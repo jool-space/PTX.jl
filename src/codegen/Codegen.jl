@@ -1,0 +1,48 @@
+module Codegen
+
+using Republic: @public
+
+using ..IR
+using ..IR: Module, Function, Instruction, Label, RegDecl, VarDecl, Param,
+            FunctionDirective, PragmaDirective, Comment, BlankLine, RawLine,
+            Block, Statement, Operand, Predicate,
+            RegisterOperand, ImmediateOperand, LabelOperand, VectorOperand,
+            AddressOperand, ParenthesizedOperand, NegatedOperand, PipeOperand,
+            ScalarType, StateSpace, LinkingDirective, ptx
+using ..Parser: parse as parse_ptx
+
+include("state.jl")
+include("operands.jl")
+include("instruction.jl")
+include("statements.jl")
+include("function.jl")
+
+@public ptx_to_julia, ir_to_julia
+
+"""
+    ptx_to_julia(source) -> String
+
+Parse PTX source text and emit Julia source code. Returns a string of one
+or more `function ... end` definitions calling the `ptx"..."` macro.
+"""
+ptx_to_julia(source::AbstractString) = ir_to_julia(parse_ptx(source))
+
+"""
+    ir_to_julia(mod::IR.Module) -> String
+
+Convert a parsed `IR.Module` into Julia source code. Each `Function` in
+the module becomes one Julia function definition.
+"""
+function ir_to_julia(mod::Module)
+    cg = CodeGenState()
+    arch    = isempty(mod.target.targets) ? "" : mod.target.targets[1]
+    version = (mod.version.major, mod.version.minor)
+    funcs = [d for d in mod.directives if d isa Function]
+    for (i, f) in enumerate(funcs)
+        i == 1 || blank!(cg)
+        emit_function!(cg, f, arch, version)
+    end
+    String(take!(cg.io))
+end
+
+end # module Codegen

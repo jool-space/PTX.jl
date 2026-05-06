@@ -1,0 +1,54 @@
+# PTX.jl
+
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://jool-space.github.io/PTX.jl/stable/)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://jool-space.github.io/PTX.jl/dev/)
+[![Build Status](https://github.com/jool-space/PTX.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/jool-space/PTX.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Coverage](https://codecov.io/gh/jool-space/PTX.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/jool-space/PTX.jl)
+
+A Julia interface for [NVIDIA PTX](https://docs.nvidia.com/cuda/parallel-thread-execution/),
+integrating seamlessly with [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl).
+
+```julia
+using PTX, CUDACore
+
+function add_kernel!(c, a, b)
+    tid = ptx"mov.u32"(sreg"%tid.x")
+    i = Int(tid) + 1
+    c[i] = ptx"add.f32"(a[i], b[i])
+    return
+end
+
+let
+    n = 128
+    a = cu(randn(n))
+    b = cu(randn(n))
+    c = similar(a)
+    @cuda threads=n add_kernel!(c, a, b)
+    c == a + b
+end
+```
+
+PTX.jl fills the gap CUDA.jl leaves uncovered: full TensorCore shape coverage
+(incl. TF32, FP8, sub-byte), TMA descriptors, cluster APIs, mbarriers, FP8
+conversions, `setmaxnreg`, `match.sync`, `prmt`, and the rest of what
+`<mma.h>`, `<cuda_pipeline.h>`, and `<cuda/barrier>` ultimately compile down
+to. Composition with CUDA.jl is strictly additive — CUDA.jl owns launch,
+memory, and control flow; PTX.jl owns specialty op emission.
+
+`ptx_to_julia(source)` turns a `.ptx` file into idiomatic Julia where each
+register is a variable and each instruction is a `ptx"..."(...)` call. See
+the [Transpiler](https://jool-space.github.io/PTX.jl/dev/transpiler/) docs.
+
+## Documentation
+
+Full docs at [jool-space.github.io/PTX.jl/dev](https://jool-space.github.io/PTX.jl/dev/):
+[Getting started](https://jool-space.github.io/PTX.jl/dev/getting_started/),
+[Chain DSL](https://jool-space.github.io/PTX.jl/dev/dsl/),
+[Wrappers](https://jool-space.github.io/PTX.jl/dev/wrappers/),
+[Transpiler](https://jool-space.github.io/PTX.jl/dev/transpiler/).
+
+## Credits
+
+Primary design inspiration: [pyptx](https://github.com/patrick-toulme/pyptx)
+by Patrick Toulmé. The parser, IR, and several wrappers and example kernels
+are ported from pyptx (Apache 2.0); see per-file headers and `LICENSE`.

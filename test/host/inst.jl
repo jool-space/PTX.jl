@@ -1,0 +1,125 @@
+using PTX: build_call, format_call, Operation, SpecialReg, Chain, @mod_str
+
+@testset "ptx\"...\" string macro" begin
+    # Returns an Operation singleton parameterized by opcode and modifier tuple.
+    @test typeof(ptx"add.f32") == Operation{:add, (:f32,)}
+    @test typeof(ptx"cp.async") == Operation{:cp, (:async,)}
+
+    # Bare opcode → empty modifier tuple.
+    @test typeof(ptx"ret") == Operation{:ret, ()}
+
+    # `::` goes in verbatim — segment is one Symbol with `::` in its name.
+    @test typeof(ptx"shared::cta.b16") ==
+          Operation{Symbol("shared::cta"), (:b16,)}
+    @test typeof(ptx"mbarrier::complete_tx::bytes") ==
+          Operation{Symbol("mbarrier::complete_tx::bytes"), ()}
+
+    # Digit-leading modifiers — no escape needed.
+    @test typeof(ptx"cp.async.bulk.tensor.3d") ==
+          Operation{:cp, (:async, :bulk, :tensor, Symbol("3d"))}
+    @test typeof(ptx"mma.sync.aligned.m16n8k32.row.col.f32.e4m3.e4m3.f32") ==
+          Operation{:mma, (:sync, :aligned, :m16n8k32, :row, :col,
+                           :f32, :e4m3, :e4m3, :f32)}
+
+    # Empty / malformed chains caught at expansion.
+    @test_throws LoadError @eval ptx""
+    @test_throws LoadError @eval ptx"add..f32"
+    @test_throws LoadError @eval ptx".add.f32"
+end
+
+@testset "ptx\"...\" string macro: \$ interpolation" begin
+    dt = "u32"
+    @test ptx"mov.$dt" === ptx"mov.u32"
+
+    # Symbol values interpolate via Base string conversion.
+    sym = :f32
+    @test ptx"add.$sym" === ptx"add.f32"
+
+    # Interpolated value containing dots produces multiple modifier parts.
+    sp = "shared::cta"
+    @test ptx"st.$sp.b32" === Operation{:st, (Symbol("shared::cta"), :b32)}()
+
+    # $(...) form for non-identifier expressions.
+    @test ptx"add.$(:f64)" === ptx"add.f64"
+
+    # Identifier as opcode — first segment after split is the opcode.
+    op = "mov"
+    @test ptx"$op.u32" === ptx"mov.u32"
+
+    # Errors at expansion / runtime split.
+    @test_throws LoadError @eval ptx"mov.\$"
+    let x = "u32"
+        @test_throws ErrorException ptx"mov..$x"
+    end
+end
+
+@testset "mod\"...\" string macro" begin
+    @test mod"f32" === Chain{(:f32,)}()
+    @test mod"row.col.f32" === Chain{(:row, :col, :f32)}()
+    # Empty form is the no-op chain.
+    @test mod"" === Chain{()}()
+    # Interpolation rejected.
+    @test_throws LoadError @eval mod"f.\$x"
+    # Malformed dotted form rejected.
+    @test_throws LoadError @eval mod".f32"
+    @test_throws LoadError @eval mod"f32."
+    @test_throws LoadError @eval mod"a..b"
+end
+
+@testset "Operation/Chain `*` composition" begin
+    # Operation * Chain extends modifiers; result is a singleton at compile time.
+    @test ptx"mma.sync.aligned" * mod"m16n8k16" * mod"row.col" ===
+          ptx"mma.sync.aligned.m16n8k16.row.col"
+
+    # Chain * Chain.
+    @test mod"row.col" * mod"f32.f16" === mod"row.col.f32.f16"
+
+    # Operation * Symbol (helper-style, plain Symbol on right).
+    @test ptx"mov" * :u32 === ptx"mov.u32"
+    @test mod"" * :f32 === mod"f32"
+
+    # mod"" is the right (and left) identity for *.
+    op = ptx"mov.u32"
+    @test op * mod"" === op
+    @test mod"" * mod"" === mod""
+    @test mod"f32" * mod"" === mod"f32"
+    @test mod"" * mod"f32" === mod"f32"
+
+    # Operation * Operation is intentionally undefined.
+    @test_throws MethodError ptx"mov.u32" * ptx"add.f32"
+end
+
+@testset "build_call" begin
+    spec = build_call(:cp, (:async, :bulk, :tensor, Symbol("3d"),
+                            Symbol("shared::cta"), :global),
+                      (UInt64, UInt64, Int32, UInt64))
+    @test spec.asm == "cp.async.bulk.tensor.3d.shared::cta.global \$0, \$1, \$2, \$3;"
+    @test spec.rettype === Nothing
+    @test spec.side_effects == true   # cp prefix → nonpure
+end
+
+@testset "sreg\"...\" string macro + SpecialReg render" begin
+    # Macro produces SpecialReg{Symbol("%name")}() for both naked and
+    # %-prefixed input forms.
+    @test sreg"tid.x"  === SpecialReg{Symbol("%tid.x")}()
+    @test sreg"%tid.x" === SpecialReg{Symbol("%tid.x")}()
+    @test sreg"cluster_ctarank" === SpecialReg{Symbol("%cluster_ctarank")}()
+    @test sreg"lanemask_eq"     === SpecialReg{Symbol("%lanemask_eq")}()
+
+    # Empty rejected at expansion.
+    @test_throws LoadError @eval sreg""
+
+    # Chain emits the symbol verbatim — preserves underscores in real names.
+    @test build_call(:mov, (:u32,), (typeof(sreg"%tid.x"),)).asm ==
+          "mov.u32 \$0, %tid.x;"
+    @test build_call(:mov, (:u32,), (typeof(sreg"%cluster_ctarank"),)).asm ==
+          "mov.u32 \$0, %cluster_ctarank;"
+    @test build_call(:mov, (:u32,), (typeof(sreg"%lanemask_eq"),)).asm ==
+          "mov.u32 \$0, %lanemask_eq;"
+    # Mixed (real underscore + real dot) — only verbatim path gets it right.
+    @test build_call(:mov, (:u32,), (typeof(sreg"%cluster_ctaid.x"),)).asm ==
+          "mov.u32 \$0, %cluster_ctaid.x;"
+
+    # Reading any SpecialReg forces side_effects=true.
+    @test build_call(:mov, (:u32,), (typeof(sreg"%tid.x"),)).side_effects == true
+end

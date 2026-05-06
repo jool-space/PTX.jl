@@ -1,0 +1,964 @@
+using PTX: format_call, build_call, Operation
+
+# Goldens: byte-exact PTX-text for each typed-chain call site, without
+# touching LLVM or the GPU. Tests that the chain's @generated body would
+# produce the right asm — same string the runtime call emits.
+
+@testset "f32 ALU" begin
+    @test format_call(ptx"add.f32",    Tuple{Float32, Float32})           == "add.f32 \$0, \$1, \$2;"
+    @test format_call(ptx"sub.f32",    Tuple{Float32, Float32})           == "sub.f32 \$0, \$1, \$2;"
+    @test format_call(ptx"mul.f32",    Tuple{Float32, Float32})           == "mul.f32 \$0, \$1, \$2;"
+    @test format_call(ptx"fma.rn.f32", Tuple{Float32, Float32, Float32})  == "fma.rn.f32 \$0, \$1, \$2, \$3;"
+    @test format_call(ptx"min.f32",    Tuple{Float32, Float32})           == "min.f32 \$0, \$1, \$2;"
+    @test format_call(ptx"max.f32",    Tuple{Float32, Float32})           == "max.f32 \$0, \$1, \$2;"
+
+    # Pure ALU should not carry the memory clobber or side_effects=true.
+    spec = build_call(:add, (:f32,), (Float32, Float32))
+    @test spec.side_effects == false
+    @test !occursin("memory", spec.constraints)
+end
+
+@testset "mov.u32 (special register)" begin
+    # `sreg"..."` bakes the verbatim PTX token into the asm, no input slot.
+    @test format_call(ptx"mov.u32", Tuple{typeof(sreg"%tid.x")})            == "mov.u32 \$0, %tid.x;"
+    @test format_call(ptx"mov.u32", Tuple{typeof(sreg"%ntid.y")})           == "mov.u32 \$0, %ntid.y;"
+    @test format_call(ptx"mov.u32", Tuple{typeof(sreg"%dynamic_smem_size")}) == "mov.u32 \$0, %dynamic_smem_size;"
+    # Register-copy form: integer arg becomes \$1.
+    @test format_call(ptx"mov.u32", Tuple{UInt32})                          == "mov.u32 \$0, \$1;"
+
+    # Reading a special register is observable.
+    @test build_call(:mov, (:u32,), (typeof(sreg"%tid.x"),)).side_effects == true
+end
+
+@testset "bar.sync" begin
+    # Integer-Val bakes immediate `0` / `15` into the asm.
+    @test format_call(ptx"bar.sync", Tuple{Val{0}})  == "bar.sync 0;"
+    @test format_call(ptx"bar.sync", Tuple{Val{15}}) == "bar.sync 15;"
+    # Register form.
+    @test format_call(ptx"bar.sync", Tuple{UInt32})  == "bar.sync \$0;"
+
+    # Sync-group opcode → side_effects=true + memory clobber.
+    spec = build_call(:bar, (:sync,), (Val{0},))
+    @test spec.side_effects == true
+    @test occursin("~{memory}", spec.constraints)
+end
+
+@testset "atom.add.gpu.u32" begin
+    @test format_call(ptx"atom.add.gpu.u32",
+                      Tuple{Core.LLVMPtr{UInt32, PTX.AS.Global}, UInt32}) ==
+        "atom.add.gpu.u32 \$0, [\$1], \$2;"
+
+    # Memory-group opcode → side_effects=true + memory clobber.
+    spec = build_call(:atom, (:add, :gpu, :u32),
+                      (Core.LLVMPtr{UInt32, PTX.AS.Global}, UInt32))
+    @test spec.side_effects == true
+    @test occursin("~{memory}", spec.constraints)
+end
+
+@testset "cp.async sync ops" begin
+    @test format_call(ptx"cp.async.commit_group", Tuple{})         == "cp.async.commit_group;"
+    @test format_call(ptx"cp.async.wait_group",   Tuple{Val{0}})   == "cp.async.wait_group 0;"
+    @test format_call(ptx"cp.async.wait_group",   Tuple{Val{3}})   == "cp.async.wait_group 3;"
+    @test format_call(ptx"cp.async.wait_all",     Tuple{})         == "cp.async.wait_all;"
+end
+
+@testset "setp single-pred" begin
+    # setp's terminal modifier (.s32, .f32, ...) is the *compare* type, not
+    # the result type. The result is always a predicate (Bool / i1).
+    @test format_call(ptx"setp.eq.s32", Tuple{Int32, Int32})     == "setp.eq.s32 \$0, \$1, \$2;"
+    @test format_call(ptx"setp.lt.f32", Tuple{Float32, Float32}) == "setp.lt.f32 \$0, \$1, \$2;"
+    @test format_call(ptx"setp.ge.u32", Tuple{UInt32, UInt32})   == "setp.ge.u32 \$0, \$1, \$2;"
+
+    # Result constraint is `=b` (i1 → Bool); inputs use their own letters.
+    spec = build_call(:setp, (:eq, :s32), (Int32, Int32))
+    @test spec.rettype == Bool
+    @test startswith(spec.constraints, "=b,")
+    @test spec.side_effects == false
+
+    spec = build_call(:setp, (:lt, :f32), (Float32, Float32))
+    @test spec.constraints == "=b,f,f"
+
+    # Bool input → `b` constraint (e.g. setp.eq.pred for pred-input compare).
+    @test build_call(:setp, (:eq, :s32), (Int32, Int32)).constraints == "=b,r,r"
+end
+
+@testset "vote.sync predicate-output" begin
+    # vote.sync.{all,any,uni}.pred: pred in, pred out.
+    @test format_call(ptx"vote.sync.all.pred", Tuple{Bool, UInt32}) ==
+          "vote.sync.all.pred \$0, \$1, \$2;"
+    @test format_call(ptx"vote.sync.any.pred", Tuple{Bool, UInt32}) ==
+          "vote.sync.any.pred \$0, \$1, \$2;"
+    @test format_call(ptx"vote.sync.uni.pred", Tuple{Bool, UInt32}) ==
+          "vote.sync.uni.pred \$0, \$1, \$2;"
+
+    spec = build_call(:vote, (:sync, :all, :pred), (Bool, UInt32))
+    @test spec.rettype == Bool
+    @test spec.constraints == "=b,b,r,~{memory}"     # warp-collective → nonpure
+    @test spec.side_effects == true
+
+    # vote.sync.ballot.b32: pred in, u32 mask out (one bit per lane).
+    @test format_call(ptx"vote.sync.ballot.b32", Tuple{Bool, UInt32}) ==
+          "vote.sync.ballot.b32 \$0, \$1, \$2;"
+    spec = build_call(:vote, (:sync, :ballot, :b32), (Bool, UInt32))
+    @test spec.rettype == UInt32
+    @test spec.constraints == "=r,b,r,~{memory}"
+    @test spec.side_effects == true
+end
+
+@testset "PTX.AS module" begin
+    @test PTX.AS.Generic == 0
+    @test PTX.AS.Global  == 1
+    @test PTX.AS.Shared  == 3
+    @test PTX.AS.Const   == 4
+    @test PTX.AS.Local   == 5
+    @test PTX.AS.Param   == 101
+end
+
+@testset "Tier 1 chain entries (mad / lop3 / prmt / redux / match / membar / etc.)" begin
+    # `mad` — pure ALU, no memory clobber.
+    @test format_call(ptx"mad.lo.s32", Tuple{Int32, Int32, Int32}) ==
+          "mad.lo.s32 \$0, \$1, \$2, \$3;"
+    spec = build_call(:mad, (:lo, :s32), (Int32, Int32, Int32))
+    @test spec.side_effects == false
+    @test !occursin("~{memory}", spec.constraints)
+    @test spec.rettype == Int32
+
+    # `lop3` — pure 3-input bitwise lookup; immediate baked via Val.
+    @test format_call(ptx"lop3.b32", Tuple{UInt32, UInt32, UInt32, Val{0xC0}}) ==
+          "lop3.b32 \$0, \$1, \$2, \$3, 192;"
+    spec = build_call(:lop3, (:b32,), (UInt32, UInt32, UInt32, Val{0xC0}))
+    @test spec.side_effects == false
+    @test spec.rettype == UInt32
+
+    # `prmt` — pure byte permutation.
+    @test format_call(ptx"prmt.b32", Tuple{UInt32, UInt32, UInt32}) ==
+          "prmt.b32 \$0, \$1, \$2, \$3;"
+    spec = build_call(:prmt, (:b32,), (UInt32, UInt32, UInt32))
+    @test spec.side_effects == false
+
+    # `redux.sync.add.u32` — warp-collective; needs `~{memory}` to block CSE.
+    @test format_call(ptx"redux.sync.add.u32", Tuple{UInt32, UInt32}) ==
+          "redux.sync.add.u32 \$0, \$1, \$2;"
+    spec = build_call(:redux, (:sync, :add, :u32), (UInt32, UInt32))
+    @test spec.side_effects == true
+    @test occursin("~{memory}", spec.constraints)
+
+    # `match.any.sync.b32` — warp-collective.
+    spec = build_call(:match, (:any, :sync, :b32), (UInt32, UInt32))
+    @test spec.side_effects == true
+    @test occursin("~{memory}", spec.constraints)
+
+    # `membar.gl` — memory barrier.
+    @test format_call(ptx"membar.gl", Tuple{}) == "membar.gl;"
+    spec = build_call(:membar, (:gl,), ())
+    @test spec.side_effects == true
+    @test occursin("~{memory}", spec.constraints)
+
+    # sm_90 cluster intrinsics — observable cross-CTA visibility.
+    spec = build_call(:mapa, (Symbol("shared::cluster",), :u32), (UInt32, UInt32))
+    @test spec.side_effects == true
+    spec = build_call(:getctarank, (Symbol("shared::cluster",), :u32), (UInt32,))
+    @test spec.side_effects == true
+
+    # `griddepcontrol.wait` — inter-launch dependency, needs barrier.
+    spec = build_call(:griddepcontrol, (:wait,), ())
+    @test spec.side_effects == true
+end
+
+@testset "stmatrix.sync.aligned hand-written wrapper" begin
+    # m8n8.x4.shared.b16 — canonical 4-fragment store (Ada+).
+    spec = PTX.stmatrix_spec(:m8n8, :x4, false, :shared, :b16)
+    @test spec.n_in == 4
+    @test spec.asm ==
+        "stmatrix.sync.aligned.m8n8.x4.shared.b16 " *
+        "[\$0], {\$1, \$2, \$3, \$4};"
+    @test spec.constraints == "r,r,r,r,r,~{memory}"
+
+    # x1 — scalar-input form (no NTuple wrapper).
+    spec1 = PTX.stmatrix_spec(:m8n8, :x1, false, :shared, :b16)
+    @test spec1.n_in == 1
+    @test spec1.asm ==
+        "stmatrix.sync.aligned.m8n8.x1.shared.b16 [\$0], {\$1};"
+    @test spec1.constraints == "r,r,~{memory}"
+
+    # x2 with .trans and .shared::cta state-space.
+    spec2 = PTX.stmatrix_spec(:m8n8, :x2, true, :shared_cta, :b16)
+    @test spec2.asm ==
+        "stmatrix.sync.aligned.m8n8.x2.trans.shared::cta.b16 " *
+        "[\$0], {\$1, \$2};"
+
+    # Hopper m16n8.b8 — declared but unreachable on Ada.
+    spec_h = PTX.stmatrix_spec(:m16n8, :x4, false, :shared, :b8)
+    @test occursin("m16n8.x4.shared.b8", spec_h.asm)
+
+    # Methods registered for representative variants.
+    @test which(Operation{:stmatrix, (:sync, :aligned, :m8n8, :x4, :shared, :b16)}(),
+                (Core.LLVMPtr{UInt16, PTX.AS.Shared}, NTuple{4, UInt32})).module == PTX
+    @test which(Operation{:stmatrix, (:sync, :aligned, :m8n8, :x1, :shared, :b16)}(),
+                (Core.LLVMPtr{UInt16, PTX.AS.Shared}, UInt32)).module == PTX
+end
+
+@testset "mbarrier hand-written wrapper" begin
+    # Nothing-return — init takes (addr, count).
+    spec = PTX.mbarrier_spec(:init, :addr_count)
+    @test spec.asm == "mbarrier.init.shared.b64 [\$0], \$1;"
+    @test spec.constraints == "r,r,~{memory}"
+    @test spec.rettype === Nothing
+
+    # Nothing-return — inval takes only (addr).
+    spec = PTX.mbarrier_spec(:inval, :addr_only)
+    @test spec.asm == "mbarrier.inval.shared.b64 [\$0];"
+    @test spec.constraints == "r,~{memory}"
+    @test spec.rettype === Nothing
+
+    # State-token return — arrive returns UInt64.
+    spec = PTX.mbarrier_spec(:arrive, :state_addr)
+    @test spec.asm == "mbarrier.arrive.shared.b64 \$0, [\$1];"
+    @test spec.constraints == "=l,r,~{memory}"
+    @test spec.rettype === UInt64
+
+    # State-token return with extra input — arrive.noComplete.
+    spec = PTX.mbarrier_spec(Symbol("arrive.noComplete"), :state_addr_n)
+    @test spec.asm == "mbarrier.arrive.noComplete.shared.b64 \$0, [\$1], \$2;"
+    @test spec.constraints == "=l,r,r,~{memory}"
+    @test spec.rettype === UInt64
+
+    # Hopper-only fused arrive+expect_tx.
+    spec = PTX.mbarrier_spec(Symbol("arrive.expect_tx"), :state_addr_n)
+    @test spec.asm == "mbarrier.arrive.expect_tx.shared.b64 \$0, [\$1], \$2;"
+
+    # Hopper-only standalone expect_tx — Nothing return.
+    spec = PTX.mbarrier_spec(:expect_tx, :addr_count)
+    @test spec.asm == "mbarrier.expect_tx.shared.b64 [\$0], \$1;"
+    @test spec.rettype === Nothing
+
+    # Pred-return token form — test_wait p, [mbar], state.
+    spec = PTX.mbarrier_spec(:test_wait, :pred_addr_state)
+    @test spec.asm == "mbarrier.test_wait.shared.b64 \$0, [\$1], \$2;"
+    @test spec.constraints == "=b,r,l,~{memory}"
+    @test spec.rettype === Bool
+
+    # Pred-return phase form — test_wait.parity p, [mbar], phase.
+    spec = PTX.mbarrier_spec(Symbol("test_wait.parity"), :pred_addr_phase)
+    @test spec.asm == "mbarrier.test_wait.parity.shared.b64 \$0, [\$1], \$2;"
+    @test spec.constraints == "=b,r,r,~{memory}"
+    @test spec.rettype === Bool
+
+    # Hopper-only try_wait variants share the test_wait shape.
+    spec = PTX.mbarrier_spec(:try_wait, :pred_addr_state)
+    @test spec.asm == "mbarrier.try_wait.shared.b64 \$0, [\$1], \$2;"
+    spec = PTX.mbarrier_spec(Symbol("try_wait.parity"), :pred_addr_phase)
+    @test spec.asm == "mbarrier.try_wait.parity.shared.b64 \$0, [\$1], \$2;"
+
+    # Methods registered on the chain singletons for representative variants.
+    @test which(Operation{:mbarrier, (:init, :shared, :b64)}(),
+                (Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt32)).module == PTX
+    @test which(Operation{:mbarrier, (:arrive, :shared, :b64)}(),
+                (Core.LLVMPtr{UInt64, PTX.AS.Shared},)).module == PTX
+    @test which(Operation{:mbarrier, (:test_wait, :parity, :shared, :b64)}(),
+                (Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt32)).module == PTX
+    @test which(Operation{:mbarrier, (:try_wait, :shared, :b64)}(),
+                (Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt64)).module == PTX
+end
+
+@testset "wgmma sync ops" begin
+    # wgmma.fence/commit_group/wait_group flow through the chain default.
+    @test format_call(ptx"wgmma.fence.sync.aligned",        Tuple{})       == "wgmma.fence.sync.aligned;"
+    @test format_call(ptx"wgmma.commit_group.sync.aligned", Tuple{})       == "wgmma.commit_group.sync.aligned;"
+    @test format_call(ptx"wgmma.wait_group.sync.aligned",   Tuple{Val{0}}) == "wgmma.wait_group.sync.aligned 0;"
+    @test format_call(ptx"wgmma.wait_group.sync.aligned",   Tuple{Val{2}}) == "wgmma.wait_group.sync.aligned 2;"
+
+    # `:wgmma` is in NONPURE_OPCODES → memory clobber + side_effects.
+    spec = build_call(:wgmma, (:fence, :sync, :aligned), ())
+    @test spec.side_effects == true
+    @test occursin("~{memory}", spec.constraints)
+end
+
+@testset "wgmma.mma_async hand-written wrapper" begin
+    # bf16 m64n8k16, f32 acc: nd = N/2 = 4, constraint letter `f`.
+    spec = PTX.wgmma_mma_async_spec(:f32, :bf16, :bf16, 8, 16, true)
+    @test spec.nd == 4
+    @test spec.d_let == "f"
+    @test spec.asm ==
+        "wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16 " *
+        "{\$0, \$1, \$2, \$3}, \$4, \$5, \$6, 1, 1, 0, 0;"
+    @test spec.constraints == "=f,=f,=f,=f,l,l,b,0,1,2,3,~{memory}"
+
+    # f16 input, f32 acc: same shape, different ab-dtype.
+    spec_f16 = PTX.wgmma_mma_async_spec(:f32, :f16, :f16, 8, 16, true)
+    @test spec_f16.asm ==
+        "wgmma.mma_async.sync.aligned.m64n8k16.f32.f16.f16 " *
+        "{\$0, \$1, \$2, \$3}, \$4, \$5, \$6, 1, 1, 0, 0;"
+
+    # tf32 (k=8) has no transpose → only `1, 1` baked.
+    spec_tf32 = PTX.wgmma_mma_async_spec(:f32, :tf32, :tf32, 8, 8, false)
+    @test spec_tf32.asm ==
+        "wgmma.mma_async.sync.aligned.m64n8k8.f32.tf32.tf32 " *
+        "{\$0, \$1, \$2, \$3}, \$4, \$5, \$6, 1, 1;"
+
+    # FP8 e4m3 with f32 acc, k=32 (Hopper FP8 GEMM).
+    spec_e4m3 = PTX.wgmma_mma_async_spec(:f32, :e4m3, :e4m3, 16, 32, false)
+    @test spec_e4m3.asm ==
+        "wgmma.mma_async.sync.aligned.m64n16k32.f32.e4m3.e4m3 " *
+        "{\$0, \$1, \$2, \$3, \$4, \$5, \$6, \$7}, \$8, \$9, \$10, 1, 1;"
+
+    # f16 accumulator: nd = N/4, constraint letter `r` (UInt32 packed f16x2).
+    spec_f16acc = PTX.wgmma_mma_async_spec(:f16, :f16, :f16, 16, 16, true)
+    @test spec_f16acc.nd == 4               # N=16, /4 = 4 packed regs
+    @test spec_f16acc.d_let == "r"
+    @test spec_f16acc.asm ==
+        "wgmma.mma_async.sync.aligned.m64n16k16.f16.f16.f16 " *
+        "{\$0, \$1, \$2, \$3}, \$4, \$5, \$6, 1, 1, 0, 0;"
+    @test spec_f16acc.constraints == "=r,=r,=r,=r,l,l,b,0,1,2,3,~{memory}"
+
+    # Largest covered shape: m64n256k16 f32-acc → 128 d-regs.
+    spec_big = PTX.wgmma_mma_async_spec(:f32, :bf16, :bf16, 256, 16, true)
+    @test spec_big.nd == 128
+    @test occursin("m64n256k16.f32.bf16.bf16", spec_big.asm)
+    @test occursin("{\$0, \$1, \$2, ", spec_big.asm)
+    @test occursin(", \$126, \$127}", spec_big.asm)
+    @test endswith(spec_big.constraints, ",126,127,~{memory}")
+
+    # m64n256k16 f16-acc → 64 packed regs.
+    spec_big_f16 = PTX.wgmma_mma_async_spec(:f16, :f16, :f16, 256, 16, true)
+    @test spec_big_f16.nd == 64
+
+    # Methods registered for representative variants.
+    @test which(Operation{:wgmma, (:mma_async, :sync, :aligned, :m64n256k16, :f32, :bf16, :bf16)}(),
+                (NTuple{128, Float32}, UInt64, UInt64, Bool)).module == PTX
+
+    @test which(Operation{:wgmma, (:mma_async, :sync, :aligned, :m64n16k16, :f16, :f16, :f16)}(),
+                (NTuple{4, UInt32}, UInt64, UInt64, Bool)).module == PTX
+
+    @test which(Operation{:wgmma, (:mma_async, :sync, :aligned, :m64n16k32, :f32, :e4m3, :e4m3)}(),
+                (NTuple{8, Float32}, UInt64, UInt64, Bool)).module == PTX
+end
+
+@testset "wgmma_descriptor packing" begin
+    using PTX: wgmma_descriptor, WgmmaSwizzle
+
+    # Empty descriptor: all zeros.
+    @test wgmma_descriptor(UInt32(0); leading_byte_offset = 0,
+                                       stride_byte_offset = 0) === UInt64(0)
+
+    # Address-only: bits [13:0] = (addr & 0x3FFFF) >> 4.
+    # 0x100 → 0x10. Sits in low 14 bits.
+    @test wgmma_descriptor(UInt32(0x100); leading_byte_offset = 0,
+                                          stride_byte_offset = 0) ===
+          UInt64(0x10)
+
+    # Address truncated past 18 bits: 0x40000 (bit 18) masks to 0 → 0.
+    @test wgmma_descriptor(UInt32(0x40000); leading_byte_offset = 0,
+                                            stride_byte_offset = 0) ===
+          UInt64(0)
+
+    # Leading byte offset: 16 → encoded `1`, lands at bit 16.
+    d = wgmma_descriptor(UInt32(0); leading_byte_offset = 16,
+                                     stride_byte_offset = 0)
+    @test d === UInt64(1) << 16
+
+    # Stride byte offset: 128 → encoded `8`, lands at bit 32.
+    d = wgmma_descriptor(UInt32(0); leading_byte_offset = 0,
+                                     stride_byte_offset = 128)
+    @test d === UInt64(8) << 32
+
+    # Swizzle mode: 128B (= 1) → bits [63:62].
+    d = wgmma_descriptor(UInt32(0); leading_byte_offset = 0,
+                                     stride_byte_offset = 0,
+                                     swizzle = WgmmaSwizzle.B128)
+    @test d === UInt64(1) << 62
+
+    # base_offset: 5 → bits [51:49].
+    d = wgmma_descriptor(UInt32(0); leading_byte_offset = 0,
+                                     stride_byte_offset = 0,
+                                     base_offset = 5)
+    @test d === UInt64(5) << 49
+
+    # Combined: canonical bf16 16×8 tile descriptor.
+    #   addr = 0x200 → encoded 0x20 at [13:0]
+    #   leading = 16 → encoded 1 at [29:16]
+    #   stride  = 128 → encoded 8 at [45:32]
+    #   swizzle = NONE
+    d = wgmma_descriptor(UInt32(0x200); leading_byte_offset = 16,
+                                         stride_byte_offset = 128)
+    expected = UInt64(0x20) | (UInt64(1) << 16) | (UInt64(8) << 32)
+    @test d === expected
+
+    # Swizzle mode constants match PTX encoding.
+    @test WgmmaSwizzle.NONE == 0
+    @test WgmmaSwizzle.B128 == 1
+    @test WgmmaSwizzle.B64  == 2
+    @test WgmmaSwizzle.B32  == 3
+end
+
+@testset "tcgen05_instr_desc_f16bf16_f32 packing" begin
+    using PTX: tcgen05_instr_desc_f16bf16_f32
+
+    # Goldens cross-checked against pyptx's
+    # `test_make_instr_desc_f16bf16_f32` cases (m=128, n=256, K-major).
+    @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :bf16) ===
+          UInt32(0x08400490)
+    @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :f16) ===
+          UInt32(0x08400010)
+    @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :f16,
+                                         scale_a = -1) ===
+          UInt32(0x08402010)
+    @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :tf32) ===
+          UInt32(0x08400910)
+
+    # MN-major flips bit 15 (A) / 16 (B).
+    base = tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :bf16)
+    @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :bf16,
+                                         a_major = :MN) ===
+          (base | (UInt32(1) << 15))
+    @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :bf16,
+                                         a_major = :MN, b_major = :MN) ===
+          (base | (UInt32(1) << 15) | (UInt32(1) << 16))
+
+    # M and N field placement: m=64 → bits[27:24]=4, m=256 → 16.
+    # n=8 → bits[22:17]=1, n=128 → 16.
+    @test tcgen05_instr_desc_f16bf16_f32(m = 64,  n = 256, ab_dtype = :bf16) ===
+          UInt32((4  << 24) | (32 << 17) | 0x490)
+    @test tcgen05_instr_desc_f16bf16_f32(m = 256, n = 256, ab_dtype = :bf16) ===
+          UInt32((16 << 24) | (32 << 17) | 0x490)
+    @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 8,   ab_dtype = :bf16) ===
+          UInt32((8  << 24) | (1  << 17) | 0x490)
+    @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 128, ab_dtype = :bf16) ===
+          UInt32((8  << 24) | (16 << 17) | 0x490)
+
+    # sparse / saturate / max_shift bits.
+    @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :bf16,
+                                         sparse = true) ===
+          UInt32(base | (UInt32(1) << 2))
+    @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :bf16,
+                                         saturate = true) ===
+          UInt32(base | (UInt32(1) << 3))
+    @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :bf16,
+                                         max_shift = 3) ===
+          UInt32(base | (UInt32(3) << 30))
+
+    # Range checks.
+    @test_throws ArgumentError tcgen05_instr_desc_f16bf16_f32(
+        m = 96, n = 256, ab_dtype = :bf16)              # m must be 64/128/256
+    @test_throws ArgumentError tcgen05_instr_desc_f16bf16_f32(
+        m = 128, n = 12, ab_dtype = :bf16)              # n must be multiple of 8
+    @test_throws ArgumentError tcgen05_instr_desc_f16bf16_f32(
+        m = 128, n = 264, ab_dtype = :bf16)             # n must be ≤ 256
+    @test_throws ArgumentError tcgen05_instr_desc_f16bf16_f32(
+        m = 128, n = 256, ab_dtype = :f64)              # bad dtype
+    @test_throws ArgumentError tcgen05_instr_desc_f16bf16_f32(
+        m = 128, n = 256, ab_dtype = :bf16, a_major = :T)  # bad major
+    @test_throws ArgumentError tcgen05_instr_desc_f16bf16_f32(
+        m = 128, n = 256, ab_dtype = :bf16, scale_a = 2)   # bad scale
+    @test_throws ArgumentError tcgen05_instr_desc_f16bf16_f32(
+        m = 128, n = 256, ab_dtype = :bf16, max_shift = 4) # bad max_shift
+end
+
+@testset "tcgen05_descriptor packing" begin
+    using PTX: tcgen05_descriptor, BlackwellLayout
+
+    # Field-isolation tests pass version=0 to suppress the default-1 bit
+    # (pyptx parity: descriptor()'s version defaults to 1).
+
+    # Empty descriptor: all zeros.
+    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0,
+                                         stride_bytes = 0,
+                                         version = 0) === UInt64(0)
+
+    # Address: 14-bit field at bits [13:0], encoded as (addr & 0x3FFF0) >> 4.
+    # 0x100 → 0x10. Sits in low 14 bits.
+    @test tcgen05_descriptor(UInt32(0x100); leading_bytes = 0,
+                                            stride_bytes = 0,
+                                            version = 0) ===
+          UInt64(0x10)
+    # 0x40000 (bit 18) is outside the 14-bit window → 0.
+    @test tcgen05_descriptor(UInt32(0x40000); leading_bytes = 0,
+                                              stride_bytes = 0,
+                                              version = 0) ===
+          UInt64(0)
+
+    # Leading / stride byte fields.
+    @test tcgen05_descriptor(UInt32(0); leading_bytes = 16,
+                                         stride_bytes = 0,
+                                         version = 0) ===
+          UInt64(1) << 16
+    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0,
+                                         stride_bytes = 1024,
+                                         version = 0) ===
+          UInt64(64) << 32
+
+    # Layout-type at bit 61 (3 bits — distinct from wgmma's 2-bit field).
+    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0,
+                                         stride_bytes = 0,
+                                         version = 0,
+                                         swizzle = BlackwellLayout.B128) ===
+          UInt64(BlackwellLayout.B128) << 61
+    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0,
+                                         stride_bytes = 0,
+                                         version = 0,
+                                         swizzle = BlackwellLayout.B64) ===
+          UInt64(BlackwellLayout.B64)  << 61
+
+    # version (default 1) → bit 46. Pass version=0 to clear it.
+    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0, stride_bytes = 0,
+                                         version = 0) === UInt64(0)
+    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0, stride_bytes = 0,
+                                         version = 1) === UInt64(1) << 46
+    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0, stride_bytes = 0,
+                                         version = 3) === UInt64(3) << 46
+
+    # base_offset / lbo_mode.
+    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0, stride_bytes = 0,
+                                         version = 0, base_offset = 5) ===
+          UInt64(5) << 49
+    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0, stride_bytes = 0,
+                                         version = 0, lbo_mode = 1) ===
+          UInt64(1) << 52
+
+    # The pyptx-equivalent BLACKWELL_MASKED_DESC_B128 constant:
+    # leading=16, stride=1024, swizzle=B128, version=1.
+    @test tcgen05_descriptor(UInt32(0); leading_bytes = 16,
+                                         stride_bytes = 1024,
+                                         swizzle = BlackwellLayout.B128) ===
+          UInt64(0x4000404000010000)
+
+    # Range checks.
+    @test_throws ArgumentError tcgen05_descriptor(
+        UInt32(0); leading_bytes = 8, stride_bytes = 0)         # not 16-aligned
+    @test_throws ArgumentError tcgen05_descriptor(
+        UInt32(0); leading_bytes = 0, stride_bytes = 24)        # not 16-aligned
+    @test_throws ArgumentError tcgen05_descriptor(
+        UInt32(0); leading_bytes = 0, stride_bytes = 0, version = 4)
+    @test_throws ArgumentError tcgen05_descriptor(
+        UInt32(0); leading_bytes = 0, stride_bytes = 0, base_offset = 8)
+    @test_throws ArgumentError tcgen05_descriptor(
+        UInt32(0); leading_bytes = 0, stride_bytes = 0, lbo_mode = 2)
+
+    # BlackwellLayout constants match PTX encoding (3-bit, non-consecutive).
+    @test BlackwellLayout.NONE         == 0
+    @test BlackwellLayout.B128_BASE32B == 1
+    @test BlackwellLayout.B128         == 2
+    @test BlackwellLayout.B64          == 4
+    @test BlackwellLayout.B32          == 6
+end
+
+@testset "tma (cp.async.bulk.tensor) hand-written wrapper" begin
+    # Load form: $0 = dst_smem (r), $1 = tmap (l), $2.. = coords (r), last = mbar (r).
+    spec = PTX.tma_spec(2, :load, Symbol("shared::cluster"))
+    @test spec.asm == "cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [\$0], [\$1, {\$2, \$3}], [\$4];"
+    @test spec.constraints == "r,l,r,r,r,~{memory}"
+
+    spec = PTX.tma_spec(1, :load, Symbol("shared::cta"))
+    @test spec.asm == "cp.async.bulk.tensor.1d.shared::cta.global.tile.mbarrier::complete_tx::bytes [\$0], [\$1, {\$2}], [\$3];"
+    @test spec.constraints == "r,l,r,r,~{memory}"
+
+    spec = PTX.tma_spec(5, :load, Symbol("shared::cluster"))
+    @test spec.asm == "cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [\$0], [\$1, {\$2, \$3, \$4, \$5, \$6}], [\$7];"
+    @test spec.constraints == "r,l,r,r,r,r,r,r,~{memory}"
+
+    # Store form: $0 = tmap (l), $1.. = coords (r), last = src_smem (r). No mbar; bulk_group.
+    spec = PTX.tma_spec(2, :store, :_)
+    @test spec.asm == "cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group [\$0, {\$1, \$2}], [\$3];"
+    @test spec.constraints == "l,r,r,r,~{memory}"
+
+    spec = PTX.tma_spec(3, :store, :_)
+    @test spec.asm == "cp.async.bulk.tensor.3d.global.shared::cta.tile.bulk_group [\$0, {\$1, \$2, \$3}], [\$4];"
+    @test spec.constraints == "l,r,r,r,r,~{memory}"
+
+    # Argument validation — caller errors on out-of-range ndim or bogus dst_ss.
+    @test_throws ErrorException PTX.tma_spec(0, :load, Symbol("shared::cta"))
+    @test_throws ErrorException PTX.tma_spec(6, :load, Symbol("shared::cta"))
+    @test_throws ErrorException PTX.tma_spec(2, :load, :global)
+    @test_throws ErrorException PTX.tma_spec(2, :wat, :_)
+
+    # Methods registered on chain singletons — load (both shared destinations) + store.
+    load_cluster_2d = (:async, :bulk, :tensor, Symbol("2d"), Symbol("shared::cluster"),
+                       :global, :tile, Symbol("mbarrier::complete_tx::bytes"))
+    @test which(Operation{:cp, load_cluster_2d}(),
+                (Core.LLVMPtr{Float32, PTX.AS.Shared},
+                 Core.LLVMPtr{Nothing, PTX.AS.Const},
+                 Int32, Int32,
+                 Core.LLVMPtr{UInt64, PTX.AS.Shared})).module == PTX
+
+    load_cta_3d = (:async, :bulk, :tensor, Symbol("3d"), Symbol("shared::cta"),
+                   :global, :tile, Symbol("mbarrier::complete_tx::bytes"))
+    @test which(Operation{:cp, load_cta_3d}(),
+                (Core.LLVMPtr{Float32, PTX.AS.Shared},
+                 Core.LLVMPtr{Nothing, PTX.AS.Const},
+                 Int32, Int32, Int32,
+                 Core.LLVMPtr{UInt64, PTX.AS.Shared})).module == PTX
+
+    store_2d = (:async, :bulk, :tensor, Symbol("2d"), :global, Symbol("shared::cta"),
+                :tile, :bulk_group)
+    @test which(Operation{:cp, store_2d}(),
+                (Core.LLVMPtr{Nothing, PTX.AS.Const},
+                 Int32, Int32,
+                 Core.LLVMPtr{Float32, PTX.AS.Shared})).module == PTX
+end
+
+@testset "tuple args → braced operand groups" begin
+    # Homogeneous tuple types render as `{$N, $N+1, ...}` and contribute one
+    # LLVM input slot per lane. Used by ldmatrix / mma / .rs cvt forms where
+    # PTX requires a register-vector operand. Hand-written wrappers like
+    # `wrappers/stmatrix.jl` build this manually; the chain default now does
+    # too via `render_arg(::Type{<:Tuple})`.
+
+    # Hypothetical fma form taking a 4-lane tuple of f32s as the first
+    # operand. Not a real PTX op — we just want to exercise the braced
+    # rendering. Real ops with this shape (mma.sync, ldmatrix, etc.) have
+    # hand-written wrappers; this confirms the chain default also works.
+    spec = build_call(:fakeop, (:f32,), (NTuple{4, Float32},))
+    @test spec.asm == "fakeop.f32 \$0, {\$1, \$2, \$3, \$4};"
+    @test spec.rettype === Float32
+    @test spec.constraints == "=f,f,f,f,f"
+    @test spec.passthrough_argtypes === (Float32, Float32, Float32, Float32)
+    @test spec.passthrough_indices === ((1, 1), (1, 2), (1, 3), (1, 4))
+
+    # Mix scalar and tuple args — slot numbering interleaves correctly.
+    spec = build_call(:fakeop, (:f32,), (Float32, NTuple{2, UInt32}, Float32))
+    @test spec.asm == "fakeop.f32 \$0, \$1, {\$2, \$3}, \$4;"
+    @test spec.constraints == "=f,f,r,r,f"
+    @test spec.passthrough_indices ===
+          ((1, nothing), (2, 1), (2, 2), (3, nothing))
+
+    # NTuple{1, T} is still tuple-shaped — emits `{$N}` (single-element
+    # brace group). Real PTX accepts this; e.g. `stmatrix.x1` uses
+    # `{$1}` not `$1` per the spec.
+    spec = build_call(:fakeop, (), (NTuple{1, UInt32},))
+    @test spec.asm == "fakeop {\$0};"
+    @test spec.constraints == "r"
+    @test spec.passthrough_indices === ((1, 1),)
+
+    # Heterogeneous tuple is rejected — there's no single constraint
+    # letter that works.
+    @test_throws ErrorException build_call(:fakeop, (),
+                                            (Tuple{Float32, Int32},))
+
+    # Empty tuple is rejected — no operand mapping.
+    @test_throws ErrorException build_call(:fakeop, (), (Tuple{},))
+end
+
+@testset "setp dual-pred hand-written wrapper" begin
+    # `setp.<cmp>.<dt> $0|$1, $2, $3;` produces (Bool, Bool). The `$0|$1`
+    # pipe form is distinct from single-pred (which flows through the chain).
+
+    spec = PTX.setp_dual_spec(:eq, :s32, Int32)
+    @test spec.asm == "setp.eq.s32 \$0|\$1, \$2, \$3;"
+    @test spec.constraints == "=b,=b,r,r"
+    @test spec.rettype === Tuple{Bool, Bool}
+
+    # Float compare — `f` constraint letter on inputs.
+    spec = PTX.setp_dual_spec(:lt, :f32, Float32)
+    @test spec.asm == "setp.lt.f32 \$0|\$1, \$2, \$3;"
+    @test spec.constraints == "=b,=b,f,f"
+
+    # 16-bit dtype — `h` constraint.
+    spec = PTX.setp_dual_spec(:ne, :u16, UInt16)
+    @test spec.constraints == "=b,=b,h,h"
+
+    # 64-bit float — `d` constraint.
+    spec = PTX.setp_dual_spec(:ge, :f64, Float64)
+    @test spec.constraints == "=b,=b,d,d"
+
+    # Methods registered on chain singletons for representative variants.
+    @test which(Operation{:setp, (:dual, :eq, :s32)}(),
+                (Int32, Int32)).module == PTX
+    @test which(Operation{:setp, (:dual, :lt, :f32)}(),
+                (Float32, Float32)).module == PTX
+    @test which(Operation{:setp, (:dual, :ge, :u64)}(),
+                (UInt64, UInt64)).module == PTX
+end
+
+@testset "cp.async data hand-written wrapper" begin
+    # cp.async.ca.shared.global accepts size 4/8/16; cp.async.cg requires 16.
+    # Shared destination uses `r` (32-bit) constraint, not `l` — see comment
+    # in src/wrappers/cp_async.jl.
+
+    spec = PTX.cp_async_spec(:ca, 16)
+    @test spec.asm == "cp.async.ca.shared.global [\$0], [\$1], 16;"
+    @test spec.constraints == "r,l,~{memory}"
+    @test spec.rettype === Nothing
+
+    spec = PTX.cp_async_spec(:ca, 8)
+    @test spec.asm == "cp.async.ca.shared.global [\$0], [\$1], 8;"
+
+    spec = PTX.cp_async_spec(:ca, 4)
+    @test spec.asm == "cp.async.ca.shared.global [\$0], [\$1], 4;"
+
+    spec = PTX.cp_async_spec(:cg, 16)
+    @test spec.asm == "cp.async.cg.shared.global [\$0], [\$1], 16;"
+    @test spec.constraints == "r,l,~{memory}"
+
+    # Size validation — :ca rejects anything outside {4,8,16}, :cg requires 16.
+    @test_throws ErrorException PTX.cp_async_spec(:ca, 0)
+    @test_throws ErrorException PTX.cp_async_spec(:ca, 7)
+    @test_throws ErrorException PTX.cp_async_spec(:ca, 32)
+    @test_throws ErrorException PTX.cp_async_spec(:cg, 4)
+    @test_throws ErrorException PTX.cp_async_spec(:cg, 8)
+    @test_throws ErrorException PTX.cp_async_spec(:cg, 32)
+
+    # Bad qualifier.
+    @test_throws ErrorException PTX.cp_async_spec(:bogus, 16)
+
+    # Methods registered on chain singletons.
+    @test which(Operation{:cp, (:async, :ca, :shared, :global)}(),
+                (Core.LLVMPtr{Float32, PTX.AS.Shared},
+                 Core.LLVMPtr{Float32, PTX.AS.Global},
+                 Val{16})).module == PTX
+    @test which(Operation{:cp, (:async, :cg, :shared, :global)}(),
+                (Core.LLVMPtr{Float32, PTX.AS.Shared},
+                 Core.LLVMPtr{Float32, PTX.AS.Global},
+                 Val{16})).module == PTX
+end
+
+@testset "shfl.sync hand-written wrapper" begin
+    # shfl.sync.<mode>.b32 d, a, b, c, mask;        — UInt32 output
+    # shfl.sync.<mode>.b32 d|p, a, b, c, mask;      — (UInt32, Bool) output
+    # All four modes share the same operand layout; the `:pred` modifier
+    # flips the output form.
+
+    spec = PTX.shfl_spec(:idx)
+    @test spec.asm == "shfl.sync.idx.b32 \$0, \$1, \$2, \$3, \$4;"
+    @test spec.constraints == "=r,r,r,r,r,~{memory}"
+    @test spec.rettype === UInt32
+
+    spec = PTX.shfl_spec(:up)
+    @test spec.asm == "shfl.sync.up.b32 \$0, \$1, \$2, \$3, \$4;"
+    spec = PTX.shfl_spec(:down)
+    @test spec.asm == "shfl.sync.down.b32 \$0, \$1, \$2, \$3, \$4;"
+    spec = PTX.shfl_spec(:bfly)
+    @test spec.asm == "shfl.sync.bfly.b32 \$0, \$1, \$2, \$3, \$4;"
+
+    # Pred-output form: `=r,=b` heads the constraints, asm uses pipe operand.
+    spec = PTX.shfl_spec(:idx; pred = true)
+    @test spec.asm == "shfl.sync.idx.b32 \$0|\$1, \$2, \$3, \$4, \$5;"
+    @test spec.constraints == "=r,=b,r,r,r,r,~{memory}"
+    @test spec.rettype === Tuple{UInt32, Bool}
+
+    spec = PTX.shfl_spec(:bfly; pred = true)
+    @test spec.asm == "shfl.sync.bfly.b32 \$0|\$1, \$2, \$3, \$4, \$5;"
+
+    # Unknown mode.
+    @test_throws ErrorException PTX.shfl_spec(:bogus)
+
+    # Methods registered for all four modes, both forms.
+    for mode in (:up, :down, :bfly, :idx)
+        @test which(Operation{:shfl, (:sync, mode, :b32)}(),
+                    (UInt32, UInt32, UInt32, UInt32)).module == PTX
+        @test which(Operation{:shfl, (:sync, mode, :b32, :pred)}(),
+                    (UInt32, UInt32, UInt32, UInt32)).module == PTX
+    end
+end
+
+@testset "vec ld/st.global hand-written wrapper" begin
+    # ld.global.v{2,4}.{f32,b32,b16} / st.global.v{2,4}.{f32,b32,b16}.
+    # Brace operand groups are emitted directly — the chain default's
+    # per-arg renderer can't group args into a single brace.
+
+    # v4.f32 load: 4 outputs in braces, 1 input pointer slot.
+    spec = PTX.vec_ld_spec(4, :f32, "f")
+    @test spec.asm == "ld.global.v4.f32 {\$0, \$1, \$2, \$3}, [\$4];"
+    @test spec.constraints == "=f,=f,=f,=f,l,~{memory}"
+
+    # v2.f32 load.
+    spec = PTX.vec_ld_spec(2, :f32, "f")
+    @test spec.asm == "ld.global.v2.f32 {\$0, \$1}, [\$2];"
+    @test spec.constraints == "=f,=f,l,~{memory}"
+
+    # v4.b32 load → `r` constraint.
+    spec = PTX.vec_ld_spec(4, :b32, "r")
+    @test spec.asm == "ld.global.v4.b32 {\$0, \$1, \$2, \$3}, [\$4];"
+    @test spec.constraints == "=r,=r,=r,=r,l,~{memory}"
+
+    # v2.b16 load → `h` constraint.
+    spec = PTX.vec_ld_spec(2, :b16, "h")
+    @test spec.constraints == "=h,=h,l,~{memory}"
+
+    # v4.f32 store: pointer slot first ($0), then 4 register inputs in braces.
+    spec = PTX.vec_st_spec(4, :f32, "f")
+    @test spec.asm == "st.global.v4.f32 [\$0], {\$1, \$2, \$3, \$4};"
+    @test spec.constraints == "l,f,f,f,f,~{memory}"
+
+    # v2.b16 store.
+    spec = PTX.vec_st_spec(2, :b16, "h")
+    @test spec.asm == "st.global.v2.b16 [\$0], {\$1, \$2};"
+    @test spec.constraints == "l,h,h,~{memory}"
+
+    # Methods registered for representative variants.
+    @test which(Operation{:ld, (:global, :v4, :f32)}(),
+                (Core.LLVMPtr{Float32, PTX.AS.Global},)).module == PTX
+    @test which(Operation{:st, (:global, :v2, :b16)}(),
+                (Core.LLVMPtr{UInt16, PTX.AS.Global},
+                 NTuple{2, UInt16})).module == PTX
+    @test which(Operation{:ld, (:global, :v2, :b32)}(),
+                (Core.LLVMPtr{UInt32, PTX.AS.Global},)).module == PTX
+    @test which(Operation{:st, (:global, :v4, :f32)}(),
+                (Core.LLVMPtr{Float32, PTX.AS.Global},
+                 NTuple{4, Float32})).module == PTX
+end
+
+@testset "wgmma.mma_async dispatch surface (registered vs unregistered)" begin
+    # The wgmma generator registers methods only for the cross-product
+    # `_WGMMA_VARIANTS × _WGMMA_NS` (PTX 9.2 §9.7.14.5). For unsupported
+    # combinations — e.g. bf16/bf16 with k=8 (only valid for tf32), N=7, or
+    # N=264 — no specific method exists on `Operation{parts}`. The `Vararg`
+    # chain default in `inst.jl` then catches the call and would emit a
+    # garbage asm string (wrong rettype, wrong operand count) that crashes
+    # in LLVM register allocation. Tests here lock in the registered surface
+    # so a regression that drops a (n,k,dtype) combo from the table is
+    # caught at host time, not via a confusing LLVM error at code-gen.
+
+    # Registered set: for each valid (dtype_d, dtype_a, dtype_b, k) from
+    # `_WGMMA_VARIANTS`, a method exists for every N in `_WGMMA_NS`.
+    registered_variants = (
+        # f32 acc → NTuple{N/2, Float32}
+        (:f32, :bf16, :bf16, 16),
+        (:f32, :f16,  :f16,  16),
+        (:f32, :tf32, :tf32, 8),
+        (:f32, :e4m3, :e4m3, 32),
+        (:f32, :e5m2, :e5m2, 32),
+        # f16 acc → NTuple{N/4, UInt32}
+        (:f16, :f16,  :f16,  16),
+        (:f16, :e4m3, :e4m3, 32),
+        (:f16, :e5m2, :e5m2, 32),
+        # s32 acc → NTuple{N/2, Int32}
+        (:s32, :s8, :s8, 32),
+        (:s32, :u8, :u8, 32),
+        (:s32, :s8, :u8, 32),
+        (:s32, :u8, :s8, 32),
+    )
+
+    for (dt_d, dt_a, dt_b, k) in registered_variants
+        for n in (8, 64, 128, 256)               # spot-check across the N grid
+            shape = Symbol("m64n", n, "k", k)
+            mods = (:mma_async, :sync, :aligned, shape, dt_d, dt_a, dt_b)
+            d_J = dt_d === :f32 ? Float32 : (dt_d === :f16 ? UInt32 : Int32)
+            nd  = dt_d === :f16 ? n >>> 2 : n >>> 1
+            d_T = NTuple{nd, d_J}
+            @test which(Operation{:wgmma, mods}(),
+                        (d_T, UInt64, UInt64, Bool)).module == PTX
+        end
+    end
+
+    # bf16 with k=8 has no registration (k=8 is tf32-only in the table).
+    mods_bad_k = (:mma_async, :sync, :aligned,
+                  :m64n8k8, :f32, :bf16, :bf16)
+    bad_k_method = which(Operation{:wgmma, mods_bad_k}(),
+                         (NTuple{4, Float32}, UInt64, UInt64, Bool))
+    # Falls through to the chain default in inst.jl, NOT a wgmma-specific
+    # method. The chain default's source file is inst.jl (the @generated
+    # `(::Operation{op, mods})(args::Vararg{Any,N})`).
+    @test endswith(string(bad_k_method.file), "inst.jl")
+
+    # N=7 (not step-by-8) and N=264 (over cap) — same chain-default fallthrough.
+    mods_bad_n = (:mma_async, :sync, :aligned,
+                  :m64n7k16, :f32, :bf16, :bf16)
+    @test endswith(string(which(Operation{:wgmma, mods_bad_n}(),
+                                 (NTuple{4, Float32}, UInt64, UInt64, Bool)).file),
+                   "inst.jl")
+end
+
+@testset "cvt convention (chain-driven)" begin
+    # cvt's grammar is `cvt.<modifiers...>.<dst>.<src>`, so dst is parts[end-1]
+    # and src is parts[end]. The chain default infers rettype from dst, builds
+    # constraints from runtime argtypes — no per-(dst,src) registration.
+
+    # Scalar widening: f32 ← f16 (no rmode permitted on widening per spec).
+    @test format_call(ptx"cvt.f32.f16", Tuple{Float16}) == "cvt.f32.f16 \$0, \$1;"
+    spec = build_call(:cvt, (:f32, :f16), (Float16,))
+    @test spec.rettype === Float32
+    @test spec.constraints == "=f,h"
+    @test spec.side_effects == false
+
+    # Scalar narrowing: f16 ← f32 with rn rounding.
+    @test format_call(ptx"cvt.rn.f16.f32", Tuple{Float32}) == "cvt.rn.f16.f32 \$0, \$1;"
+    spec = build_call(:cvt, (:rn, :f16, :f32), (Float32,))
+    @test spec.rettype === Float16
+    @test spec.constraints == "=h,f"
+
+    # Packed pack: e4m3x2 ← (f32, f32). Two inputs, UInt16 output (i16 carrier).
+    @test format_call(ptx"cvt.rn.satfinite.e4m3x2.f32", Tuple{Float32, Float32}) ==
+          "cvt.rn.satfinite.e4m3x2.f32 \$0, \$1, \$2;"
+    spec = build_call(:cvt, (:rn, :satfinite, :e4m3x2, :f32), (Float32, Float32))
+    @test spec.rettype === UInt16
+    @test spec.constraints == "=h,f,f"
+
+    # Packed pack: f16x2 ← (f32, f32). Output is UInt32 (i32 carrier).
+    spec = build_call(:cvt, (:rn, :f16x2, :f32), (Float32, Float32))
+    @test spec.rettype === UInt32
+    @test spec.constraints == "=r,f,f"
+
+    # Packed unpack: f16x2 ← e4m3x2. UInt16 → UInt32. Single input, single output.
+    @test format_call(ptx"cvt.rn.f16x2.e4m3x2", Tuple{UInt16}) ==
+          "cvt.rn.f16x2.e4m3x2 \$0, \$1;"
+    spec = build_call(:cvt, (:rn, :f16x2, :e4m3x2), (UInt16,))
+    @test spec.rettype === UInt32
+    @test spec.constraints == "=r,h"
+
+    # Packed unpack: bf16x2 ← e5m2x2.
+    spec = build_call(:cvt, (:rn, :bf16x2, :e5m2x2), (UInt16,))
+    @test spec.rettype === UInt32
+    @test spec.constraints == "=r,h"
+
+    # Direct FP16x2 → FP8x2 down-cast (no f32 detour).
+    @test format_call(ptx"cvt.rn.satfinite.e4m3x2.f16x2", Tuple{UInt32}) ==
+          "cvt.rn.satfinite.e4m3x2.f16x2 \$0, \$1;"
+    spec = build_call(:cvt, (:rn, :satfinite, :e4m3x2, :f16x2), (UInt32,))
+    @test spec.rettype === UInt16
+    @test spec.constraints == "=h,r"
+
+    # `.relu` modifier composes for free — no registration needed.
+    @test format_call(ptx"cvt.rn.relu.f16.f32", Tuple{Float32}) ==
+          "cvt.rn.relu.f16.f32 \$0, \$1;"
+    spec = build_call(:cvt, (:rn, :relu, :f16, :f32), (Float32,))
+    @test spec.rettype === Float16
+    @test spec.constraints == "=h,f"
+
+    # `.ftz` modifier composes for free.
+    @test format_call(ptx"cvt.rzi.ftz.s32.f32", Tuple{Float32}) ==
+          "cvt.rzi.ftz.s32.f32 \$0, \$1;"
+    spec = build_call(:cvt, (:rzi, :ftz, :s32, :f32), (Float32,))
+    @test spec.rettype === Int32
+    @test spec.constraints == "=r,f"
+
+    # Integer cvt: u64 ← u32 (widening). Previously broken — chain default
+    # used last(parts) = :u32 and returned UInt32 with =r,r constraints.
+    @test format_call(ptx"cvt.u64.u32", Tuple{UInt32}) == "cvt.u64.u32 \$0, \$1;"
+    spec = build_call(:cvt, (:u64, :u32), (UInt32,))
+    @test spec.rettype === UInt64
+    @test spec.constraints == "=l,r"
+
+    # tf32: i32 carrier, satfinite optional per spec.
+    @test format_call(ptx"cvt.rn.satfinite.tf32.f32", Tuple{Float32}) ==
+          "cvt.rn.satfinite.tf32.f32 \$0, \$1;"
+    spec = build_call(:cvt, (:rn, :satfinite, :tf32, :f32), (Float32,))
+    @test spec.rettype === UInt32
+    @test spec.constraints == "=r,f"
+
+    # bf16: i16 carrier.
+    spec = build_call(:cvt, (:rn, :bf16, :f32), (Float32,))
+    @test spec.rettype === UInt16
+    @test spec.constraints == "=h,f"
+
+    # `.scaled::n2::ue8m0` modifier — munged through `__` → `::`. Trailing
+    # scale-factor operand is just a regular UInt16 input.
+    @test format_call(ptx"cvt.rn.scaled::n2::ue8m0.bf16x2.e4m3x2",
+                      Tuple{UInt16, UInt16}) ==
+          "cvt.rn.scaled::n2::ue8m0.bf16x2.e4m3x2 \$0, \$1, \$2;"
+    spec = build_call(:cvt, (:rn, :scaled__n2__ue8m0, :bf16x2, :e4m3x2),
+                      (UInt16, UInt16))
+    @test spec.rettype === UInt32
+    @test spec.constraints == "=r,h,h"
+
+    # cvt is a pure ALU op — no memory clobber, no side effects.
+    spec = build_call(:cvt, (:rn, :f16, :f32), (Float32,))
+    @test spec.side_effects == false
+    @test !occursin("memory", spec.constraints)
+
+    # cvta is unaffected — uses the standard "rettype = last modifier" rule.
+    @test format_call(ptx"cvta.to.global.u32", Tuple{Core.LLVMPtr{Float32, PTX.AS.Global}}) ==
+          "cvta.to.global.u32 \$0, \$1;"
+    spec = build_call(:cvta, (:to, :global, :u32),
+                      (Core.LLVMPtr{Float32, PTX.AS.Global},))
+    @test spec.rettype === UInt32
+end
