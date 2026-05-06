@@ -1,12 +1,11 @@
 # PTX.jl
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://jool-space.github.io/PTX.jl/stable/)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://jool-space.github.io/PTX.jl/dev/)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://docs.jool.space/PTX.jl/dev/)
 [![Build Status](https://github.com/jool-space/PTX.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/jool-space/PTX.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/jool-space/PTX.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/jool-space/PTX.jl)
 
 A Julia interface for [NVIDIA PTX](https://docs.nvidia.com/cuda/parallel-thread-execution/),
-integrating seamlessly with [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl).
+composing additively with [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl).
 
 ```julia
 using PTX, CUDACore
@@ -38,14 +37,6 @@ memory, and control flow; PTX.jl owns specialty op emission.
 `ptx_to_julia(source)` turns a `.ptx` file into idiomatic Julia where each
 register is a variable and each instruction is a `ptx"..."(...)` call. See
 the [Transpiler](https://jool-space.github.io/PTX.jl/dev/transpiler/) docs.
-
-## Documentation
-
-Full docs at [jool-space.github.io/PTX.jl/dev](https://jool-space.github.io/PTX.jl/dev/):
-[Getting started](https://jool-space.github.io/PTX.jl/dev/getting_started/),
-[Chain DSL](https://jool-space.github.io/PTX.jl/dev/dsl/),
-[Wrappers](https://jool-space.github.io/PTX.jl/dev/wrappers/),
-[Transpiler](https://jool-space.github.io/PTX.jl/dev/transpiler/).
 
 ## Credits
 
