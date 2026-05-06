@@ -8,7 +8,7 @@ makedocs(;
     authors="Anton Oresten <antonoresten@proton.me>",
     sitename="PTX.jl",
     format=Documenter.HTML(;
-        canonical="https://jool-space.github.io/PTX.jl",
+        canonical="https://docs.jool.space/PTX.jl",
         edit_link="main",
         assets=String[],
     ),
@@ -23,6 +23,7 @@ makedocs(;
 )
 
 deploydocs(;
-    repo="github.com/jool-space/PTX.jl",
+    repo="github.com/jool-space/docs",
     devbranch="main",
+    dirname="PTX.jl",
 )
