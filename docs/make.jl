@@ -24,6 +24,7 @@ makedocs(;
 
 deploydocs(;
     repo="github.com/jool-space/docs",
+    deploy_repo="github.com/jool-space/docs",
     devbranch="main",
     dirname="PTX.jl",
 )
