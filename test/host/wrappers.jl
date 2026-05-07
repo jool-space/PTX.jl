@@ -114,6 +114,45 @@ end
     @test PTX.AS.Param   == 101
 end
 
+@testset "constraint_letter" begin
+    # NVPTX register-class letters per src/types.jl. Wrong letters → ptxas
+    # rejects with "Invalid register class" or silent miscompile (e.g. an i8
+    # value passed via "r" is zero-extended into the high bits).
+    @test PTX.constraint_letter(Float64) == "d"
+    @test PTX.constraint_letter(Float32) == "f"
+    @test PTX.constraint_letter(Float16) == "h"
+
+    # i8 has no native NVPTX register; both signed and unsigned are bridged
+    # through i16.
+    @test PTX.constraint_letter(Int8)   == "h"
+    @test PTX.constraint_letter(UInt8)  == "h"
+
+    @test PTX.constraint_letter(Int16)  == "h"
+    @test PTX.constraint_letter(UInt16) == "h"
+    @test PTX.constraint_letter(Int32)  == "r"
+    @test PTX.constraint_letter(UInt32) == "r"
+    @test PTX.constraint_letter(Int64)  == "l"
+    @test PTX.constraint_letter(UInt64) == "l"
+    @test PTX.constraint_letter(Bool)   == "b"
+
+    # LLVMPtr always uses "l" regardless of address space — NVPTX represents
+    # non-zero AS pointers as 64-bit at the LLVM IR level even when the
+    # underlying PTX address is 32-bit.
+    @test PTX.constraint_letter(Core.LLVMPtr{Float32, PTX.AS.Generic}) == "l"
+    @test PTX.constraint_letter(Core.LLVMPtr{Float32, PTX.AS.Global})  == "l"
+    @test PTX.constraint_letter(Core.LLVMPtr{Float32, PTX.AS.Shared})  == "l"
+    @test PTX.constraint_letter(Core.LLVMPtr{UInt8,   PTX.AS.Const})   == "l"
+    @test PTX.constraint_letter(Core.LLVMPtr{UInt64,  PTX.AS.Local})   == "l"
+
+    # Indirect coverage via build_call — confirms the letter flows into the
+    # constraint string for both i8 inputs and LLVMPtr inputs.
+    @test build_call(:add, (:s16,), (Int8, Int8)).constraints  == "=h,h,h"
+    @test build_call(:add, (:u16,), (UInt8, UInt8)).constraints == "=h,h,h"
+    @test build_call(:ld, (:global, :u32),
+                     (Core.LLVMPtr{UInt32, PTX.AS.Global},)).constraints ==
+        "=r,l,~{memory}"
+end
+
 @testset "Tier 1 chain entries (mad / lop3 / prmt / redux / match / membar / etc.)" begin
     # `mad` — pure ALU, no memory clobber.
     @test format_call(ptx"mad.lo.s32", Tuple{Int32, Int32, Int32}) ==
@@ -250,6 +289,9 @@ end
     spec = PTX.mbarrier_spec(Symbol("try_wait.parity"), :pred_addr_phase)
     @test spec.asm == "mbarrier.try_wait.parity.shared.b64 \$0, [\$1], \$2;"
 
+    # Unknown layout — caller error with informative message.
+    @test_throws ErrorException PTX.mbarrier_spec(:init, :bogus_layout)
+
     # Methods registered on the chain singletons for representative variants.
     @test which(Operation{:mbarrier, (:init, :shared, :b64)}(),
                 (Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt32)).module == PTX
@@ -259,6 +301,47 @@ end
                 (Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt32)).module == PTX
     @test which(Operation{:mbarrier, (:try_wait, :shared, :b64)}(),
                 (Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt64)).module == PTX
+end
+
+@testset "mbarrier @generated body expansion" begin
+    # Each `Operation{:mbarrier, ...}` is `@generated` — its body computes the
+    # spec and builds an `@asmcall(...)` quote at type-inference time. We can
+    # trigger expansion via `Base.code_typed` without ever executing
+    # `@asmcall` (which would emit inline asm — GPU-only). The lowered IR
+    # embeds the asm string and constraint string as the llvmcall payload;
+    # we match the opcode prefix + constraint pair, which together pin down
+    # the (asm shape, register-class output) the @generated body produced.
+    pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
+
+    cases = [
+        ((:init, :shared, :b64),                  (pS, UInt32),
+            "mbarrier.init.shared.b64",                  "r,r,~{memory}"),
+        ((:inval, :shared, :b64),                 (pS,),
+            "mbarrier.inval.shared.b64",                 "r,~{memory}"),
+        ((:arrive, :shared, :b64),                (pS,),
+            "mbarrier.arrive.shared.b64",                "=l,r,~{memory}"),
+        ((:arrive, :noComplete, :shared, :b64),   (pS, UInt32),
+            "mbarrier.arrive.noComplete.shared.b64",     "=l,r,r,~{memory}"),
+        ((:arrive, :expect_tx, :shared, :b64),    (pS, UInt32),
+            "mbarrier.arrive.expect_tx.shared.b64",      "=l,r,r,~{memory}"),
+        ((:expect_tx, :shared, :b64),             (pS, UInt32),
+            "mbarrier.expect_tx.shared.b64",             "r,r,~{memory}"),
+        ((:test_wait, :shared, :b64),             (pS, UInt64),
+            "mbarrier.test_wait.shared.b64",             "=b,r,l,~{memory}"),
+        ((:test_wait, :parity, :shared, :b64),    (pS, UInt32),
+            "mbarrier.test_wait.parity.shared.b64",      "=b,r,r,~{memory}"),
+        ((:try_wait, :shared, :b64),              (pS, UInt64),
+            "mbarrier.try_wait.shared.b64",              "=b,r,l,~{memory}"),
+        ((:try_wait, :parity, :shared, :b64),     (pS, UInt32),
+            "mbarrier.try_wait.parity.shared.b64",       "=b,r,r,~{memory}"),
+    ]
+    for (mods, argts, expected_op, expected_cons) in cases
+        op = Operation{:mbarrier, mods}()
+        ci, _ = first(Base.code_typed(op, argts))
+        s = string(ci)
+        @test occursin(expected_op,   s)
+        @test occursin(expected_cons, s)
+    end
 end
 
 @testset "wgmma sync ops" begin
@@ -334,8 +417,84 @@ end
                 (NTuple{8, Float32}, UInt64, UInt64, Bool)).module == PTX
 end
 
+@testset "wgmma.mma_async — full _WGMMA_VARIANTS coverage" begin
+    # Per-variant goldens for every entry of `_WGMMA_VARIANTS` in
+    # src/wrappers/wgmma.jl. The encoder is cross-checked against pyptx's
+    # `_Wgmma.mma_async()` (pyptx/pyptx/ptx.py:817-910) — same modifier
+    # ordering, same imm tail (`scaleD, scaleA[, transA, transB]`), same
+    # tied-operand convention. Corpus reference:
+    # pyptx/tests/corpus/wgmma_simple.ptx (m64n256k16.f32.e4m3.e4m3) and
+    # wgmma_gemm_tile.ptx (m64n128k16.f32.bf16.bf16).
+    #
+    # The five "popular" combos are spot-checked above; this set fills the
+    # remaining 7 of 12 variants × representative N at each end of the grid.
+
+    # FP8 e5m2 with f32 acc — k=32, no transpose imms. N=8 → 4 d-regs.
+    spec = PTX.wgmma_mma_async_spec(:f32, :e5m2, :e5m2, 8, 32, false)
+    @test spec.nd == 4
+    @test spec.d_let == "f"
+    @test spec.asm ==
+        "wgmma.mma_async.sync.aligned.m64n8k32.f32.e5m2.e5m2 " *
+        "{\$0, \$1, \$2, \$3}, \$4, \$5, \$6, 1, 1;"
+    @test spec.constraints == "=f,=f,=f,=f,l,l,b,0,1,2,3,~{memory}"
+
+    # f16 acc + e4m3 inputs — packed f16x2 d-regs (nd = N/4), no trans imms.
+    spec = PTX.wgmma_mma_async_spec(:f16, :e4m3, :e4m3, 16, 32, false)
+    @test spec.nd == 4              # N=16, /4 = 4 packed regs
+    @test spec.d_let == "r"
+    @test spec.asm ==
+        "wgmma.mma_async.sync.aligned.m64n16k32.f16.e4m3.e4m3 " *
+        "{\$0, \$1, \$2, \$3}, \$4, \$5, \$6, 1, 1;"
+    @test spec.constraints == "=r,=r,=r,=r,l,l,b,0,1,2,3,~{memory}"
+
+    # f16 acc + e5m2 inputs — same shape, different ab-dtype.
+    spec = PTX.wgmma_mma_async_spec(:f16, :e5m2, :e5m2, 16, 32, false)
+    @test spec.asm ==
+        "wgmma.mma_async.sync.aligned.m64n16k32.f16.e5m2.e5m2 " *
+        "{\$0, \$1, \$2, \$3}, \$4, \$5, \$6, 1, 1;"
+
+    # Integer accumulator: s32 with all four (s8/u8) × (s8/u8) ab-pairs.
+    # PTX 9.2 §9.7.14.5.7: integer wgmma has only `scale-d` (no scale-a/b
+    # or trans imms) — asm tail is just `, $scale_d;` with no trailing
+    # `1, 1`. nd = N/2, constraint letter `r` (Int32 d-regs).
+    for (dt_a, dt_b) in ((:s8, :s8), (:u8, :u8), (:s8, :u8), (:u8, :s8))
+        spec = PTX.wgmma_mma_async_spec(:s32, dt_a, dt_b, 8, 32, false)
+        @test spec.nd == 4
+        @test spec.d_let == "r"
+        @test spec.asm ==
+            "wgmma.mma_async.sync.aligned.m64n8k32.s32.$dt_a.$dt_b " *
+            "{\$0, \$1, \$2, \$3}, \$4, \$5, \$6;"
+        @test spec.constraints == "=r,=r,=r,=r,l,l,b,0,1,2,3,~{memory}"
+    end
+
+    # Largest s32 shape (m64n256k32) — 128 d-regs, locks the brace-count loop.
+    spec = PTX.wgmma_mma_async_spec(:s32, :s8, :s8, 256, 32, false)
+    @test spec.nd == 128
+    @test occursin("m64n256k32.s32.s8.s8", spec.asm)
+    @test occursin(", \$126, \$127}", spec.asm)
+    @test endswith(spec.asm, ", \$128, \$129, \$130;")
+    @test endswith(spec.constraints, ",126,127,~{memory}")
+
+    # Methods registered for the new variants — locks dispatch.
+    @test which(Operation{:wgmma,
+            (:mma_async, :sync, :aligned, :m64n8k32, :f32, :e5m2, :e5m2)}(),
+        (NTuple{4, Float32}, UInt64, UInt64, Bool)).module == PTX
+    @test which(Operation{:wgmma,
+            (:mma_async, :sync, :aligned, :m64n16k32, :f16, :e4m3, :e4m3)}(),
+        (NTuple{4, UInt32}, UInt64, UInt64, Bool)).module == PTX
+    @test which(Operation{:wgmma,
+            (:mma_async, :sync, :aligned, :m64n8k32, :s32, :s8, :u8)}(),
+        (NTuple{4, Int32}, UInt64, UInt64, Bool)).module == PTX
+end
+
 @testset "wgmma_descriptor packing" begin
     using PTX: wgmma_descriptor, WgmmaSwizzle
+
+    # Encoder cross-reference: pyptx's `_Wgmma.make_descriptor()`
+    # (pyptx/pyptx/ptx.py:1022-1144) implements the same 14-bit field layout
+    # (start_addr / leading_offset / stride_offset / base_offset / swizzle).
+    # The two encoders are independent; tests below validate the bit layout
+    # directly against PTX 9.2 §9.7.14.5.
 
     # Empty descriptor: all zeros.
     @test wgmma_descriptor(UInt32(0); leading_byte_offset = 0,
@@ -709,6 +868,42 @@ end
                 (Core.LLVMPtr{Float32, PTX.AS.Shared},
                  Core.LLVMPtr{Float32, PTX.AS.Global},
                  Val{16})).module == PTX
+
+    # @generated catch path — when `cp_async_spec(:ca/:cg, N)` throws (bad N),
+    # the wrapper's try/catch (src/wrappers/cp_async.jl:24-28, 44-48) re-emits
+    # `:(error(...))` as the function body. Constructing pointers via bitcast
+    # so we can invoke from host without a kernel.
+    let
+        op_ca = Operation{:cp, (:async, :ca, :shared, :global)}()
+        op_cg = Operation{:cp, (:async, :cg, :shared, :global)}()
+        p_s = Base.bitcast(Core.LLVMPtr{Float32, PTX.AS.Shared}, UInt(0))
+        p_g = Base.bitcast(Core.LLVMPtr{Float32, PTX.AS.Global}, UInt(0))
+
+        # ca rejects N=7 (not in {4,8,16}) — message bubbles up via showerror.
+        @test_throws ErrorException op_ca(p_s, p_g, Val(7))
+        @test_throws ErrorException op_ca(p_s, p_g, Val(0))
+        @test_throws ErrorException op_ca(p_s, p_g, Val(32))
+
+        # cg rejects N≠16.
+        @test_throws ErrorException op_cg(p_s, p_g, Val(4))
+        @test_throws ErrorException op_cg(p_s, p_g, Val(8))
+    end
+
+    # @generated body expansion via `code_typed` — triggers the `try cp_async_spec
+    # catch e ... end` branch on the success side, hitting the body lines that
+    # build the @asmcall quote. Each registered (qual, N) pair lands the
+    # size-baked opcode + constraint string in the lowered IR.
+    pS = Core.LLVMPtr{Float32, PTX.AS.Shared}
+    pG = Core.LLVMPtr{Float32, PTX.AS.Global}
+    for (qual, n) in [(:ca, 4), (:ca, 8), (:ca, 16), (:cg, 16)]
+        op = Operation{:cp, (:async, qual, :shared, :global)}()
+        ci, _ = first(Base.code_typed(op, (pS, pG, Val{n})))
+        s = string(ci)
+        # Size baked into the asm tail.
+        @test occursin("cp.async.$qual.shared.global", s)
+        @test occursin(", $n;",                        s)
+        @test occursin("r,l,~{memory}",                s)
+    end
 end
 
 @testset "shfl.sync hand-written wrapper" begin
@@ -795,6 +990,18 @@ end
     @test which(Operation{:st, (:global, :v4, :f32)}(),
                 (Core.LLVMPtr{Float32, PTX.AS.Global},
                  NTuple{4, Float32})).module == PTX
+
+    # vec ld is `@eval @generated function ...`, so `code_typed` triggers
+    # body expansion at host. (vec st is plain @eval; its body only runs
+    # when invoked from a kernel.)
+    for (n, dt, T, letter) in PTX._VEC_LDST_VARIANTS
+        op = Operation{:ld, (:global, Symbol("v", n), dt)}()
+        ci, _ = first(Base.code_typed(op,
+            (Core.LLVMPtr{T, PTX.AS.Global},)))
+        s = string(ci)
+        @test occursin("ld.global.v$n.$dt", s)
+        @test occursin(join(fill("=$letter", n), ","),  s)
+    end
 end
 
 @testset "wgmma.mma_async dispatch surface (registered vs unregistered)" begin
@@ -961,4 +1168,140 @@ end
     spec = build_call(:cvta, (:to, :global, :u32),
                       (Core.LLVMPtr{Float32, PTX.AS.Global},))
     @test spec.rettype === UInt32
+end
+
+
+# Re-invoke private `_*_register` helpers from host so their bodies show in
+# coverage reports. The module-load for-loops register every method during
+# precompile, but precompile-time line execution doesn't generate coverage
+# data — only runtime does. Each call here re-defines an existing method
+# (silenced via `redirect_stderr`) and we follow up with `which()` to assert
+# dispatch is intact afterward. These pull `mma.jl`, `mma_scaled.jl`,
+# `ldmatrix.jl`, `tcgen05.jl` from 0% host coverage into the meaningful
+# range, and lift the partially-covered helpers in stmatrix/tma/vec_ldst/
+# wgmma to fully covered.
+@testset "register helpers — re-invoke for coverage + dispatch sanity" begin
+
+    # `redirect_stderr(devnull) do ... end` swallows the
+    # "Method definition ... overwritten on the same line" notices that
+    # `--warn-overwrite=yes` (set by Pkg.test) emits when @eval re-defines
+    # an existing method.
+    silent(f) = redirect_stderr(devnull) do; f(); end
+
+    # ---- _mma_register ----
+    silent() do
+        PTX._mma_register(:m16n8k16, :row, :col, :f32, :bf16, :bf16, :f32)
+        PTX._mma_register(:m16n8k16, :row, :col, :f16, :f16, :f16, :f16)
+        PTX._mma_register(:m16n8k32, :row, :col, :f32, :e4m3, :e4m3, :f32;
+                          kind = :f8f6f4)
+        # Early-return path: shape/dtype not in MMA_SYNC_FRAGS.
+        @test PTX._mma_register(:m99n99k99, :row, :col,
+                                 :f32, :bf16, :bf16, :f32) === nothing
+    end
+    @test which(Operation{:mma,
+            (:sync, :aligned, :m16n8k16, :row, :col, :f32, :bf16, :bf16, :f32)}(),
+        (NTuple{4, UInt32}, NTuple{2, UInt32}, NTuple{4, Float32})).module == PTX
+    @test which(Operation{:mma,
+            (:sync, :aligned, Symbol("kind::f8f6f4"),
+             :m16n8k32, :row, :col, :f32, :e4m3, :e4m3, :f32)}(),
+        (NTuple{4, UInt32}, NTuple{2, UInt32}, NTuple{4, Float32})).module == PTX
+
+    # ---- _mma_scaled_register ----
+    silent() do
+        PTX._mma_scaled_register(:mxf8f6f4, Symbol("1X"),
+            :m16n8k32, :row, :col, :f32, :e4m3, :e4m3, :f32, :ue8m0)
+        # Early-return path: shape/dtype not in MMA_SCALED_FRAGS.
+        @test PTX._mma_scaled_register(:mxf4, Symbol("1X"),
+            :m99n99k99, :row, :col, :f32, :e2m1, :e2m1, :f32, :ue8m0) === nothing
+    end
+
+    # ---- _ldmatrix_register ----
+    silent() do
+        PTX._ldmatrix_register(:m8n8, :x4, false, :shared, :b16)
+        PTX._ldmatrix_register(:m8n8, :x1, true,  :shared_cta, :b16)
+        PTX._ldmatrix_register(:m16n16, :x1, false, :shared, :b8)
+    end
+    @test which(Operation{:ldmatrix,
+            (:sync, :aligned, :m8n8, :x4, :shared, :b16)}(),
+        (Core.LLVMPtr{UInt16, PTX.AS.Shared},)).module == PTX
+
+    # ---- _stmatrix_register (also coverage for n_in==1 vs n_in>1 branches) ----
+    silent() do
+        PTX._stmatrix_register(:m8n8, :x1, false, :shared, :b16)       # n_in=1 path
+        PTX._stmatrix_register(:m8n8, :x4, true,  :shared_cta, :b16)   # n_in>1 + trans
+    end
+    @test which(Operation{:stmatrix,
+            (:sync, :aligned, :m8n8, :x1, :shared, :b16)}(),
+        (Core.LLVMPtr{UInt16, PTX.AS.Shared}, UInt32)).module == PTX
+
+    # ---- _tma_load_register / _tma_store_register ----
+    silent() do
+        PTX._tma_load_register(2, Symbol("shared::cluster"))
+        PTX._tma_load_register(5, Symbol("shared::cta"))
+        PTX._tma_store_register(2)
+        PTX._tma_store_register(3)
+    end
+
+    # ---- _vec_ld_register / _vec_st_register ----
+    silent() do
+        PTX._vec_ld_register(2, :f32, Float32, "f")
+        PTX._vec_ld_register(4, :b32, UInt32,  "r")
+        PTX._vec_st_register(4, :f32, Float32, "f")
+        PTX._vec_st_register(2, :b16, UInt16,  "h")
+    end
+
+    # ---- _wgmma_mma_async_register ----
+    silent() do
+        PTX._wgmma_mma_async_register(:f32, :bf16, :bf16, 8,  16, true)
+        PTX._wgmma_mma_async_register(:f16, :f16,  :f16,  16, 16, true)
+        PTX._wgmma_mma_async_register(:s32, :s8,   :s8,   8,  32, false)
+    end
+
+    # ---- _tcgen05_ld_register / _tcgen05_st_register ----
+    silent() do
+        PTX._tcgen05_ld_register(Symbol("16x128b"), :x1, 2)
+        PTX._tcgen05_st_register(Symbol("16x128b"), :x1, 2)
+        # Early-return: per-lane reg count > 128 is "NA" per Table 49.
+        @test PTX._tcgen05_ld_register(Symbol("16x256b"), :x128, 4) === nothing
+        @test PTX._tcgen05_st_register(Symbol("16x256b"), :x128, 4) === nothing
+    end
+
+    # ---- _tcgen05_shift_register / _dealloc / _cp ----
+    silent() do
+        PTX._tcgen05_shift_register(1)
+        PTX._tcgen05_shift_register(2)
+        PTX._tcgen05_dealloc_register(1)
+        PTX._tcgen05_dealloc_register(2)
+        PTX._tcgen05_cp_register(1, Symbol("128x256b"))
+        PTX._tcgen05_cp_register(2, Symbol("4x256b"))
+    end
+    @test which(Operation{:tcgen05,
+            (:shift, Symbol("cta_group::1"), :down)}(),
+        (UInt32,)).module == PTX
+    @test which(Operation{:tcgen05,
+            (:dealloc, Symbol("cta_group::1"), :sync, :aligned, :b32)}(),
+        (UInt32, UInt32)).module == PTX
+    @test which(Operation{:tcgen05,
+            (:cp, Symbol("cta_group::1"), Symbol("128x256b"))}(),
+        (UInt32, UInt64)).module == PTX
+
+    # ---- _setp_dual_register ----
+    silent() do
+        PTX._setp_dual_register(:eq, :s32, Int32)
+        PTX._setp_dual_register(:lt, :f32, Float32)
+        PTX._setp_dual_register(:ne, :u16, UInt16)
+    end
+    @test which(Operation{:setp, (:dual, :eq, :s32)}(),
+                (Int32, Int32)).module == PTX
+
+    # ---- _shfl_register (registers both data-only + pred forms) ----
+    silent() do
+        for mode in (:up, :down, :bfly, :idx)
+            PTX._shfl_register(mode)
+        end
+    end
+    @test which(Operation{:shfl, (:sync, :idx, :b32)}(),
+                (UInt32, UInt32, UInt32, UInt32)).module == PTX
+    @test which(Operation{:shfl, (:sync, :bfly, :b32, :pred)}(),
+                (UInt32, UInt32, UInt32, UInt32)).module == PTX
 end

@@ -22,7 +22,7 @@ function setp_dual_spec(cmp::Symbol, dt::Symbol, JT::Type)
     (; asm, constraints, rettype = Tuple{Bool, Bool})
 end
 
-for (dt, JT) in (SETP_INT_DTYPES..., SETP_FLOAT_DTYPES...), cmp in SETP_CMPS
+function _setp_dual_register(cmp::Symbol, dt::Symbol, JT::Type)
     mods = (:dual, cmp, dt)
     spec = setp_dual_spec(cmp, dt, JT)
     asm, constraints = spec.asm, spec.constraints
@@ -31,4 +31,9 @@ for (dt, JT) in (SETP_INT_DTYPES..., SETP_FLOAT_DTYPES...), cmp in SETP_CMPS
         @asmcall($asm, $constraints, false,
                  Tuple{Bool, Bool}, Tuple{$JT, $JT}, a, b)
     end
+    nothing
+end
+
+for (dt, JT) in (SETP_INT_DTYPES..., SETP_FLOAT_DTYPES...), cmp in SETP_CMPS
+    _setp_dual_register(cmp, dt, JT)
 end

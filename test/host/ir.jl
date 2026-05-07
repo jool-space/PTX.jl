@@ -2,7 +2,7 @@ using PTX.IR: Instruction, RegisterOperand, ImmediateOperand, LabelOperand,
               VectorOperand, AddressOperand, ParenthesizedOperand,
               NegatedOperand, PipeOperand, Predicate, FormattingInfo,
               Version, Target, AddressSize, RegDecl, VarDecl, Comment,
-              BlankLine, RawLine, Block, Param, FunctionDirective,
+              BlankLine, RawLine, Block, Label, Param, FunctionDirective,
               ScalarType, StateSpace, LinkingDirective, format
 using PTX.IR: ptx, scalar_type_from_ptx, state_space_from_ptx, linking_from_ptx
 
@@ -322,4 +322,197 @@ end
         formatting = FormattingInfo(preceding_comments = ("// hand-written",)),
     )
     @test occursin("// hand-written", format(f))
+end
+
+
+# ---------------------------------------------------------------------------
+# IR.normalize / IR.diff: cover non-Instruction body branches programmatically.
+# parse_ptx produces RegDecl/Instruction/RawLine in bodies in normal usage; the
+# rarer Statement kinds (Block, Label, VarDecl, PragmaDirective, IntrinsicScope)
+# are easier to construct directly via the IR kwarg constructors.
+
+# Build a minimal Module with a single function whose body is `body`.
+function _build_module(body::Tuple{Vararg{PTX.IR.Statement}};
+                      fname::String = "f")
+    PTX.IR.Module(
+        version      = Version(8, 0),
+        target       = Target(("sm_89",)),
+        address_size = AddressSize(64),
+        directives   = (PTX.IR.Function(is_entry = true,
+                                         name = fname, body = body),),
+    )
+end
+
+_reg(s)  = RegisterOperand(s)
+_imm(s)  = ImmediateOperand(s)
+
+@testset "IR.normalize: non-Instruction body branches" begin
+    # Body containing every Statement kind that the body-branch dispatch in
+    # `_normalize_body` handles:
+    #   Comment / BlankLine — dropped
+    #   RawLine             — passthrough
+    #   Instruction         — _normalize_instruction
+    #   RegDecl             — passthrough with formatting cleared
+    #   VarDecl             — _normalize_var_decl
+    #   Label               — passthrough with formatting cleared
+    #   Block               — flattened
+    #   IntrinsicScope      — flattened
+    #   PragmaDirective     — passthrough with formatting cleared
+    body = (
+        Comment("// drop me"),
+        BlankLine(),
+        RawLine("\traw;"),
+        Instruction(opcode = "mov", modifiers = (".u32",),
+                    operands = (_reg("%r0"), _imm("1")),
+                    formatting = FormattingInfo(indent = "\t")),
+        RegDecl(type = ScalarType.B32, name = "r"),
+        VarDecl(state_space = StateSpace.SHARED, type = ScalarType.B32,
+                name = "smem", array_size = 4,
+                formatting = FormattingInfo(indent = "\t")),
+        Label("LBL_0"),
+        Block(body = (Instruction(opcode = "ret"),)),
+        PTX.IR.IntrinsicScope(name = "scope", args_repr = "()",
+                               body = (Instruction(opcode = "ret"),)),
+        PTX.IR.PragmaDirective(value = "nounroll"),
+    )
+    m = _build_module(body)
+    n = PTX.IR.normalize(m)
+    nf = first(d for d in n.directives if d isa PTX.IR.Function)
+
+    # Comment + BlankLine dropped. Block/IntrinsicScope flatten to their inner
+    # `ret`. Surviving: RawLine, Instruction, RegDecl, VarDecl, Label,
+    # ret(from Block), ret(from IntrinsicScope), PragmaDirective = 8 stmts.
+    @test length(nf.body) == 8
+
+    # Each surviving non-Instruction kind has formatting cleared.
+    var = first(s for s in nf.body if s isa VarDecl)
+    @test var.formatting === nothing
+    @test var.name == "smem" && var.array_size == 4
+
+    inst = first(s for s in nf.body if s isa Instruction)
+    @test inst.formatting === nothing
+    @test inst.opcode == "mov"
+
+    @test any(s -> s isa Label && s.name == "LBL_0",                nf.body)
+    @test any(s -> s isa PTX.IR.PragmaDirective && s.value == "nounroll", nf.body)
+
+    # Block / IntrinsicScope flattened — the inner `ret` instructions appear
+    # as direct body entries, with no surviving Block/IntrinsicScope wrapper.
+    @test count(s -> s isa Instruction && s.opcode == "ret", nf.body) == 2
+    @test !any(s -> s isa Block,                  nf.body)
+    @test !any(s -> s isa PTX.IR.IntrinsicScope,  nf.body)
+
+    # Idempotence — second normalize is a no-op.
+    @test PTX.IR.normalize(n) == n
+end
+
+@testset "IR.normalize: top-level VarDecl + PragmaDirective" begin
+    # `_normalize_directives` has a separate VarDecl/PragmaDirective branch
+    # for module-level directives — distinct from the body branch.
+    m = PTX.IR.Module(
+        version      = Version(8, 0),
+        target       = Target(("sm_89",)),
+        address_size = AddressSize(64),
+        directives   = (
+            Comment("// drop me"),
+            BlankLine(),
+            RawLine(".dropme"),
+            VarDecl(state_space = StateSpace.GLOBAL, type = ScalarType.B32,
+                    name = "g", array_size = 16,
+                    formatting = FormattingInfo(indent = "")),
+            PTX.IR.PragmaDirective(value = "loop_unroll(2)",
+                                    formatting = FormattingInfo(indent = "")),
+            PTX.IR.Function(is_entry = true, name = "f",
+                             body = (Instruction(opcode = "ret"),)),
+        ),
+    )
+    n = PTX.IR.normalize(m)
+    # RawLine + Comment + BlankLine all drop at module level.
+    @test !any(d -> d isa RawLine, n.directives)
+    @test !any(d -> d isa Comment, n.directives)
+
+    var = first(d for d in n.directives if d isa VarDecl)
+    @test var.formatting === nothing && var.name == "g"
+
+    pr = first(d for d in n.directives if d isa PTX.IR.PragmaDirective)
+    @test pr.formatting === nothing && pr.value == "loop_unroll(2)"
+end
+
+@testset "IR.diff: Instruction-internal differences (operands / predicate)" begin
+    # Locked-in: opcode and modifier diffs are exercised by the existing
+    # 'surfaces header / structural differences' testset (mods key). Here we
+    # cover the remaining two Instruction-internal diff branches: operands
+    # and predicate.
+    body_a = (
+        Instruction(opcode = "mov", modifiers = (".u32",),
+                    operands = (_reg("%r0"), _imm("1"))),
+        Instruction(opcode = "ret"),
+    )
+    body_b_op = (
+        Instruction(opcode = "mov", modifiers = (".u32",),
+                    operands = (_reg("%r0"), _imm("2"))),    # operand 1 differs
+        Instruction(opcode = "ret"),
+    )
+    d = PTX.IR.diff(_build_module(body_a), _build_module(body_b_op))
+    @test any(line -> occursin("operands differ", line), d)
+    @test any(line -> occursin("a: ", line),             d)
+    @test any(line -> occursin("b: ", line),             d)
+
+    body_b_pred = (
+        Instruction(opcode = "mov", modifiers = (".u32",),
+                    operands = (_reg("%r0"), _imm("1")),
+                    predicate = Predicate("p0", false)),
+        Instruction(opcode = "ret"),
+    )
+    d = PTX.IR.diff(_build_module(body_a), _build_module(body_b_pred))
+    @test any(line -> occursin("pred:", line), d)
+end
+
+@testset "IR.diff: typeof mismatch + non-Instruction _eq_ignoring_formatting" begin
+    # Two modules with different statement *types* at the same body position.
+    body_a = (RegDecl(type = ScalarType.B32, name = "r"),
+              Instruction(opcode = "ret"))
+    body_b = (Label("L"),
+              Instruction(opcode = "ret"))
+    d = PTX.IR.diff(_build_module(body_a), _build_module(body_b))
+    @test any(line -> occursin("body[1] type:", line), d)
+
+    # Same Statement type, different fields — exercises
+    # `_eq_ignoring_formatting` for non-Instruction.
+    body_a = (RegDecl(type = ScalarType.B32, name = "r"),
+              Instruction(opcode = "ret"))
+    body_b = (RegDecl(type = ScalarType.B32, name = "different"),
+              Instruction(opcode = "ret"))
+    d = PTX.IR.diff(_build_module(body_a), _build_module(body_b))
+    @test any(line -> occursin("body[1]:", line) && occursin("different", line), d)
+
+    # Differs only in formatting → equal under _eq_ignoring_formatting.
+    body_a = (Label("L", FormattingInfo(indent = "")),
+              Instruction(opcode = "ret"))
+    body_b = (Label("L", FormattingInfo(indent = "  ")),
+              Instruction(opcode = "ret"))
+    @test isempty(PTX.IR.diff(_build_module(body_a), _build_module(body_b)))
+end
+
+@testset "IR.diff: _stmt_summary covers RegDecl / VarDecl / Label / fallback" begin
+    # Body length mismatch triggers the per-statement-summary loop in
+    # `diff()` — exercises every `_stmt_summary` overload.
+    short_body = (Instruction(opcode = "ret"),)
+    long_body = (
+        Instruction(opcode = "mov", modifiers = (".u32",),
+                    operands = (_reg("%r0"), _imm("1"))),
+        RegDecl(type = ScalarType.B32, name = "r", count = 4),
+        VarDecl(state_space = StateSpace.SHARED, type = ScalarType.B32,
+                name = "smem"),
+        Label("LBL"),
+        PTX.IR.PragmaDirective(value = "p"),  # hits the generic _stmt_summary fallback
+        Instruction(opcode = "ret"),
+    )
+    d = PTX.IR.diff(_build_module(short_body), _build_module(long_body))
+    @test any(line -> occursin("body length:", line), d)
+    # _stmt_summary: ScalarType prints as `B32` (EnumX), not `.b32`.
+    @test any(line -> occursin(".reg ", line) && occursin("r<4>", line), d)
+    @test any(line -> occursin("VarDecl(smem)", line), d)
+    @test any(line -> occursin("LBL:",          line), d)
+    @test any(line -> occursin("PragmaDirective", line), d)
 end

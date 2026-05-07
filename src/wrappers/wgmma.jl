@@ -40,8 +40,18 @@ function wgmma_mma_async_spec(dtype_d::Symbol, dtype_a::Symbol, dtype_b::Symbol,
     nd, _, d_let = _wgmma_dvec_kind(dtype_d, n)
     head = "wgmma.mma_async.sync.aligned.m64n$(n)k$(k).$dtype_d.$dtype_a.$dtype_b"
     d_slots = "{" * join(("\$$i" for i in 0:nd-1), ", ") * "}"
-    imms = has_trans ? "1, 1, 0, 0" : "1, 1"
-    asm = "$head $d_slots, \$$(nd), \$$(nd+1), \$$(nd+2), $imms;"
+    # PTX 9.2 §9.7.14.5.7: integer wgmma takes only `scale-d` (no scale-a/b
+    # or trans-a/b). FP wgmma takes `scale-d, scale-a, scale-b` plus optional
+    # `trans-a, trans-b` for f16/bf16/tf32 inputs (mantissa-shape A/B
+    # descriptors). FP8 inputs have no trans bits.
+    imms_tail = if dtype_d === :s32
+        ""
+    elseif has_trans
+        ", 1, 1, 0, 0"
+    else
+        ", 1, 1"
+    end
+    asm = "$head $d_slots, \$$(nd), \$$(nd+1), \$$(nd+2)$imms_tail;"
     constraints = join(vcat(
         fill("=$d_let", nd),
         ["l", "l", "b"],

@@ -135,6 +135,195 @@ end
 end
 
 
+# --- mbarrier pre-Hopper full cycle at sm_80 ------------------------------
+#
+# init / inval / arrive / arrive.noComplete / test_wait / test_wait.parity
+# were added in PTX 7.0 (sm_80). Hopper-only forms (expect_tx, try_wait,
+# try_wait.parity) live in ptxas/hopper.jl. One kernel covers all six pre-
+# Hopper @generated bodies — previously only `which()` smoke-checked.
+
+function _baseline_mbarrier_lifecycle!(out::CuDeviceVector{UInt64, 1},
+                                        outp::CuDeviceVector{UInt32, 1})
+    smem = CuStaticSharedArray(UInt64, 1)
+    mbar = pointer(smem)
+    tid  = ptx"mov.u32"(sreg"tid.x")
+    if tid == UInt32(0)
+        ptx"mbarrier.init.shared.b64"(mbar, UInt32(1))
+    end
+    ptx"bar.sync"(Val(0))
+
+    # arrive returns a u64 phase token; arrive.noComplete with count does not
+    # close the phase even when pending hits zero. Both produce u64 state.
+    s1 = ptx"mbarrier.arrive.shared.b64"(mbar)
+    s2 = ptx"mbarrier.arrive.noComplete.shared.b64"(mbar, UInt32(1))
+
+    # Token form returns `Bool`; phase form takes a 0/1 parity bit and also
+    # returns Bool. Stash both as 0/1 to keep the result alive.
+    p1 = ptx"mbarrier.test_wait.shared.b64"(mbar, s1)
+    p2 = ptx"mbarrier.test_wait.parity.shared.b64"(mbar, UInt32(0))
+
+    if tid == UInt32(0)
+        @inbounds out[1]  = s1
+        @inbounds out[2]  = s2
+        @inbounds outp[1] = p1 ? UInt32(1) : UInt32(0)
+        @inbounds outp[2] = p2 ? UInt32(1) : UInt32(0)
+        ptx"mbarrier.inval.shared.b64"(mbar)
+    end
+    return nothing
+end
+
+@testset "mbarrier pre-Hopper lifecycle at sm_80" begin
+    types = Tuple{CuDeviceVector{UInt64, 1}, CuDeviceVector{UInt32, 1}}
+    @test ptxas_compiles(_baseline_mbarrier_lifecycle!, types; cap = v"8.0")
+    ptx = emit_ptx(_baseline_mbarrier_lifecycle!, types; cap = v"8.0")
+    @test occursin("mbarrier.init.shared.b64",                ptx)
+    @test occursin("mbarrier.arrive.shared.b64",              ptx)
+    @test occursin("mbarrier.arrive.noComplete.shared.b64",   ptx)
+    @test occursin("mbarrier.test_wait.shared.b64",           ptx)
+    @test occursin("mbarrier.test_wait.parity.shared.b64",    ptx)
+    @test occursin("mbarrier.inval.shared.b64",               ptx)
+end
+
+
+# --- shfl all four modes (incl. pred-output) at sm_75 ---------------------
+#
+# `idx` is covered above; this adds up/down/bfly + pred-output for every
+# mode. Pred form returns `(UInt32, Bool)` via the `\$0|\$1` operand.
+
+function _baseline_shfl_all_modes!(out::CuDeviceVector{UInt32, 1})
+    tid  = ptx"mov.u32"(sreg"tid.x")
+    mask = UInt32(0xFFFFFFFF)
+    v_up   = ptx"shfl.sync.up.b32"(  tid, UInt32(1), UInt32(0x00), mask)
+    v_dn   = ptx"shfl.sync.down.b32"(tid, UInt32(1), UInt32(0x1F), mask)
+    v_bfly = ptx"shfl.sync.bfly.b32"(tid, UInt32(1), UInt32(0x1F), mask)
+    v_idx  = ptx"shfl.sync.idx.b32"( tid, UInt32(0), UInt32(0x1F), mask)
+    @inbounds out[tid + 1] = v_up ⊻ v_dn ⊻ v_bfly ⊻ v_idx
+
+    # Pred form — destination + in-range predicate. Stash the pred bit so
+    # LLVM doesn't DCE the call.
+    (vp, p) = ptx"shfl.sync.bfly.b32.pred"(tid, UInt32(1), UInt32(0x1F), mask)
+    if tid == UInt32(0)
+        @inbounds out[33] = p ? vp : UInt32(0xDEAD)
+    end
+    return nothing
+end
+
+@testset "shfl.sync all modes (+ pred form) at sm_75" begin
+    types = Tuple{CuDeviceVector{UInt32, 1}}
+    @test ptxas_compiles(_baseline_shfl_all_modes!, types; cap = v"7.5")
+    ptx = emit_ptx(_baseline_shfl_all_modes!, types; cap = v"7.5")
+    @test occursin("shfl.sync.up.b32",   ptx)
+    @test occursin("shfl.sync.down.b32", ptx)
+    @test occursin("shfl.sync.bfly.b32", ptx)
+    @test occursin("shfl.sync.idx.b32",  ptx)
+    # Pred form uses the `d|p, ...` pipe-operand syntax.
+    @test occursin(r"shfl\.sync\.bfly\.b32\s+%r\d+\|%p\d+,", ptx)
+end
+
+
+# --- vec ld/st {v2,v4} × {f32,b32,b16} at sm_75 ---------------------------
+#
+# `ld.global.v{2,4}.<dt>` / `st.global.v{2,4}.<dt>` exercise the brace-
+# operand renderers in src/wrappers/vec_ldst.jl. Round-trip through globals
+# so the @generated body is fully expanded.
+
+function _baseline_vec_ldst!(out_f::CuDeviceVector{Float32, 1},
+                              out_u32::CuDeviceVector{UInt32, 1},
+                              out_u16::CuDeviceVector{UInt16, 1})
+    p_f   = pointer(out_f)
+    p_u32 = pointer(out_u32)
+    p_u16 = pointer(out_u16)
+
+    # Loads: v2.f32 / v4.f32 / v2.b32 / v4.b32 / v2.b16 / v4.b16
+    f2 = ptx"ld.global.v2.f32"(p_f)
+    f4 = ptx"ld.global.v4.f32"(p_f)
+    u32_2 = ptx"ld.global.v2.b32"(p_u32)
+    u32_4 = ptx"ld.global.v4.b32"(p_u32)
+    u16_2 = ptx"ld.global.v2.b16"(p_u16)
+    u16_4 = ptx"ld.global.v4.b16"(p_u16)
+
+    # Stores — round-trip the loaded tuples.
+    ptx"st.global.v2.f32"(p_f, f2)
+    ptx"st.global.v4.f32"(p_f, f4)
+    ptx"st.global.v2.b32"(p_u32, u32_2)
+    ptx"st.global.v4.b32"(p_u32, u32_4)
+    ptx"st.global.v2.b16"(p_u16, u16_2)
+    ptx"st.global.v4.b16"(p_u16, u16_4)
+    return nothing
+end
+
+@testset "vec ld/st v2/v4 × {f32,b32,b16} at sm_75" begin
+    types = Tuple{CuDeviceVector{Float32, 1},
+                  CuDeviceVector{UInt32, 1},
+                  CuDeviceVector{UInt16, 1}}
+    @test ptxas_compiles(_baseline_vec_ldst!, types; cap = v"7.5")
+    ptx = emit_ptx(_baseline_vec_ldst!, types; cap = v"7.5")
+    @test occursin("ld.global.v2.f32", ptx)
+    @test occursin("ld.global.v4.f32", ptx)
+    @test occursin("ld.global.v2.b32", ptx)
+    @test occursin("ld.global.v4.b32", ptx)
+    @test occursin("ld.global.v2.b16", ptx)
+    @test occursin("ld.global.v4.b16", ptx)
+    @test occursin("st.global.v2.f32", ptx)
+    @test occursin("st.global.v4.f32", ptx)
+    @test occursin("st.global.v2.b16", ptx)
+    @test occursin("st.global.v4.b16", ptx)
+end
+
+
+# --- cp.async.ca size-baking N=8 / N=16 at sm_80 --------------------------
+#
+# The N=4 form is exercised by the `cp.async.ca.shared.global at sm_80`
+# testset above. This locks N=8 and N=16 — the @generated body has separate
+# size-baked asm strings for each of {4, 8, 16}.
+
+function _baseline_cp_async_n8!(dst::CuDeviceVector{UInt64, 1},
+                                 src::CuDeviceVector{UInt64, 1})
+    smem = CuStaticSharedArray(UInt64, 32)
+    tid  = ptx"mov.u32"(sreg"tid.x")
+    src_p = pointer(src) + Int(tid) * 8
+    dst_p = pointer(smem) + Int(tid) * 8
+    ptx"cp.async.ca.shared.global"(dst_p, src_p, Val(8))
+    ptx"cp.async.commit_group"()
+    ptx"cp.async.wait_all"()
+    ptx"bar.sync"(Val(0))
+    @inbounds dst[tid + 1] = smem[tid + 1]
+    return nothing
+end
+
+function _baseline_cp_async_n16!(dst::CuDeviceVector{UInt32, 1},
+                                  src::CuDeviceVector{UInt32, 1})
+    smem = CuStaticSharedArray(UInt32, 128)
+    tid  = ptx"mov.u32"(sreg"tid.x")
+    src_p = pointer(src) + Int(tid) * 16
+    dst_p = pointer(smem) + Int(tid) * 16
+    ptx"cp.async.ca.shared.global"(dst_p, src_p, Val(16))
+    ptx"cp.async.cg.shared.global"(dst_p, src_p, Val(16))
+    ptx"cp.async.commit_group"()
+    ptx"cp.async.wait_all"()
+    ptx"bar.sync"(Val(0))
+    @inbounds dst[tid + 1] = smem[tid * 4 + 1]
+    return nothing
+end
+
+@testset "cp.async.{ca,cg}.shared.global N=8/N=16 at sm_80" begin
+    types8 = Tuple{CuDeviceVector{UInt64, 1}, CuDeviceVector{UInt64, 1}}
+    @test ptxas_compiles(_baseline_cp_async_n8!, types8; cap = v"8.0")
+    ptx8 = emit_ptx(_baseline_cp_async_n8!, types8; cap = v"8.0")
+    @test occursin(r"cp\.async\.ca\.shared\.global \[%r\d+\], \[%rd?\d+\], 8;",
+                   ptx8)
+
+    types16 = Tuple{CuDeviceVector{UInt32, 1}, CuDeviceVector{UInt32, 1}}
+    @test ptxas_compiles(_baseline_cp_async_n16!, types16; cap = v"8.0")
+    ptx16 = emit_ptx(_baseline_cp_async_n16!, types16; cap = v"8.0")
+    @test occursin(r"cp\.async\.ca\.shared\.global \[%r\d+\], \[%rd?\d+\], 16;",
+                   ptx16)
+    # cg is L2-only; size 16 is the only legal form.
+    @test occursin(r"cp\.async\.cg\.shared\.global \[%r\d+\], \[%rd?\d+\], 16;",
+                   ptx16)
+end
+
+
 # `feature_set = :arch` is gated to sm_90+ in CUDACore (sm_89a doesn't
 # exist as a target). The :arch path is exercised in ptxas/hopper.jl
 # (cap=9.0) and ptxas/blackwell.jl (cap=10.0).

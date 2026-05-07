@@ -18,7 +18,7 @@ function shfl_spec(mode::Symbol; pred::Bool = false)
     end
 end
 
-for mode in SHFL_MODES
+function _shfl_register(mode::Symbol)
     mods = (:sync, mode, :b32)
     spec = shfl_spec(mode)
     asm, constraints = spec.asm, spec.constraints
@@ -40,4 +40,9 @@ for mode in SHFL_MODES
                  Tuple{UInt32, Bool}, Tuple{UInt32, UInt32, UInt32, UInt32},
                  a, b, c, membermask)
     end
+    nothing
+end
+
+for mode in SHFL_MODES
+    _shfl_register(mode)
 end

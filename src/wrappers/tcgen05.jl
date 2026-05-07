@@ -23,7 +23,7 @@
 # (PTX 9.2 §9.7.16.8.3 Table 49). count ∈ {x1..x128} with limit per_lane ≤ 128.
 # Shape `.16x32bx2` excluded — needs an extra `immHalfSplitoff` immediate.
 
-for cta in (1, 2)
+function _tcgen05_shift_register(cta::Int)
     cta_part = Symbol("cta_group::", cta)
     mods = (:shift, cta_part, :down)
     asm = "tcgen05.shift.cta_group::$cta.down [\$0];"
@@ -32,10 +32,15 @@ for cta in (1, 2)
         @asmcall($asm, "r,~{memory}", true, Nothing, Tuple{UInt32}, taddr)
         nothing
     end
+    nothing
+end
+
+for cta in (1, 2)
+    _tcgen05_shift_register(cta)
 end
 
 # Unbracketed taddr per pyptx.
-for cta in (1, 2)
+function _tcgen05_dealloc_register(cta::Int)
     cta_part = Symbol("cta_group::", cta)
     mods = (:dealloc, cta_part, :sync, :aligned, :b32)
     asm = "tcgen05.dealloc.cta_group::$cta.sync.aligned.b32 \$0, \$1;"
@@ -45,11 +50,16 @@ for cta in (1, 2)
                  Tuple{UInt32, UInt32}, taddr, ncols)
         nothing
     end
+    nothing
+end
+
+for cta in (1, 2)
+    _tcgen05_dealloc_register(cta)
 end
 
 # Common single-warp shapes (no multicast). 64x128b / 32x128b need multicast
 # qualifiers — separate wrapper wave.
-for cta in (1, 2), shape in (Symbol("128x256b"), Symbol("4x256b"), Symbol("128x128b"))
+function _tcgen05_cp_register(cta::Int, shape::Symbol)
     mods = (:cp, Symbol("cta_group::", cta), shape)
     asm = "tcgen05.cp.cta_group::$cta.$shape [\$0], \$1;"
     @eval function (::Operation{:tcgen05, $mods})(taddr::UInt32, s_desc::UInt64)
@@ -58,6 +68,11 @@ for cta in (1, 2), shape in (Symbol("128x256b"), Symbol("4x256b"), Symbol("128x1
                  Tuple{UInt32, UInt64}, taddr, s_desc)
         nothing
     end
+    nothing
+end
+
+for cta in (1, 2), shape in (Symbol("128x256b"), Symbol("4x256b"), Symbol("128x128b"))
+    _tcgen05_cp_register(cta, shape)
 end
 
 const _TCGEN05_LDST_SHAPES = ((Symbol("16x64b"), 1), (Symbol("32x32b"), 1),

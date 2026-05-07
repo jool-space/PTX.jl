@@ -202,6 +202,32 @@ end
     @test occursin("cvt.rn.bf16x2.e2m1x2", ptx)
 end
 
+# e2m1x2 (FP4) direct pack from packed FP16/BF16 (no f32 detour). Hand-
+# written wrapper in src/wrappers/cvt.jl: UInt32 (f16x2/bf16x2) in,
+# UInt16 (e2m1x2 carrier) out via a `.reg .b8 t; ... mov.b16 \$0, {t, 0};`
+# shim. The pack-from-f32 form is covered above; this locks the pack-from-
+# packed forms.
+
+function _bw_cvt_fp4_pack_from_x2!(out::CuDeviceVector{UInt16, 1},
+                                    x_f16x2::UInt32, x_bf16x2::UInt32)
+    tid = ptx"mov.u32"(sreg"tid.x")
+    if tid == UInt32(0)
+        @inbounds out[1] = ptx"cvt.rn.satfinite.e2m1x2.f16x2"(x_f16x2)
+        @inbounds out[2] = ptx"cvt.rn.satfinite.e2m1x2.bf16x2"(x_bf16x2)
+    end
+    return nothing
+end
+
+@testset "cvt FP4 (e2m1x2) pack from f16x2/bf16x2 at sm_100a" begin
+    types = Tuple{CuDeviceVector{UInt16, 1}, UInt32, UInt32}
+    @test ptxas_compiles(_bw_cvt_fp4_pack_from_x2!, types;
+                         cap = v"10.0", feature_set = :arch)
+    ptx = emit_ptx(_bw_cvt_fp4_pack_from_x2!, types;
+                   cap = v"10.0", feature_set = :arch)
+    @test occursin("cvt.rn.satfinite.e2m1x2.f16x2",  ptx)
+    @test occursin("cvt.rn.satfinite.e2m1x2.bf16x2", ptx)
+end
+
 # `cvt.rn.bf16x2.ue8m0x2` — block-scale dtype unpacked to BF16 (PTX 8.6).
 function _bw_cvt_ue8m0_unpack!(out::CuDeviceVector{UInt32, 1}, x::UInt16)
     tid = ptx"mov.u32"(sreg"tid.x")

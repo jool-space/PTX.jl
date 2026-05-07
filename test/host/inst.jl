@@ -123,3 +123,44 @@ end
     # Reading any SpecialReg forces side_effects=true.
     @test build_call(:mov, (:u32,), (typeof(sreg"%tid.x"),)).side_effects == true
 end
+
+@testset "infer_rettype + _has_no_return_prefix" begin
+    # Single-element prefixes in NO_RETURN_PREFIXES suppress the trailing-dtype
+    # rule. `st.global.b32` ends in :b32 but the value is being *written*, not
+    # returned — so rettype must be Nothing.
+    @test PTX.infer_rettype(:st, (:global, :b32)) === Nothing
+    @test PTX.infer_rettype(:red, (:global, :add, :u32)) === Nothing
+    @test PTX.infer_rettype(:setmaxnreg, (:inc, :sync, :aligned, :u32)) === Nothing
+    @test PTX.infer_rettype(:tensormap, (:replace, :tile, :global_address, :b1024, :b32)) === Nothing
+
+    # Multi-element prefixes — exercises the inner `for i in 1:nrest` loop in
+    # src/types.jl:60-66. tcgen05 mixes ops; only the three sink forms are in
+    # the NO_RETURN list.
+    @test PTX.infer_rettype(:tcgen05,
+        (:alloc, Symbol("cta_group::1"), :sync, :aligned, :b32)) === Nothing
+    @test PTX.infer_rettype(:tcgen05,
+        (:commit, Symbol("cta_group::1"), Symbol("mbarrier::arrive::one"),
+         Symbol("shared::cluster"), :b64)) === Nothing
+    @test PTX.infer_rettype(:tcgen05,
+        (:relinquish_alloc_permit, Symbol("cta_group::1"), :sync, :aligned)) === Nothing
+
+    # Negative — `:tcgen05, :ld, ...` is NOT in NO_RETURN_PREFIXES; the trailing
+    # dtype rule fires and the rettype is the carrier of `:b32` → UInt32.
+    @test PTX.infer_rettype(:tcgen05,
+        (:ld, :sync, :aligned, Symbol("16x128b"), :x1, :b32)) === UInt32
+
+    # First-segment match alone isn't enough — `(:tcgen05, :alloc)` shouldn't
+    # match a chain that starts with a different second segment. The loop must
+    # check every position; if it terminated early on op-match, this would
+    # incorrectly return Nothing.
+    @test PTX.infer_rettype(:tcgen05,
+        (:dealloc, Symbol("cta_group::1"), :sync, :aligned, :b32)) === UInt32
+
+    # Direct check of the prefix predicate.
+    @test PTX._has_no_return_prefix(:st, (:global, :b32)) === true
+    @test PTX._has_no_return_prefix(:tcgen05,
+        (:alloc, Symbol("cta_group::1"), :sync, :aligned, :b32)) === true
+    @test PTX._has_no_return_prefix(:tcgen05,
+        (:dealloc, Symbol("cta_group::1"))) === false
+    @test PTX._has_no_return_prefix(:add, (:f32,)) === false
+end

@@ -13,7 +13,6 @@ using .Codegen: ptx_to_julia, ir_to_julia
 export ptx_to_julia, ir_to_julia
 
 include("address_space.jl")
-include("emit.jl")
 include("types.jl")
 
 include("inst.jl")

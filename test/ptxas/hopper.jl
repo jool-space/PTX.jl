@@ -83,6 +83,58 @@ end
 end
 
 
+# --- WGMMA parametric sweep across _WGMMA_VARIANTS × {N=8, N=256} ---------
+#
+# Mints one compile-only kernel per (dtype_d, dtype_a, dtype_b, k) variant
+# in `PTX._WGMMA_VARIANTS` at both ends of the N grid (8 and 256). Catches
+# brace-count, tied-operand, and dispatch regressions across the full
+# registered surface that the three hand-rolled testsets above don't reach.
+#
+# Encoder cross-reference: pyptx's `_Wgmma.mma_async()`
+# (pyptx/pyptx/ptx.py:817-910). Verbatim corpus reference for
+# m64n256k16.f32.e4m3.e4m3:
+# pyptx/tests/corpus/wgmma_simple.ptx:10. The Hopper full pipeline below
+# anchors the m64n8k16.f32.bf16.bf16 shape end-to-end.
+
+const _WGMMA_SWEEP_NS = (8, 256)
+
+# Emit one kernel per variant × N. Function name encodes the combo so
+# ptxas error messages identify the failing variant.
+for (dt_d, dt_a, dt_b, k, _has_trans) in PTX._WGMMA_VARIANTS,
+        n in _WGMMA_SWEEP_NS
+    nd    = dt_d === :f16 ? n >>> 2 : n >>> 1
+    acc_J = dt_d === :f32 ? Float32 :
+            dt_d === :f16 ? UInt32  : Int32
+    shape = Symbol("m64n", n, "k", k)
+    mods  = (:mma_async, :sync, :aligned, shape, dt_d, dt_a, dt_b)
+    fname = Symbol("_wgmma_sweep_", dt_d, "_", dt_a, "_", dt_b, "_n", n, "!")
+
+    @eval function $fname(out::CuDeviceVector{$acc_J, 1},
+                          a_desc::UInt64, b_desc::UInt64)
+        d = ntuple(_ -> zero($acc_J), Val($nd))
+        d_new = $(PTX.Operation{:wgmma, mods}())(d, a_desc, b_desc, false)
+        @inbounds out[1] = d_new[1]
+        return nothing
+    end
+end
+
+@testset "wgmma sweep $(dt_d).$(dt_a).$(dt_b) m64n$(n)k$(k)" for
+        (dt_d, dt_a, dt_b, k, _has_trans) in PTX._WGMMA_VARIANTS,
+        n in _WGMMA_SWEEP_NS
+
+    acc_J = dt_d === :f32 ? Float32 :
+            dt_d === :f16 ? UInt32  : Int32
+    fname = Symbol("_wgmma_sweep_", dt_d, "_", dt_a, "_", dt_b, "_n", n, "!")
+    f     = getfield(@__MODULE__, fname)
+    types = Tuple{CuDeviceVector{acc_J, 1}, UInt64, UInt64}
+
+    @test ptxas_compiles(f, types; cap = v"9.0", feature_set = :arch)
+    ptx = emit_ptx(f, types; cap = v"9.0", feature_set = :arch)
+    @test occursin(
+        "wgmma.mma_async.sync.aligned.m64n$(n)k$(k).$dt_d.$dt_a.$dt_b", ptx)
+end
+
+
 # --- Hopper full pipeline ---------------------------------------------------
 #
 # End-to-end Hopper kernel: cp.async load → fence.proxy.async →
