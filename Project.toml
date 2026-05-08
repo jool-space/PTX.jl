@@ -1,7 +1,7 @@
 name = "PTX"
 uuid = "7a3554bf-f3bf-40cd-9a57-3cf23ff3bbf8"
 version = "0.1.0-DEV"
-authors = ["Anton Oresten <antonoresten@proton.me> and contributors"]
+authors = ["Anton Oresten <antonoresten@proton.me>"]
 
 [workspace]
 projects = ["test", "docs"]
