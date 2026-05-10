@@ -1,6 +1,5 @@
-# Encode a Param's type spec in pyptx's dot-separated format. Lossless capture
-# of the original `.param` decl — v2.1 will consume these strings to drive
-# use-def-aware Julia type inference.
+# Encode a Param's type spec in dot-separated format — lossless capture of the
+# original `.param` decl.
 #   .param .u64 param0                       → "u64"
 #   .param .u64 .ptr .global param0          → "u64.ptr.global"
 #   .param .u64 .ptr .global .align 8 param0 → "u64.ptr.global.palign8"

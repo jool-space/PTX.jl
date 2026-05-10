@@ -51,10 +51,14 @@ const NO_RETURN_PREFIXES = Set{Tuple{Vararg{Symbol}}}((
     # "Arguments mismatch for instruction 'st'".
     (:st,),
     (:red,),
+    # `cp.async.mbarrier.arrive{.noinc}.shared.b64` — `.b64` is the width
+    # of the mbarrier address, not a return type. The chain would (wrongly)
+    # reserve $0 as a UInt64 output.
+    (:cp, :async, :mbarrier, :arrive),
 ))
 
 # Prefixes are stored as `(opcode, mod1, mod2, ...)` for compactness.
-@inline function _has_no_return_prefix(op::Symbol, mods::Tuple{Vararg{Symbol}})
+function _has_no_return_prefix(op::Symbol, mods::Tuple{Vararg{Symbol}})
     for prefix in NO_RETURN_PREFIXES
         op === prefix[1] || continue
         nrest = length(prefix) - 1

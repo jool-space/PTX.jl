@@ -3,13 +3,13 @@ struct Operation{op, mods} end
 struct Chain{mods} end
 
 # Type-level chain composition. See `@mod_str` for semantics and patterns.
-@inline Base.:*(::Operation{op, M1}, ::Chain{M2}) where {op, M1, M2} =
+Base.:*(::Operation{op, M1}, ::Chain{M2}) where {op, M1, M2} =
     Operation{op, (M1..., M2...)}()
-@inline Base.:*(::Operation{op, M},  s::Symbol) where {op, M} =
+Base.:*(::Operation{op, M},  s::Symbol) where {op, M} =
     Operation{op, (M..., s)}()
-@inline Base.:*(::Chain{M1}, ::Chain{M2}) where {M1, M2} =
+Base.:*(::Chain{M1}, ::Chain{M2}) where {M1, M2} =
     Chain{(M1..., M2...)}()
-@inline Base.:*(::Chain{M},  s::Symbol) where {M} =
+Base.:*(::Chain{M},  s::Symbol) where {M} =
     Chain{(M..., s)}()
 
 struct SpecialReg{name} end
@@ -69,60 +69,6 @@ type-level `*` (below) already handles compile-time composition.
 
 `mod""` is the empty chain `Chain{()}`. Composing it via `*` is a no-op —
 useful as an "absent modifier" sentinel for conditional helpers.
-
-# Composition with `*`
-
-`Chain` is the right-hand side of a type-level concatenation operator. Every
-operand carries its data in type parameters, so dispatch determines the
-result type and the singleton folds at compile time:
-
-    Operation{op, M1} * Chain{M2}    -> Operation{op, (M1..., M2...)}
-    Chain{M1}         * Chain{M2}    -> Chain{(M1..., M2...)}
-    Operation{op, M}  * sym::Symbol  -> Operation{op, (M..., sym)}
-    Chain{M}          * sym::Symbol  -> Chain{(M..., sym)}
-
-`Operation * Operation` is intentionally undefined — splicing two opcodes is
-meaningless and surfaces as a `MethodError`. Plain `Symbol` is accepted on
-the right because dispatched modifier helpers (e.g. `dt(::Type{Float32}) = :f32`)
-const-prop just as well as ones returning `Chain{(:f32,)}`.
-
-# Patterns
-
-**Generic kernels** — pick the dtype/layout modifier from the Julia type:
-
-    dt(::Type{Float32}) = :f32
-    dt(::Type{Float16}) = :f16
-    @inline mma_op(::Type{A}, ::Type{B}, ::Type{C}) where {A,B,C} =
-        ptx"mma.sync.aligned.m16n8k16.row.col" * dt(C) * dt(A) * dt(B) * dt(C)
-
-`mma_op(Float16, Float16, Float32)` infers to a single `Operation{:mma, …}`
-singleton — no runtime tuple build, no allocation.
-
-**Trait-style optional modifiers** — encode opt-in behavior in the type and
-have it inject (or skip) the modifier:
-
-    sat_mod(::Type)                  = mod""
-    sat_mod(::Type{Float8_E4M3_SAT}) = mod"satfinite"
-
-    ptx"cvt.rn" * sat_mod(Dst) * dt(Dst, Val(:cvt_dst)) * dt(Src, Val(:cvt_src))
-
-**Conditional modifiers** — `mod""` as the false branch:
-
-    trans_mod(b::Bool) = b ? mod"trans" : mod""
-    ptx"ldmatrix.sync.aligned.m8n8.x4" * trans_mod(trans) * mod"shared.b16"
-
-When the condition is statically known (e.g. through `Val` dispatch), the
-whole chain folds. With a runtime `Bool` you get a `Union` of the two
-singleton outcomes — each branch is type-stable.
-
-# Notes
-
-- `Chain` is not callable; only `Operation` heads an `@asmcall`.
-- Modifier order is opcode-dependent (per the PTX ISA). `*` performs no
-  reordering, so it is the wrapper author's job to compose in the legal slot
-  order.
-
-Not exported; reference as `PTX.@mod_str`.
 """
 macro mod_str(s::String)
     occursin('\$', s) && error("mod\"" * s * "\": interpolation not supported (use `*` to compose)")
@@ -163,7 +109,7 @@ function _ptx_parse_interp(s::String)
     Expr(:string, pieces...)
 end
 
-@inline function _ptx_op_from_string(s::AbstractString)
+function _ptx_op_from_string(s::AbstractString)
     raw = split(s, '.')
     any(isempty, raw) && error("ptx string \"" * String(s) * "\": empty modifier between '.'")
     op = Symbol(raw[1])

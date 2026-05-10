@@ -10,11 +10,10 @@ function emit_stmt!(cg::CodeGenState, s::RegDecl)
     nothing
 end
 
-# v2.0 emits a TODO comment; v2.1 will translate to CuStaticSharedArray etc.
 function emit_stmt!(cg::CodeGenState, s::VarDecl)
     suffix = s.array_size === nothing ? "" : "[$(s.array_size)]"
     emit!(cg, "# " * ptx(s.state_space) * " " * ptx(s.type) * " " *
-              s.name * suffix * ";  # TODO v2.1: CuStaticSharedArray / etc.")
+              s.name * suffix * ";")
 end
 
 emit_stmt!(cg::CodeGenState, s::PragmaDirective) =

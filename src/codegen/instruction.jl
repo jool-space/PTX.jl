@@ -52,7 +52,7 @@ _is_no_dest(inst::Instruction) =
      (inst.opcode, inst.modifiers[1]) in NO_DEST_OPCODE_MODIFIERS)
 
 function emit_instruction!(cg::CodeGenState, inst::Instruction)
-    # Drop debug directives. Mirror pyptx codegen.py:1272.
+    # Drop debug directives.
     (inst.opcode == ".loc" || inst.opcode == ".file") && return
 
     if inst.opcode == "ret" && isempty(inst.operands)

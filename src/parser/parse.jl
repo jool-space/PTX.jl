@@ -42,9 +42,9 @@ function ParserState(tokens::Vector{Token}, source::AbstractString = "")
     ParserState(tokens, 1, src, String.(lines), Statement[], String[])
 end
 
-@inline _peek(s::ParserState) = s.tokens[s.pos]
-@inline _peek_kind(s::ParserState) = s.tokens[s.pos].kind
-@inline _peek_offset(s::ParserState, off::Int) = s.tokens[s.pos + off]
+_peek(s::ParserState) = s.tokens[s.pos]
+_peek_kind(s::ParserState) = s.tokens[s.pos].kind
+_peek_offset(s::ParserState, off::Int) = s.tokens[s.pos + off]
 
 function _advance!(s::ParserState)
     t = s.tokens[s.pos]

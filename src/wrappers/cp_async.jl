@@ -55,3 +55,32 @@ end
         nothing
     end
 end
+
+# `cp.async.mbarrier.arrive[.noinc].shared.b64 [addr];` — couples
+# completion of the issuing thread's prior cp.async ops to an mbarrier
+# arrive. Without `.noinc`, mbarrier's pending count is bumped by 1
+# before the arrive (so a subsequent in-flight cp.async still decrements
+# correctly). With `.noinc`, the bump is skipped — used when the caller
+# pre-arranged the pending count via `mbarrier.expect_tx`.
+# PTX 9.2 §9.7.13.15.15. Hand-written for the same `r` (i32) constraint
+# reason as the other shared-AS wrappers above — and to override the
+# generic dispatch that would (incorrectly) infer rettype = UInt64 from
+# the trailing `.b64` modifier (the chain treats `.b64` as a dtype
+# suffix; here it describes the *width of the address*, not a return).
+@inline function (::Operation{:cp, (:async, :mbarrier, :arrive, :shared, :b64)})(
+        mbar::Core.LLVMPtr{T, AS.Shared}) where T
+    @asmcall("cp.async.mbarrier.arrive.shared.b64 [\$0];",
+             "r,~{memory}", true, Nothing,
+             Tuple{Core.LLVMPtr{T, AS.Shared}},
+             mbar)
+    nothing
+end
+
+@inline function (::Operation{:cp, (:async, :mbarrier, :arrive, :noinc, :shared, :b64)})(
+        mbar::Core.LLVMPtr{T, AS.Shared}) where T
+    @asmcall("cp.async.mbarrier.arrive.noinc.shared.b64 [\$0];",
+             "r,~{memory}", true, Nothing,
+             Tuple{Core.LLVMPtr{T, AS.Shared}},
+             mbar)
+    nothing
+end

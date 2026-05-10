@@ -20,6 +20,7 @@ export @ptx_str, @sreg_str
 
 include("wrappers/cp_async.jl")
 include("wrappers/cvt.jl")
+include("wrappers/fence.jl")
 include("wrappers/ldmatrix.jl")
 include("wrappers/mbarrier.jl")
 include("wrappers/mma.jl")
@@ -34,4 +35,4 @@ include("wrappers/tcgen05.jl")
 include("wgmma_descriptor.jl")
 include("tcgen05_descriptor.jl")
 
-end # module PTX
+end

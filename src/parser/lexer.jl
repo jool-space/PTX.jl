@@ -25,15 +25,15 @@ end
 
 Lexer(src::AbstractString) = Lexer(String(src), 1, 1, 1)
 
-@inline _at_end(L::Lexer) = L.pos > lastindex(L.src)
+_at_end(L::Lexer) = L.pos > lastindex(L.src)
 
-@inline function _peek(L::Lexer, offset::Int = 0)
+function _peek(L::Lexer, offset::Int = 0)
     i = L.pos + offset
     i > lastindex(L.src) && return '\0'
     L.src[i]
 end
 
-@inline function _advance!(L::Lexer)
+function _advance!(L::Lexer)
     ch = L.src[L.pos]
     L.pos = nextind(L.src, L.pos)
     if ch == '\n'
@@ -45,7 +45,7 @@ end
     ch
 end
 
-@inline _is_hex_digit(ch::Char) =
+_is_hex_digit(ch::Char) =
     ('0' <= ch <= '9') || ('a' <= ch <= 'f') || ('A' <= ch <= 'F')
 
 """
