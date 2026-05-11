@@ -86,10 +86,9 @@ _tensormap_dtype_symbol(::Type{Float64}) = :f64
 _tensormap_dtype_symbol(s::Symbol)       = s
 
 function _lookup_code(table::Dict{Symbol, UInt32}, key::Symbol, what::AbstractString)
-    code = get(table, key, nothing)
-    code === nothing && throw(ArgumentError(
+    haskey(table, key) || throw(ArgumentError(
         "tensor_map: unknown $what $(repr(key)). Valid: $(sort(collect(keys(table))))"))
-    return code
+    return table[key]
 end
 
 tensor_map_dtype_code(dt) =
@@ -146,20 +145,9 @@ function tensor_map_tile_2d end
 
 # --- internal helpers (no CUDACore needed) ----------------------------------
 
-# Pick a default 2D box that respects the swizzle byte-width.
-function _default_box_2d(elem_bytes::Int, rows::Int, cols::Int, swizzle::Symbol)
-    swizzle_bytes = swizzle === :B128 ? 128 :
-                    swizzle === :B64  ? 64  :
-                    swizzle === :B32  ? 32  :
-                    128
-    box_cols = max(swizzle_bytes ÷ elem_bytes, 1)
-    box_rows = 128
-    return (min(box_rows, rows), min(box_cols, cols))
-end
-
 # Per-dtype element byte size. Pure host helper used by the convenience
 # wrappers to set up strides; mirrors PtxType.bits // 8 logic in pyptx.
-_tensor_map_elem_bytes(::Type{T}) where {T} = sizeof(T)
+_tensor_map_elem_bytes(T::DataType) = sizeof(T)
 function _tensor_map_elem_bytes(s::Symbol)
     s === :u8 && return 1
     s in (:u16, :f16, :bf16) && return 2
