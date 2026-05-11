@@ -96,6 +96,14 @@ end
     ptx"mov.b32"((bf_lo, bf_hi))
 end
 
+# B32 GMMA swizzle (CUTLASS Swizzle<1, 4, 3>): physical = logical XOR
+# ((logical & 0x80) >> 3). Per pyptx/pyptx/smem.py apply_swizzle. Required
+# whenever we MANUALLY store to a SMEM tile that wgmma reads through a B32
+# descriptor — TMA loads handle the swizzle for free, but `st.shared.b32`
+# does not. Three ALU ops; cheap enough to inline at every store site.
+@inline _fa_swizzle_b32(logical::UInt32) =
+    logical ⊻ ((logical & UInt32(0x80)) >> UInt32(3))
+
 function _fa_kernel!(
         O::CuDeviceVector{Float32, 1},
         tma_Q::Core.LLVMPtr{UInt8, PTX.AS.Const},
@@ -255,16 +263,17 @@ function _fa_kernel!(
         pack2 = _fa_pack_bf16x2(qk[5], qk[6])              # row_a, col_b+8 .. col_b+9
         pack3 = _fa_pack_bf16x2(qk[7], qk[8])              # row_b, col_b+8 .. col_b+9
 
-        off_a0 = (row_a * UInt32(FA_BN) + col_b) * UInt32(2)
-        off_b0 = (row_b * UInt32(FA_BN) + col_b) * UInt32(2)
-        off_a8 = (row_a * UInt32(FA_BN) + col_b + UInt32(8)) * UInt32(2)
-        off_b8 = (row_b * UInt32(FA_BN) + col_b + UInt32(8)) * UInt32(2)
-
-        # st.shared.b32 takes a Shared LLVMPtr and the value.
-        ptx"st.shared.b32"(p_ptr + Int(off_a0), pack0)
-        ptx"st.shared.b32"(p_ptr + Int(off_b0), pack1)
-        ptx"st.shared.b32"(p_ptr + Int(off_a8), pack2)
-        ptx"st.shared.b32"(p_ptr + Int(off_b8), pack3)
+        # Logical (un-swizzled) byte offsets into sP. wgmma reads through a
+        # B32 swizzle, so we apply the same swizzle here to land each pair
+        # at the matching physical address.
+        log_a0 = (row_a * UInt32(FA_BN) + col_b) * UInt32(2)
+        log_b0 = (row_b * UInt32(FA_BN) + col_b) * UInt32(2)
+        log_a8 = (row_a * UInt32(FA_BN) + col_b + UInt32(8)) * UInt32(2)
+        log_b8 = (row_b * UInt32(FA_BN) + col_b + UInt32(8)) * UInt32(2)
+        ptx"st.shared.b32"(p_ptr + Int(_fa_swizzle_b32(log_a0)), pack0)
+        ptx"st.shared.b32"(p_ptr + Int(_fa_swizzle_b32(log_b0)), pack1)
+        ptx"st.shared.b32"(p_ptr + Int(_fa_swizzle_b32(log_a8)), pack2)
+        ptx"st.shared.b32"(p_ptr + Int(_fa_swizzle_b32(log_b8)), pack3)
 
         ptx"bar.sync"(Val(0))   # all threads must see sP writes before PV
 
