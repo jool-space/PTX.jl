@@ -164,7 +164,10 @@ if v"9.0" <= DEV_CAP < v"10.0"
         a_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const}, UInt64(pointer(tmap_A_dev)))
         b_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const}, UInt64(pointer(tmap_B_dev)))
 
-        @cuda threads=HOPPER_THREADS _hopper_warpgroup_gemm_kernel!(D, a_const, b_const)
+        # `feature_set=:arch` targets sm_90a (the arch-specific variant
+        # required for wgmma) instead of @cuda's default baseline sm_90.
+        # Without it ptxas rejects every wgmma.* instruction.
+        @cuda threads=HOPPER_THREADS feature_set=:arch _hopper_warpgroup_gemm_kernel!(D, a_const, b_const)
         CUDACore.synchronize()
 
         # d[1] of every lane (ones × ones, K=16 contractions) → 16.0f0.

@@ -32,20 +32,33 @@ function _target_runnable(target::AbstractString, dev_cap::VersionNumber)
 end
 
 # Many LLVM-testsuite-derived corpus files are filecheck fixtures that
-# generate PTX from IR without emitting a full prologue. They declare
-# `.visible .entry NAME()` with zero params yet reference `[NAME_param_N]`
-# inside the body — undefined symbols at ptxas time. Detect and skip.
+# generate PTX from IR without emitting a full prologue. They share one of
+# three malformed patterns, all of which ptxas correctly rejects:
 #
-# Also catches the clusterlaunchcontrol__* family: those declare a 128-bit
-# `%clc_handle` reg in the body but never in the `.reg` prologue. Same
-# class of "doesn't bother declaring what it uses" bug — easier to filter
-# structurally than to maintain a blacklist.
+#   (a) `.visible .entry NAME()` with zero params but body references
+#       `[NAME_param_N]` — undefined param symbols.
+#   (b) `.visible .entry NAME()` with no return slot but body stores to
+#       `func_retval0` — undefined retval symbol.
+#   (c) Body uses 32-bit regs `[%rN]` as memory addresses; ptxas treats
+#       this as 32-bit ABI which is rejected on sm_90+. Real PTX uses
+#       `%rdN` (i64) for addresses there.
+#
+# Also catches the clusterlaunchcontrol__* family which adds undeclared
+# 128-bit `%clc_handle` regs on top of (a). Easier to filter structurally
+# than to maintain a per-file blacklist.
 function _is_malformed_llvm_fixture(path::AbstractString)
     src = read(path, String)
     m = match(r"\.visible\s+\.entry\s+([A-Za-z_0-9]+)\(\)", src)
     m === nothing && return false
     entry_name = m.captures[1]
-    occursin(Regex("\\b" * entry_name * "_param_\\d"), src)
+    # (a) `_param_N` body references against an empty `()` entry.
+    occursin(Regex("\\b" * entry_name * "_param_\\d"), src) && return true
+    # (b) `func_retval0` body references against an empty `()` entry.
+    occursin("func_retval0", src) && return true
+    # (c) 32-bit reg as memory address — `[%r<digits>]` or `[%r<digits>+...]`,
+    # but NOT `[%rd...]` (the 64-bit form). ptxas rejects on sm_90+.
+    occursin(r"\[%r\d", src) && return true
+    return false
 end
 
 function _runnable_corpus_files()
