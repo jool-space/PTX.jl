@@ -36,6 +36,14 @@ function _runnable_corpus_files()
     for (root, _, names) in walkdir(_CORPUS_EXT_DIR)
         for name in names
             endswith(name, ".ptx") || continue
+            # Buggy LLVM test fixtures: declare `.target sm_90a` but emit
+            # `clusterlaunchcontrol.query_cancel.get_first_ctaid::*` /
+            # `.is_canceled` / `.try_cancel`, all of which ptxas requires
+            # sm_100+ for. They also reference 128-bit `%clc_handle` regs that
+            # are never declared in `.reg`. ptxas correctly rejects on any
+            # device below Blackwell, so skip these unconditionally.
+            startswith(name, "clusterlaunchcontrol__nvvm_clusterlaunchcontrol_") &&
+                _DEV_CAP < v"10.0" && continue
             path = joinpath(root, name)
             target_line = nothing
             for line in eachline(path)
