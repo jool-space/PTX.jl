@@ -72,11 +72,18 @@ function _grouped_gemm_multik_kernel!(
 
     d = ntuple(_ -> 0f0, Val(4))
 
+    # mbarrier init ONCE outside the loop — re-initializing every iter resets
+    # the phase indicator to 0 and breaks the `phase ^= 1` parity tracking
+    # whenever K > tile_k (i.e., the loop runs more than once).
+    if tid == UInt32(0)
+        ptx"mbarrier.init.shared.b64"(mb_ptr, UInt32(1))
+    end
+    ptx"bar.sync"(Val(0))
+
     phase = UInt32(0)
     k_off = Int32(0)
     while k_off < K
         if tid == UInt32(0)
-            ptx"mbarrier.init.shared.b64"(mb_ptr, UInt32(1))
             ptx"fence.proxy.async.shared::cta"()
             ptx"mbarrier.arrive.expect_tx.shared.b64"(mb_ptr, UInt32(GGM_LOAD_BYTES))
             ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
