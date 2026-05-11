@@ -35,5 +35,6 @@ include("wrappers/tcgen05.jl")
 include("wgmma_descriptor.jl")
 include("wrappers/wgmma_layout.jl")
 include("tcgen05_descriptor.jl")
+include("tensor_map.jl")
 
 end

@@ -11,7 +11,14 @@ EnumX = "4e289a0a-7415-4d19-859d-a7e5c4648b56"
 LLVM = "929cbde3-209d-540e-8aea-75f648917ca0"
 Republic = "27243419-9dde-4721-b67c-fd63626fea7f"
 
+[weakdeps]
+CUDACore = "bd0ed864-bdfe-4181-a5ed-ce625a5fdea2"
+
+[extensions]
+PTXCUDACoreExt = "CUDACore"
+
 [compat]
+CUDACore = "6"
 EnumX = "1"
 LLVM = "9.7.1"
 Republic = "2"
