@@ -30,13 +30,15 @@ function _tma_copy_kernel!(out::CuDeviceVector{UInt16, 1},
 
     tid = ptx"mov.u32"(sreg"tid.x")
 
-    # Thread 0 inits the mbarrier and kicks off the TMA load. Other threads
-    # spin on test_wait below — they may briefly poll an uninitialized phase
-    # word (still zero) before thread 0 lands the init, which is harmless:
-    # parity=0 against an as-yet-unflipped phase returns false, the loop
-    # iterates, and the next read picks up the init plus the eventual flip.
+    # Thread 0 inits the mbarrier; bar.sync makes the init visible CTA-wide
+    # before any other thread polls. Static SMEM is not zero-initialized by
+    # PTX, so the lazy "uninitialized reads as 0" assumption doesn't hold.
     if tid == UInt32(0)
         ptx"mbarrier.init.shared.b64"(mb_ptr, UInt32(1))
+    end
+    ptx"bar.sync"(Val(0))
+
+    if tid == UInt32(0)
         ptx"fence.proxy.async.shared::cta"()
         ptx"mbarrier.arrive.expect_tx.shared.b64"(mb_ptr, UInt32(128))
         ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(

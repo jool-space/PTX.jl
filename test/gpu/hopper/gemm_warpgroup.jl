@@ -48,13 +48,17 @@ function _hopper_warpgroup_gemm_kernel!(
 
     tid = ptx"mov.u32"(sreg"tid.x")
 
-    # 1. Lane 0: init the mbarrier, arrive_expect_tx, issue both TMA loads.
-    #    Other threads fall through to the test_wait loop. They may poll an
-    #    uninitialized phase word briefly — parity=0 against an unflipped
-    #    phase returns false, the loop iterates, and the next read picks up
-    #    thread 0's init plus the eventual phase flip.
+    # 1. Lane 0 inits the mbarrier; bar.sync makes the init visible CTA-wide
+    #    before any other thread polls. Static SMEM is not zero-initialized by
+    #    PTX, so the lazy "uninitialized reads as 0" assumption doesn't hold.
+    #    pyptx (`_test_tma_*` test kernels) splits these for the same reason.
     if tid == UInt32(0)
         ptx"mbarrier.init.shared.b64"(mb_ptr, UInt32(1))
+    end
+    ptx"bar.sync"(Val(0))
+
+    # 2. Lane 0 arrives_expect_tx and issues both TMA loads.
+    if tid == UInt32(0)
         ptx"fence.proxy.async.shared::cta"()
         ptx"mbarrier.arrive.expect_tx.shared.b64"(mb_ptr, UInt32(HOPPER_LOAD_BYTES))
         ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
@@ -63,7 +67,7 @@ function _hopper_warpgroup_gemm_kernel!(
             b_ptr, tma_B, Int32(0), Int32(0), mb_ptr)
     end
 
-    # 2. Every thread waits for TMA completion. test_wait.parity polls the
+    # 3. Every thread waits for TMA completion. test_wait.parity polls the
     #    phase bit — 0 → 1 on the first arrival round.
     while !ptx"mbarrier.test_wait.parity.shared.b64"(mb_ptr, UInt32(0))
     end
