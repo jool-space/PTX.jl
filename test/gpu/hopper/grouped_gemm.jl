@@ -116,6 +116,7 @@ function _grouped_gemm_kernel!(
                 k_off, reinterpret(Int32, n_outer),
                 mb_ptr)
         end
+        ptx"bar.sync"(Val(0))
 
         while !ptx"mbarrier.test_wait.parity.shared.b64"(mb_ptr, phase)
         end

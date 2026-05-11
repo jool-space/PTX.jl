@@ -30,20 +30,19 @@ function _tma_copy_kernel!(out::CuDeviceVector{UInt16, 1},
 
     tid = ptx"mov.u32"(sreg"tid.x")
 
-    # Thread 0 inits the mbarrier; bar.sync makes the init visible CTA-wide
-    # before any other thread polls. Static SMEM is not zero-initialized by
-    # PTX, so the lazy "uninitialized reads as 0" assumption doesn't hold.
+    # Thread 0 does the full TMA-issue sequence (init, fence, arrive, load);
+    # bar.sync after makes the inited+armed state visible CTA-wide before
+    # other threads enter the test_wait spin. Splitting init/arrive with a
+    # bar.sync between deadlocks on H100 — pyptx's _test_tma_* kernels
+    # likewise keep these together with bar.sync at the END.
     if tid == UInt32(0)
         ptx"mbarrier.init.shared.b64"(mb_ptr, UInt32(1))
-    end
-    ptx"bar.sync"(Val(0))
-
-    if tid == UInt32(0)
         ptx"fence.proxy.async.shared::cta"()
         ptx"mbarrier.arrive.expect_tx.shared.b64"(mb_ptr, UInt32(128))
         ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
             s_ptr, tma_src, Int32(0), Int32(0), mb_ptr)
     end
+    ptx"bar.sync"(Val(0))
 
     while !ptx"mbarrier.test_wait.parity.shared.b64"(mb_ptr, UInt32(0))
     end
