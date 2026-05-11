@@ -18,8 +18,9 @@
 # Cross-arch ptxas-validation at v"9.0" always runs (catches wrapper-side
 # regressions on the GB10 dev box, where the kernel can't actually launch).
 
-using PTX: wgmma_descriptor, WgmmaSwizzle, smem_addr_u32, layout_for_a, layout_for_b
+using PTX: wgmma_descriptor, WgmmaSwizzle, smem_addr_u32, layout_for_a
 using CUDACore
+using Random
 
 const HOPPER_BM = 64
 const HOPPER_BN = 8
@@ -77,10 +78,17 @@ function _hopper_warpgroup_gemm_kernel!(
     ptx"fence.proxy.async.shared::cta"()
     ptx"wgmma.fence.sync.aligned"()
 
-    # 4. Build A/B descriptors. K-major bf16 m64k16 tile:
-    #    row width 32 B = 2 u128 → B32 swizzle; leading 16, stride 256.
+    # 4. Build A/B descriptors. Both tiles are K-fast in SMEM (so wgmma's
+    #    trans_b=0 default reads B correctly as col-major / K-fast); both
+    #    use the K-major canonical formula (`layout_for_a`). Row width =
+    #    16 bf16 = 32 B → B32 swizzle, LBO=16, SBO=256.
+    #    Earlier code used `layout_for_b` (MN-major / N-fast canonical) for
+    #    B, which mismatches the wrapper's baked trans_b=0 and would silently
+    #    miscompute on non-uniform inputs. See grouped_gemm.jl for the same
+    #    fix applied at port-time. The wgmma_descriptor builder doesn't
+    #    distinguish A vs B operands — it just packs offsets into a UInt64.
     la = layout_for_a(dtype = :bf16, m = HOPPER_BM, k = HOPPER_BK)
-    lb = layout_for_b(dtype = :bf16, k = HOPPER_BK, n = HOPPER_BN)
+    lb = layout_for_a(dtype = :bf16, m = HOPPER_BN, k = HOPPER_BK)
     a_desc = wgmma_descriptor(a_addr;
         leading_byte_offset = la.leading_byte_offset,
         stride_byte_offset  = la.stride_byte_offset,
@@ -98,10 +106,21 @@ function _hopper_warpgroup_gemm_kernel!(
     ptx"wgmma.commit_group.sync.aligned"()
     ptx"wgmma.wait_group.sync.aligned"(Val(0))
 
-    # 6. Stash one frag per lane so the compiler can't dead-code the chain.
-    #    Full lane→(row,col) mapping is ROADMAP item 1 / fragment-coord
-    #    helper — deferred until first numerical validation on H100.
-    @inbounds D[Int(tid) + 1] = d[1]
+    # 6. Epilogue. m64n8k16 wgmma f32 layout (PTX 9.2 §9.7.14.5.5):
+    #    warp w ∈ 0..3 owns rows [16w, 16w+16); lane l within a warp:
+    #      frag_row = 16w + (l >> 2),    frag_col = 2 * (l & 3)
+    #    4 f32 frags per lane at (frag_row, frag_col), (frag_row, frag_col+1),
+    #    (frag_row+8, frag_col), (frag_row+8, frag_col+1). v2.f32 stores
+    #    two consecutive cols at the same row in one transaction.
+    wid      = tid >> UInt32(5)
+    lane     = tid & UInt32(31)
+    frag_row = (wid << UInt32(4)) + (lane >> UInt32(2))
+    frag_col = (lane & UInt32(3)) << UInt32(1)
+    pd       = pointer(D)
+    off_a    = (frag_row * UInt32(HOPPER_BN) + frag_col) * UInt32(4)
+    off_b    = ((frag_row + UInt32(8)) * UInt32(HOPPER_BN) + frag_col) * UInt32(4)
+    ptx"st.global.v2.f32"(pd + Int(off_a), (d[1], d[2]))
+    ptx"st.global.v2.f32"(pd + Int(off_b), (d[3], d[4]))
     return nothing
 end
 
@@ -128,6 +147,7 @@ end
     @test occursin("wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16", ptx)
     @test occursin("wgmma.commit_group.sync.aligned",                ptx)
     @test occursin("wgmma.wait_group.sync.aligned 0",                ptx)
+    @test occursin("st.global.v2.f32",                               ptx)
 
     # Descriptor build constant-folds the layout-picked offsets into a single
     # OR with the runtime SMEM address (verified compile-only).
@@ -138,44 +158,69 @@ end
 # (sm_100/sm_120/sm_121) replaced it with tcgen05, so cap is required to be
 # in [9.0, 10.0). On the GB10 dev box (sm_121a) this testset is skipped.
 if v"9.0" <= DEV_CAP < v"10.0"
-    @testset "single-warpgroup Hopper GEMM runs on H100" begin
-        # The descriptor-build math is host-side; we just need to upload the
-        # blob to a device buffer (.global), then alias it as AS.Const for
-        # the kernel arg (`cp.async.bulk.tensor.*.tile` accepts .global tmaps).
-        # See PTX 9.2 §9.7.8.24.6.
+    bf16_bits(x::Float32) = UInt16((reinterpret(UInt32, x) + UInt32(0x8000)) >> 16)
+    bf16_to_f32(b::UInt16) = reinterpret(Float32, UInt32(b) << 16)
 
-        # Inputs: A = ones(BM, BK) bf16, B = ones(BK, BN) bf16. With f32 acc
-        # the expected output of every lane's d[1] is BK = 16.0f0.
-        A_bits = CuArray(fill(UInt16(0x3f80) >> 0, HOPPER_BM, HOPPER_BK))  # 1.0 in bf16
-        B_bits = CuArray(fill(UInt16(0x3f80) >> 0, HOPPER_BK, HOPPER_BN))
+    function _warpgroup_gemm_cpu_ref(A::Array{Float32, 2}, B::Array{Float32, 2})
+        M, K = size(A); _, N = size(B)
+        Ab = bf16_to_f32.(bf16_bits.(A))
+        Bb = bf16_to_f32.(bf16_bits.(B))
+        D = zeros(Float32, M, N)
+        for m in 1:M, n in 1:N, k in 1:K
+            D[m, n] += Ab[m, k] * Bb[k, n]
+        end
+        D
+    end
 
-        # Build TMA descriptors (rank-2). Innermost = K for A (row-major).
-        tmap_A_host = PTX.tensor_map_tile_2d(
-            :bf16, pointer(A_bits), HOPPER_BM, HOPPER_BK, HOPPER_BM, HOPPER_BK;
-            swizzle = :B32)
-        tmap_B_host = PTX.tensor_map_tile_2d(
-            :bf16, pointer(B_bits), HOPPER_BK, HOPPER_BN, HOPPER_BK, HOPPER_BN;
-            swizzle = :NONE)
+    @testset "single-warpgroup Hopper GEMM (random bf16, K-fast layout)" begin
+        # Random non-uniform inputs — exercises the layout fix (both A and B
+        # K-fast in SMEM, both descriptors via layout_for_a). Uniform 1.0s
+        # would have masked the previous N-fast B / trans_b=0 mismatch.
+        rng = MersenneTwister(0x501a)
+        A_f32 = Float32.(randn(rng, HOPPER_BM, HOPPER_BK)) .* 0.1f0
+        B_f32 = Float32.(randn(rng, HOPPER_BK, HOPPER_BN)) .* 0.1f0
 
-        # Upload the 128-byte blobs to device memory.
-        tmap_A_dev = CuArray{UInt8}(undef, 128)
-        tmap_B_dev = CuArray{UInt8}(undef, 128)
-        copyto!(tmap_A_dev, collect(tmap_A_host.data))
-        copyto!(tmap_B_dev, collect(tmap_B_host.data))
+        # Pack to bf16. Memory layout = K-fast for both:
+        #   A: Julia (K, M) col-major → K innermost
+        #   B: Julia (K, N) col-major → K innermost
+        A_packed = Array{UInt16}(undef, HOPPER_BK, HOPPER_BM)
+        B_packed = Array{UInt16}(undef, HOPPER_BK, HOPPER_BN)
+        for m in 1:HOPPER_BM, k in 1:HOPPER_BK
+            A_packed[k, m] = bf16_bits(A_f32[m, k])
+        end
+        for n in 1:HOPPER_BN, k in 1:HOPPER_BK
+            B_packed[k, n] = bf16_bits(B_f32[k, n])
+        end
+        A_d = CuArray(A_packed)
+        B_d = CuArray(B_packed)
 
-        D = CUDACore.zeros(Float32, HOPPER_THREADS)
+        # TMA descriptors. Both K-innermost (matching K-fast memory).
+        # Row width = 16 bf16 = 32 B → B32 swizzle for both.
+        tmap_A = PTX.tensor_map_tile_2d(:bf16, pointer(A_d),
+            HOPPER_BM, HOPPER_BK, HOPPER_BM, HOPPER_BK; swizzle = :B32)
+        tmap_B = PTX.tensor_map_tile_2d(:bf16, pointer(B_d),
+            HOPPER_BN, HOPPER_BK, HOPPER_BN, HOPPER_BK; swizzle = :B32)
+
+        tmap_A_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_A_dev, collect(tmap_A.data))
+        tmap_B_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_B_dev, collect(tmap_B.data))
         a_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const}, UInt64(pointer(tmap_A_dev)))
         b_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const}, UInt64(pointer(tmap_B_dev)))
 
-        # `feature_set=:arch` targets sm_90a (the arch-specific variant
-        # required for wgmma) instead of @cuda's default baseline sm_90.
-        # Without it ptxas rejects every wgmma.* instruction.
-        @cuda threads=HOPPER_THREADS feature_set=:arch _hopper_warpgroup_gemm_kernel!(D, a_const, b_const)
+        # Output D allocated as (BN, BM) col-major = BN-innermost. The
+        # kernel writes (frag_row * BN + frag_col) byte offsets — N-innermost
+        # in global memory, matching the per-lane v2.f32 stride.
+        D = CUDACore.zeros(Float32, HOPPER_BM * HOPPER_BN)
+        @cuda threads = HOPPER_THREADS feature_set = :arch _hopper_warpgroup_gemm_kernel!(
+            D, a_const, b_const)
         CUDACore.synchronize()
 
-        # d[1] of every lane (ones × ones, K=16 contractions) → 16.0f0.
-        # Numerical validation per-lane is ROADMAP item 1; we only sanity-check
-        # the warpgroup ran and wrote a non-zero value here.
-        @test any(!=(0f0), Array(D))
+        D_packed = reshape(Array(D), HOPPER_BN, HOPPER_BM)
+        D_got = Array{Float32}(undef, HOPPER_BM, HOPPER_BN)
+        for m in 1:HOPPER_BM, n in 1:HOPPER_BN
+            D_got[m, n] = D_packed[n, m]
+        end
+
+        D_ref = _warpgroup_gemm_cpu_ref(A_f32, B_f32)
+        @test isapprox(D_got, D_ref; rtol = 1e-3, atol = 1e-3)
     end
 end
