@@ -48,7 +48,11 @@ function _hopper_warpgroup_gemm_kernel!(
 
     tid = ptx"mov.u32"(sreg"tid.x")
 
-    # 1. Lane 0: init the barrier, expect_tx for both TMA loads, issue both.
+    # 1. Lane 0: init the mbarrier, arrive_expect_tx, issue both TMA loads.
+    #    Other threads fall through to the test_wait loop. They may poll an
+    #    uninitialized phase word briefly — parity=0 against an unflipped
+    #    phase returns false, the loop iterates, and the next read picks up
+    #    thread 0's init plus the eventual phase flip.
     if tid == UInt32(0)
         ptx"mbarrier.init.shared.b64"(mb_ptr, UInt32(1))
         ptx"fence.proxy.async.shared::cta"()
