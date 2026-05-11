@@ -31,20 +31,30 @@ function _target_runnable(target::AbstractString, dev_cap::VersionNumber)
     suffix == "a" ? dev_cap == target_cc : dev_cap >= target_cc
 end
 
+# Many LLVM-testsuite-derived corpus files are filecheck fixtures that
+# generate PTX from IR without emitting a full prologue. They declare
+# `.visible .entry NAME()` with zero params yet reference `[NAME_param_N]`
+# inside the body — undefined symbols at ptxas time. Detect and skip.
+#
+# Also catches the clusterlaunchcontrol__* family: those declare a 128-bit
+# `%clc_handle` reg in the body but never in the `.reg` prologue. Same
+# class of "doesn't bother declaring what it uses" bug — easier to filter
+# structurally than to maintain a blacklist.
+function _is_malformed_llvm_fixture(path::AbstractString)
+    src = read(path, String)
+    m = match(r"\.visible\s+\.entry\s+([A-Za-z_0-9]+)\(\)", src)
+    m === nothing && return false
+    entry_name = m.captures[1]
+    occursin(Regex("\\b" * entry_name * "_param_\\d"), src)
+end
+
 function _runnable_corpus_files()
     files = String[]
     for (root, _, names) in walkdir(_CORPUS_EXT_DIR)
         for name in names
             endswith(name, ".ptx") || continue
-            # Buggy LLVM test fixtures: declare `.target sm_90a` but emit
-            # `clusterlaunchcontrol.query_cancel.get_first_ctaid::*` /
-            # `.is_canceled` / `.try_cancel`, all of which ptxas requires
-            # sm_100+ for. They also reference 128-bit `%clc_handle` regs that
-            # are never declared in `.reg`. ptxas correctly rejects on any
-            # device below Blackwell, so skip these unconditionally.
-            startswith(name, "clusterlaunchcontrol__nvvm_clusterlaunchcontrol_") &&
-                _DEV_CAP < v"10.0" && continue
             path = joinpath(root, name)
+            _is_malformed_llvm_fixture(path) && continue
             target_line = nothing
             for line in eachline(path)
                 if startswith(line, ".target")
