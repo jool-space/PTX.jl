@@ -72,6 +72,36 @@ bit-packing helpers for both:
 These are not exported but are part of the documented API. Access them
 as `PTX.wgmma_descriptor`, `PTX.tcgen05_descriptor`, etc.
 
+## GMMA layout helpers
+
+For `wgmma.mma_async` SMEM operands, the descriptor's
+`leading_byte_offset` / `stride_byte_offset` / `swizzle` triple is
+fully determined by the tile geometry (dtype, M-or-N, K, major axis).
+The four canonical GMMA layout families (`INTERLEAVE` / `B32` / `B64`
+/ `B128`) cover all wgmma-compatible SMEM tile widths.
+
+```@docs
+PTX.pick_gmma_layout
+PTX.layout_for_a
+PTX.layout_for_b
+```
+
+## Host-side TMA descriptor encoder
+
+Hopper TMA (`cp.async.bulk.tensor.*`) consumes a 128-byte
+`CUtensorMap` blob built host-side by the CUDA driver's
+`cuTensorMapEncodeTiled`. PTX.jl wraps the driver call so descriptors
+take Julia types / symbols instead of raw `CUtensorMapDataType` enums,
+with a thin convenience helper for the common 2D row-major case.
+
+These methods live in `ext/PTXCUDACoreExt.jl` and load automatically
+when `CUDACore` is in the environment.
+
+```@docs
+PTX.tensor_map_encode_tiled
+PTX.tensor_map_tile_2d
+```
+
 ## When to extend
 
 Most chain-default coverage is sufficient. Reach for a wrapper when:
