@@ -8,7 +8,7 @@ module PTXCUDACoreExt
 using PTX
 using PTX: CuTensorMap, tensor_map_dtype_code, tensor_map_swizzle_code,
            tensor_map_interleave_code, tensor_map_l2_promotion_code,
-           tensor_map_oob_fill_code, _tensor_map_elem_bytes, _default_box_2d
+           tensor_map_oob_fill_code, _tensor_map_elem_bytes
 using CUDACore: CUtensorMap, CUtensorMapDataType, CUtensorMapInterleave,
                 CUtensorMapSwizzle, CUtensorMapL2promotion,
                 CUtensorMapFloatOOBfill, cuTensorMapEncodeTiled,
