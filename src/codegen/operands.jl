@@ -8,7 +8,9 @@ function render_operand(op::RegisterOperand, cg::CodeGenState;
                         type_hint::Union{Symbol, Nothing} = nothing)
     name = op.name
     name in SPECIAL_REGS && return sreg_val_expr(name)
-    julia_var(name)
+    jname = julia_var(name)
+    haskey(cg.pointer_aliases, jname) && return cg.pointer_aliases[jname]
+    jname
 end
 
 function render_operand(op::ImmediateOperand, cg::CodeGenState;
@@ -45,9 +47,14 @@ function render_operand(op::ImmediateOperand, cg::CodeGenState;
     text
 end
 
-render_operand(op::LabelOperand, cg::CodeGenState;
-               type_hint::Union{Symbol, Nothing} = nothing) =
+function render_operand(op::LabelOperand, cg::CodeGenState;
+                        type_hint::Union{Symbol, Nothing} = nothing)
+    # State-space symbols (e.g. a `.shared` decl referenced by name) come
+    # through as LabelOperand. If we've translated the symbol, substitute.
+    jname = julia_var(op.name)
+    haskey(cg.pointer_aliases, jname) && return cg.pointer_aliases[jname]
     julia_label(op.name)
+end
 
 function render_operand(op::VectorOperand, cg::CodeGenState;
                         type_hint::Union{Symbol, Nothing} = nothing)
@@ -57,9 +64,12 @@ end
 
 function render_operand(op::AddressOperand, cg::CodeGenState;
                         type_hint::Union{Symbol, Nothing} = nothing)
-    base_expr = startswith(op.base, "%") ?
-                render_operand(RegisterOperand(op.base), cg) :
-                julia_var(op.base)
+    base_expr = if startswith(op.base, "%")
+        render_operand(RegisterOperand(op.base), cg)
+    else
+        jb = julia_var(op.base)
+        get(cg.pointer_aliases, jb, jb)
+    end
     op.offset === nothing && return base_expr
     off = String(op.offset)
     # TMA tensor-coord form: `[%rd, {%c0, %c1, ...}]` → render as a Julia

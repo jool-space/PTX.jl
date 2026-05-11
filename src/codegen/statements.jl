@@ -10,11 +10,32 @@ function emit_stmt!(cg::CodeGenState, s::RegDecl)
     nothing
 end
 
+# `.shared` / `.shared::cta` VarDecls translate to `CuStaticSharedArray`. The
+# Julia binding shadows the PTX symbol, and `pointer_aliases[name]` is seeded
+# so any later reference (`mov.u64 %rd, name` etc.) substitutes
+# `pointer(name)` and the defining instruction is dropped — see
+# `_try_alias_def!` in instruction.jl. Other state spaces (`.global`,
+# `.const`, `.local`, `.shared::cluster`) still emit a placeholder comment.
 function emit_stmt!(cg::CodeGenState, s::VarDecl)
+    if s.state_space === StateSpace.SHARED || s.state_space === StateSpace.SHARED_CTA
+        jname = julia_var(s.name)
+        jt    = scalar_to_julia(s.type)
+        n     = _shared_array_count(s)
+        emit!(cg, jname * " = CuStaticSharedArray(" * string(jt) * ", " * string(n) * ")")
+        push!(cg.shared_vars, jname)
+        cg.pointer_aliases[jname] = "pointer(" * jname * ")"
+        union!(cg.declared, [jname])
+        return
+    end
     suffix = s.array_size === nothing ? "" : "[$(s.array_size)]"
     emit!(cg, "# " * ptx(s.state_space) * " " * ptx(s.type) * " " *
               s.name * suffix * ";")
 end
+
+# `.shared .b8 buf[64]` → 64 elements of UInt8.
+# `.shared .b32 buf[16]` → 16 elements of UInt32.
+# Scalar (`.shared .b32 x`) → length-1 array; callers can `[1]`-index.
+_shared_array_count(s::VarDecl) = s.array_size === nothing ? 1 : s.array_size
 
 emit_stmt!(cg::CodeGenState, s::PragmaDirective) =
     emit!(cg, "# .pragma " * repr(s.value))

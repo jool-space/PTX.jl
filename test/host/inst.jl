@@ -51,6 +51,25 @@ end
     let x = "u32"
         @test_throws ErrorException ptx"mov..$x"
     end
+
+    # Glued `$(expr)` mid-segment with a value-known interp folds to the same
+    # singleton the literal form produces. Critical for device kernels:
+    # `@inline f(p, ::Val{N}) = ptx"...x$(N)..."(p)` must lower to a single
+    # asm site with no runtime split/Symbol/concat. We assert (a) singleton
+    # equivalence and (b) `@inferred` returns the concrete singleton type —
+    # i.e. constant propagation through `*` saw all params.
+    let glue(N) = ptx"ldmatrix.sync.aligned.m8n8.x$(N).shared.b16"
+        @test glue(4) === ptx"ldmatrix.sync.aligned.m8n8.x4.shared.b16"
+        @test glue(2) === ptx"ldmatrix.sync.aligned.m8n8.x2.shared.b16"
+        @test glue(1) === ptx"ldmatrix.sync.aligned.m8n8.x1.shared.b16"
+    end
+    let f(::Val{N}) where {N} = ptx"foo.x$(N).bar"
+        @test @inferred(f(Val(7))) === ptx"foo.x7.bar"
+    end
+    # Bare `$expr` between dots, value with no `.` → single Symbol modifier.
+    let g(s::Symbol) = ptx"add.$s"
+        @test g(:f16) === ptx"add.f16"
+    end
 end
 
 @testset "mod\"...\" string macro" begin

@@ -90,6 +90,12 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
         end
     end
 
+    # Shared-pointer alias propagation: if this `mov`/`add`/`sub` defines a
+    # register from a translated shared symbol or an existing alias, record
+    # the alias and emit nothing. Use sites of the dst register are
+    # substituted via `pointer_aliases` in `render_operand`.
+    inst.predicate === nothing && _try_alias_def!(cg, inst) && return
+
     # PipeOperand destination needs an extra modifier — `.dual` for setp,
     # `.pred` for shfl — so the wrapped multi-output method dispatches.
     modifiers = inst.modifiers
@@ -133,6 +139,74 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     args = join(src_strs, ", ")
     line = dst_expr * " = " * chain * "(" * args * ")"
     emit_with_predicate!(cg, line, inst.predicate, dst_names)
+end
+
+# Returns true if the instruction was absorbed as a pointer-alias definition
+# (and therefore should not be emitted). Handles:
+#   mov.<sz>  %dst, X           where X resolves through pointer_aliases / shared_vars
+#   add.<sz>  %dst, X, Y        where exactly one of X, Y is a known pointer
+#   sub.<sz>  %dst, X, Y        where X is a known pointer (Y is the offset)
+# Wider patterns (mad.lo, shifts on a pointer-derived offset, ...) fall back
+# to plain emission — the substitution at use-site stays correct, the line
+# just isn't elided.
+function _try_alias_def!(cg::CodeGenState, inst::Instruction)
+    isempty(inst.operands) && return false
+    inst.operands[1] isa RegisterOperand || return false
+    dst = julia_var((inst.operands[1]::RegisterOperand).name)
+
+    if inst.opcode == "mov" && length(inst.operands) == 2
+        expr = _alias_expr(cg, inst.operands[2])
+        expr === nothing && return false
+        cg.pointer_aliases[dst] = expr
+        return true
+    end
+
+    type_hint = operand_type_hint(inst.opcode, inst.modifiers)
+
+    if inst.opcode == "add" && length(inst.operands) == 3
+        a = _alias_expr(cg, inst.operands[2])
+        b = _alias_expr(cg, inst.operands[3])
+        # Exactly one operand must be the pointer; the other must resolve to
+        # a plain (non-pointer) value that can be added as a byte offset.
+        if a !== nothing && b === nothing
+            off = render_operand(inst.operands[3], cg; type_hint)
+            cg.pointer_aliases[dst] = "(" * a * ") + " * off
+            return true
+        elseif b !== nothing && a === nothing
+            off = render_operand(inst.operands[2], cg; type_hint)
+            cg.pointer_aliases[dst] = "(" * b * ") + " * off
+            return true
+        end
+        return false
+    end
+
+    if inst.opcode == "sub" && length(inst.operands) == 3
+        a = _alias_expr(cg, inst.operands[2])
+        a === nothing && return false
+        _alias_expr(cg, inst.operands[3]) === nothing || return false
+        off = render_operand(inst.operands[3], cg; type_hint)
+        cg.pointer_aliases[dst] = "(" * a * ") - " * off
+        return true
+    end
+
+    false
+end
+
+# Returns the alias expression if this operand is (or already aliases) a
+# translated shared symbol; nothing otherwise. Bare symbol references — `smem`
+# in `mov.u64 %rd, smem` — are parsed as `LabelOperand` (the lexer can't
+# distinguish a label target from a state-space symbol), so both forms map.
+function _alias_expr(cg::CodeGenState, op::Operand)
+    name = if op isa RegisterOperand
+        op.name
+    elseif op isa LabelOperand
+        op.name
+    else
+        return nothing
+    end
+    jname = julia_var(name)
+    haskey(cg.pointer_aliases, jname) && return cg.pointer_aliases[jname]
+    nothing
 end
 
 # Tracks dst names assigned under predication so the function pass can emit

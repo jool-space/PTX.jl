@@ -237,11 +237,55 @@ function branch_test()
 end
 """
 
+const GOLDEN_SHARED_MEMORY = """\
+# @ptx_kernel arch=sm_90a version=8.5
+#   linking     = "visible"
+function smem_test()
+    smem = CuStaticSharedArray(UInt8, 49152)
+    r0 = ptx"ld.shared.b32"(pointer(smem))
+    ptx"st.shared.b32"(pointer(smem) + 4, r0)
+    ptx"bar.sync"(0)
+    return nothing
+end
+"""
+
 @testset "golden: $name" for (name, expected) in [
-        ("minimal.ptx",    GOLDEN_MINIMAL),
-        ("vector_add.ptx", GOLDEN_VECTOR_ADD),
-        ("predicates.ptx", GOLDEN_PREDICATES),
-        ("branches.ptx",   GOLDEN_BRANCHES),
+        ("minimal.ptx",       GOLDEN_MINIMAL),
+        ("vector_add.ptx",    GOLDEN_VECTOR_ADD),
+        ("predicates.ptx",    GOLDEN_PREDICATES),
+        ("branches.ptx",      GOLDEN_BRANCHES),
+        ("shared_memory.ptx", GOLDEN_SHARED_MEMORY),
     ]
     @test ptx_to_julia(read(joinpath(CORPUS_DIR, name), String)) == expected
+end
+
+# Synthetic case exercising the `add`-through-alias propagation path: ptxas
+# often does `mov.u64 %rd0, smem; add.u64 %rd1, %rd0, off; ld.shared.b32
+# [%rd1]` instead of folding the offset into the addressing mode.
+@testset "shared-memory alias propagation through add" begin
+    src = """
+    .version 8.5
+    .target sm_90a
+    .address_size 64
+    .visible .entry add_alias()
+    {
+        .reg .b32 %r<2>;
+        .reg .b64 %rd<3>;
+        .shared .b32 buf[16];
+        mov.u64 %rd0, buf;
+        add.u64 %rd1, %rd0, 8;
+        ld.shared.b32 %r0, [%rd1];
+        ret;
+    }
+    """
+    expected = """\
+    # @ptx_kernel arch=sm_90a version=8.5
+    #   linking     = "visible"
+    function add_alias()
+        buf = CuStaticSharedArray(UInt32, 16)
+        r0 = ptx"ld.shared.b32"((pointer(buf)) + UInt64(8))
+        return nothing
+    end
+    """
+    @test ptx_to_julia(src) == expected
 end

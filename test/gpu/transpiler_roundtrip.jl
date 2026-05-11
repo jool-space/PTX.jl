@@ -6,10 +6,9 @@ using CUDATools
 # wider operand patterns, mangled names, comments, inline-asm markers,
 # long basic blocks — than the small hand-written corpus.
 #
-# Currently a syntactic-validity sweep (Meta.parse with no `:error` Exprs).
-# Semantic correctness — that the transpiled function would *run* if you
-# pasted it into a kernel — is harder to validate and gated on the
-# transpiler's v2.1 sugar pass.
+# Primarily a syntactic-validity sweep (Meta.parse with no `:error` Exprs).
+# Per-kernel testsets add surface-level structural checks (e.g. shared-
+# memory decls came through as `CuStaticSharedArray`).
 
 # Kernel definitions live alongside their own testsets — pull them in so
 # this file is self-contained under ParallelTestRunner's per-worker model.

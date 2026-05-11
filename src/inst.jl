@@ -23,11 +23,23 @@ on `.`; each segment becomes one Symbol verbatim, so `::` (PTX sub-namespace
 separator), digit-leading tokens (`3d`, `m16n8k32`), and underscores in
 modifier names all flow through cleanly.
 
-Supports `\$x` / `\$(expr)` interpolation. Interpolated values are
-`string`-ified, spliced into the modifier string, and split on `.` — so an
-interpolated value containing `.` produces multiple parts. With constant
-inputs the call still folds to the singleton; with runtime values the
-`Operation{op, mods}()` construction happens at the call site.
+Supports `\$x` / `\$(expr)` interpolation. The macro expands to a chain of
+type-domain `*` compositions:
+
+  * Static segments fold into the initial `Operation{op, mods}()` and
+    subsequent `Chain{(...)}()` constants.
+  * A *glued* interpolation (literal chars adjacent on either side, e.g.
+    `x\$(N)` or `\$(N)d`) emits `Symbol(pre, expr, post)` and composes via
+    `Operation * Symbol`. With a compile-time-constant interpolated value
+    (e.g. `N` from a `Val{N}` unwrap) the whole site folds to the same
+    singleton the literal form would produce — making it safe to use inside
+    device kernels.
+  * A *bare* interpolation (between two `.`s) emits `_ptx_dyn_seg(expr)`,
+    which yields a `Chain` — supports `String` values containing `.` (split
+    into multiple modifier segments) for host-side use.
+  * An interpolated *opcode* (first segment) falls back to
+    `_ptx_op_from_string(...)`. Device kernels should keep the opcode
+    literal.
 
 Examples:
 
@@ -41,7 +53,12 @@ Examples:
     ptx"mov.\$dt"(x)              # ≡ ptx"mov.u32"(x)
     ptx"st.\$(space).b32"(p, v)   # \$(...) for non-identifier exprs
 
-Empty parts (consecutive `.`, leading/trailing `.`, or empty string) error at expansion.
+    # Glued — folds to a literal singleton when N is Val-known:
+    @inline f(p, ::Val{N}) where {N} =
+        ptx"ldmatrix.sync.aligned.m8n8.x\$(N).shared.b16"(p)
+
+Empty literal parts (consecutive `.`, leading/trailing `.`, or empty string)
+error at expansion for the static path, and at runtime for the interp path.
 
 See also: [`@mod_str`](@ref) for modifier-only chains usable on the right
 side of `*`.
@@ -55,8 +72,7 @@ macro ptx_str(s::String)
         mods = Tuple(Symbol(p) for p in @view raw[2:end])
         return :( $Operation{$(QuoteNode(op)), $mods}() )
     end
-    str_expr = _ptx_parse_interp(s)
-    return :( $_ptx_op_from_string($(esc(str_expr))) )
+    return _ptx_build_interp(s)
 end
 
 """
@@ -108,6 +124,126 @@ function _ptx_parse_interp(s::String)
     isempty(data) || push!(pieces, data)
     Expr(:string, pieces...)
 end
+
+# Walk the macro body and emit `Operation{op,init}() * seg * Chain{run}() * ...`,
+# where each `seg` for a dynamic atom is either `Symbol(pre, expr, post, ...)`
+# (glued — adjacent literal chars) or `_ptx_dyn_seg(expr)` (bare — sits alone
+# between two `.`s). When all interpolated values are compile-time constants
+# (or `Val`-unwrapped type params), the whole site folds to the same singleton
+# the literal form would produce.
+function _ptx_build_interp(s::String)
+    atoms = _ptx_interp_atoms(s)
+    # Validation deferred to runtime so error type matches pre-existing tests.
+    for atom in atoms
+        if isempty(atom)
+            return :( error($("ptx\"" * s * "\": empty modifier between '.'")) )
+        end
+    end
+    first_atom = atoms[1]
+    # Dyn opcode → fall back to host-only string assembly.
+    if !(length(first_atom) == 1 && first_atom[1] isa String)
+        str_expr = _ptx_parse_interp(s)
+        return :( $_ptx_op_from_string($(esc(str_expr))) )
+    end
+    op_sym = Symbol(first_atom[1])
+    idx = 2
+    init_mods = Symbol[]
+    while idx <= length(atoms) && length(atoms[idx]) == 1 && atoms[idx][1] isa String
+        push!(init_mods, Symbol(atoms[idx][1]))
+        idx += 1
+    end
+    init_tup = Tuple(init_mods)
+    acc = :( $Operation{$(QuoteNode(op_sym)), $init_tup}() )
+    while idx <= length(atoms)
+        acc = :( $acc * $(_ptx_atom_expr(atoms[idx])) )
+        idx += 1
+        run = Symbol[]
+        while idx <= length(atoms) && length(atoms[idx]) == 1 && atoms[idx][1] isa String
+            push!(run, Symbol(atoms[idx][1]))
+            idx += 1
+        end
+        if !isempty(run)
+            run_tup = Tuple(run)
+            acc = :( $acc * $Chain{$run_tup}() )
+        end
+    end
+    return acc
+end
+
+# Group the macro body into modifier-level atoms. Each atom is a `Vector{Any}`
+# whose elements are literal `String` chunks and user `Expr`s (in source order).
+# `.` outside an interpolation closes the current atom.
+function _ptx_interp_atoms(s::String)
+    atoms = Vector{Any}[]
+    cur   = Any[]
+    buf   = IOBuffer()
+    flush_buf! = () -> begin
+        data = String(take!(buf))
+        isempty(data) || push!(cur, data)
+    end
+    i = firstindex(s)
+    n = lastindex(s)
+    while i <= n
+        c = s[i]
+        if c == '$'
+            flush_buf!()
+            j = nextind(s, i)
+            j > n && error("ptx\"" * s * "\": dangling '\$' at end of string")
+            expr, k = Meta.parse(s, j; greedy=false)
+            expr === nothing && error("ptx\"" * s * "\": empty interpolation after '\$'")
+            push!(cur, expr)
+            i = k
+        elseif c == '.'
+            flush_buf!()
+            push!(atoms, cur)
+            cur = Any[]
+            i = nextind(s, i)
+        else
+            print(buf, c)
+            i = nextind(s, i)
+        end
+    end
+    flush_buf!()
+    push!(atoms, cur)
+    return atoms
+end
+
+# One modifier atom containing ≥1 interpolation → Expr building a Symbol
+# (when glued) or a Chain (when the atom is exactly one bare `$expr`).
+function _ptx_atom_expr(parts::Vector{Any})
+    if length(parts) == 1 && !(parts[1] isa String)
+        return :( $_ptx_dyn_seg($(esc(parts[1]))) )
+    end
+    args = Any[]
+    for p in parts
+        push!(args, p isa String ? p : esc(p))
+    end
+    return :( $_ptx_sym($(args...)) )
+end
+
+# Runtime path for bare `$expr` modifier atoms — value-dependent number of
+# resulting segments. Preserves the legacy "string with `.`s splits into
+# multiple parts" behavior. For `Symbol` / `Integer` / `Val{V}` inputs the
+# result is a 1-segment Chain that folds at compile time.
+@inline _ptx_dyn_seg(x::Symbol) = Chain{(x,)}()
+@inline _ptx_dyn_seg(x::Integer) = Chain{(_ptx_sym(x),)}()
+@inline _ptx_dyn_seg(::Val{V}) where {V} = Chain{(_ptx_sym(V),)}()
+@inline function _ptx_dyn_seg(x::AbstractString)
+    if occursin('.', x)
+        parts = split(x, '.')
+        any(isempty, parts) && error("ptx interp: empty modifier between '.' in ", repr(String(x)))
+        Chain{Tuple(Symbol(p) for p in parts)}()
+    else
+        Chain{(Symbol(x),)}()
+    end
+end
+
+# Glued-Symbol builder for the macro's interp path. Marked `:total` so that
+# `Symbol(literal_str, N, ...)` folds at compile time when `N` is a constant
+# (e.g. a `Val{N}` unwrap). Without this assertion, the compiler refuses to
+# const-fold through `Base.print_to_string`'s heap allocation, even for
+# concrete inputs — and the call site stops being device-safe.
+Base.@assume_effects :total _ptx_sym(args...) = Symbol(args...)
 
 function _ptx_op_from_string(s::AbstractString)
     raw = split(s, '.')

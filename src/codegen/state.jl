@@ -5,6 +5,16 @@ mutable struct CodeGenState
     declared::Set{String}                 # Julia local-var names already bound
     predicated_assigns::Set{String}       # regs assigned under predication — need `local` hoist
     param_names::Vector{String}           # PTX param order → Julia arg name
+    # Names of `.shared` / `.shared::cta` VarDecls translated to
+    # `CuStaticSharedArray`. Stored stripped of any `%`/`.` mangling — i.e.
+    # the form `julia_var` produces.
+    shared_vars::Set{String}
+    # Register-name (stripped form) → Julia expression string. Populated when
+    # `mov`/`add` stash a translated shared-pointer (or offset thereof) into a
+    # register; consulted at every operand-render site so subsequent uses of
+    # the register flatten to the substituted expression and the defining
+    # instruction is dropped entirely.
+    pointer_aliases::Dict{String, String}
 end
 
 CodeGenState() = CodeGenState(
@@ -13,6 +23,8 @@ CodeGenState() = CodeGenState(
     Set{String}(),
     Set{String}(),
     String[],
+    Set{String}(),
+    Dict{String, String}(),
 )
 
 emit!(cg::CodeGenState, line::AbstractString) =
