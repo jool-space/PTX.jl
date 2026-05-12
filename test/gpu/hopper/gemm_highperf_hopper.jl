@@ -439,6 +439,15 @@ if v"9.0" <= DEV_CAP < v"12.0"
             Int32(M_total), Int32(N_total), Int32(K_test))
         attrs = CUDACore.attributes(kern.fun)
         attrs[CUDACore.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES] = GHH_TOTAL_SMEM
+        # Diagnostic: confirm SMEM opt-in took effect and surface ptxas's
+        # per-thread register count. Used to decide whether a future BN=256
+        # attempt is bottlenecked on SMEM (cap stuck at 48 KiB) or on regs
+        # (NUM_REGS × GHH_THREADS over 65536). Drop once the question is
+        # settled.
+        @show GHH_TOTAL_SMEM
+        @show attrs[CUDACore.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES]
+        @show attrs[CUDACore.FUNC_ATTRIBUTE_NUM_REGS]
+        @show attrs[CUDACore.FUNC_ATTRIBUTE_SHARED_SIZE_BYTES]
         kern(C_d, A.ptr, B.ptr, Cd.ptr, sched_d,
              Int32(M_total), Int32(N_total), Int32(K_test);
              blocks = grid, threads = GHH_THREADS,
