@@ -37,8 +37,13 @@ function _tma_multicast_cluster_kernel!(out::CuDeviceVector{UInt16, 1},
     end
     ptx"bar.sync"(Val(0))
 
-    ptx"barrier.cluster.arrive"()
-    ptx"barrier.cluster.wait"()
+    # `.aligned` is required: without it each thread arrives independently
+    # rather than the warp arriving as a unit, and the rendezvous never
+    # completes (this is what `llvm.nvvm.barrier.cluster.{arrive,wait}` in
+    # CUDACore lowers to — the chain default emits the unaligned form, so
+    # the modifier must be supplied explicitly).
+    ptx"barrier.cluster.arrive.aligned"()
+    ptx"barrier.cluster.wait.aligned"()
 
     if tid == UInt32(0)
         ptx"mbarrier.arrive.expect_tx.shared.b64"(mb_ptr, UInt32(128))

@@ -31,8 +31,8 @@ function _cluster_arrive_mapa_kernel!(out::CuDeviceVector{UInt32, 1})
     end
     # Cluster-wide barrier so the init becomes visible cluster-wide before
     # any CTA tries to arrive on a remote mbarrier.
-    ptx"barrier.cluster.arrive"()
-    ptx"barrier.cluster.wait"()
+    ptx"barrier.cluster.arrive.aligned"()
+    ptx"barrier.cluster.wait.aligned"()
 
     if tid == UInt32(0)
         # Map our local mbarrier address into CTA-0's view. When cta_rank=0
