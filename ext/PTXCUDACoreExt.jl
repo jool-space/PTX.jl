@@ -49,7 +49,6 @@ end
 # stores it raw — CuPtr is the common case (device address from a CuArray).
 _as_void_ptr(p::Ptr) = convert(Ptr{Cvoid}, p)
 _as_void_ptr(p::CuPtr) = Ptr{Cvoid}(UInt(p))
-_as_void_ptr(p::UInt) = Ptr{Cvoid}(p)
 _as_void_ptr(p::Integer) = Ptr{Cvoid}(UInt(p))
 
 function PTX.tensor_map_encode_tiled(
@@ -68,11 +67,6 @@ function PTX.tensor_map_encode_tiled(
         "tensor_map: global_strides must have length N-1 = $(N-1), " *
         "got $(length(global_strides)) (innermost stride is implicit elem_bytes×1)"))
 
-    # Driver expects N-element strides arrays even though only the outer
-    # N-1 entries are read; pad the head with elem_bytes to match cuda-python
-    # behavior. Easier: pass N-1-element arrays — driver actually accepts
-    # this, per pyptx's call site (line 573 in jax_support.py: globalStrides
-    # has rank-1 entries).
     gd = collect(cuuint64_t, global_dim)
     gs = collect(cuuint64_t, global_strides)
     bd = collect(cuuint32_t, box_dim)
@@ -98,8 +92,7 @@ function PTX.tensor_map_tile_2d(
         box_rows::Integer, box_cols::Integer;
         swizzle::Symbol = :B128,
         oob_fill::Symbol = :NONE)
-    elem_bytes = _tensor_map_elem_bytes(dtype isa Symbol ? dtype :
-                                        PTX._tensormap_dtype_symbol(dtype))
+    elem_bytes = _tensor_map_elem_bytes(PTX._tensormap_dtype_symbol(dtype))
     # Innermost-first: dim = (cols, rows). Outer stride = cols * elem_bytes
     # (the byte step between adjacent rows for row-major).
     return PTX.tensor_map_encode_tiled(
