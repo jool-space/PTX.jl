@@ -106,9 +106,9 @@ end
 
 function _fa_kernel!(
         O::CuDeviceVector{Float32, 1},
-        tma_Q::Core.LLVMPtr{UInt8, PTX.AS.Const},
-        tma_K::Core.LLVMPtr{UInt8, PTX.AS.Const},
-        tma_V::Core.LLVMPtr{UInt8, PTX.AS.Const},
+        tma_Q::PTX.TMADescriptorPtr,
+        tma_K::PTX.TMADescriptorPtr,
+        tma_V::PTX.TMADescriptorPtr,
         N_seq::Int32,
         qk_scale_log2e::Float32)
 
@@ -327,9 +327,9 @@ end
 
 @testset "flash_attention kernel compiles at sm_90a" begin
     types = Tuple{CuDeviceVector{Float32, 1},
-                  Core.LLVMPtr{UInt8, PTX.AS.Const},
-                  Core.LLVMPtr{UInt8, PTX.AS.Const},
-                  Core.LLVMPtr{UInt8, PTX.AS.Const},
+                  PTX.TMADescriptorPtr,
+                  PTX.TMADescriptorPtr,
+                  PTX.TMADescriptorPtr,
                   Int32, Float32}
     @test ptxas_compiles(_fa_kernel!, types; cap = v"9.0", feature_set = :arch)
 
@@ -433,9 +433,9 @@ if v"9.0" <= DEV_CAP < v"10.0"
         tmap_Q_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_Q_dev, collect(tmap_Q.data))
         tmap_K_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_K_dev, collect(tmap_K.data))
         tmap_V_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_V_dev, collect(tmap_V.data))
-        q_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const}, UInt64(pointer(tmap_Q_dev)))
-        k_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const}, UInt64(pointer(tmap_K_dev)))
-        v_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const}, UInt64(pointer(tmap_V_dev)))
+        q_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_Q_dev)))
+        k_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_K_dev)))
+        v_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_V_dev)))
 
         O_d = CUDACore.zeros(Float32, M_q * HD)
         @cuda threads = FA_THREADS blocks = (M_q ÷ FA_BM, 1, 1) feature_set = :arch _fa_kernel!(

@@ -20,7 +20,7 @@ using CUDACore
 const EPI_BM = 8
 const EPI_BN = 8
 
-function _tma_epilogue_kernel!(tma_D::Core.LLVMPtr{UInt8, PTX.AS.Const})
+function _tma_epilogue_kernel!(tma_D::PTX.TMADescriptorPtr)
     smem = CuStaticSharedArray(UInt16, EPI_BM * EPI_BN)
 
     tid = ptx"mov.u32"(sreg"tid.x")
@@ -42,7 +42,7 @@ function _tma_epilogue_kernel!(tma_D::Core.LLVMPtr{UInt8, PTX.AS.Const})
 end
 
 @testset "TMA store epilogue compiles at sm_90a" begin
-    types = Tuple{Core.LLVMPtr{UInt8, PTX.AS.Const}}
+    types = Tuple{PTX.TMADescriptorPtr}
     @test ptxas_compiles(_tma_epilogue_kernel!, types;
                          cap = v"9.0", feature_set = :arch)
     ptx = emit_ptx(_tma_epilogue_kernel!, types;
@@ -57,7 +57,7 @@ end
     # Same wrapper chain has to keep emitting for Blackwell — TMA store is
     # not deprecated in PTX 9.0. Cap-bumps are mechanical (sm_100a is the
     # current Blackwell datacenter target).
-    types = Tuple{Core.LLVMPtr{UInt8, PTX.AS.Const}}
+    types = Tuple{PTX.TMADescriptorPtr}
     @test ptxas_compiles(_tma_epilogue_kernel!, types;
                          cap = v"10.0", feature_set = :arch)
 end

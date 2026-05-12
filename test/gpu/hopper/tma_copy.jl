@@ -22,7 +22,7 @@ using PTX: tensor_map_tile_2d, CuTensorMap
 using CUDACore
 
 function _tma_copy_kernel!(out::CuDeviceVector{UInt16, 1},
-                           tma_src::Core.LLVMPtr{UInt8, PTX.AS.Const})
+                           tma_src::PTX.TMADescriptorPtr)
     smem = CuStaticSharedArray(UInt16, 64)       # 8 × 8 bf16 = 128 B
     mbar = CuStaticSharedArray(UInt64, 1)
     mb_ptr = pointer(mbar)
@@ -68,7 +68,7 @@ end
     copyto!(tmap_dev, collect(tmap_host.data))
 
     out = CUDACore.zeros(UInt16, 64)
-    src_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const},
+    src_const = reinterpret(PTX.TMADescriptorPtr,
                             UInt64(pointer(tmap_dev)))
 
     @cuda threads = 128 _tma_copy_kernel!(out, src_const)
@@ -92,7 +92,7 @@ end
     copyto!(tmap_dev, collect(tmap_host.data))
 
     out = CUDACore.zeros(UInt16, rows * cols)
-    src_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const},
+    src_const = reinterpret(PTX.TMADescriptorPtr,
                             UInt64(pointer(tmap_dev)))
 
     # The kernel above is shape-specific (8x8); for B32 we'd need a 16x16

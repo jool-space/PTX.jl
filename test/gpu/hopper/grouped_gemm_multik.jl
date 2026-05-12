@@ -34,8 +34,8 @@ const GGM_KSTRIDE_U128 = UInt64((GGM_WGMMA_K * 2) >> 4)
 
 function _grouped_gemm_multik_kernel!(
         C::CuDeviceVector{Float32, 1},
-        tma_A::Core.LLVMPtr{UInt8, PTX.AS.Const},
-        tma_B::Core.LLVMPtr{UInt8, PTX.AS.Const},
+        tma_A::PTX.TMADescriptorPtr,
+        tma_B::PTX.TMADescriptorPtr,
         M::Int32, N::Int32, K::Int32)
 
     smem_A = CuStaticSharedArray(UInt16, GGM_BM * GGM_TILE_K)        # 64 × 64 bf16 = 8192 B
@@ -135,8 +135,8 @@ end
 
 @testset "grouped_gemm_multik kernel compiles at sm_90a" begin
     types = Tuple{CuDeviceVector{Float32, 1},
-                  Core.LLVMPtr{UInt8, PTX.AS.Const},
-                  Core.LLVMPtr{UInt8, PTX.AS.Const},
+                  PTX.TMADescriptorPtr,
+                  PTX.TMADescriptorPtr,
                   Int32, Int32, Int32}
     @test ptxas_compiles(_grouped_gemm_multik_kernel!, types;
                          cap = v"9.0", feature_set = :arch)
@@ -213,8 +213,8 @@ if v"9.0" <= DEV_CAP < v"10.0"
 
         tmap_A_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_A_dev, collect(tmap_A.data))
         tmap_B_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_B_dev, collect(tmap_B.data))
-        a_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const}, UInt64(pointer(tmap_A_dev)))
-        b_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const}, UInt64(pointer(tmap_B_dev)))
+        a_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_A_dev)))
+        b_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_B_dev)))
 
         C_d = CUDACore.zeros(Float32, G * M * N)
         grid = (N ÷ GGM_BN, M ÷ GGM_BM, G)

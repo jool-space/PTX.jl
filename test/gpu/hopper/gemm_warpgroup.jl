@@ -34,8 +34,8 @@ const HOPPER_LOAD_BYTES = HOPPER_BM * HOPPER_BK * 2 + HOPPER_BK * HOPPER_BN * 2
 
 function _hopper_warpgroup_gemm_kernel!(
         D::CuDeviceVector{Float32, 1},
-        tma_A::Core.LLVMPtr{UInt8, PTX.AS.Const},
-        tma_B::Core.LLVMPtr{UInt8, PTX.AS.Const})
+        tma_A::PTX.TMADescriptorPtr,
+        tma_B::PTX.TMADescriptorPtr)
 
     smem_A = CuStaticSharedArray(UInt16, HOPPER_BM * HOPPER_BK)
     smem_B = CuStaticSharedArray(UInt16, HOPPER_BK * HOPPER_BN)
@@ -129,8 +129,8 @@ end
     # sm_90a. Catches wrapper regressions on the GB10 dev box where the
     # kernel can't actually launch.
     types = Tuple{CuDeviceVector{Float32, 1},
-                  Core.LLVMPtr{UInt8, PTX.AS.Const},
-                  Core.LLVMPtr{UInt8, PTX.AS.Const}}
+                  PTX.TMADescriptorPtr,
+                  PTX.TMADescriptorPtr}
     @test ptxas_compiles(_hopper_warpgroup_gemm_kernel!, types;
                          cap = v"9.0", feature_set = :arch)
 
@@ -203,8 +203,8 @@ if v"9.0" <= DEV_CAP < v"10.0"
 
         tmap_A_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_A_dev, collect(tmap_A.data))
         tmap_B_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_B_dev, collect(tmap_B.data))
-        a_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const}, UInt64(pointer(tmap_A_dev)))
-        b_const = reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Const}, UInt64(pointer(tmap_B_dev)))
+        a_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_A_dev)))
+        b_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_B_dev)))
 
         # Output D allocated as (BN, BM) col-major = BN-innermost. The
         # kernel writes (frag_row * BN + frag_col) byte offsets — N-innermost

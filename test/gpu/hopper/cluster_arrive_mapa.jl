@@ -16,7 +16,6 @@
 # No `# REQUIRES CC` banner: ptxas testset is host-only. Runtime testset
 # is gated to clusters-capable arch (Hopper + datacenter Blackwell).
 
-using PTX: AS
 using CUDACore: cluster_arrive, cluster_wait
 
 function _cluster_arrive_mapa_kernel!(out::CuDeviceVector{UInt32, 1})

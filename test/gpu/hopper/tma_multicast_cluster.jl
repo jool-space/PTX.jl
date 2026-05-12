@@ -23,11 +23,10 @@
 #     must equal the input — failure on either half indicates the multicast
 #     fan-out is broken.
 
-using PTX: AS
 using CUDACore: cluster_arrive, cluster_wait
 
 function _tma_multicast_cluster_kernel!(out::CuDeviceVector{UInt16, 1},
-                                        tma_src::Core.LLVMPtr{UInt8, AS.Const})
+                                        tma_src::PTX.TMADescriptorPtr)
     smem = CuStaticSharedArray(UInt16, 64)       # 8 × 8 bf16 = 128 B
     mbar = CuStaticSharedArray(UInt64, 1)
     mb_ptr = pointer(mbar)
@@ -64,7 +63,7 @@ function _tma_multicast_cluster_kernel!(out::CuDeviceVector{UInt16, 1},
 end
 
 @testset "TMA multicast — ptxas sm_90a (cluster kernel)" begin
-    types = Tuple{CuDeviceVector{UInt16, 1}, Core.LLVMPtr{UInt8, AS.Const}}
+    types = Tuple{CuDeviceVector{UInt16, 1}, PTX.TMADescriptorPtr}
     @test ptxas_compiles(_tma_multicast_cluster_kernel!, types;
                          cap = v"9.0", feature_set = :arch)
 end
@@ -86,7 +85,7 @@ if v"9.0" <= DEV_CAP < v"12.0"
         copyto!(tmap_dev, collect(tmap_host.data))
 
         out = CUDACore.zeros(UInt16, 128)
-        src_const = reinterpret(Core.LLVMPtr{UInt8, AS.Const},
+        src_const = reinterpret(PTX.TMADescriptorPtr,
                                 UInt64(pointer(tmap_dev)))
 
         # grid_dim must be a multiple of cluster_dim — set `blocks=(2,1,1)` so
