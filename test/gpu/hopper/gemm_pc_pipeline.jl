@@ -32,7 +32,9 @@
 # having started. After this, the loop bodies handle phase tracking
 # unaided.
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
+           BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
+           barrier_wait, barrier_arrive, barrier_arrive_expect_tx
 using CUDACore
 using Random
 
@@ -65,10 +67,11 @@ function _pc_gemm_kernel!(
 
     a_base_ptr  = pointer(smem_A)
     b_base_ptr  = pointer(smem_B)
-    mb_full_base  = pointer(mbar_full)
-    mb_empty_base = pointer(mbar_empty)
     a_base_addr = smem_addr_u32(a_base_ptr)
     b_base_addr = smem_addr_u32(b_base_ptr)
+
+    full  = BarrierArray{PC_N_STAGES}(pointer(mbar_full))
+    empty = BarrierArray{PC_N_STAGES}(pointer(mbar_empty))
 
     tid     = ptx"mov.u32"(sreg"tid.x")
     wg_id   = tid >> UInt32(7)              # 0 = producer, 1 = consumer
@@ -79,14 +82,7 @@ function _pc_gemm_kernel!(
     # `empty[s]` once. After init, empty[s] is at phase=1, so the
     # producer's first wait (expected_phase=0) succeeds without waiting.
     if tid == 0
-        @inbounds for s in 0:(PC_N_STAGES - 1)
-            full_s  = mb_full_base  + s * sizeof(UInt64)
-            empty_s = mb_empty_base + s * sizeof(UInt64)
-            ptx"mbarrier.init.shared.b64"(full_s,  1)
-            ptx"mbarrier.init.shared.b64"(empty_s, 1)
-            ptx"mbarrier.arrive.shared.b64"(empty_s)        # pre-arrive
-        end
-        ptx"fence.proxy.async.shared::cta"()
+        pipeline_init!(full, empty, Val(1), Val(false))
     end
     ptx"bar.sync"(Val(0))                                   # CTA-wide
 
@@ -100,28 +96,24 @@ function _pc_gemm_kernel!(
         ptx"setmaxnreg.dec.sync.aligned.u32"(Val(24))
 
         @inbounds for k_iter in Int32(0):(num_k_tiles - Int32(1))
-            stage = k_iter & Int32(PC_N_STAGES - 1)         # k_iter mod 2
-            phase = UInt32((k_iter >> Int32(1)) & Int32(1))
-            full_s  = mb_full_base  + Int(stage) * sizeof(UInt64)
-            empty_s = mb_empty_base + Int(stage) * sizeof(UInt64)
+            stage, phase = pipeline_cursor(Pipeline{PC_N_STAGES}, k_iter)
 
             # Wait for consumer to free this stage's SMEM buffer.
-            while !ptx"mbarrier.test_wait.parity.shared.b64"(empty_s, phase)
-            end
+            barrier_wait(empty[stage], phase)
 
             # Lane 0 issues the TMA pair + arms `full[stage]` for completion.
             if lane128 == UInt32(0)
                 ptx"fence.proxy.async.shared::cta"()
-                ptx"mbarrier.arrive.expect_tx.shared.b64"(full_s, PC_LOAD_BYTES)
+                barrier_arrive_expect_tx(full[stage], PC_LOAD_BYTES)
                 a_stage_ptr = a_base_ptr + Int(stage) * PC_A_STAGE_BYTES
                 b_stage_ptr = b_base_ptr + Int(stage) * PC_B_STAGE_BYTES
                 # TMA coords: K-fast layout → (k_off, m_or_n_off). m_off / n_off
                 # are 0 here (single tile in M/N); only K advances.
                 k_off = k_iter * Int32(PC_BK)
                 ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
-                    a_stage_ptr, tma_A, k_off, Int32(0), full_s)
+                    a_stage_ptr, tma_A, k_off, Int32(0), full[stage])
                 ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
-                    b_stage_ptr, tma_B, k_off, Int32(0), full_s)
+                    b_stage_ptr, tma_B, k_off, Int32(0), full[stage])
             end
         end
     else
@@ -147,14 +139,10 @@ function _pc_gemm_kernel!(
         d = ntuple(_ -> 0f0, Val(4))
 
         @inbounds for k_iter in Int32(0):(num_k_tiles - Int32(1))
-            stage = k_iter & Int32(PC_N_STAGES - 1)
-            phase = UInt32((k_iter >> Int32(1)) & Int32(1))
-            full_s  = mb_full_base  + Int(stage) * sizeof(UInt64)
-            empty_s = mb_empty_base + Int(stage) * sizeof(UInt64)
+            stage, phase = pipeline_cursor(Pipeline{PC_N_STAGES}, k_iter)
 
             # Wait for producer's TMA to land for this stage.
-            while !ptx"mbarrier.test_wait.parity.shared.b64"(full_s, phase)
-            end
+            barrier_wait(full[stage], phase)
 
             # wgmma. The SMEM stage offset folds into the descriptor low
             # bits via UInt64 addition (descriptor SMEM address lives in
@@ -170,7 +158,7 @@ function _pc_gemm_kernel!(
 
             # Signal stage's SMEM is free for the next round.
             if lane128 == UInt32(0)
-                ptx"mbarrier.arrive.shared.b64"(empty_s)
+                barrier_arrive(empty[stage])
             end
         end
 

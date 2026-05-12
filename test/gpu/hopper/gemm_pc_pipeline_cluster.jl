@@ -42,7 +42,9 @@
 #
 # Runtime gated to clusters-capable arch (`[9.0, 12.0)`).
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
+           BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
+           barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
 using CUDACore
 using CUDACore: cluster_arrive, cluster_wait
 using Random
@@ -81,10 +83,11 @@ function _pcc_gemm_kernel!(
     mbar_full  = CuStaticSharedArray(UInt64, PCC_N_STAGES)
     mbar_empty = CuStaticSharedArray(UInt64, PCC_N_STAGES)
 
-    a_base_ptr    = pointer(smem_A)
-    b_base_ptr    = pointer(smem_B)
-    mb_full_base  = pointer(mbar_full)
-    mb_empty_base = pointer(mbar_empty)
+    a_base_ptr = pointer(smem_A)
+    b_base_ptr = pointer(smem_B)
+
+    full  = BarrierArray{PCC_N_STAGES}(pointer(mbar_full))
+    empty = BarrierArray{PCC_N_STAGES}(pointer(mbar_empty))
 
     tid      = ptx"mov.u32"(sreg"tid.x")
     cta_rank = ptx"mov.u32"(sreg"cluster_ctarank")
@@ -105,18 +108,9 @@ function _pcc_gemm_kernel!(
 
     # ── Init mbarriers + pipeline warm-up (per CTA) ─────────────────
     if tid == UInt32(0)
-        @inbounds for s in 0:(PCC_N_STAGES - 1)
-            full_s  = mb_full_base  + s * sizeof(UInt64)
-            empty_s = mb_empty_base + s * sizeof(UInt64)
-            ptx"mbarrier.init.shared.b64"(full_s,  1)
-            ptx"mbarrier.init.shared.b64"(empty_s, PCC_EMPTY_COUNT)
-            # 4 local pre-arrives → phase flips to 1 (count satisfied).
-            ptx"mbarrier.arrive.shared.b64"(empty_s)
-            ptx"mbarrier.arrive.shared.b64"(empty_s)
-            ptx"mbarrier.arrive.shared.b64"(empty_s)
-            ptx"mbarrier.arrive.shared.b64"(empty_s)
-        end
-        ptx"fence.mbarrier_init.release.cluster"()
+        # Cluster scope: full pre-arrive count = NUM_CONSUMERS × CLUSTERS,
+        # cluster-release fence (vs CTA-scope fence in single-CTA case).
+        pipeline_init!(full, empty, Val(PCC_EMPTY_COUNT), Val(true))
     end
     ptx"bar.sync"(Val(0))               # CTA-local sync after init
 
@@ -135,17 +129,12 @@ function _pcc_gemm_kernel!(
         ptx"setmaxnreg.dec.sync.aligned.u32"(Val(24))
 
         @inbounds for k_iter in Int32(0):(num_k_tiles - Int32(1))
-            stage = k_iter & Int32(PCC_N_STAGES - 1)
-            phase = UInt32((k_iter >> Int32(1)) & Int32(1))
-            full_s  = mb_full_base  + Int(stage) * sizeof(UInt64)
-            empty_s = mb_empty_base + Int(stage) * sizeof(UInt64)
-
-            while !ptx"mbarrier.test_wait.parity.shared.b64"(empty_s, phase)
-            end
+            stage, phase = pipeline_cursor(Pipeline{PCC_N_STAGES}, k_iter)
+            barrier_wait(empty[stage], phase)
 
             if lane128 == UInt32(0)
                 ptx"fence.proxy.async.shared::cta"()
-                ptx"mbarrier.arrive.expect_tx.shared.b64"(full_s, PCC_LOAD_BYTES)
+                barrier_arrive_expect_tx(full[stage], PCC_LOAD_BYTES)
 
                 a_stage_ptr = a_base_ptr + Int(stage) * PCC_A_STAGE_BYTES
                 b_stage_ptr = b_base_ptr + Int(stage) * PCC_B_STAGE_BYTES
@@ -154,13 +143,13 @@ function _pcc_gemm_kernel!(
                 # Local A load — each CTA fetches its M-slice of this
                 # cluster's (M, K) tile.
                 ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
-                    a_stage_ptr, tma_A, k_off, reinterpret(Int32, m_off_global), full_s)
+                    a_stage_ptr, tma_A, k_off, reinterpret(Int32, m_off_global), full[stage])
 
                 # Multicast B load — CTA 0 issues, both CTAs receive.
                 if cta_rank == UInt32(0)
                     ptx"cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
                         b_stage_ptr, tma_B, k_off,
-                        reinterpret(Int32, n_off_global), full_s, UInt16(0x3))
+                        reinterpret(Int32, n_off_global), full[stage], UInt16(0x3))
                 end
             end
         end
@@ -187,13 +176,8 @@ function _pcc_gemm_kernel!(
         d = ntuple(_ -> 0f0, Val(8))
 
         @inbounds for k_iter in Int32(0):(num_k_tiles - Int32(1))
-            stage = k_iter & Int32(PCC_N_STAGES - 1)
-            phase = UInt32((k_iter >> Int32(1)) & Int32(1))
-            full_s  = mb_full_base  + Int(stage) * sizeof(UInt64)
-            empty_s = mb_empty_base + Int(stage) * sizeof(UInt64)
-
-            while !ptx"mbarrier.test_wait.parity.shared.b64"(full_s, phase)
-            end
+            stage, phase = pipeline_cursor(Pipeline{PCC_N_STAGES}, k_iter)
+            barrier_wait(full[stage], phase)
 
             a_desc = a_desc_base + UInt64(stage) * PCC_A_DESC_STEP
             b_desc = b_desc_base + UInt64(stage) * PCC_B_DESC_STEP
@@ -209,8 +193,7 @@ function _pcc_gemm_kernel!(
             # CTA k's empty[s]. 2 lanes × 2 consumer wgs = 4 arrives per
             # CTA per stage = empty[s].count.
             if lane128 < UInt32(PCC_CLUSTERS)
-                remote_empty = ptx"mapa.shared::cluster.u32"(empty_s, lane128)
-                ptx"mbarrier.arrive.shared::cluster.b64"(remote_empty)
+                barrier_arrive_cluster(empty[stage], lane128)
             end
         end
 

@@ -24,7 +24,9 @@
 # in gemm_warpgroup.jl / gemm_pc_pipeline.jl. Per consumer the writes
 # land at consumer-base offset (consumer_id × B_WG_M rows).
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
+           BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
+           barrier_wait, barrier_arrive, barrier_arrive_expect_tx
 using CUDACore
 using Random
 
@@ -58,10 +60,11 @@ function _pcs_gemm_kernel!(
     mbar_full  = CuStaticSharedArray(UInt64, PCS_N_STAGES)
     mbar_empty = CuStaticSharedArray(UInt64, PCS_N_STAGES)
 
-    a_base_ptr    = pointer(smem_A)
-    b_base_ptr    = pointer(smem_B)
-    mb_full_base  = pointer(mbar_full)
-    mb_empty_base = pointer(mbar_empty)
+    a_base_ptr = pointer(smem_A)
+    b_base_ptr = pointer(smem_B)
+
+    full  = BarrierArray{PCS_N_STAGES}(pointer(mbar_full))
+    empty = BarrierArray{PCS_N_STAGES}(pointer(mbar_empty))
 
     tid     = ptx"mov.u32"(sreg"tid.x")
     wg_id   = tid >> UInt32(7)              # 0 = producer, 1/2 = consumers
@@ -72,15 +75,7 @@ function _pcs_gemm_kernel!(
     # (count=2, two arrives → flip), so the producer's first wait
     # (expected_phase=0) succeeds without consumer participation.
     if tid == 0
-        @inbounds for s in 0:(PCS_N_STAGES - 1)
-            full_s  = mb_full_base  + s * sizeof(UInt64)
-            empty_s = mb_empty_base + s * sizeof(UInt64)
-            ptx"mbarrier.init.shared.b64"(full_s,  1)
-            ptx"mbarrier.init.shared.b64"(empty_s, PCS_NUM_CONSUMERS)
-            ptx"mbarrier.arrive.shared.b64"(empty_s)
-            ptx"mbarrier.arrive.shared.b64"(empty_s)        # 2 pre-arrives
-        end
-        ptx"fence.proxy.async.shared::cta"()
+        pipeline_init!(full, empty, Val(PCS_NUM_CONSUMERS), Val(false))
     end
     ptx"bar.sync"(Val(0))
 
@@ -91,24 +86,19 @@ function _pcs_gemm_kernel!(
         ptx"setmaxnreg.dec.sync.aligned.u32"(Val(24))
 
         @inbounds for k_iter in Int32(0):(num_k_tiles - Int32(1))
-            stage = k_iter & Int32(PCS_N_STAGES - 1)
-            phase = UInt32((k_iter >> Int32(1)) & Int32(1))
-            full_s  = mb_full_base  + Int(stage) * sizeof(UInt64)
-            empty_s = mb_empty_base + Int(stage) * sizeof(UInt64)
-
-            while !ptx"mbarrier.test_wait.parity.shared.b64"(empty_s, phase)
-            end
+            stage, phase = pipeline_cursor(Pipeline{PCS_N_STAGES}, k_iter)
+            barrier_wait(empty[stage], phase)
 
             if lane128 == UInt32(0)
                 ptx"fence.proxy.async.shared::cta"()
-                ptx"mbarrier.arrive.expect_tx.shared.b64"(full_s, PCS_LOAD_BYTES)
+                barrier_arrive_expect_tx(full[stage], PCS_LOAD_BYTES)
                 a_stage_ptr = a_base_ptr + Int(stage) * PCS_A_STAGE_BYTES
                 b_stage_ptr = b_base_ptr + Int(stage) * PCS_B_STAGE_BYTES
                 k_off = k_iter * Int32(PCS_BK)
                 ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
-                    a_stage_ptr, tma_A, k_off, Int32(0), full_s)
+                    a_stage_ptr, tma_A, k_off, Int32(0), full[stage])
                 ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
-                    b_stage_ptr, tma_B, k_off, Int32(0), full_s)
+                    b_stage_ptr, tma_B, k_off, Int32(0), full[stage])
             end
         end
     else
@@ -138,13 +128,8 @@ function _pcs_gemm_kernel!(
         d = ntuple(_ -> 0f0, Val(8))         # m64n16k16 → 8 f32 frags/lane
 
         @inbounds for k_iter in Int32(0):(num_k_tiles - Int32(1))
-            stage = k_iter & Int32(PCS_N_STAGES - 1)
-            phase = UInt32((k_iter >> Int32(1)) & Int32(1))
-            full_s  = mb_full_base  + Int(stage) * sizeof(UInt64)
-            empty_s = mb_empty_base + Int(stage) * sizeof(UInt64)
-
-            while !ptx"mbarrier.test_wait.parity.shared.b64"(full_s, phase)
-            end
+            stage, phase = pipeline_cursor(Pipeline{PCS_N_STAGES}, k_iter)
+            barrier_wait(full[stage], phase)
 
             a_desc = a_desc_base + UInt64(stage) * PCS_A_DESC_STEP
             b_desc = b_desc_base + UInt64(stage) * PCS_B_DESC_STEP
@@ -156,7 +141,7 @@ function _pcs_gemm_kernel!(
             ptx"wgmma.wait_group.sync.aligned"(Val(0))
 
             if lane128 == UInt32(0)
-                ptx"mbarrier.arrive.shared.b64"(empty_s)
+                barrier_arrive(empty[stage])
             end
         end
 

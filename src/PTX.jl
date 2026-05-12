@@ -37,5 +37,6 @@ include("wgmma_descriptor.jl")
 include("wgmma_layout.jl")
 include("tcgen05_descriptor.jl")
 include("tensor_map.jl")
+include("pipeline.jl")
 
 end

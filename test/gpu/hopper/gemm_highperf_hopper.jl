@@ -27,7 +27,9 @@
 # iterates `tile_iter = 0, 1, ...` reading the SMEM segment until it
 # sees the sentinel `0xffffffff` (== -1 cast to u32).
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
+           BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
+           barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
 using CUDACore
 using CUDACore: cluster_arrive, cluster_wait
 using Random
@@ -153,9 +155,10 @@ function _ghh_gemm_kernel!(
     a_base_ptr    = pointer(smem_A)
     b_base_ptr    = pointer(smem_B)
     c_base_ptr    = pointer(smem_C)
-    mb_full_base  = pointer(mbar_full)
-    mb_empty_base = pointer(mbar_empty)
     sched_base    = pointer(smem_sched)
+
+    full  = BarrierArray{GHH_N_STAGES}(pointer(mbar_full))
+    empty = BarrierArray{GHH_N_STAGES}(pointer(mbar_empty))
 
     tid       = ptx"mov.u32"(sreg"tid.x")
     cta_rank  = ptx"mov.u32"(sreg"cluster_ctarank")
@@ -174,17 +177,7 @@ function _ghh_gemm_kernel!(
 
     # ── Init mbarriers + pipeline warm-up (thread 0) ────────────────
     if tid == UInt32(0)
-        @inbounds for s in 0:(GHH_N_STAGES - 1)
-            full_s  = mb_full_base  + s * sizeof(UInt64)
-            empty_s = mb_empty_base + s * sizeof(UInt64)
-            ptx"mbarrier.init.shared.b64"(full_s,  1)
-            ptx"mbarrier.init.shared.b64"(empty_s, GHH_EMPTY_COUNT)
-            ptx"mbarrier.arrive.shared.b64"(empty_s)
-            ptx"mbarrier.arrive.shared.b64"(empty_s)
-            ptx"mbarrier.arrive.shared.b64"(empty_s)
-            ptx"mbarrier.arrive.shared.b64"(empty_s)
-        end
-        ptx"fence.mbarrier_init.release.cluster"()
+        pipeline_init!(full, empty, Val(GHH_EMPTY_COUNT), Val(true))
     end
     ptx"bar.sync"(Val(0))
 
@@ -212,26 +205,21 @@ function _ghh_gemm_kernel!(
                 n_off  = tile_n * UInt32(GHH_BN)
 
                 @inbounds for kt in Int32(0):(num_blocks_k - Int32(1))
-                    stage = global_k_iter & Int32(GHH_N_STAGES - 1)
-                    phase = UInt32((global_k_iter >> Int32(1)) & Int32(1))
-                    full_s  = mb_full_base  + Int(stage) * sizeof(UInt64)
-                    empty_s = mb_empty_base + Int(stage) * sizeof(UInt64)
-
-                    while !ptx"mbarrier.test_wait.parity.shared.b64"(empty_s, phase)
-                    end
+                    stage, phase = pipeline_cursor(Pipeline{GHH_N_STAGES}, global_k_iter)
+                    barrier_wait(empty[stage], phase)
 
                     ptx"fence.proxy.async.shared::cta"()
-                    ptx"mbarrier.arrive.expect_tx.shared.b64"(full_s, GHH_LOAD_BYTES)
+                    barrier_arrive_expect_tx(full[stage], GHH_LOAD_BYTES)
                     a_stage_ptr = a_base_ptr + Int(stage) * GHH_A_STAGE_BYTES
                     b_stage_ptr = b_base_ptr + Int(stage) * GHH_B_STAGE_BYTES
                     k_off = kt * Int32(GHH_BK_TILE)
                     ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
                         a_stage_ptr, tma_A, k_off,
-                        reinterpret(Int32, m_off), full_s)
+                        reinterpret(Int32, m_off), full[stage])
                     if cta_rank == UInt32(0)
                         ptx"cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
                             b_stage_ptr, tma_B, k_off,
-                            reinterpret(Int32, n_off), full_s, UInt16(0x3))
+                            reinterpret(Int32, n_off), full[stage], UInt16(0x3))
                     end
 
                     global_k_iter += Int32(1)
@@ -277,13 +265,8 @@ function _ghh_gemm_kernel!(
             d = ntuple(_ -> 0f0, Val(64))
 
             @inbounds for kt in Int32(0):(num_blocks_k - Int32(1))
-                stage = global_k_iter & Int32(GHH_N_STAGES - 1)
-                phase = UInt32((global_k_iter >> Int32(1)) & Int32(1))
-                full_s  = mb_full_base  + Int(stage) * sizeof(UInt64)
-                empty_s = mb_empty_base + Int(stage) * sizeof(UInt64)
-
-                while !ptx"mbarrier.test_wait.parity.shared.b64"(full_s, phase)
-                end
+                stage, phase = pipeline_cursor(Pipeline{GHH_N_STAGES}, global_k_iter)
+                barrier_wait(full[stage], phase)
 
                 a_desc_stage = a_desc_base + UInt64(stage) * GHH_A_DESC_STEP
                 b_desc_stage = b_desc_base + UInt64(stage) * GHH_B_DESC_STEP
@@ -301,8 +284,7 @@ function _ghh_gemm_kernel!(
                 ptx"wgmma.wait_group.sync.aligned"(Val(0))
 
                 if lane128 < UInt32(GHH_CLUSTERS)
-                    remote_empty = ptx"mapa.shared::cluster.u32"(empty_s, lane128)
-                    ptx"mbarrier.arrive.shared::cluster.b64"(remote_empty)
+                    barrier_arrive_cluster(empty[stage], lane128)
                 end
 
                 global_k_iter += Int32(1)
