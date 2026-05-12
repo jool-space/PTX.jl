@@ -1,6 +1,9 @@
-# REQUIRES CC 9.0
+# Runtime cluster-launch round-trip for TMA multicast.
 #
-# Runtime cluster-launch round-trip for TMA multicast:
+# No `# REQUIRES CC` banner: the ptxas testset is host-only (cross-arch via
+# `ptxas_compiles(...; cap=v"9.0", feature_set=:arch)`) and runs on any
+# CUDACore-loadable device. The runtime cluster-launch testset is gated
+# in-file by `DEV_CAP`.
 #
 #   - `clustersize=(2, 1, 1)` — 2-CTA Hopper cluster
 #   - Each CTA inits a local mbarrier with `count=1`, then a cluster barrier
@@ -62,10 +65,13 @@ end
                          cap = v"9.0", feature_set = :arch)
 end
 
-# Runtime cluster-launch path — Hopper only. Blackwell (sm_100/sm_120/sm_121)
-# either retired multi-CTA clusters or restricts size in ways that don't
-# match this 2-CTA shape (GB10 rejects with ERROR_INVALID_CLUSTER_SIZE).
-if v"9.0" <= DEV_CAP < v"10.0"
+# Runtime cluster-launch path — Hopper sm_90a and datacenter Blackwell
+# sm_100a (B100/B200/GB100) support multi-CTA clusters. Consumer Blackwell
+# (sm_120/sm_121, RTX 50-series / GB10) dropped clusters — GB10 rejects
+# the 2-CTA launch with ERROR_INVALID_CLUSTER_SIZE despite reporting
+# `CU_DEVICE_ATTRIBUTE_CLUSTER_LAUNCH=1`. Range `[9.0, 12.0)` covers both
+# clusters-capable arch families without enabling consumer Blackwell.
+if v"9.0" <= DEV_CAP < v"12.0"
     @testset "TMA multicast cluster round-trip" begin
         input_vals = UInt16[(0x3f80 + i) for i in 0:63]
         src = CuArray(reshape(input_vals, 8, 8))
