@@ -85,7 +85,10 @@ if v"9.0" <= DEV_CAP < v"12.0"
         src_const = reinterpret(Core.LLVMPtr{UInt8, AS.Const},
                                 UInt64(pointer(tmap_dev)))
 
-        @cuda threads = 128 clustersize = (2, 1, 1) _tma_multicast_cluster_kernel!(out, src_const)
+        # grid_dim must be a multiple of cluster_dim — set `blocks=(2,1,1)` so
+        # the single cluster contains both CTAs. Default `blocks=1` would
+        # violate this and ptxas rejects with ERROR_INVALID_CLUSTER_SIZE.
+        @cuda blocks = (2, 1, 1) threads = 128 clustersize = (2, 1, 1) _tma_multicast_cluster_kernel!(out, src_const)
         CUDACore.synchronize()
 
         result = Array(out)
