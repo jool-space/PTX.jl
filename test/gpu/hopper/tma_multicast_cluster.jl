@@ -81,17 +81,13 @@ if v"9.0" <= DEV_CAP < v"12.0"
 
         tmap_host = PTX.tensor_map_tile_2d(:bf16, pointer(src), 8, 8, 8, 8;
                                            swizzle = :NONE)
-        tmap_dev = CuArray{UInt8}(undef, 128)
-        copyto!(tmap_dev, collect(tmap_host.data))
-
+        src_const = upload_tma_descriptor(tmap_host)
         out = CUDACore.zeros(UInt16, 128)
-        src_const = reinterpret(PTX.TMADescriptorPtr,
-                                UInt64(pointer(tmap_dev)))
 
         # grid_dim must be a multiple of cluster_dim — set `blocks=(2,1,1)` so
         # the single cluster contains both CTAs. Default `blocks=1` would
         # violate this and ptxas rejects with ERROR_INVALID_CLUSTER_SIZE.
-        @cuda blocks = (2, 1, 1) threads = 128 clustersize = (2, 1, 1) _tma_multicast_cluster_kernel!(out, src_const)
+        @cuda blocks = (2, 1, 1) threads = 128 clustersize = (2, 1, 1) _tma_multicast_cluster_kernel!(out, src_const.ptr)
         CUDACore.synchronize()
 
         result = Array(out)

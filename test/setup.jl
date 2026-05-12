@@ -46,3 +46,43 @@ function ptxas_compiles(f, tt::Type{<:Tuple};
     CUDACore.invoke_frozen(CUDACore.compile, job)
     true
 end
+
+# --- Hopper kernel test helpers ---------------------------------------------
+# Patterns repeated 3+ times across the test/gpu/hopper/*.jl kernels.
+
+# `f32 → bf16` (round-to-nearest-even) and `bf16 → f32` reinterpretations
+# used by every bf16 kernel's host-side reference + tile-pack code.
+bf16_bits(x::Float32) = UInt16((reinterpret(UInt32, x) + UInt32(0x8000)) >> 16)
+bf16_to_f32(b::UInt16) = reinterpret(Float32, UInt32(b) << 16)
+
+# Host → device upload for a TMA descriptor. Allocates a 128-byte device
+# blob, copies the encoded descriptor into it, and returns a
+# `(ptr, blob)` NamedTuple. The caller MUST bind the NamedTuple to a
+# named variable for the lifetime of the kernel launch — `blob` is the
+# `CuArray` that owns the device memory, and the LLVMPtr does not keep
+# it alive on its own. Pattern:
+#
+#     A = upload_tma_descriptor(tmap_A)
+#     B = upload_tma_descriptor(tmap_B)
+#     @cuda kernel!(D, A.ptr, B.ptr)        # A and B alive through @cuda
+#
+function upload_tma_descriptor(tmap::PTX.CuTensorMap)
+    blob = CuArray{UInt8}(undef, 128)
+    copyto!(blob, collect(tmap.data))
+    ptr = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(blob)))
+    return (; ptr, blob)
+end
+
+# bf16-round-tripping triple-loop matmul. Mirrors what a bf16-tile kernel
+# actually computes: round both inputs to bf16, then accumulate in f32.
+# Used 4× in the Hopper GEMM/FA reference paths.
+function bf16_gemm_ref(A::Array{Float32, 2}, B::Array{Float32, 2})
+    M, K = size(A); _, N = size(B)
+    Ab = bf16_to_f32.(bf16_bits.(A))
+    Bb = bf16_to_f32.(bf16_bits.(B))
+    D = zeros(Float32, M, N)
+    for m in 1:M, n in 1:N, k in 1:K
+        @inbounds D[m, n] += Ab[m, k] * Bb[k, n]
+    end
+    return D
+end

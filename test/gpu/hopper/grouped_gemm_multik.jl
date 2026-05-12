@@ -155,9 +155,6 @@ end
 # --- Runtime — H100 only -------------------------------------------------
 
 if v"9.0" <= DEV_CAP < v"10.0"
-    bf16_bits(x::Float32) = UInt16((reinterpret(UInt32, x) + UInt32(0x8000)) >> 16)
-    bf16_to_f32(b::UInt16) = reinterpret(Float32, UInt32(b) << 16)
-
     function _multik_cpu_ref(A3::Array{Float32, 3}, B3::Array{Float32, 3})
         G, M, K = size(A3)
         _, _, N = size(B3)
@@ -211,15 +208,13 @@ if v"9.0" <= DEV_CAP < v"10.0"
         tmap_B = tensor_map_tile_2d(:bf16, pointer(B_d), G * N, K,
                                     GGM_BN, GGM_TILE_K; swizzle = :B128)
 
-        tmap_A_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_A_dev, collect(tmap_A.data))
-        tmap_B_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_B_dev, collect(tmap_B.data))
-        a_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_A_dev)))
-        b_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_B_dev)))
+        a_const = upload_tma_descriptor(tmap_A)
+        b_const = upload_tma_descriptor(tmap_B)
 
         C_d = CUDACore.zeros(Float32, G * M * N)
         grid = (N ÷ GGM_BN, M ÷ GGM_BM, G)
         @cuda threads = GGM_THREADS blocks = grid feature_set = :arch _grouped_gemm_multik_kernel!(
-            C_d, a_const, b_const, Int32(M), Int32(N), Int32(K))
+            C_d, a_const.ptr, b_const.ptr, Int32(M), Int32(N), Int32(K))
         CUDACore.synchronize()
 
         C_packed = reshape(Array(C_d), N, G * M)

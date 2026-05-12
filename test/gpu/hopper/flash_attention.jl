@@ -347,9 +347,6 @@ end
 # --- Runtime — H100 only -------------------------------------------------
 
 if v"9.0" <= DEV_CAP < v"10.0"
-    bf16_bits(x::Float32) = UInt16((reinterpret(UInt32, x) + UInt32(0x8000)) >> 16)
-    bf16_to_f32(b::UInt16) = reinterpret(Float32, UInt32(b) << 16)
-
     function _fa_cpu_ref(Q::Array{Float32, 2}, K::Array{Float32, 2},
                          V::Array{Float32, 2}, sm_scale::Float32)
         # Q (M, HD), K (N, HD), V (N, HD).
@@ -430,16 +427,13 @@ if v"9.0" <= DEV_CAP < v"10.0"
         tmap_V = tensor_map_tile_2d(:bf16, pointer(V_d), HD, N_seq, HD, FA_BN;
                                     swizzle = :B32)
 
-        tmap_Q_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_Q_dev, collect(tmap_Q.data))
-        tmap_K_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_K_dev, collect(tmap_K.data))
-        tmap_V_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_V_dev, collect(tmap_V.data))
-        q_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_Q_dev)))
-        k_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_K_dev)))
-        v_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_V_dev)))
+        q_const = upload_tma_descriptor(tmap_Q)
+        k_const = upload_tma_descriptor(tmap_K)
+        v_const = upload_tma_descriptor(tmap_V)
 
         O_d = CUDACore.zeros(Float32, M_q * HD)
         @cuda threads = FA_THREADS blocks = (M_q ÷ FA_BM, 1, 1) feature_set = :arch _fa_kernel!(
-            O_d, q_const, k_const, v_const, Int32(N_seq), sm_scale * FA_LOG2E)
+            O_d, q_const.ptr, k_const.ptr, v_const.ptr, Int32(N_seq), sm_scale * FA_LOG2E)
         CUDACore.synchronize()
 
         O_packed = reshape(Array(O_d), HD, M_q)

@@ -158,20 +158,6 @@ end
 # (sm_100/sm_120/sm_121) replaced it with tcgen05, so cap is required to be
 # in [9.0, 10.0). On the GB10 dev box (sm_121a) this testset is skipped.
 if v"9.0" <= DEV_CAP < v"10.0"
-    bf16_bits(x::Float32) = UInt16((reinterpret(UInt32, x) + UInt32(0x8000)) >> 16)
-    bf16_to_f32(b::UInt16) = reinterpret(Float32, UInt32(b) << 16)
-
-    function _warpgroup_gemm_cpu_ref(A::Array{Float32, 2}, B::Array{Float32, 2})
-        M, K = size(A); _, N = size(B)
-        Ab = bf16_to_f32.(bf16_bits.(A))
-        Bb = bf16_to_f32.(bf16_bits.(B))
-        D = zeros(Float32, M, N)
-        for m in 1:M, n in 1:N, k in 1:K
-            D[m, n] += Ab[m, k] * Bb[k, n]
-        end
-        D
-    end
-
     @testset "single-warpgroup Hopper GEMM (random bf16, K-fast layout)" begin
         # Random non-uniform inputs — exercises the layout fix (both A and B
         # K-fast in SMEM, both descriptors via layout_for_a). Uniform 1.0s
@@ -201,17 +187,15 @@ if v"9.0" <= DEV_CAP < v"10.0"
         tmap_B = PTX.tensor_map_tile_2d(:bf16, pointer(B_d),
             HOPPER_BN, HOPPER_BK, HOPPER_BN, HOPPER_BK; swizzle = :B32)
 
-        tmap_A_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_A_dev, collect(tmap_A.data))
-        tmap_B_dev = CuArray{UInt8}(undef, 128); copyto!(tmap_B_dev, collect(tmap_B.data))
-        a_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_A_dev)))
-        b_const = reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(tmap_B_dev)))
+        a_const = upload_tma_descriptor(tmap_A)
+        b_const = upload_tma_descriptor(tmap_B)
 
         # Output D allocated as (BN, BM) col-major = BN-innermost. The
         # kernel writes (frag_row * BN + frag_col) byte offsets — N-innermost
         # in global memory, matching the per-lane v2.f32 stride.
         D = CUDACore.zeros(Float32, HOPPER_BM * HOPPER_BN)
         @cuda threads = HOPPER_THREADS feature_set = :arch _hopper_warpgroup_gemm_kernel!(
-            D, a_const, b_const)
+            D, a_const.ptr, b_const.ptr)
         CUDACore.synchronize()
 
         D_packed = reshape(Array(D), HOPPER_BN, HOPPER_BM)
@@ -220,7 +204,7 @@ if v"9.0" <= DEV_CAP < v"10.0"
             D_got[m, n] = D_packed[n, m]
         end
 
-        D_ref = _warpgroup_gemm_cpu_ref(A_f32, B_f32)
+        D_ref = bf16_gemm_ref(A_f32, B_f32)
         @test isapprox(D_got, D_ref; rtol = 1e-3, atol = 1e-3)
     end
 end
