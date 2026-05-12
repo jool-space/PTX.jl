@@ -30,7 +30,8 @@
 # `mov.b32 d, {x, y}` (which puts `x` in the LOW half), so kernels that
 # want "low first, high second" tuple-style ordering need to swap.
 # This helper hides the swap: caller passes `(lo, hi)` in natural order,
-# we feed PTX `(a=hi, b=lo)`. See `test/gpu/cvt_packed_order.jl` for the
-# pin-down test that locks in the spec convention across H100 + GB10.
+# we feed PTX `(a=hi, b=lo)`. Convention confirmed empirically on H100
+# and GB10 across all four packed-cvt-from-f32 ops (bf16x2, f16x2,
+# e4m3x2, e5m2x2) — uniform with the spec.
 @inline bf16x2_pack(lo::Float32, hi::Float32)::UInt32 =
     ptx"cvt.rn.bf16x2.f32"(hi, lo)
