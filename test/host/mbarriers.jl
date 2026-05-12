@@ -36,8 +36,14 @@ end
     @test pipeline_stage(P, Int32(5)) == Int32(1)
 end
 
-@testset "Pipeline rejects non-power-of-two N_STAGES" begin
-    # @generated phase function asserts ispow2(N). The error surfaces
-    # at compile time of the first phase call — exercise that here.
-    @test_throws AssertionError pipeline_phase(Pipeline{3}, Int32(0))
+@testset "pipeline_cursor arithmetic (N=3, non-power-of-two)" begin
+    # The pyptx headline GEMM config uses N_STAGES=3. Phase ticks once
+    # per full ring cycle: k ∈ [0,3) → phase 0; k ∈ [3,6) → phase 1; etc.
+    P = Pipeline{3}
+    for (k, exp_stage, exp_phase) in [(0, 0, 0), (1, 1, 0), (2, 2, 0),
+                                       (3, 0, 1), (4, 1, 1), (5, 2, 1),
+                                       (6, 0, 0), (7, 1, 0), (8, 2, 0)]
+        @test pipeline_stage(P, Int32(k)) == Int32(exp_stage)
+        @test pipeline_phase(P, Int32(k)) == UInt32(exp_phase)
+    end
 end

@@ -47,16 +47,18 @@ end
 # `pipeline_cursor(Pipeline{N_STAGES}, k_iter)` to get `(stage, phase)`.
 struct Pipeline{N_STAGES} end
 
+# Stage cursor: `k_iter mod N`. Compile-time-constant divisor → LLVM
+# strength-reduces to `& (N-1)` for power-of-two N and to a multiply-
+# and-shift otherwise.
 @inline pipeline_stage(::Type{Pipeline{N}}, k_iter::Integer) where N =
-    Int32(k_iter) & Int32(N - 1)
+    Int32(Int32(k_iter) % Int32(N))
 
-# log2(N) lifted to a compile-time shift via @generated. N must be a
-# power of two; the construction is the standard ring-buffer phase trick.
-@generated function pipeline_phase(::Type{Pipeline{N}}, k_iter::Integer) where N
-    @assert ispow2(N) "Pipeline N_STAGES must be a power of two (got $N)"
-    lg = trailing_zeros(N)
-    :(UInt32((Int32(k_iter) >> Int32($lg)) & Int32(1)))
-end
+# Phase parity: which round through this stage's mbarrier we're on.
+# `(k_iter ÷ N) & 1`. For pow2 N this folds to a single shift; for
+# non-pow2 N (e.g. N=3, the pyptx headline config) it lowers to a
+# divide-by-constant which LLVM strength-reduces.
+@inline pipeline_phase(::Type{Pipeline{N}}, k_iter::Integer) where N =
+    UInt32((Int32(k_iter) ÷ Int32(N)) & Int32(1))
 
 @inline pipeline_cursor(P::Type{Pipeline{N}}, k_iter::Integer) where N =
     (pipeline_stage(P, k_iter), pipeline_phase(P, k_iter))
