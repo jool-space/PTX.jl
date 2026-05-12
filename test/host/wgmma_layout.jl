@@ -1,4 +1,4 @@
-using PTX: GmmaLayout, pick_gmma_layout, layout_for_a, layout_for_b,
+using PTX: GmmaLayout, pick_gmma_layout, layout_for_a, layout_for_mn_major,
            swizzle_code, WgmmaSwizzle
 
 # Mirrors pyptx/tests/test_wgmma_layout.py. Same shapes, same expected
@@ -77,14 +77,14 @@ end
         elem_bytes=2, m_or_n=8, k=15, major=:MN)
 end
 
-@testset "layout_for_a / layout_for_b helpers" begin
+@testset "layout_for_a / layout_for_mn_major helpers" begin
     # bf16 m=64 k=16 — the canonical Hopper GEMM A tile.
     la = layout_for_a(dtype=:bf16, m=64, k=16)
     @test la.layout_type == WgmmaSwizzle.B32
     @test la.stride_byte_offset == 256
 
-    # bf16 k=16 n=8 — degenerate single-warpgroup B tile.
-    lb = layout_for_b(dtype=:bf16, k=16, n=8)
+    # bf16 k=16 n=8 — degenerate single-warpgroup B tile (MN-major variant).
+    lb = layout_for_mn_major(dtype=:bf16, k=16, n=8)
     @test lb.layout_type == WgmmaSwizzle.NONE
     @test lb.leading_byte_offset == 128
 
@@ -130,4 +130,25 @@ end
     @test (desc >> 32) & 0x3FFF == 16
     # leading field (bits 29:16) = (16 & 0x3FFFF) >> 4 = 1.
     @test (desc >> 16) & 0x3FFF == 1
+end
+
+@testset "step_desc advances start_addr by byte_offset/16" begin
+    # Build a real-shaped descriptor at smem_addr=0, swizzle=B32. The
+    # start_addr field lives in bits [13:0]. After step_desc(d, n * 16)
+    # the field should read `n` (mod the field width).
+    la = layout_for_a(dtype=:bf16, m=64, k=16)
+    base = PTX.wgmma_descriptor(
+        UInt32(0);
+        leading_byte_offset = la.leading_byte_offset,
+        stride_byte_offset  = la.stride_byte_offset,
+        swizzle             = swizzle_code(la))
+    @test base & 0x3FFF == 0                                # baseline start_addr
+    @test PTX.step_desc(base, 16)   & 0x3FFF == 1
+    @test PTX.step_desc(base, 32)   & 0x3FFF == 2
+    @test PTX.step_desc(base, 2048) & 0x3FFF == 128         # typical A-stage step
+    @test PTX.step_desc(base, 0)            == base         # identity
+
+    # Higher fields (leading/stride/swizzle) are unchanged — step_desc only
+    # touches the low 14 bits in practice.
+    @test PTX.step_desc(base, 2048) >> 16 == base >> 16
 end

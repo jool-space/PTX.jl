@@ -521,3 +521,110 @@ end
         @test occursin(asm, emit_ptx(kf, types; cap = v"9.0", feature_set = :arch))
     end
 end
+
+# --- Pipeline / Barrier abstractions --------------------------------------
+#
+# The verb-style API in src/pipeline.jl is a thin layer over the raw
+# `ptx"mbarrier.*"` wrappers. These tests are smoke kernels that
+# exercise the abstraction end-to-end (init + cursor + waits + arrives)
+# and confirm the emitted PTX matches the same sequence as the
+# hand-rolled callers used to produce.
+
+using PTX.MBarriers: BarrierArray, Pipeline, pipeline_cursor, pipeline_stage,
+                      pipeline_init!, barrier_init, barrier_arrive,
+                      barrier_arrive_expect_tx, barrier_wait,
+                      barrier_arrive_cluster
+
+function _pipe_smoke_cta!(C::CuDeviceVector{UInt64, 1}, K::Int32)
+    mbar_full  = CuStaticSharedArray(UInt64, 2)
+    mbar_empty = CuStaticSharedArray(UInt64, 2)
+    full  = BarrierArray{2}(pointer(mbar_full))
+    empty = BarrierArray{2}(pointer(mbar_empty))
+
+    tid = ptx"mov.u32"(sreg"tid.x")
+    if tid == UInt32(0)
+        pipeline_init!(full, empty, Val(1), Val(false))
+    end
+    ptx"bar.sync"(Val(0))
+
+    if tid == UInt32(0)
+        @inbounds for k_iter in Int32(0):(K - Int32(1))
+            stage, phase = pipeline_cursor(Pipeline{2}, k_iter)
+            barrier_wait(empty[stage], phase)
+            barrier_arrive_expect_tx(full[stage], 64)
+            barrier_arrive(empty[stage])
+            barrier_wait(full[stage], phase)
+        end
+        C[1] = UInt64(K)
+    end
+    return nothing
+end
+
+@testset "pipeline_init! + barrier verbs (CTA-scope)" begin
+    types = Tuple{CuDeviceVector{UInt64, 1}, Int32}
+    @test ptxas_compiles(_pipe_smoke_cta!, types;
+                         cap = v"9.0", feature_set = :arch)
+    ptx = emit_ptx(_pipe_smoke_cta!, types;
+                   cap = v"9.0", feature_set = :arch)
+    @test occursin("mbarrier.init.shared.b64",             ptx)
+    @test occursin("mbarrier.arrive.shared.b64",           ptx)
+    @test occursin("mbarrier.arrive.expect_tx.shared.b64", ptx)
+    @test occursin("mbarrier.test_wait.parity.shared.b64", ptx)
+    @test occursin("fence.proxy.async.shared::cta",        ptx)
+    @test !occursin("fence.mbarrier_init.release.cluster", ptx)
+end
+
+function _pipe_smoke_cluster!(C::CuDeviceVector{UInt64, 1})
+    mbar_full  = CuStaticSharedArray(UInt64, 2)
+    mbar_empty = CuStaticSharedArray(UInt64, 2)
+    full  = BarrierArray{2}(pointer(mbar_full))
+    empty = BarrierArray{2}(pointer(mbar_empty))
+
+    tid = ptx"mov.u32"(sreg"tid.x")
+    if tid == UInt32(0)
+        # 2 consumers × 2 clusters = 4 pre-arrives per stage.
+        pipeline_init!(full, empty, Val(4), Val(true))
+    end
+    ptx"bar.sync"(Val(0))
+
+    stage = pipeline_stage(Pipeline{2}, Int32(0))
+    if tid < UInt32(2)
+        barrier_arrive_cluster(empty[stage], tid)
+    end
+    C[1] = UInt64(stage)
+    return nothing
+end
+
+@testset "pipeline_init! + barrier verbs (cluster-scope)" begin
+    types = Tuple{CuDeviceVector{UInt64, 1}}
+    @test ptxas_compiles(_pipe_smoke_cluster!, types;
+                         cap = v"9.0", feature_set = :arch)
+    ptx = emit_ptx(_pipe_smoke_cluster!, types;
+                   cap = v"9.0", feature_set = :arch)
+    @test occursin("fence.mbarrier_init.release.cluster", ptx)
+    @test occursin("mapa.shared::cluster.u32",            ptx)
+    @test occursin("mbarrier.arrive.shared::cluster.b64", ptx)
+end
+
+# --- bf16x2_pack ergonomic helper -----------------------------------------
+#
+# `bf16x2_pack(lo, hi)` calls the fused `cvt.rn.bf16x2.f32` with swapped
+# args so the Julia caller passes (lo, hi) and PTX gets (a=hi, b=lo)
+# per its first-arg-upper convention (PTX 9.2 §9.7.9.21).
+
+using PTX: bf16x2_pack
+
+function _bf16x2_pack_compile!(out::CuDeviceVector{UInt32, 1},
+                                a::Float32, b::Float32)
+    @inbounds out[1] = bf16x2_pack(a, b)
+    return nothing
+end
+
+@testset "bf16x2_pack lowers to fused cvt.rn.bf16x2.f32" begin
+    types = Tuple{CuDeviceVector{UInt32, 1}, Float32, Float32}
+    @test ptxas_compiles(_bf16x2_pack_compile!, types;
+                         cap = v"8.0", feature_set = :baseline)
+    ptx = emit_ptx(_bf16x2_pack_compile!, types;
+                   cap = v"8.0", feature_set = :baseline)
+    @test occursin("cvt.rn.bf16x2.f32", ptx)
+end

@@ -279,6 +279,12 @@ const NONPURE_OPCODES = Set{Symbol}((
     # input. Without `~{memory}` LLVM hoists/constant-folds them as if pure
     # and silently loses the cross-lane semantics.
     :vote, :shfl, :match, :redux, :activemask, :membar,
+    # `barrier.cluster.{arrive,wait}` + the broader `barrier.sync`/`.arrive`/`.red`
+    # named-barrier family — all observable side effects. Without `~{memory}`
+    # LLVM is free to reorder `barrier.cluster.arrive` / `wait` past surrounding
+    # mbarrier / TMA ops, which silently breaks cluster-wide init visibility
+    # and hangs cluster kernels at the first cross-CTA mbarrier wait.
+    :barrier,
     # sm_90 cluster intrinsics: observable cross-CTA visibility.
     :mapa, :getctarank,
     # Inter-launch / kernel-control.

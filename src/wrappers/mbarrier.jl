@@ -10,6 +10,8 @@
 #   :state_addr_n    — `$0, [$1], $2`
 #   :pred_addr_state — `$0, [$1], $2`  (state input)
 #   :pred_addr_phase — `$0, [$1], $2`  (phase input)
+#   :sink_addr       — `_, [$0]`        (cluster-scope arrive: no state token)
+#   :sink_addr_n     — `_, [$0], $1`    (cluster-scope arrive with count/tx)
 function mbarrier_spec(op::Symbol, layout::Symbol; ss::Symbol = :shared)
     head = "mbarrier.$op.$ss.b64"
     if layout === :addr_only
@@ -36,6 +38,14 @@ function mbarrier_spec(op::Symbol, layout::Symbol; ss::Symbol = :shared)
         return (; asm = "$head \$0, [\$1], \$2;",
                   constraints = "=b,r,r,~{memory}",
                   rettype = Bool)
+    elseif layout === :sink_addr
+        return (; asm = "$head _, [\$0];",
+                  constraints = "r,~{memory}",
+                  rettype = Nothing)
+    elseif layout === :sink_addr_n
+        return (; asm = "$head _, [\$0], \$1;",
+                  constraints = "r,r,~{memory}",
+                  rettype = Nothing)
     else
         error("mbarrier_spec: unknown layout $layout")
     end
@@ -43,13 +53,13 @@ end
 
 @generated function (::Operation{:mbarrier, (:init, :shared, :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared},
-        count::UInt32) where T
+        count::Integer) where T
     spec = mbarrier_spec(:init, :addr_count)
     quote
         Base.@inline
         @asmcall($(spec.asm), $(spec.constraints), true, Nothing,
                  Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
-                 mbar, count)
+                 mbar, UInt32(count))
         nothing
     end
 end
@@ -81,39 +91,39 @@ end
 # Does NOT close the phase even if pending hits zero.
 @generated function (::Operation{:mbarrier, (:arrive, :noComplete, :shared, :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared},
-        count::UInt32) where T
+        count::Integer) where T
     spec = mbarrier_spec(Symbol("arrive.noComplete"), :state_addr_n)
     quote
         Base.@inline
         @asmcall($(spec.asm), $(spec.constraints), true,
                  UInt64, Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
-                 mbar, count)
+                 mbar, UInt32(count))
     end
 end
 
 # (sm_90+) Fused expect+arrive: records expected-tx-bytes and bumps pending by 1.
 @generated function (::Operation{:mbarrier, (:arrive, :expect_tx, :shared, :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared},
-        tx_count::UInt32) where T
+        tx_count::Integer) where T
     spec = mbarrier_spec(Symbol("arrive.expect_tx"), :state_addr_n)
     quote
         Base.@inline
         @asmcall($(spec.asm), $(spec.constraints), true,
                  UInt64, Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
-                 mbar, tx_count)
+                 mbar, UInt32(tx_count))
     end
 end
 
 # (sm_90+) Standalone form: no arrive, no state output.
 @generated function (::Operation{:mbarrier, (:expect_tx, :shared, :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared},
-        tx_count::UInt32) where T
+        tx_count::Integer) where T
     spec = mbarrier_spec(:expect_tx, :addr_count)
     quote
         Base.@inline
         @asmcall($(spec.asm), $(spec.constraints), true, Nothing,
                  Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
-                 mbar, tx_count)
+                 mbar, UInt32(tx_count))
         nothing
     end
 end
@@ -121,13 +131,13 @@ end
 # Token form: pass the UInt64 returned by a prior arrive on the same mbar.
 @generated function (::Operation{:mbarrier, (:test_wait, :shared, :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared},
-        state::UInt64) where T
+        state::Integer) where T
     spec = mbarrier_spec(:test_wait, :pred_addr_state)
     quote
         Base.@inline
         @asmcall($(spec.asm), $(spec.constraints), true,
                  Bool, Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt64},
-                 mbar, state)
+                 mbar, UInt64(state))
     end
 end
 
@@ -135,13 +145,13 @@ end
 # cycle has completed.
 @generated function (::Operation{:mbarrier, (:test_wait, :parity, :shared, :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared},
-        phase::UInt32) where T
+        phase::Integer) where T
     spec = mbarrier_spec(Symbol("test_wait.parity"), :pred_addr_phase)
     quote
         Base.@inline
         @asmcall($(spec.asm), $(spec.constraints), true,
                  Bool, Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
-                 mbar, phase)
+                 mbar, UInt32(phase))
     end
 end
 
@@ -149,24 +159,56 @@ end
 # of returning false immediately.
 @generated function (::Operation{:mbarrier, (:try_wait, :shared, :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared},
-        state::UInt64) where T
+        state::Integer) where T
     spec = mbarrier_spec(:try_wait, :pred_addr_state)
     quote
         Base.@inline
         @asmcall($(spec.asm), $(spec.constraints), true,
                  Bool, Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt64},
-                 mbar, state)
+                 mbar, UInt64(state))
     end
 end
 
 @generated function (::Operation{:mbarrier, (:try_wait, :parity, :shared, :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared},
-        phase::UInt32) where T
+        phase::Integer) where T
     spec = mbarrier_spec(Symbol("try_wait.parity"), :pred_addr_phase)
     quote
         Base.@inline
         @asmcall($(spec.asm), $(spec.constraints), true,
                  Bool, Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
-                 mbar, phase)
+                 mbar, UInt32(phase))
+    end
+end
+
+# --- Cluster-scope variants (sm_90+) ---------------------------------------
+# `mbarrier.arrive.shared::cluster.b64` requires a `_` (sink) destination
+# operand — the cluster-scope arrive doesn't return a state token (cross-CTA
+# state would be meaningless). Caller passes a cluster-mapped address from
+# `mapa.shared::cluster` when arriving on a remote CTA's mbarrier.
+
+@generated function (::Operation{:mbarrier, (:arrive, Symbol("shared::cluster"), :b64)})(
+        mbar::Core.LLVMPtr{T, AS.Shared}) where T
+    spec = mbarrier_spec(:arrive, :sink_addr; ss = Symbol("shared::cluster"))
+    quote
+        Base.@inline
+        @asmcall($(spec.asm), $(spec.constraints), true, Nothing,
+                 Tuple{Core.LLVMPtr{$T, AS.Shared}},
+                 mbar)
+        nothing
+    end
+end
+
+@generated function (::Operation{:mbarrier, (:arrive, :expect_tx, Symbol("shared::cluster"), :b64)})(
+        mbar::Core.LLVMPtr{T, AS.Shared},
+        tx_count::Integer) where T
+    spec = mbarrier_spec(Symbol("arrive.expect_tx"), :sink_addr_n;
+                         ss = Symbol("shared::cluster"))
+    quote
+        Base.@inline
+        @asmcall($(spec.asm), $(spec.constraints), true, Nothing,
+                 Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
+                 mbar, UInt32(tx_count))
+        nothing
     end
 end

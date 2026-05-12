@@ -28,6 +28,14 @@ end
 Base.sizeof(::CuTensorMap) = 128
 Base.sizeof(::Type{CuTensorMap}) = 128
 
+# Device-side kernel-arg type for a TMA descriptor: a 128-byte blob in
+# `.const` address space, passed as `Core.LLVMPtr{UInt8, AS.Const}`. Kernels
+# receive this after a host-side `reinterpret(...)` of the device-uploaded
+# `CuTensorMap` blob pointer. Centralizing the alias here means kernel
+# signatures read as `tmap::TMADescriptorPtr` instead of repeating the
+# full `Core.LLVMPtr{UInt8, AS.Const}` spelling at every call site.
+const TMADescriptorPtr = Core.LLVMPtr{UInt8, AS.Const}
+
 # --- Symbol → driver enum values --------------------------------------------
 # Mirrors CUtensorMap{DataType,Interleave,Swizzle,L2promotion,FloatOOBfill}
 # in CUDACore/lib/cudadrv/libcuda.jl. Keep values in sync with the driver.
