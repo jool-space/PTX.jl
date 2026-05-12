@@ -8,13 +8,16 @@
 #      into the cluster-mapped view of CTA-0's equivalent mbarrier.
 #   2. `mbarrier.arrive.shared::cluster.b64` — sink-operand arrive on the
 #      cluster-mapped address.
-#   3. `barrier.cluster.{arrive,wait}` (chain-default) — flush mbarrier
-#      init across the cluster before any CTA arrives.
+#   3. `cluster_arrive` / `cluster_wait` (CUDACore LLVM intrinsics, not
+#      `ptx"..."`) — flush mbarrier init across the cluster before any CTA
+#      arrives. The intrinsics carry `IntrConvergent`; routing through
+#      `@asmcall` would drop that attribute and the rendezvous deadlocks.
 #
 # No `# REQUIRES CC` banner: ptxas testset is host-only. Runtime testset
 # is gated to clusters-capable arch (Hopper + datacenter Blackwell).
 
 using PTX: AS
+using CUDACore: cluster_arrive, cluster_wait
 
 function _cluster_arrive_mapa_kernel!(out::CuDeviceVector{UInt32, 1})
     mbar = CuStaticSharedArray(UInt64, 1)
@@ -31,8 +34,8 @@ function _cluster_arrive_mapa_kernel!(out::CuDeviceVector{UInt32, 1})
     end
     # Cluster-wide barrier so the init becomes visible cluster-wide before
     # any CTA tries to arrive on a remote mbarrier.
-    ptx"barrier.cluster.arrive.aligned"()
-    ptx"barrier.cluster.wait.aligned"()
+    cluster_arrive()
+    cluster_wait()
 
     if tid == UInt32(0)
         # Map our local mbarrier address into CTA-0's view. When cta_rank=0

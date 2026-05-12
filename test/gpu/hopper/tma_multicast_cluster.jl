@@ -7,9 +7,13 @@
 #
 #   - `clustersize=(2, 1, 1)` — 2-CTA Hopper cluster
 #   - Each CTA inits a local mbarrier with `count=1`, then a cluster barrier
-#     pair (`barrier.cluster.arrive` / `barrier.cluster.wait` via PTX.jl's
-#     chain-default emitter) makes that init visible across the cluster
-#     before any CTA reads the mbarrier.
+#     pair (`barrier.cluster.arrive` / `barrier.cluster.wait` via CUDACore's
+#     `cluster_arrive` / `cluster_wait` LLVM intrinsics) makes that init
+#     visible across the cluster before any CTA reads the mbarrier. The
+#     intrinsics carry `IntrConvergent` which prevents LLVM from reordering
+#     them; routing through `ptx"..."` inline asm drops that attribute
+#     (`@asmcall` only sets `sideeffect` + memory clobber) and the
+#     rendezvous deadlocks at the first cross-CTA mbarrier wait.
 #   - Each CTA arms `arrive.expect_tx(128)` on its own mbarrier.
 #   - CTA rank 0 issues a single `cp.async.bulk.tensor.2d ... .multicast::cluster`
 #     load with `mask = 0b11`; the hardware broadcasts the 128-byte tile to
@@ -20,6 +24,7 @@
 #     fan-out is broken.
 
 using PTX: AS
+using CUDACore: cluster_arrive, cluster_wait
 
 function _tma_multicast_cluster_kernel!(out::CuDeviceVector{UInt16, 1},
                                         tma_src::Core.LLVMPtr{UInt8, AS.Const})
@@ -37,13 +42,8 @@ function _tma_multicast_cluster_kernel!(out::CuDeviceVector{UInt16, 1},
     end
     ptx"bar.sync"(Val(0))
 
-    # `.aligned` is required: without it each thread arrives independently
-    # rather than the warp arriving as a unit, and the rendezvous never
-    # completes (this is what `llvm.nvvm.barrier.cluster.{arrive,wait}` in
-    # CUDACore lowers to — the chain default emits the unaligned form, so
-    # the modifier must be supplied explicitly).
-    ptx"barrier.cluster.arrive.aligned"()
-    ptx"barrier.cluster.wait.aligned"()
+    cluster_arrive()
+    cluster_wait()
 
     if tid == UInt32(0)
         ptx"mbarrier.arrive.expect_tx.shared.b64"(mb_ptr, UInt32(128))
