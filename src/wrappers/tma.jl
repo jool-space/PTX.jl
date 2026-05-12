@@ -43,7 +43,9 @@ function tma_spec(ndim::Int, direction::Symbol, dst_ss::Symbol)
     end
 end
 
-_tma_coord_param(c::Symbol) = Expr(:(::), c, :Int32)
+# Coord param accepts any `Integer`; the wrapper converts to `Int32` at the
+# @asmcall boundary so callers don't have to spell out `Int32(0)` etc.
+_tma_coord_param(c::Symbol) = Expr(:(::), c, :Integer)
 
 function _tma_load_register(ndim::Int, dst_ss::Symbol)
     spec = tma_spec(ndim, :load, dst_ss)
@@ -52,6 +54,7 @@ function _tma_load_register(ndim::Int, dst_ss::Symbol)
     coords = [Symbol("c$i") for i in 1:ndim]
     coord_params = [_tma_coord_param(c) for c in coords]
     coord_types  = fill(:Int32, ndim)
+    coord_casts  = [:(Int32($c)) for c in coords]
 
     fdef = quote
         function (::Operation{:cp, $mods})(
@@ -64,7 +67,7 @@ function _tma_load_register(ndim::Int, dst_ss::Symbol)
                      Tuple{Core.LLVMPtr{T,AS.Shared}, Core.LLVMPtr{S,AS.Const},
                            $(coord_types...),
                            Core.LLVMPtr{U,AS.Shared}},
-                     dst, tmap, $(coords...), mbar)
+                     dst, tmap, $(coord_casts...), mbar)
             nothing
         end
     end
@@ -80,6 +83,7 @@ function _tma_load_multicast_register(ndim::Int)
     coords = [Symbol("c$i") for i in 1:ndim]
     coord_params = [_tma_coord_param(c) for c in coords]
     coord_types  = fill(:Int32, ndim)
+    coord_casts  = [:(Int32($c)) for c in coords]
 
     fdef = quote
         function (::Operation{:cp, $mods})(
@@ -87,13 +91,13 @@ function _tma_load_multicast_register(ndim::Int)
                 tmap::Core.LLVMPtr{S,AS.Const},
                 $(coord_params...),
                 mbar::Core.LLVMPtr{U,AS.Shared},
-                mask::UInt16) where {T,S,U}
+                mask::Integer) where {T,S,U}
             Base.@inline
             @asmcall($(spec.asm), $(spec.constraints), true, Nothing,
                      Tuple{Core.LLVMPtr{T,AS.Shared}, Core.LLVMPtr{S,AS.Const},
                            $(coord_types...),
                            Core.LLVMPtr{U,AS.Shared}, UInt16},
-                     dst, tmap, $(coords...), mbar, mask)
+                     dst, tmap, $(coord_casts...), mbar, UInt16(mask))
             nothing
         end
     end
@@ -107,6 +111,7 @@ function _tma_store_register(ndim::Int)
     coords = [Symbol("c$i") for i in 1:ndim]
     coord_params = [_tma_coord_param(c) for c in coords]
     coord_types  = fill(:Int32, ndim)
+    coord_casts  = [:(Int32($c)) for c in coords]
 
     fdef = quote
         function (::Operation{:cp, $mods})(
@@ -118,7 +123,7 @@ function _tma_store_register(ndim::Int)
                      Tuple{Core.LLVMPtr{S,AS.Const},
                            $(coord_types...),
                            Core.LLVMPtr{T,AS.Shared}},
-                     tmap, $(coords...), src)
+                     tmap, $(coord_casts...), src)
             nothing
         end
     end
