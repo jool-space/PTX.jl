@@ -74,7 +74,7 @@ function _pcc_gemm_kernel!(
         C::CuDeviceVector{Float32, 1},
         tma_A::PTX.TMADescriptorPtr,
         tma_B::PTX.TMADescriptorPtr,
-        K::Int32)
+        M::Int32, N::Int32, K::Int32)
 
     smem_A = CuStaticSharedArray(UInt16, PCC_N_STAGES * PCC_BM_CTA * PCC_BK)
     smem_B = CuStaticSharedArray(UInt16, PCC_N_STAGES * PCC_BK    * PCC_BN)
@@ -88,8 +88,20 @@ function _pcc_gemm_kernel!(
 
     tid      = ptx"mov.u32"(sreg"tid.x")
     cta_rank = ptx"mov.u32"(sreg"cluster_ctarank")
+    ctaid_x  = ptx"mov.u32"(sreg"ctaid.x")
+    ctaid_y  = ptx"mov.u32"(sreg"ctaid.y")
     wg_id    = tid >> UInt32(7)
     lane128  = tid & UInt32(127)
+
+    # Cluster tile indices. CLUSTERS=2 in the X dimension, so the grid
+    # has CLUSTERS × num_n_tiles blocks along X; each pair maps to one
+    # N tile. M tiles fold straight onto Y (one cluster per M tile).
+    tile_m_cluster = ctaid_y                           # 0-based cluster M-tile
+    tile_n         = ctaid_x >> UInt32(1)              # 0-based N-tile
+
+    # Global offsets for this CTA's A-slice and the shared B-tile.
+    m_off_global = tile_m_cluster * UInt32(PCC_BM_CLUSTER) + cta_rank * UInt32(PCC_BM_CTA)
+    n_off_global = tile_n * UInt32(PCC_BN)
 
     # ── Init mbarriers + pipeline warm-up (per CTA) ─────────────────
     if tid == UInt32(0)
@@ -138,16 +150,17 @@ function _pcc_gemm_kernel!(
                 a_stage_ptr = a_base_ptr + Int(stage) * PCC_A_STAGE_BYTES
                 b_stage_ptr = b_base_ptr + Int(stage) * PCC_B_STAGE_BYTES
                 k_off  = k_iter * Int32(PCC_BK)
-                m_off  = reinterpret(Int32, cta_rank * UInt32(PCC_BM_CTA))
 
-                # Local A load — each CTA fetches its M-slice.
+                # Local A load — each CTA fetches its M-slice of this
+                # cluster's (M, K) tile.
                 ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
-                    a_stage_ptr, tma_A, k_off, m_off, full_s)
+                    a_stage_ptr, tma_A, k_off, reinterpret(Int32, m_off_global), full_s)
 
                 # Multicast B load — CTA 0 issues, both CTAs receive.
                 if cta_rank == UInt32(0)
                     ptx"cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
-                        b_stage_ptr, tma_B, k_off, Int32(0), full_s, UInt16(0x3))
+                        b_stage_ptr, tma_B, k_off,
+                        reinterpret(Int32, n_off_global), full_s, UInt16(0x3))
                 end
             end
         end
@@ -202,23 +215,25 @@ function _pcc_gemm_kernel!(
         end
 
         # ── Epilogue ─────────────────────────────────────────────────
-        # Each CTA writes its 128×16 f32 output. Global C is laid out as
-        # (BN, BM_CLUSTER) col-major → BN-innermost. Per-CTA base offset
-        # in C: cta_rank * BM_CTA rows × BN cols × 4 bytes/f32. Within
-        # a CTA, consumer_id selects the upper or lower half of the M-slice.
+        # C is (N, M) col-major (N-innermost). Linear offset for
+        # (global_m, global_n) = global_m * N + global_n.
+        # Per-consumer base global row: cluster m-base + per-CTA m-base
+        # + per-consumer m-base (consumer 0 → first B_WG_M rows of the
+        # CTA, consumer 1 → next B_WG_M rows).
         wid      = lane128 >> UInt32(5)
         lane     = lane128 & UInt32(31)
         frag_row = (wid << UInt32(4)) + (lane >> UInt32(2))
         frag_col = (lane & UInt32(3)) << UInt32(1)
 
-        cta_base_off = cta_rank * UInt32(PCC_BM_CTA) * UInt32(PCC_BN) * UInt32(4)
-        consumer_off = consumer_id * UInt32(PCC_B_WG_M) * UInt32(PCC_BN) * UInt32(4)
-        c_base       = pointer(C) + Int(cta_base_off) + Int(consumer_off)
+        global_m_base = m_off_global + consumer_id * UInt32(PCC_B_WG_M)
+        N_u32         = reinterpret(UInt32, N)
+        c_base        = pointer(C) +
+            Int(global_m_base * N_u32 + n_off_global) * sizeof(Float32)
 
-        off_a1 = (frag_row * UInt32(PCC_BN) + frag_col) * UInt32(4)
-        off_b1 = ((frag_row + UInt32(8)) * UInt32(PCC_BN) + frag_col) * UInt32(4)
-        off_a2 = (frag_row * UInt32(PCC_BN) + frag_col + UInt32(8)) * UInt32(4)
-        off_b2 = ((frag_row + UInt32(8)) * UInt32(PCC_BN) + frag_col + UInt32(8)) * UInt32(4)
+        off_a1 = (frag_row * N_u32 + frag_col) * UInt32(4)
+        off_b1 = ((frag_row + UInt32(8)) * N_u32 + frag_col) * UInt32(4)
+        off_a2 = (frag_row * N_u32 + frag_col + UInt32(8)) * UInt32(4)
+        off_b2 = ((frag_row + UInt32(8)) * N_u32 + frag_col + UInt32(8)) * UInt32(4)
         ptx"st.global.v2.f32"(c_base + Int(off_a1), (d[1], d[2]))
         ptx"st.global.v2.f32"(c_base + Int(off_b1), (d[3], d[4]))
         ptx"st.global.v2.f32"(c_base + Int(off_a2), (d[5], d[6]))
@@ -232,7 +247,8 @@ end
 
 @testset "cluster GEMM (producer + 2 consumers + multicast B) compiles at sm_90a" begin
     types = Tuple{CuDeviceVector{Float32, 1},
-                  PTX.TMADescriptorPtr, PTX.TMADescriptorPtr, Int32}
+                  PTX.TMADescriptorPtr, PTX.TMADescriptorPtr,
+                  Int32, Int32, Int32}
     @test ptxas_compiles(_pcc_gemm_kernel!, types;
                          cap = v"9.0", feature_set = :arch)
 
@@ -246,47 +262,67 @@ end
 # ── Runtime — clusters-capable arch only ───────────────────────────────
 
 if v"9.0" <= DEV_CAP < v"12.0"
-    @testset "cluster GEMM (BM=256, BN=16, K=64) random bf16" begin
-        rng = MersenneTwister(0xc1d5)
-        K_test = 64
-        M_total = PCC_BM_CLUSTER       # 256 = 2 CTAs × 128 rows
-        A_f32 = randn(rng, Float32, M_total, K_test) .* 0.1f0
-        B_f32 = randn(rng, Float32, K_test, PCC_BN)  .* 0.1f0
+    # Helper: run the kernel for a given (M, N, K) shape and compare
+    # against the bf16-rounded reference. M must be a multiple of
+    # BM_CLUSTER, N a multiple of BN, K a multiple of BK.
+    function _run_pcc_case(rng, M_total, N_total, K_test)
+        @assert M_total % PCC_BM_CLUSTER == 0
+        @assert N_total % PCC_BN         == 0
+        @assert K_test  % PCC_BK         == 0
 
-        # K-fast packing: A as (K, M_total), B as (K, BN), both col-major.
+        A_f32 = randn(rng, Float32, M_total, K_test) .* 0.1f0
+        B_f32 = randn(rng, Float32, K_test, N_total) .* 0.1f0
+
         A_packed = Array{UInt16}(undef, K_test, M_total)
-        B_packed = Array{UInt16}(undef, K_test, PCC_BN)
+        B_packed = Array{UInt16}(undef, K_test, N_total)
         for m in 1:M_total, k in 1:K_test
             A_packed[k, m] = bf16_bits(A_f32[m, k])
         end
-        for k in 1:K_test, n in 1:PCC_BN
+        for k in 1:K_test, n in 1:N_total
             B_packed[k, n] = bf16_bits(B_f32[k, n])
         end
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)
 
-        # TMA descriptors. A covers the full M_total; per-CTA tile is
-        # (BM_CTA, BK) at offset (k_off, cta_rank × BM_CTA).
+        # TMA covers the full M/N range; per-tile coord-offset selects the slice.
         tmap_A = tensor_map_tile_2d(:bf16, pointer(A_d),
             M_total, K_test, PCC_BM_CTA, PCC_BK; swizzle = :B32)
         tmap_B = tensor_map_tile_2d(:bf16, pointer(B_d),
-            PCC_BN, K_test, PCC_BN, PCC_BK; swizzle = :B32)
+            N_total, K_test, PCC_BN, PCC_BK; swizzle = :B32)
         A = upload_tma_descriptor(tmap_A)
         B = upload_tma_descriptor(tmap_B)
 
-        C_d = CUDACore.zeros(Float32, M_total * PCC_BN)
-        @cuda blocks = (2, 1, 1) threads = PCC_THREADS clustersize = (2, 1, 1) feature_set = :arch _pcc_gemm_kernel!(
-            C_d, A.ptr, B.ptr, Int32(K_test))
+        # Grid: (CLUSTERS × num_n_tiles, num_m_clusters, 1). Each cluster
+        # handles one (tile_m_cluster, tile_n).
+        num_n_tiles    = N_total ÷ PCC_BN
+        num_m_clusters = M_total ÷ PCC_BM_CLUSTER
+        grid = (PCC_CLUSTERS * num_n_tiles, num_m_clusters, 1)
+
+        C_d = CUDACore.zeros(Float32, M_total * N_total)
+        @cuda blocks = grid threads = PCC_THREADS clustersize = (PCC_CLUSTERS, 1, 1) feature_set = :arch _pcc_gemm_kernel!(
+            C_d, A.ptr, B.ptr, Int32(M_total), Int32(N_total), Int32(K_test))
         CUDACore.synchronize()
 
-        # Output is (BN, BM_CLUSTER) BN-fast.
-        C_packed = reshape(Array(C_d), PCC_BN, M_total)
-        C_got    = Array{Float32}(undef, M_total, PCC_BN)
-        for m in 1:M_total, n in 1:PCC_BN
+        # C_d is N-innermost: (N_total, M_total) Julia col-major.
+        C_packed = reshape(Array(C_d), N_total, M_total)
+        C_got    = Array{Float32}(undef, M_total, N_total)
+        for m in 1:M_total, n in 1:N_total
             C_got[m, n] = C_packed[n, m]
         end
-
         C_ref = bf16_gemm_ref(A_f32, B_f32)
+        return C_got, C_ref
+    end
+
+    @testset "cluster GEMM (single cluster-tile: M=256, N=16, K=64)" begin
+        # 1×1 grid of cluster-tiles — same shape as the pre-multi-tile version.
+        C_got, C_ref = _run_pcc_case(MersenneTwister(0xc1d5), PCC_BM_CLUSTER, PCC_BN, 64)
+        @test isapprox(C_got, C_ref; rtol = 1e-3, atol = 1e-3)
+    end
+
+    @testset "cluster GEMM (multi-tile: M=512, N=32, K=64) random bf16" begin
+        # 2 M-clusters × 2 N-tiles = 4 cluster-tiles in the grid. Validates
+        # the per-cluster offset math (TMA coords + global C-write address).
+        C_got, C_ref = _run_pcc_case(MersenneTwister(0xd1d5), 512, 32, 64)
         @test isapprox(C_got, C_ref; rtol = 1e-3, atol = 1e-3)
     end
 end
