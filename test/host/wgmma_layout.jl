@@ -1,4 +1,4 @@
-using PTX: GmmaLayout, pick_gmma_layout, layout_for_a, layout_for_b,
+using PTX: GmmaLayout, pick_gmma_layout, layout_for_a, layout_for_mn_major,
            swizzle_code, WgmmaSwizzle
 
 # Mirrors pyptx/tests/test_wgmma_layout.py. Same shapes, same expected
@@ -77,14 +77,14 @@ end
         elem_bytes=2, m_or_n=8, k=15, major=:MN)
 end
 
-@testset "layout_for_a / layout_for_b helpers" begin
+@testset "layout_for_a / layout_for_mn_major helpers" begin
     # bf16 m=64 k=16 — the canonical Hopper GEMM A tile.
     la = layout_for_a(dtype=:bf16, m=64, k=16)
     @test la.layout_type == WgmmaSwizzle.B32
     @test la.stride_byte_offset == 256
 
-    # bf16 k=16 n=8 — degenerate single-warpgroup B tile.
-    lb = layout_for_b(dtype=:bf16, k=16, n=8)
+    # bf16 k=16 n=8 — degenerate single-warpgroup B tile (MN-major variant).
+    lb = layout_for_mn_major(dtype=:bf16, k=16, n=8)
     @test lb.layout_type == WgmmaSwizzle.NONE
     @test lb.leading_byte_offset == 128
 

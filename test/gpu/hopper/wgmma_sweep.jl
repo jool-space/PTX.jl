@@ -9,7 +9,7 @@
 # build with the canonical layout picked by `wgmma_layout`, so the two
 # helper layers compose end-to-end here.
 
-using PTX: wgmma_descriptor, layout_for_a, layout_for_b, WgmmaSwizzle
+using PTX: wgmma_descriptor, layout_for_a, layout_for_mn_major, WgmmaSwizzle
 
 # (acc, ab, ab, N, K, has_trans, d_jltype, d_per_lane)
 const WGMMA_CASES = [
@@ -109,8 +109,8 @@ end
     # leading field (bits 29:16) = 16 >> 4 = 1.
     @test (desc >> 16) & 0x3FFF == 1
 
-    # B-side (degenerate N=8): INTERLEAVE, LBO = 128, SBO trivial.
-    lb = layout_for_b(dtype = :bf16, k = 16, n = 8)
+    # B-side (degenerate N=8, MN-major): INTERLEAVE, LBO = 128, SBO trivial.
+    lb = layout_for_mn_major(dtype = :bf16, k = 16, n = 8)
     @test lb.layout_type == WgmmaSwizzle.NONE
     @test lb.leading_byte_offset == 128
 

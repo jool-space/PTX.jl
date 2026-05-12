@@ -82,7 +82,7 @@ function _hopper_warpgroup_gemm_kernel!(
     #    trans_b=0 default reads B correctly as col-major / K-fast); both
     #    use the K-major canonical formula (`layout_for_a`). Row width =
     #    16 bf16 = 32 B → B32 swizzle, LBO=16, SBO=256.
-    #    Earlier code used `layout_for_b` (MN-major / N-fast canonical) for
+    #    Earlier code used `layout_for_mn_major` (MN-major / N-fast canonical) for
     #    B, which mismatches the wrapper's baked trans_b=0 and would silently
     #    miscompute on non-uniform inputs. See grouped_gemm.jl for the same
     #    fix applied at port-time. The wgmma_descriptor builder doesn't

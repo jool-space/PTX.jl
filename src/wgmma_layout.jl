@@ -177,15 +177,25 @@ end
 """
     layout_for_a(; dtype, m, k) -> GmmaLayout
 
-Canonical GMMA layout for operand A (row-major MxK, K-major).
+K-major GMMA layout — natural for row-major A (`MxK` with K-fast),
+and also the right pick for operand B when the kernel lays B as
+row-major `KxN` in SMEM with K-fast (the common case across the
+Hopper kernels in this repo). Use this for either operand whose
+K-dimension is fastest-varying in SMEM.
 """
 layout_for_a(; dtype, m::Integer, k::Integer) =
     pick_gmma_layout(elem_bytes=_elem_bytes(dtype), m_or_n=m, k=k, major=:K)
 
 """
-    layout_for_b(; dtype, k, n) -> GmmaLayout
+    layout_for_mn_major(; dtype, k, n) -> GmmaLayout
 
-Canonical GMMA layout for operand B (row-major KxN, MN-major).
+MN-major GMMA layout — operand B laid as col-major `KxN` in SMEM
+with N-fast (i.e. the N-or-M dimension is fastest-varying). Required
+only when the SMEM tile genuinely needs MN-fastness and a transposed
+wgmma `trans_b=1` flag is used. Most Hopper kernels in this repo
+use `layout_for_a` for both operands and let wgmma run with `trans_b=0`
+against a K-fast B tile; reach for `layout_for_mn_major` only when
+the data layout forces the issue.
 """
-layout_for_b(; dtype, k::Integer, n::Integer) =
+layout_for_mn_major(; dtype, k::Integer, n::Integer) =
     pick_gmma_layout(elem_bytes=_elem_bytes(dtype), m_or_n=n, k=k, major=:MN)

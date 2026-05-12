@@ -83,7 +83,7 @@ The four canonical GMMA layout families (`INTERLEAVE` / `B32` / `B64`
 ```@docs
 PTX.pick_gmma_layout
 PTX.layout_for_a
-PTX.layout_for_b
+PTX.layout_for_mn_major
 ```
 
 ## Host-side TMA descriptor encoder
