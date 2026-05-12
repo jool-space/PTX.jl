@@ -285,10 +285,13 @@ if v"9.0" <= DEV_CAP < v"12.0"
             M_total, K_test, PCT_BM_CTA, PCT_BK; swizzle = :B32)
         tmap_B = tensor_map_tile_2d(:bf16, pointer(B_d),
             N_total, K_test, PCT_BN, PCT_BK; swizzle = :B32)
-        # TMA store descriptor: linear (no swizzle) since our consumer
-        # writes to SMEM C-tile linearly.
+        # TMA store descriptor. C_d is N-innermost (col-major `(N, M)`
+        # in Julia), so N is the `cols` (innermost) axis of the
+        # descriptor and M is `rows`. The tile is (box_rows=B_WG_M
+        # M-rows, box_cols=BN N-cols) — same orientation. Linear (no
+        # swizzle) since our consumer writes to SMEM C-tile linearly.
         tmap_C = tensor_map_tile_2d(:bf16, pointer(C_d),
-            N_total, M_total, PCT_BN, PCT_B_WG_M; swizzle = :NONE)
+            M_total, N_total, PCT_B_WG_M, PCT_BN; swizzle = :NONE)
         A = upload_tma_descriptor(tmap_A)
         B = upload_tma_descriptor(tmap_B)
         Cd = upload_tma_descriptor(tmap_C)
