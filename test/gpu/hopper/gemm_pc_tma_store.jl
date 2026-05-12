@@ -25,7 +25,7 @@
 # no swizzle math at the consumer side).
 
 using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
-           bf16x2_pack
+           bf16x2_pack, step_desc
 using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
                      barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
 using CUDACore
@@ -49,8 +49,6 @@ const PCT_LOAD_BYTES = PCT_A_PER_CTA + PCT_B_BYTES
 const PCT_A_STAGE_BYTES = PCT_A_PER_CTA
 const PCT_B_STAGE_BYTES = PCT_B_BYTES
 
-const PCT_A_DESC_STEP = UInt64(PCT_A_STAGE_BYTES >> 4)
-const PCT_B_DESC_STEP = UInt64(PCT_B_STAGE_BYTES >> 4)
 const PCT_A_CONSUMER_BYTES = PCT_B_WG_M * PCT_BK * 2
 
 const PCT_EMPTY_COUNT = PCT_NUM_CONSUMERS * PCT_CLUSTERS
@@ -150,8 +148,8 @@ function _pct_gemm_kernel!(
             stage, phase = pipeline_cursor(Pipeline{PCT_N_STAGES}, k_iter)
             barrier_wait(full[stage], phase)
 
-            a_desc = a_desc_base + UInt64(stage) * PCT_A_DESC_STEP
-            b_desc = b_desc_base + UInt64(stage) * PCT_B_DESC_STEP
+            a_desc = step_desc(a_desc_base, Int(stage) * PCT_A_STAGE_BYTES)
+            b_desc = step_desc(b_desc_base, Int(stage) * PCT_B_STAGE_BYTES)
             ptx"fence.proxy.async.shared::cta"()
             ptx"wgmma.fence.sync.aligned"()
             d = ptx"wgmma.mma_async.sync.aligned.m64n16k16.f32.bf16.bf16"(

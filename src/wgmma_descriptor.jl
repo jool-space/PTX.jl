@@ -42,3 +42,17 @@ end
     sw   = (UInt64(swizzle)     & 0x3) << 62
     addr | ld | sd | bo | sw
 end
+
+# Advance a wgmma SMEM-operand descriptor's start_addr by `byte_offset`
+# bytes. The descriptor's low 14 bits encode `(smem_addr & 0x3FFFF) >> 4`,
+# so adding `byte_offset >> 4` to the descriptor's UInt64 representation
+# moves its base by the equivalent byte distance — as long as the carry
+# stays within the 14-bit start_addr field (true for any in-CTA SMEM
+# offset on H100). Used to walk a SMEM ring buffer (per-stage offset)
+# or to step within a tile (per-wgmma-K offset on the inner loop).
+#
+# `byte_offset` must be a multiple of 16 — the operand encoding has no
+# representation for sub-16-byte offsets. Caller guarantees this; the
+# helper truncates silently if violated.
+@inline step_desc(desc::UInt64, byte_offset::Integer) =
+    desc + UInt64(byte_offset >> 4)

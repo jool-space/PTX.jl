@@ -42,7 +42,8 @@
 #
 # Runtime gated to clusters-capable arch (`[9.0, 12.0)`).
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
+           step_desc
 using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
                      barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
 using CUDACore
@@ -66,8 +67,6 @@ const PCC_LOAD_BYTES = PCC_A_PER_CTA + PCC_B_BYTES        # 4608
 const PCC_A_STAGE_BYTES = PCC_A_PER_CTA
 const PCC_B_STAGE_BYTES = PCC_B_BYTES
 
-const PCC_A_DESC_STEP = UInt64(PCC_A_STAGE_BYTES >> 4)
-const PCC_B_DESC_STEP = UInt64(PCC_B_STAGE_BYTES >> 4)
 const PCC_A_CONSUMER_BYTES = PCC_B_WG_M * PCC_BK * 2      # 2048
 
 const PCC_EMPTY_COUNT = PCC_NUM_CONSUMERS * PCC_CLUSTERS  # 4
@@ -179,8 +178,8 @@ function _pcc_gemm_kernel!(
             stage, phase = pipeline_cursor(Pipeline{PCC_N_STAGES}, k_iter)
             barrier_wait(full[stage], phase)
 
-            a_desc = a_desc_base + UInt64(stage) * PCC_A_DESC_STEP
-            b_desc = b_desc_base + UInt64(stage) * PCC_B_DESC_STEP
+            a_desc = step_desc(a_desc_base, Int(stage) * PCC_A_STAGE_BYTES)
+            b_desc = step_desc(b_desc_base, Int(stage) * PCC_B_STAGE_BYTES)
             ptx"fence.proxy.async.shared::cta"()
             ptx"wgmma.fence.sync.aligned"()
             d = ptx"wgmma.mma_async.sync.aligned.m64n16k16.f32.bf16.bf16"(

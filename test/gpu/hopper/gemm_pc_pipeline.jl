@@ -32,7 +32,8 @@
 # having started. After this, the loop bodies handle phase tracking
 # unaided.
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
+           step_desc
 using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
                      barrier_wait, barrier_arrive, barrier_arrive_expect_tx
 using CUDACore
@@ -48,10 +49,6 @@ const PC_LOAD_BYTES = PC_BM * PC_BK * 2 + PC_BK * PC_BN * 2
 # Per-stage SMEM bytes for A and B.
 const PC_A_STAGE_BYTES = PC_BM * PC_BK * 2              # 2048
 const PC_B_STAGE_BYTES = PC_BK * PC_BN * 2              # 256
-
-# Descriptor stage-step in u128 units (= bytes >> 4).
-const PC_A_DESC_STEP = UInt64(PC_A_STAGE_BYTES >> 4)    # 128
-const PC_B_DESC_STEP = UInt64(PC_B_STAGE_BYTES >> 4)    # 16
 
 function _pc_gemm_kernel!(
         C::CuDeviceVector{Float32, 1},
@@ -144,11 +141,10 @@ function _pc_gemm_kernel!(
             # Wait for producer's TMA to land for this stage.
             barrier_wait(full[stage], phase)
 
-            # wgmma. The SMEM stage offset folds into the descriptor low
-            # bits via UInt64 addition (descriptor SMEM address lives in
-            # bits [13:0] post >>4, so +N adds N×16 bytes).
-            a_desc = a_desc_base + UInt64(stage) * PC_A_DESC_STEP
-            b_desc = b_desc_base + UInt64(stage) * PC_B_DESC_STEP
+            # Per-stage SMEM offset on the wgmma operand descriptors:
+            # step_desc handles the bytes → 16-byte-unit conversion.
+            a_desc = step_desc(a_desc_base, Int(stage) * PC_A_STAGE_BYTES)
+            b_desc = step_desc(b_desc_base, Int(stage) * PC_B_STAGE_BYTES)
             ptx"fence.proxy.async.shared::cta"()
             ptx"wgmma.fence.sync.aligned"()
             d = ptx"wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16"(

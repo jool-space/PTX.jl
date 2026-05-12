@@ -24,7 +24,8 @@
 # in gemm_warpgroup.jl / gemm_pc_pipeline.jl. Per consumer the writes
 # land at consumer-base offset (consumer_id × B_WG_M rows).
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
+           step_desc
 using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
                      barrier_wait, barrier_arrive, barrier_arrive_expect_tx
 using CUDACore
@@ -42,9 +43,6 @@ const PCS_LOAD_BYTES = PCS_BM * PCS_BK * 2 + PCS_BK * PCS_BN * 2
 
 const PCS_A_STAGE_BYTES = PCS_BM * PCS_BK * 2     # 4096
 const PCS_B_STAGE_BYTES = PCS_BK * PCS_BN * 2     # 512
-
-const PCS_A_DESC_STEP = UInt64(PCS_A_STAGE_BYTES >> 4)   # 256
-const PCS_B_DESC_STEP = UInt64(PCS_B_STAGE_BYTES >> 4)   # 32
 
 # Per-consumer A-offset within one stage's BM×BK A tile (in bytes).
 const PCS_A_CONSUMER_BYTES = PCS_B_WG_M * PCS_BK * 2     # 2048
@@ -131,8 +129,8 @@ function _pcs_gemm_kernel!(
             stage, phase = pipeline_cursor(Pipeline{PCS_N_STAGES}, k_iter)
             barrier_wait(full[stage], phase)
 
-            a_desc = a_desc_base + UInt64(stage) * PCS_A_DESC_STEP
-            b_desc = b_desc_base + UInt64(stage) * PCS_B_DESC_STEP
+            a_desc = step_desc(a_desc_base, Int(stage) * PCS_A_STAGE_BYTES)
+            b_desc = step_desc(b_desc_base, Int(stage) * PCS_B_STAGE_BYTES)
             ptx"fence.proxy.async.shared::cta"()
             ptx"wgmma.fence.sync.aligned"()
             d = ptx"wgmma.mma_async.sync.aligned.m64n16k16.f32.bf16.bf16"(

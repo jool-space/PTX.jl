@@ -28,7 +28,7 @@
 # sees the sentinel `0xffffffff` (== -1 cast to u32).
 
 using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
-           bf16x2_pack
+           bf16x2_pack, step_desc
 using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
                      barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
 using CUDACore
@@ -57,11 +57,7 @@ const GHH_A_STAGE_BYTES = GHH_BM_CTA * GHH_BK_TILE * 2      # 16384
 const GHH_B_STAGE_BYTES = GHH_BK_TILE * GHH_BN * 2          # 16384
 const GHH_C_BYTES       = GHH_BM_CTA * GHH_BN * 2           # 32768
 const GHH_LOAD_BYTES    = GHH_A_STAGE_BYTES + GHH_B_STAGE_BYTES  # 32768 per CTA
-
-# Per-stage delta for descriptor SMEM addresses (u128 units = bytes >> 4)
-const GHH_A_DESC_STEP = UInt64(GHH_A_STAGE_BYTES >> 4)      # 1024
-const GHH_B_DESC_STEP = UInt64(GHH_B_STAGE_BYTES >> 4)      # 1024
-const GHH_KSTRIDE_U128 = UInt64((GHH_WGMMA_K * 2) >> 4)     # 2 (16 K-elem × 2 B / 16)
+const GHH_K_STEP_BYTES  = GHH_WGMMA_K * 2                   # 32 (16 K-elem × 2 B/elem)
 
 # Per-consumer A-offset within stage's A tile
 const GHH_A_CONSUMER_BYTES = GHH_B_WG_M * GHH_BK_TILE * 2   # 8192
@@ -269,17 +265,18 @@ function _ghh_gemm_kernel!(
                 stage, phase = pipeline_cursor(Pipeline{GHH_N_STAGES}, global_k_iter)
                 barrier_wait(full[stage], phase)
 
-                a_desc_stage = a_desc_base + UInt64(stage) * GHH_A_DESC_STEP
-                b_desc_stage = b_desc_base + UInt64(stage) * GHH_B_DESC_STEP
+                a_desc_stage = step_desc(a_desc_base, Int(stage) * GHH_A_STAGE_BYTES)
+                b_desc_stage = step_desc(b_desc_base, Int(stage) * GHH_B_STAGE_BYTES)
                 ptx"fence.proxy.async.shared::cta"()
                 ptx"wgmma.fence.sync.aligned"()
                 # Tile-K inner loop: WGMMA_KITERS wgmma sub-calls per K-tile.
-                # Each sub-call advances the descriptor SMEM address by
-                # WGMMA_K × elem_bytes / 16 = 2 u128 units.
+                # Each sub-call advances the descriptor's SMEM address by
+                # WGMMA_K × elem_bytes = 32 bytes.
                 @inbounds for kk in 0:(GHH_WGMMA_KITERS - 1)
-                    offset = UInt64(kk) * GHH_KSTRIDE_U128
+                    k_off = kk * GHH_K_STEP_BYTES
                     d = ptx"wgmma.mma_async.sync.aligned.m64n128k16.f32.bf16.bf16"(
-                        d, a_desc_stage + offset, b_desc_stage + offset, true)
+                        d, step_desc(a_desc_stage, k_off),
+                           step_desc(b_desc_stage, k_off), true)
                 end
                 ptx"wgmma.commit_group.sync.aligned"()
                 ptx"wgmma.wait_group.sync.aligned"(Val(0))
