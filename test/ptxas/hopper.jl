@@ -605,3 +605,26 @@ end
     @test occursin("mapa.shared::cluster.u32",            ptx)
     @test occursin("mbarrier.arrive.shared::cluster.b64", ptx)
 end
+
+# --- bf16x2_pack ergonomic helper -----------------------------------------
+#
+# `bf16x2_pack(lo, hi)` calls the fused `cvt.rn.bf16x2.f32` with swapped
+# args so the Julia caller passes (lo, hi) and PTX gets (a=hi, b=lo)
+# per its first-arg-upper convention (PTX 9.2 §9.7.9.21).
+
+using PTX: bf16x2_pack
+
+function _bf16x2_pack_compile!(out::CuDeviceVector{UInt32, 1},
+                                a::Float32, b::Float32)
+    @inbounds out[1] = bf16x2_pack(a, b)
+    return nothing
+end
+
+@testset "bf16x2_pack lowers to fused cvt.rn.bf16x2.f32" begin
+    types = Tuple{CuDeviceVector{UInt32, 1}, Float32, Float32}
+    @test ptxas_compiles(_bf16x2_pack_compile!, types;
+                         cap = v"8.0", feature_set = :baseline)
+    ptx = emit_ptx(_bf16x2_pack_compile!, types;
+                   cap = v"8.0", feature_set = :baseline)
+    @test occursin("cvt.rn.bf16x2.f32", ptx)
+end

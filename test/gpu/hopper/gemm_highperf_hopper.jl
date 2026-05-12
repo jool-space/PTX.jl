@@ -27,7 +27,8 @@
 # iterates `tile_iter = 0, 1, ...` reading the SMEM segment until it
 # sees the sentinel `0xffffffff` (== -1 cast to u32).
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
+           bf16x2_pack
 using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
                      barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
 using CUDACore
@@ -309,12 +310,8 @@ function _ghh_gemm_kernel!(
                 fidx_b1 = 4 * (g - 1) + 3                       # d[4g-1]
                 fidx_b2 = 4 * (g - 1) + 4                       # d[4g]
                 col_g   = col_a + UInt32(8 * (g - 1))           # col base for this group
-                bf_a1   = ptx"cvt.rn.bf16.f32"(d[fidx_a1])
-                bf_a2   = ptx"cvt.rn.bf16.f32"(d[fidx_a2])
-                bf_b1   = ptx"cvt.rn.bf16.f32"(d[fidx_b1])
-                bf_b2   = ptx"cvt.rn.bf16.f32"(d[fidx_b2])
-                pack_a  = ptx"mov.b32"((bf_a1, bf_a2))
-                pack_b  = ptx"mov.b32"((bf_b1, bf_b2))
+                pack_a  = bf16x2_pack(d[fidx_a1], d[fidx_a2])
+                pack_b  = bf16x2_pack(d[fidx_b1], d[fidx_b2])
                 off_a   = (row_a * UInt32(GHH_BN) + col_g) * UInt32(2)
                 off_b   = (row_b * UInt32(GHH_BN) + col_g) * UInt32(2)
                 ptx"st.shared.b32"(c_consumer_ptr + Int(off_a), pack_a)
@@ -366,9 +363,9 @@ end
     @test occursin("setmaxnreg.inc.sync.aligned.u32", ptx)
     @test occursin("setmaxnreg.dec.sync.aligned.u32", ptx)
     @test occursin("ld.shared.u32",                  ptx)
-    # 16 col-groups × 2 packs = 32 mov.b32 + 64 cvt.rn.bf16.f32 per lane.
-    n_mov = length(collect(eachmatch(r"mov\.b32 [^,]+, \{", ptx)))
-    @test n_mov >= 32
+    # 16 col-groups × 2 packs = 32 fused `cvt.rn.bf16x2.f32` per lane.
+    n_pack = length(collect(eachmatch(r"cvt\.rn\.bf16x2\.f32", ptx)))
+    @test n_pack >= 32
 end
 
 # ── Hilbert host helper unit test ─────────────────────────────────────

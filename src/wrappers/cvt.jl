@@ -23,3 +23,14 @@
 @inline (::Operation{:cvt, (:rn, :bf16x2, :e2m1x2)})(a::UInt16) =
     @asmcall("{ .reg .b8 t, hi; mov.b16 {t, hi}, \$1; cvt.rn.bf16x2.e2m1x2 \$0, t; }",
              "=r,h", false, UInt32, Tuple{UInt16}, a)
+
+# Ergonomic pack helper for `cvt.rn.bf16x2.f32`. PTX 9.2 §9.7.9.21:
+# `cvt.rn.bf16x2.f32 d, a, b` puts input `a` in the UPPER half of `d`
+# and input `b` in the LOWER half. That convention is opposite of
+# `mov.b32 d, {x, y}` (which puts `x` in the LOW half), so kernels that
+# want "low first, high second" tuple-style ordering need to swap.
+# This helper hides the swap: caller passes `(lo, hi)` in natural order,
+# we feed PTX `(a=hi, b=lo)`. See `test/gpu/cvt_packed_order.jl` for the
+# pin-down test that locks in the spec convention across H100 + GB10.
+@inline bf16x2_pack(lo::Float32, hi::Float32)::UInt32 =
+    ptx"cvt.rn.bf16x2.f32"(hi, lo)

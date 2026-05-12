@@ -24,7 +24,8 @@
 # tile (BN, B_WG_M), swizzle = :NONE (matches our linear SMEM writes —
 # no swizzle math at the consumer side).
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
+           bf16x2_pack
 using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
                      barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
 using CUDACore
@@ -177,25 +178,13 @@ function _pct_gemm_kernel!(
         col_a = (lane & UInt32(3)) << UInt32(1)
         col_b = col_a + UInt32(8)
 
-        # `cvt.rn.bf16x2.f32 d, a, b` — empirically the SECOND source
-        # ends up in the LOW 16 bits of the result, not the first as the
-        # PTX docs suggest. flash_attention.jl works around this by
-        # avoiding the fused cvt: it does two `cvt.rn.bf16.f32` + a
-        # `mov.b32 {lo, hi}` pack where the brace syntax has unambiguous
-        # ordering. Same workaround here so we don't depend on the
-        # observed cvt arg-order behavior.
-        b1 = ptx"cvt.rn.bf16.f32"(d[1])
-        b2 = ptx"cvt.rn.bf16.f32"(d[2])
-        b3 = ptx"cvt.rn.bf16.f32"(d[3])
-        b4 = ptx"cvt.rn.bf16.f32"(d[4])
-        b5 = ptx"cvt.rn.bf16.f32"(d[5])
-        b6 = ptx"cvt.rn.bf16.f32"(d[6])
-        b7 = ptx"cvt.rn.bf16.f32"(d[7])
-        b8 = ptx"cvt.rn.bf16.f32"(d[8])
-        p_a1 = ptx"mov.b32"((b1, b2))     # bf16(d[1]) in low, bf16(d[2]) in high
-        p_a2 = ptx"mov.b32"((b3, b4))
-        p_b1 = ptx"mov.b32"((b5, b6))
-        p_b2 = ptx"mov.b32"((b7, b8))
+        # PTX 9.2 §9.7.9.21: `cvt.rn.bf16x2.f32 d, a, b` puts `a` in the
+        # UPPER half of `d` and `b` in the LOWER half. `bf16x2_pack(lo, hi)`
+        # hides the arg swap so this reads in tuple-natural (lo, hi) order.
+        p_a1 = bf16x2_pack(d[1], d[2])
+        p_a2 = bf16x2_pack(d[3], d[4])
+        p_b1 = bf16x2_pack(d[5], d[6])
+        p_b2 = bf16x2_pack(d[7], d[8])
 
         # Per-consumer SMEM C-tile base (linear, BN-innermost).
         c_consumer_ptr = c_base_ptr + Int(consumer_id) * PCT_C_CONSUMER_BYTES
@@ -247,13 +236,9 @@ end
                          cap = v"9.0", feature_set = :arch)
 
     ptx = emit_ptx(_pct_gemm_kernel!, types; cap = v"9.0", feature_set = :arch)
-    # f32 → bf16 conversion + brace-pair pack to bf16x2 (matches the FA
-    # pattern); the fused `cvt.rn.bf16x2.f32` has an empirically
-    # different operand ordering than its PTX docs claim, so we route
-    # through `cvt.rn.bf16.f32` + `mov.b32 {lo, hi}` for an
-    # unambiguous packing semantic.
-    @test occursin("cvt.rn.bf16.f32",                          ptx)
-    @test occursin(r"mov\.b32 .*\{",                           ptx)
+    # Epilogue packs two f32 frags per col-pair into one bf16x2 via
+    # `bf16x2_pack(lo, hi)` (fused `cvt.rn.bf16x2.f32` under the hood).
+    @test occursin("cvt.rn.bf16x2.f32",                        ptx)
     @test occursin("cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group", ptx)
     @test occursin("cp.async.bulk.commit_group",               ptx)
     @test occursin("cp.async.bulk.wait_group",                 ptx)
