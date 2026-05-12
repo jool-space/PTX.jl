@@ -42,9 +42,9 @@
 #
 # Runtime gated to clusters-capable arch (`[9.0, 12.0)`).
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
-           BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
-           barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
+                     barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
 using CUDACore
 using CUDACore: cluster_arrive, cluster_wait
 using Random

@@ -3,7 +3,7 @@
 # `barrier_*` verbs live under `test/ptxas/hopper.jl` (they need the
 # NVPTX backend + ptxas).
 
-using PTX: Pipeline, pipeline_stage, pipeline_phase, pipeline_cursor
+using PTX.MBarriers: Pipeline, pipeline_stage, pipeline_phase, pipeline_cursor
 
 @testset "pipeline_cursor arithmetic (N=2)" begin
     P = Pipeline{2}

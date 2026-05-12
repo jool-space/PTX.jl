@@ -32,9 +32,9 @@
 # having started. After this, the loop bodies handle phase tracking
 # unaided.
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
-           BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
-           barrier_wait, barrier_arrive, barrier_arrive_expect_tx
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
+                     barrier_wait, barrier_arrive, barrier_arrive_expect_tx
 using CUDACore
 using Random
 

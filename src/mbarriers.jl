@@ -1,5 +1,6 @@
-# Producer/consumer pipeline scaffolding. Wraps three patterns that
-# every Hopper warp-spec kernel repeats verbatim:
+# mbarrier-driven producer/consumer pipeline scaffolding for sm_90+
+# kernels. Wraps three patterns that every Hopper warp-spec kernel
+# repeats verbatim:
 #
 #   1. SMEM mbarrier array indexed by stage (byte arithmetic on the base
 #      pointer).
@@ -12,6 +13,23 @@
 # over the raw `ptx"..."` mbarrier wrappers — it exists so callers don't
 # have to remember which of the seven mbarrier ops needs a phase, a state
 # token, or an expect-tx count.
+#
+# Lives in a submodule because it's a composition layer above the
+# `src/wrappers/*.jl` 1:1 PTX bindings, not a wrapper itself. The
+# contents are plain sm_90 (mbarrier, mapa, fence) — kernels that use
+# them only become arch-specific via what other ops they pull in
+# (e.g. wgmma → sm_90a, tcgen05.mma → sm_100a).
+
+module MBarriers
+
+using ..PTX: AS, @ptx_str
+using Republic: @public
+
+@public BarrierArray, Pipeline,
+        pipeline_stage, pipeline_phase, pipeline_cursor,
+        pipeline_init!,
+        barrier_init, barrier_arrive, barrier_arrive_expect_tx,
+        barrier_wait, barrier_arrive_cluster
 
 # Typed SMEM mbarrier array. `N` is the stage count; `base` points at
 # the first of N consecutive 8-byte mbarriers. Indexing returns the
@@ -124,3 +142,5 @@ end
     push!(body.args, :(nothing))
     body
 end
+
+end # module MBarriers

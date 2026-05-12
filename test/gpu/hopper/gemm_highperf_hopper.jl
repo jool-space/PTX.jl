@@ -27,9 +27,9 @@
 # iterates `tile_iter = 0, 1, ...` reading the SMEM segment until it
 # sees the sentinel `0xffffffff` (== -1 cast to u32).
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
-           BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
-           barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
+                     barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
 using CUDACore
 using CUDACore: cluster_arrive, cluster_wait
 using Random

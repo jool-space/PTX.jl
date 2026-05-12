@@ -24,9 +24,9 @@
 # in gemm_warpgroup.jl / gemm_pc_pipeline.jl. Per consumer the writes
 # land at consumer-base offset (consumer_id × B_WG_M rows).
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
-           BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
-           barrier_wait, barrier_arrive, barrier_arrive_expect_tx
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
+                     barrier_wait, barrier_arrive, barrier_arrive_expect_tx
 using CUDACore
 using Random
 

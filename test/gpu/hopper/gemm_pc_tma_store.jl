@@ -24,9 +24,9 @@
 # tile (BN, B_WG_M), swizzle = :NONE (matches our linear SMEM writes —
 # no swizzle math at the consumer side).
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
-           BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
-           barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
+                     barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
 using CUDACore
 using CUDACore: cluster_arrive, cluster_wait
 using Random

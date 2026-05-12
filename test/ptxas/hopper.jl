@@ -530,10 +530,10 @@ end
 # and confirm the emitted PTX matches the same sequence as the
 # hand-rolled callers used to produce.
 
-using PTX: BarrierArray, Pipeline, pipeline_cursor, pipeline_stage,
-           pipeline_init!, barrier_init, barrier_arrive,
-           barrier_arrive_expect_tx, barrier_wait,
-           barrier_arrive_cluster
+using PTX.MBarriers: BarrierArray, Pipeline, pipeline_cursor, pipeline_stage,
+                      pipeline_init!, barrier_init, barrier_arrive,
+                      barrier_arrive_expect_tx, barrier_wait,
+                      barrier_arrive_cluster
 
 function _pipe_smoke_cta!(C::CuDeviceVector{UInt64, 1}, K::Int32)
     mbar_full  = CuStaticSharedArray(UInt64, 2)
