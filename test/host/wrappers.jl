@@ -30,6 +30,36 @@ end
     @test build_call(:mov, (:u32,), (typeof(sreg"%tid.x"),)).side_effects == true
 end
 
+@testset "mov.u32 sreg NVVM whitelist" begin
+    # Invariant-per-thread sregs route through `llvm.nvvm.read.ptx.sreg.*`
+    # so LLVM can CSE the reads and propagate range metadata.
+    @test haskey(PTX.NVVM_SREG_U32, Symbol("%tid.x"))
+    @test haskey(PTX.NVVM_SREG_U32, Symbol("%ntid.y"))
+    @test haskey(PTX.NVVM_SREG_U32, Symbol("%ctaid.z"))
+    @test haskey(PTX.NVVM_SREG_U32, Symbol("%laneid"))
+    @test haskey(PTX.NVVM_SREG_U32, Symbol("%warpsize"))
+    @test haskey(PTX.NVVM_SREG_U32, Symbol("%cluster_ctarank"))
+    @test haskey(PTX.NVVM_SREG_U32, Symbol("%lanemask_eq"))
+
+    # PTX-asm underscores become dots in the LLVM intrinsic name.
+    @test PTX.NVVM_SREG_U32[Symbol("%cluster_ctarank")] == "cluster.ctarank"
+    @test PTX.NVVM_SREG_U32[Symbol("%lanemask_eq")]     == "lanemask.eq"
+
+    # Volatile sregs deliberately stay on the asm path so `~{memory}` blocks
+    # CSE. Per PTX spec these may return different values on each read.
+    @test !haskey(PTX.NVVM_SREG_U32, Symbol("%clock"))
+    @test !haskey(PTX.NVVM_SREG_U32, Symbol("%clock64"))
+    @test !haskey(PTX.NVVM_SREG_U32, Symbol("%activemask"))
+    @test !haskey(PTX.NVVM_SREG_U32, Symbol("%smid"))
+    @test !haskey(PTX.NVVM_SREG_U32, Symbol("%warpid"))
+    @test !haskey(PTX.NVVM_SREG_U32, Symbol("%dynamic_smem_size"))
+
+    # `format_call` reflects the asm fallback unchanged — the NVVM path only
+    # kicks in at runtime through the @generated dispatch.
+    @test format_call(ptx"mov.u32", Tuple{typeof(sreg"%tid.x")}) ==
+        "mov.u32 \$0, %tid.x;"
+end
+
 @testset "bar.sync" begin
     # Integer-Val bakes immediate `0` / `15` into the asm.
     @test format_call(ptx"bar.sync", Tuple{Val{0}})  == "bar.sync 0;"

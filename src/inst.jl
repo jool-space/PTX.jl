@@ -405,3 +405,51 @@ end
 function format_call(::Operation{op, mods}, @nospecialize(argtypes::Type{<:Tuple})) where {op, mods}
     build_call(op, mods, Tuple(argtypes.parameters)).asm
 end
+
+# NVVM-backed shortcut for `mov.u32 %reg, %sreg`. Routing through
+# `llvm.nvvm.read.ptx.sreg.*` lets LLVM CSE redundant reads and propagate
+# range metadata — neither expressible via `@asmcall` + `~{memory}`. Only
+# invariant-per-thread sregs are listed; volatile ones (clock, clock64,
+# globaltimer, activemask, pm0..7, smid, warpid, nsmid, gridid) deliberately
+# fall through to the asm path so LLVM doesn't collapse repeated reads.
+# Whitelist matches the set LLVM 15 (Julia 1.10's bundled LLVM) exposes,
+# cross-checked against CUDA.jl's CUDACore/src/device/intrinsics/indexing.jl.
+const NVVM_SREG_U32 = Dict{Symbol, String}(
+    Symbol("%tid.x")    => "tid.x",    Symbol("%tid.y")    => "tid.y",    Symbol("%tid.z")    => "tid.z",
+    Symbol("%ntid.x")   => "ntid.x",   Symbol("%ntid.y")   => "ntid.y",   Symbol("%ntid.z")   => "ntid.z",
+    Symbol("%ctaid.x")  => "ctaid.x",  Symbol("%ctaid.y")  => "ctaid.y",  Symbol("%ctaid.z")  => "ctaid.z",
+    Symbol("%nctaid.x") => "nctaid.x", Symbol("%nctaid.y") => "nctaid.y", Symbol("%nctaid.z") => "nctaid.z",
+    Symbol("%laneid")   => "laneid",   Symbol("%warpsize") => "warpsize",
+    Symbol("%lanemask_eq") => "lanemask.eq", Symbol("%lanemask_lt") => "lanemask.lt",
+    Symbol("%lanemask_le") => "lanemask.le", Symbol("%lanemask_ge") => "lanemask.ge",
+    Symbol("%lanemask_gt") => "lanemask.gt",
+    Symbol("%cluster_ctaid.x")  => "cluster.ctaid.x",
+    Symbol("%cluster_ctaid.y")  => "cluster.ctaid.y",
+    Symbol("%cluster_ctaid.z")  => "cluster.ctaid.z",
+    Symbol("%cluster_nctaid.x") => "cluster.nctaid.x",
+    Symbol("%cluster_nctaid.y") => "cluster.nctaid.y",
+    Symbol("%cluster_nctaid.z") => "cluster.nctaid.z",
+    Symbol("%cluster_ctarank")  => "cluster.ctarank",
+    Symbol("%cluster_nctarank") => "cluster.nctarank",
+    Symbol("%clusterid.x")  => "clusterid.x",
+    Symbol("%clusterid.y")  => "clusterid.y",
+    Symbol("%clusterid.z")  => "clusterid.z",
+    Symbol("%nclusterid.x") => "nclusterid.x",
+    Symbol("%nclusterid.y") => "nclusterid.y",
+    Symbol("%nclusterid.z") => "nclusterid.z",
+)
+
+@generated function (::Operation{:mov, (:u32,)})(::SpecialReg{S}) where {S}
+    suffix = get(NVVM_SREG_U32, S, nothing)
+    if suffix !== nothing
+        intr = "llvm.nvvm.read.ptx.sreg." * suffix
+        return :( ccall($intr, llvmcall, UInt32, ()) )
+    end
+    spec = build_call(:mov, (:u32,), (SpecialReg{S},))
+    quote
+        Base.@inline $(LLVM.Interop).@asmcall(
+            $(spec.asm), $(spec.constraints), $(spec.side_effects),
+            $(spec.rettype),
+            Tuple{$(spec.passthrough_argtypes...)})
+    end
+end
