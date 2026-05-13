@@ -38,5 +38,6 @@ include("wgmma_layout.jl")
 include("tcgen05_descriptor.jl")
 include("tensor_map.jl")
 include("mbarriers.jl")
+include("pipelines.jl")
 
 end

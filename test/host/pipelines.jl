@@ -1,9 +1,9 @@
 # Host tests for cursor arithmetic on `Pipeline{N_STAGES}`. The full
-# kernel-emission tests for `BarrierArray` / `pipeline_init!` /
-# `barrier_*` verbs live under `test/ptxas/hopper.jl` (they need the
-# NVPTX backend + ptxas).
+# kernel-emission tests for `pipeline_init!` and the `barrier_*` verbs
+# live under `test/ptxas/hopper.jl` (they need the NVPTX backend +
+# ptxas).
 
-using PTX.MBarriers: Pipeline, pipeline_stage, pipeline_phase, pipeline_cursor
+using PTX.Pipelines: Pipeline, pipeline_stage, pipeline_phase, pipeline_cursor
 
 @testset "pipeline_cursor arithmetic (N=2)" begin
     P = Pipeline{2}

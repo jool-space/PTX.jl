@@ -34,8 +34,9 @@
 
 using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
            step_desc
-using PTX.MBarriers: BarrierArray, Pipeline, pipeline_init!, pipeline_cursor,
+using PTX.MBarriers: BarrierArray,
                      barrier_wait, barrier_arrive, barrier_arrive_expect_tx
+using PTX.Pipelines: Pipeline, pipeline_init!, pipeline_cursor
 using CUDACore
 using Random
 
