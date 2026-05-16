@@ -10,6 +10,9 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
 CUDACore = {rev = "feature-set", subdir = "CUDACore", url = "https://github.com/AntonOresten/CUDA.jl"}
+CUDATools = {rev = "feature-set", subdir = "CUDATools", url = "https://github.com/AntonOresten/CUDA.jl"}
+NVML = {rev = "feature-set", subdir = "lib/nvml", url = "https://github.com/AntonOresten/CUDA.jl"}
+CUPTI = {rev = "feature-set", subdir = "lib/cupti", url = "https://github.com/AntonOresten/CUDA.jl"}
 
 [compat]
 CUDACore = "6"
