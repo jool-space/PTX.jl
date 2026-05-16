@@ -19,6 +19,7 @@
 
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
            BlackwellLayout
+using PTX.MBarriers: barrier_try_wait
 using CUDACore
 
 # pyptx tcgen05_smoke.py SMEM map (bytes).
@@ -107,8 +108,7 @@ function _tcgen05_mma_only_kernel!(O::CuDeviceVector{Float32, 1})
             bar_addr)
     end
 
-    while !ptx"mbarrier.try_wait.parity.shared.b64"(mb_ptr, UInt32(0))
-    end
+    barrier_try_wait(mb_ptr, UInt32(0))
 
     if tid < UInt32(32)
         ptx"tcgen05.dealloc.cta_group::1.sync.aligned.b32"(tmem, UInt32(512))

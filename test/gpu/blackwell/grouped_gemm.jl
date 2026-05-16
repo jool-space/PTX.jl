@@ -26,6 +26,7 @@
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
            BlackwellLayout, tensor_map_tile_2d, CuTensorMap,
            tmem_lane_addr, tmem_warp_band_lane
+using PTX.MBarriers: barrier_wait, barrier_try_wait
 using CUDACore
 using Random
 
@@ -107,8 +108,7 @@ function _grouped_gemm_bw_kernel!(
         end
         ptx"bar.sync"(Val(0))
 
-        while !ptx"mbarrier.test_wait.parity.shared.b64"(bl_ptr, phase)
-        end
+        barrier_wait(bl_ptr, phase)
         ptx"fence.proxy.async.shared::cta"()
 
         if tid == UInt32(0)
@@ -131,8 +131,7 @@ function _grouped_gemm_bw_kernel!(
             bm_ptr)
     end
     # bar_mma: single init + single commit → parity 0 (pyptx-faithful).
-    while !ptx"mbarrier.try_wait.parity.shared.b64"(bm_ptr, UInt32(0))
-    end
+    barrier_try_wait(bm_ptr, UInt32(0))
 
     # Epilogue: per-thread TMEM row → BN f32 to C[(m_outer+tid), col_base..].
     row     = m_outer + tid

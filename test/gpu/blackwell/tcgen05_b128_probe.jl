@@ -31,6 +31,7 @@
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
            tcgen05_layout_kmajor, kmajor_swizzled_logical_bytes,
            apply_blackwell_swizzle, tmem_lane_addr, BlackwellLayout
+using PTX.MBarriers: barrier_try_wait
 using CUDACore
 
 const TBP_BM = 128
@@ -121,8 +122,7 @@ function _tcgen05_b128_probe_kernel!(O::CuDeviceVector{Float32, 1},
     end
 
     # Single init + single commit → parity 0 (see header / memory).
-    while !ptx"mbarrier.try_wait.parity.shared.b64"(mb_ptr, UInt32(0))
-    end
+    barrier_try_wait(mb_ptr, UInt32(0))
 
     tmem_addr = tmem_lane_addr(tmem, lane)
     if tid < UInt32(TBP_EPI_ROWS)

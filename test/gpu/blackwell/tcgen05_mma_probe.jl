@@ -22,6 +22,7 @@
 
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
            BlackwellLayout, tmem_lane_addr
+using PTX.MBarriers: barrier_try_wait
 using CUDACore
 
 const TMP_BM      = 128
@@ -86,8 +87,7 @@ function _tcgen05_mma_probe_kernel!(O::CuDeviceVector{Float32, 1})
     # pyptx waits try_wait.parity … 1 here; blackwell-1's mma_only (same
     # mbarrier.init(1) + single tcgen05.commit pattern) is B300-verified
     # with parity 0, so we use 0 for consistency with the green kernels.
-    while !ptx"mbarrier.try_wait.parity.shared.b64"(mb_ptr, UInt32(0))
-    end
+    barrier_try_wait(mb_ptr, UInt32(0))
 
     tmem_addr = tmem_lane_addr(tmem, lane)
     if tid < UInt32(32)
