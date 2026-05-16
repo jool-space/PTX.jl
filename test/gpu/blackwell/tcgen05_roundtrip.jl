@@ -67,9 +67,9 @@ end
     @test occursin("tcgen05.ld.sync.aligned.32x32b.x64.b32", ptx)
 end
 
-# Datacenter-Blackwell only (CC 10.x); see tcgen05_smoke.jl for the
-# [10.0, 12.0) rationale (excludes consumer sm_120/sm_121).
-if v"10.0" <= DEV_CAP < v"12.0"
+# Datacenter-Blackwell only [10.0, 11.0); see tcgen05_smoke.jl for the
+# rationale (excludes consumer sm_120/sm_121).
+if v"10.0" <= DEV_CAP < v"11.0"
     @testset "tcgen05 TMEM roundtrip (B300 runtime)" begin
         O = CUDACore.zeros(Float32, TCR_ROWS * TCR_COLS)
         @cuda blocks=1 threads=128 feature_set=:arch _tcgen05_roundtrip_kernel!(O)

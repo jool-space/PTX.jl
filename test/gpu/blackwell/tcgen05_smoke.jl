@@ -179,10 +179,10 @@ end
 
 # Runtime path — gated on Blackwell *datacenter* hardware. tcgen05 ships
 # on sm_100/sm_103 (B100/B200/B300, CC 10.x); consumer Blackwell
-# (sm_120/sm_121, CC 12.x) dropped it, and there is no CC 11.x. The
-# [10.0, 12.0) window therefore admits B300 (sm_103a, CC 10.3) while
-# skipping the GB10 dev box (sm_121a) and the sm_89 box.
-if v"10.0" <= DEV_CAP < v"12.0"
+# (sm_120/sm_121, CC 12.x) dropped it. The datacenter-Blackwell window is
+# [10.0, 11.0): admits B300 (sm_103a, CC 10.3) while skipping the GB10
+# dev box (sm_121a) and the sm_89 box.
+if v"10.0" <= DEV_CAP < v"11.0"
     @testset "tcgen05 smoke kernels (B300 runtime)" begin
         for (kernel!, marker) in (
                 (_tcgen05_alloc_only_kernel!, 11.0f0),

@@ -65,7 +65,10 @@ end
                          cap = v"9.0", feature_set = :arch)
 end
 
-if v"9.0" <= DEV_CAP < v"12.0"
+# Hopper-only by directory convention ([9.0, 10.0)); the mapa/cluster ops
+# here also work on datacenter Blackwell, but hopper/ tests gate strictly
+# to Hopper — a Blackwell cluster port would live under blackwell/.
+if v"9.0" <= DEV_CAP < v"10.0"
     @testset "cluster mbarrier arrive via mapa — runtime" begin
         out = CUDACore.zeros(UInt32, 1)
         @cuda blocks = (2, 1, 1) threads = 128 clustersize = (2, 1, 1) _cluster_arrive_mapa_kernel!(out)

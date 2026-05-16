@@ -244,9 +244,9 @@ end
     @test occursin("bar.sync",                                 ptx)
 end
 
-# ── Runtime — clusters-capable arch only ───────────────────────────────
+# ── Runtime — Hopper only (wgmma is sm_90a; Blackwell uses tcgen05) ─────
 
-if v"9.0" <= DEV_CAP < v"12.0"
+if v"9.0" <= DEV_CAP < v"10.0"
     function _run_pct_case(rng, M_total, N_total, K_test)
         @assert M_total % PCT_BM_CLUSTER == 0
         @assert N_total % PCT_BN         == 0
