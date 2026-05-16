@@ -242,9 +242,9 @@ end
     @test occursin("wgmma.mma_async.sync.aligned.m64n16k16.f32.bf16.bf16", ptx)
 end
 
-# ── Runtime — clusters-capable arch only ───────────────────────────────
+# ── Runtime — Hopper only (wgmma is sm_90a; Blackwell uses tcgen05) ─────
 
-if v"9.0" <= DEV_CAP < v"12.0"
+if v"9.0" <= DEV_CAP < v"10.0"
     # Helper: run the kernel for a given (M, N, K) shape and compare
     # against the bf16-rounded reference. M must be a multiple of
     # BM_CLUSTER, N a multiple of BN, K a multiple of BK.

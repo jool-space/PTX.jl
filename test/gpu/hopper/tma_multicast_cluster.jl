@@ -68,13 +68,12 @@ end
                          cap = v"9.0", feature_set = :arch)
 end
 
-# Runtime cluster-launch path — Hopper sm_90a and datacenter Blackwell
-# sm_100a (B100/B200/GB100) support multi-CTA clusters. Consumer Blackwell
-# (sm_120/sm_121, RTX 50-series / GB10) dropped clusters — GB10 rejects
-# the 2-CTA launch with ERROR_INVALID_CLUSTER_SIZE despite reporting
-# `CU_DEVICE_ATTRIBUTE_CLUSTER_LAUNCH=1`. Range `[9.0, 12.0)` covers both
-# clusters-capable arch families without enabling consumer Blackwell.
-if v"9.0" <= DEV_CAP < v"12.0"
+# Runtime cluster-launch path. Multi-CTA clusters work on Hopper sm_90a
+# and datacenter Blackwell (sm_100a/sm_103a); consumer Blackwell
+# (sm_120/sm_121, RTX 50-series / GB10) dropped clusters entirely. By the
+# hopper/ directory convention this gates strictly to Hopper [9.0, 10.0);
+# a datacenter-Blackwell cluster port would live under blackwell/.
+if v"9.0" <= DEV_CAP < v"10.0"
     @testset "TMA multicast cluster round-trip" begin
         input_vals = UInt16[(0x3f80 + i) for i in 0:63]
         src = CuArray(reshape(input_vals, 8, 8))

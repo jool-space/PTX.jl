@@ -18,7 +18,7 @@ using Republic: @public
 
 @public BarrierArray,
         barrier_init, barrier_arrive, barrier_arrive_expect_tx,
-        barrier_wait, barrier_arrive_cluster
+        barrier_wait, barrier_try_wait, barrier_arrive_cluster
 
 # Typed SMEM mbarrier array. `N` is the slot count; `base` points at
 # the first of N consecutive 8-byte mbarriers. Indexing returns the
@@ -47,9 +47,28 @@ end
 # Spin on test_wait.parity until the named phase has been observed.
 # Lowers to a `setp ; @!pred bra` loop — identical to the hand-rolled
 # `while !test_wait_parity ... end` callers were writing.
+#
+# `test_wait` vs `try_wait` are NOT interchangeable: test_wait is a
+# non-suspending poll; try_wait may park the thread until a scheduler
+# wake. The Blackwell tcgen05 commit-drain idiom is specifically
+# `try_wait.parity` (see memory `blackwell-parity-faithful` — casually
+# swapping the two, or the phase literal, is the exact friction-#3
+# footgun). Hence two distinct verbs, not one with a flag: pick the one
+# the pyptx source uses, verbatim.
 @inline function barrier_wait(mbar::Core.LLVMPtr{UInt64, AS.Shared},
                               phase::Integer)
     while !ptx"mbarrier.test_wait.parity.shared.b64"(mbar, UInt32(phase))
+    end
+    nothing
+end
+
+# Spin on try_wait.parity (suspending form) until `phase` is observed —
+# the tcgen05 `commit → mbarrier::arrive::one` drain. Same loop shape as
+# barrier_wait; lowers byte-identically to the hand-rolled
+# `while !try_wait_parity ... end` the blackwell kernels were writing.
+@inline function barrier_try_wait(mbar::Core.LLVMPtr{UInt64, AS.Shared},
+                                  phase::Integer)
+    while !ptx"mbarrier.try_wait.parity.shared.b64"(mbar, UInt32(phase))
     end
     nothing
 end

@@ -422,9 +422,9 @@ end
     end
 end
 
-# ── Runtime — clusters-capable arch only ───────────────────────────────
+# ── Runtime — Hopper only (wgmma is sm_90a; Blackwell uses tcgen05) ─────
 
-if v"9.0" <= DEV_CAP < v"12.0"
+if v"9.0" <= DEV_CAP < v"10.0"
     function _run_ghh_case(rng, M_total, N_total, K_test, num_clusters)
         @assert M_total % GHH_BM_CLUSTER == 0
         @assert N_total % GHH_BN         == 0

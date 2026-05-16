@@ -130,3 +130,128 @@ for (shape, base) in _TCGEN05_LDST_SHAPES, count in _TCGEN05_LDST_COUNTS
     _tcgen05_ld_register(shape, count, base)
     _tcgen05_st_register(shape, count, base)
 end
+
+# --- alloc / relinquish / wait / commit / mma (blackwell-1) ----------------
+# Added for the tcgen05 smoke + roundtrip ports (ROADMAP item 10, first wave).
+# All addresses are 32-bit (TMEM taddr or .shared::cta SMEM offset) and render
+# as `[$N]` with the `r` constraint — same discipline as shift/cp above, NOT
+# the chain default (which would bracket an LLVMPtr with the 64-bit `l`
+# constraint). Callers pass `smem_addr_u32(pointer(slot))`.
+
+# `tcgen05.alloc` writes the allocated TMEM base into a `.shared::cta` slot.
+function _tcgen05_alloc_register(cta::Int)
+    mods = (:alloc, Symbol("cta_group::", cta), :sync, :aligned,
+            Symbol("shared::cta"), :b32)
+    asm = "tcgen05.alloc.cta_group::$cta.sync.aligned.shared::cta.b32 [\$0], \$1;"
+    @eval function (::Operation{:tcgen05, $mods})(dst::UInt32, ncols::UInt32)
+        Base.@inline
+        @asmcall($asm, "r,r,~{memory}", true, Nothing,
+                 Tuple{UInt32, UInt32}, dst, ncols)
+        nothing
+    end
+    nothing
+end
+
+for cta in (1, 2)
+    _tcgen05_alloc_register(cta)
+end
+
+# `tcgen05.relinquish_alloc_permit` — no operands.
+function _tcgen05_relinquish_register(cta::Int)
+    mods = (:relinquish_alloc_permit, Symbol("cta_group::", cta), :sync, :aligned)
+    asm = "tcgen05.relinquish_alloc_permit.cta_group::$cta.sync.aligned;"
+    @eval function (::Operation{:tcgen05, $mods})()
+        Base.@inline
+        @asmcall($asm, "~{memory}", true, Nothing, Tuple{})
+        nothing
+    end
+    nothing
+end
+
+for cta in (1, 2)
+    _tcgen05_relinquish_register(cta)
+end
+
+# `tcgen05.wait::ld` / `tcgen05.wait::st` — drain prior tcgen05.ld / .st
+# before the registers / TMEM are reused. No operands.
+function _tcgen05_wait_register(which::Symbol)
+    w = Symbol("wait::", which)
+    mods = (w, :sync, :aligned)
+    asm = "tcgen05.wait::$which.sync.aligned;"
+    @eval function (::Operation{:tcgen05, $mods})()
+        Base.@inline
+        @asmcall($asm, "~{memory}", true, Nothing, Tuple{})
+        nothing
+    end
+    nothing
+end
+
+for which in (:ld, :st)
+    _tcgen05_wait_register(which)
+end
+
+# `tcgen05.commit` — arrive-on-one of an mbarrier after the MMA group
+# retires. Single 32-bit shared mbarrier address. The `.multicast::cluster`
+# + u16 mask variant (cta_group::2 datacenter cluster GEMM) is deferred.
+function _tcgen05_commit_register(cta::Int, space::Symbol)
+    mods = (:commit, Symbol("cta_group::", cta),
+            Symbol("mbarrier::arrive::one"), Symbol("shared::", space), :b64)
+    asm = "tcgen05.commit.cta_group::$cta.mbarrier::arrive::one." *
+          "shared::$space.b64 [\$0];"
+    @eval function (::Operation{:tcgen05, $mods})(mbar::UInt32)
+        Base.@inline
+        @asmcall($asm, "r,~{memory}", true, Nothing, Tuple{UInt32}, mbar)
+        nothing
+    end
+    nothing
+end
+
+for cta in (1, 2), space in (:cta, :cluster)
+    _tcgen05_commit_register(cta, space)
+end
+
+# `tcgen05.mma` — dense F16/BF16/TF32/FP8 path (ROADMAP item 10, first
+# wave). Form (PTX 9.2 §9.7.16.4, dense, ptx_version >= 8.8):
+#
+#   tcgen05.mma.cta_group::N.kind::K [d], a_desc, b_desc, idesc,
+#                                    {m0..m_{W-1}}, p;
+#
+# `d` is a 32-bit TMEM accumulator address; `a_desc`/`b_desc` are 64-bit
+# SMEM descriptors (`tcgen05_descriptor`); `idesc` is the 32-bit UMMA
+# instruction descriptor (`tcgen05_instr_desc_f16bf16_f32`). The brace
+# vector is the disable-output-lane mask — W = 4 words for cta_group::1
+# (≤128 lanes), 8 for cta_group::2 (256 lanes); all-zero disables nothing,
+# which is the dense CUTLASS/CuTe form. `p` is the enable-input-D /
+# accumulate predicate. Deferred to a later wave: the trailing SCALE_C
+# immediate, `.sp` (sparse) + `[metadata]`, `.ashift`, `.collector::a::*`,
+# and the A-operand-in-TMEM variant.
+function _tcgen05_mma_register(cta::Int, kind::Symbol)
+    nmask = cta == 2 ? 8 : 4
+    mask_slots = join(("\$$(4 + i)" for i in 0:nmask-1), ", ")
+    pslot = 4 + nmask
+    mods = (:mma, Symbol("cta_group::", cta), Symbol("kind::", kind))
+    asm = "tcgen05.mma.cta_group::$cta.kind::$kind " *
+          "[\$0], \$1, \$2, \$3, {$mask_slots}, \$$pslot;"
+    # d(r, bracketed) a(l) b(l) idesc(r) nmask×mask(r) p(b)
+    constraints = join(vcat(["r", "l", "l", "r"],
+                            fill("r", nmask), ["b", "~{memory}"]), ",")
+    masks = fill(:(UInt32(0)), nmask)
+    flat  = vcat([:UInt32, :UInt64, :UInt64, :UInt32],
+                 fill(:UInt32, nmask), [:Bool])
+    @eval function (::Operation{:tcgen05, $mods})(
+            d::UInt32, a_desc::UInt64, b_desc::UInt64,
+            idesc::UInt32, enable_input_d::Bool)
+        Base.@inline
+        @asmcall($asm, $constraints, true, Nothing,
+                 Tuple{$(flat...)},
+                 d, a_desc, b_desc, idesc, $(masks...), enable_input_d)
+        nothing
+    end
+    nothing
+end
+
+# Kinds per PTX 9.2 §9.7.16.4 (pyptx `_TCGEN05_KINDS`).
+for cta in (1, 2),
+    kind in (:tf32, :f16, :i8, :f8f6f4, :mxf8f6f4, :mxf4, :mxf4nvf4)
+    _tcgen05_mma_register(cta, kind)
+end
