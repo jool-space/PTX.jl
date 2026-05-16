@@ -194,8 +194,15 @@ if v"10.0" <= DEV_CAP < v"11.0"
             A_d = CuArray(_gxb_pack(A_f32))
             B_d = CuArray(_gxb_pack(B_f32))
             D_d = CUDACore.zeros(Float32, M * Ntot)
-            @cuda blocks=(M ÷ GXB_BM, Ntot ÷ GXB_BN) threads=128 feature_set=:arch _gxb_gemm_kernel!(
+            # GXB_SMEM = 49184 B > 48 KiB → dynamic SMEM needs the >48 KiB
+            # opt-in attribute + explicit shmem= (see tcgen05_smoke.jl).
+            kern = @cuda launch=false feature_set=:arch _gxb_gemm_kernel!(
                 D_d, A_d, B_d, Int32(Ntot))
+            attrs = CUDACore.attributes(kern.fun)
+            attrs[CUDACore.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES] = GXB_SMEM
+            kern(D_d, A_d, B_d, Int32(Ntot);
+                 blocks = (M ÷ GXB_BM, Ntot ÷ GXB_BN), threads = 128,
+                 shmem = GXB_SMEM)
             CUDACore.synchronize()
 
             Dflat = Array(D_d)
