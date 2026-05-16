@@ -21,7 +21,7 @@
 # datacenter Blackwell [10.0, 11.0) — B300 (sm_103a) is the cloud target.
 
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
-           BlackwellLayout
+           BlackwellLayout, tmem_lane_addr
 using CUDACore
 
 const TMP_BM      = 128
@@ -89,7 +89,7 @@ function _tcgen05_mma_probe_kernel!(O::CuDeviceVector{Float32, 1})
     while !ptx"mbarrier.try_wait.parity.shared.b64"(mb_ptr, UInt32(0))
     end
 
-    tmem_addr = tmem + ((lane << UInt32(16)) & UInt32(0x1F0000))
+    tmem_addr = tmem_lane_addr(tmem, lane)
     if tid < UInt32(32)
         dst = ptx"tcgen05.ld.sync.aligned.32x32b.x64.b32"(tmem_addr)
         ptx"tcgen05.wait::ld.sync.aligned"()

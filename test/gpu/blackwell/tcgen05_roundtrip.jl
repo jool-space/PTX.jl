@@ -12,7 +12,7 @@
 # Always validates cross-arch (sm_100a ptxas); runtime gated on Blackwell
 # datacenter hw (CC >= 10.0) — B300 (sm_103a) is the cloud target.
 
-using PTX: smem_addr_u32
+using PTX: smem_addr_u32, tmem_lane_addr
 using CUDACore
 
 const TCR_ROWS = 32
@@ -32,8 +32,8 @@ function _tcgen05_roundtrip_kernel!(O::CuDeviceVector{Float32, 1})
     ptx"bar.sync"(Val(0))
 
     tmem_base = @inbounds tmem_slot[1]
-    # Per-lane TMEM row: lane index in bits [20:16] (pyptx tmem_roundtrip).
-    tmem_addr = tmem_base + ((lane << UInt32(16)) & UInt32(0x1F0000))
+    # Per-lane TMEM row: lane index in bits[31:16] (PTX §9.7.16.1).
+    tmem_addr = tmem_lane_addr(tmem_base, lane)
 
     # src[c] = bitcast(Float32(c)) for c = 1..COLS  (pyptx: col+1, col 0-based).
     src = ntuple(c -> reinterpret(UInt32, Float32(c)), Val(TCR_COLS))

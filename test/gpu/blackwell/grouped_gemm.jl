@@ -24,7 +24,8 @@
 # 64). SMEM 24616 B < 48 KiB → static, no dynamic opt-in.
 
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
-           BlackwellLayout, tensor_map_tile_2d, CuTensorMap
+           BlackwellLayout, tensor_map_tile_2d, CuTensorMap,
+           tmem_lane_addr, tmem_warp_band_lane
 using CUDACore
 using Random
 
@@ -137,7 +138,7 @@ function _grouped_gemm_bw_kernel!(
     row     = m_outer + tid
     d_elem  = UInt64(row) * UInt64(N) + UInt64(col_base)
     d_ptr   = pointer(C) + Int(d_elem) * 4
-    tmem_ad = tmem + ((tid << UInt32(16)) & UInt32(0x03E00000))
+    tmem_ad = tmem_lane_addr(tmem, tmem_warp_band_lane(tid))
 
     out = ntuple(c -> ptx"tcgen05.ld.sync.aligned.32x32b.x1.b32"(
                           tmem_ad + UInt32(c - 1)), Val(GGB_BN))
