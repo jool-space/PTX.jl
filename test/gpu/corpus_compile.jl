@@ -36,13 +36,20 @@ using PTX.IR: format
 #    *instructions* valid for this target" a well-posed, single-rule
 #    question (no per-target floor table). Safe: ptxas is
 #    backward-compatible and the stamped ISA == the binary's own ceiling.
-#  * Two deterministic, hardware-independent skip reasons for the ptxas
-#    leg (these files are still covered by host/corpus.jl round-trip):
-#      - `_is_malformed_llvm_fixture`: LLVM FileCheck snippets that aren't
-#        complete modules (undefined `_param_N` / `func_retval0` /
-#        32-bit `[%rN]` address ABI) — structurally un-assemblable.
-#      - declared `.target` the managed ptxas dropped (CUDA 13 removed
-#        sm_50 / sm_70): the binary cannot target it; not a corpus defect.
+#  * `_is_malformed_llvm_fixture` excludes LLVM FileCheck snippets that
+#    aren't complete modules (undefined `_param_N` / `func_retval0` /
+#    32-bit `[%rN]` address ABI) — structurally un-assemblable. Their
+#    parse/round-trip is still covered by host/corpus.jl.
+#  * The point of this file is PTX-*ISA* coverage, not which legacy GPU
+#    still builds on a modern toolkit. ptxas's instruction-superset
+#    (the PTX *language*) is distinct from its per-arch SASS backends
+#    (which NVIDIA prunes — CUDA 13 dropped sm_50/sm_70). So if a file's
+#    declared `.target` arch was pruned, we retarget UP to the lowest
+#    arch the managed ptxas still backs (PTX is forward-portable) and
+#    validate the instructions there — symmetric with stamping
+#    `.version` up to the assembler's ISA. Verbatim-`.target` fidelity
+#    stays covered by host/corpus.jl's round-trip tiers. Net: every
+#    selected file is asserted; nothing is skipped.
 
 const _CORPUS_EXT_DIR = joinpath(@__DIR__, "..", "corpus", "external")
 const _PTXAS = CUDACore.CUDA_Compiler.ptxas()
@@ -81,17 +88,53 @@ function _is_malformed_llvm_fixture(path::AbstractString)
     return false
 end
 
-# Stamp `.version` to the managed assembler's ISA; leave `.target` alone.
+# Stamp `.version` to the managed assembler's ISA.
 _stamp_version(src::AbstractString) =
     replace(src, r"^(\.version[ \t]+)[0-9.]+"m =>
             SubstitutionString("\\g<1>$(_ISA.major).$(_ISA.minor)"))
 
-# Run the managed ptxas standalone: PTX → cubin, no device. Returns
-# (ok::Bool, stderr::String). `arch` = the file's declared `sm_*`.
-function _ptxas_accepts(src::AbstractString, arch::AbstractString)
-    ptx = tempname() * ".ptx"
+# Can the managed ptxas emit SASS for `arch`? A property of the shipped
+# binary (its per-arch backends), not of any device — memoized.
+const _ARCH_OK = Dict{String,Bool}()
+function _arch_supported(arch::AbstractString)
+    get!(_ARCH_OK, arch) do
+        stub = ".version $(_ISA.major).$(_ISA.minor)\n.target $arch\n" *
+               ".address_size 64\n.visible .entry _probe(){ ret; }\n"
+        ptx = tempname() * ".ptx"; write(ptx, stub)
+        cub = tempname() * ".cubin"
+        proc = run(pipeline(ignorestatus(
+                       `$_PTXAS --compile-only --gpu-name $arch --output-file $cub $ptx`);
+                   stdout = devnull, stderr = devnull))
+        rm(ptx; force = true); rm(cub; force = true)
+        proc.exitcode == 0
+    end
+end
+
+# Lowest real arch the managed ptxas still backs. Derived (not hardcoded)
+# by scanning a fixed ascending ladder — self-adjusts when CUDACore bumps
+# the toolkit (CUDA 13 → sm_75; a future CUDA pruning more just moves it).
+const _ARCH_LADDER = ["sm_50", "sm_52", "sm_53", "sm_60", "sm_61", "sm_62",
+                      "sm_70", "sm_72", "sm_75", "sm_80", "sm_86", "sm_87",
+                      "sm_89", "sm_90", "sm_90a", "sm_100a", "sm_103a",
+                      "sm_120a"]
+const _MIN_ARCH = _ARCH_LADDER[findfirst(_arch_supported, _ARCH_LADDER)]
+
+# Arch to actually assemble at: the file's declared one if the managed
+# ptxas still backs it, else retarget UP to `_MIN_ARCH` (PTX is
+# forward-portable; we want ISA coverage, not legacy-GPU coverage).
+_target_arch(declared::AbstractString) =
+    _arch_supported(declared) ? declared : _MIN_ARCH
+
+# Run the managed ptxas standalone: PTX → cubin, no device. `.version`
+# stamped to the managed ISA; `.target` retargeted up iff its declared
+# arch was pruned from the binary. Returns (ok::Bool, stderr::String).
+function _ptxas_accepts(src::AbstractString, declared::AbstractString)
+    arch = _target_arch(declared)
+    text = _stamp_version(src)
+    arch == declared ||
+        (text = replace(text, r"^\.target[ \t]+sm_\w+"m => ".target $arch"))
+    ptx = tempname() * ".ptx"; write(ptx, text)
     cub = tempname() * ".cubin"
-    write(ptx, _stamp_version(src))
     errbuf = IOBuffer()
     proc = run(pipeline(ignorestatus(
                    `$_PTXAS --compile-only --gpu-name $arch --output-file $cub $ptx`);
@@ -126,15 +169,8 @@ const _PTXAS_CORPUS = _ptxas_corpus_files()
 @testset "ptxas accepts source + structural re-emit ($(basename(path)))" for (path, arch) in _PTXAS_CORPUS
     src = read(path, String)
     ok, err = _ptxas_accepts(src, arch)
-    if !ok && occursin("not defined for option 'gpu-name'", err)
-        # Managed ptxas (CUDA $(CUDACore.compiler_version())) dropped this
-        # arch (CUDA 13 removed sm_50 / sm_70). Deterministic & identical
-        # on every machine; round-trip still covered by host/corpus.jl.
-        @test_skip _ptxas_accepts(src, arch)[1]
-    else
-        @test ok || (println(err); false)
-        reformatted = format(IR.unraw(parse_ptx(src)))
-        ok2, err2 = _ptxas_accepts(reformatted, arch)
-        @test ok2 || (println(err2); false)
-    end
+    @test ok || (println(err); false)
+    reformatted = format(IR.unraw(parse_ptx(src)))
+    ok2, err2 = _ptxas_accepts(reformatted, arch)
+    @test ok2 || (println(err2); false)
 end
