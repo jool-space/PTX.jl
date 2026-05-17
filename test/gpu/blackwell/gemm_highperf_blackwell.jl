@@ -279,19 +279,23 @@ end
 #     0 / 32, so 256 buys nothing; we keep the **B200-proven
 #     128-thread block** from `build_gemm`.
 #
-#  2. Ring parity: pyptx's `slot_use_index = tile_iter*supt + ki÷S`
-#     accumulates across tiles, but pyptx ALSO re-inits every mbarrier
-#     per tile (required for bar_mma's literal-0 epilogue wait, which
-#     resets phase to 0). Those contradict: a re-init'd barrier is at
-#     phase 0, but slot_use_index says wait parity 1 at tile_iter≥1 →
-#     infinite spin. **B200-confirmed**: the (256,512,256, ctas=1) /
-#     4-tiles-1-CTA case hung exactly at tile_iter=1, precisely as
-#     flagged. Per blackwell-parity-faithful we replicated verbatim
-#     first and let hardware localise it — it did, cleanly. The fix:
-#     phase resets per tile (`sui = ki÷STAGES`), reducing the per-tile
-#     k-loop to the exact B200-proven `build_gemm` scheme. The
-#     `tcgen05.fence::after_thread_sync` and per-tile re-init are kept
-#     (pyptx-intended, not the bug).
+#  2. No mid-kernel mbarrier re-init. EVERY datacenter-Blackwell kernel
+#     that inits mbarriers once passes (probes, grouped_gemm, core
+#     build_gemm incl. K=512 ring reuse); BOTH that re-init mid-kernel
+#     hang (gemm_experimental's 2-phase mma_bar reinit; pyptx
+#     persistent's per-tile reinit). It is not a wrapper bug — the core
+#     uses the identical wrappers and passed every B200 shape. Re-init
+#     of a live mbarrier in a running async pipeline is the cursed
+#     pattern (blackwell-parity-faithful). So: init all mbarriers ONCE
+#     before the tile loop, and index the ring with a CONTINUOUS global
+#     counter `gki = tile_iter*kiters + ki` — making bl/bc phase
+#     exactly the B200-proven core scheme, just spanning tiles. bar_mma
+#     (init once, one commit/tile) → epilogue waits parity
+#     `tile_iter&1` (phase flips once per tile; verified). The
+#     per-tile re-init AND the `tcgen05.fence::after_thread_sync` the
+#     core proved unnecessary are both removed. `is_first` stays
+#     per-tile-local (resets the accumulator each tile); TMA coords use
+#     the per-tile `ki` (each tile re-reads K from 0).
 #
 # v0 also skips the serpentine rasterization (pure L2 perf).
 
@@ -336,6 +340,18 @@ function _ghb_persistent_kernel!(
     total_tiles  = UInt32(M ÷ Int32(GHB_BM)) * tile_n_iters
     kiters       = UInt32(K ÷ Int32(GHB_BK))
 
+    # mbarriers init ONCE (NOT per tile — header #2). bl/bc phase is then
+    # continuous across tiles via `gki`; bar_mma flips once per tile.
+    if tid == UInt32(0)
+        for s in 0:(GHB_STAGES - 1)
+            barrier_init(bl[s], 1)
+            barrier_init(bc[s], 1)
+        end
+        barrier_init(bm_ptr, 1)
+        ptx"fence.proxy.async.shared::cta"()
+    end
+    ptx"bar.sync"(Val(0))
+
     # Condition-loop (the proven grouped_gemm / build_gemm idiom), NOT
     # `while true … && break` — the one structural form not inherited
     # from a hardware-validated kernel.
@@ -347,35 +363,19 @@ function _ghb_persistent_kernel!(
         m_base = tile_m << UInt32(7)
         n_base = tile_n << UInt32(8)
 
-        if tid == UInt32(0)
-            for s in 0:(GHB_STAGES - 1)
-                barrier_init(bl[s], 1)
-                barrier_init(bc[s], 1)
-            end
-            barrier_init(bm_ptr, 1)
-            ptx"fence.proxy.async.shared::cta"()
-        end
-        ptx"bar.sync"(Val(0))
-
         if is_tma
             ki = UInt32(0)
             while ki < kiters
-                slot = ki & UInt32(GHB_STAGES - 1)
-                # Per-tile phase = the B200-proven build_gemm scheme.
-                # mbarriers are re-init'd each tile (required for bar_mma's
-                # literal-0 epilogue wait), so phase MUST reset per tile.
-                # pyptx's cross-tile `tile_iter*supt + ki÷S` contradicts
-                # the per-tile re-init and deadlocks at tile_iter≥1 —
-                # B200-confirmed hang (memory blackwell-parity-faithful:
-                # the hang localised the contradiction; this is the
-                # diagnosed fix, not a casual parity tweak).
-                sui  = ki >> 2
+                # Continuous global slot index → bl/bc phase is exactly
+                # the B200-proven core ring, just spanning tiles.
+                gki  = tile_iter * kiters + ki
+                slot = gki & UInt32(GHB_STAGES - 1)
                 a_ptr  = a_base + Int(slot) * GHB_A_STAGE
                 b_ptr  = b_base + Int(slot) * GHB_B_STAGE
                 mbar_l = bl[slot]
-                if sui > UInt32(0)
-                    barrier_try_wait(bc[slot], (sui - UInt32(1)) & UInt32(1))
-                    ptx"tcgen05.fence::after_thread_sync"()
+                if gki >= UInt32(GHB_STAGES)
+                    barrier_try_wait(bc[slot],
+                                     ((gki >> 2) - UInt32(1)) & UInt32(1))
                 end
                 barrier_arrive_expect_tx(mbar_l, GHB_A_STAGE + GHB_B_STAGE)
                 kcoord = reinterpret(Int32, ki * UInt32(GHB_BK))
@@ -390,9 +390,9 @@ function _ghb_persistent_kernel!(
         if is_mma
             ki = UInt32(0)
             while ki < kiters
-                slot = ki & UInt32(GHB_STAGES - 1)
-                sui  = ki >> 2                  # per-tile phase (see producer)
-                barrier_try_wait(bl[slot], sui & UInt32(1))
+                gki  = tile_iter * kiters + ki
+                slot = gki & UInt32(GHB_STAGES - 1)
+                barrier_try_wait(bl[slot], (gki >> 2) & UInt32(1))
                 a_addr = smem_addr_u32(a_base) + UInt32(slot) * UInt32(GHB_A_STAGE)
                 b_addr = smem_addr_u32(b_base) + UInt32(slot) * UInt32(GHB_B_STAGE)
                 da0 = tcgen05_descriptor(a_addr; leading_bytes = 16,
@@ -415,7 +415,8 @@ function _ghb_persistent_kernel!(
                 bm_addr)
         end
 
-        barrier_try_wait(bm_ptr, UInt32(0))
+        # bar_mma init once, one commit/tile → phase flips each tile.
+        barrier_try_wait(bm_ptr, tile_iter & UInt32(1))
 
         row    = m_base + tid
         d_elem = UInt64(row) * UInt64(N) + UInt64(n_base)
@@ -454,7 +455,6 @@ end
                    cap = v"10.0", feature_set = :arch)
     @test occursin("tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32", ptx)
     @test occursin("cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes", ptx)
-    @test occursin("tcgen05.fence::after_thread_sync", ptx)
     @test occursin("mbarrier.try_wait.parity.shared.b64", ptx)
     @test occursin("tcgen05.mma.cta_group::1.kind::f16", ptx)
     @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64", ptx)
@@ -503,10 +503,14 @@ if v"10.0" <= DEV_CAP < v"11.0"
 
     # num_ctas < total_tiles forces multiple tiles/CTA → exercises the
     # persistent loop, per-tile re-init, and the slot_use_index parity.
+    # Bisector FIRST: 1 tile / 8 K-iters = the proven core ring in the
+    # persistent shell (init-once, outer loop runs once). If this hangs,
+    # the shell itself is wrong, not the ring/scheduling. The multi-tile
+    # cases follow and exercise the continuous-`gki` cross-tile ring.
     @testset "ghb persistent M=$M N=$N K=$K ctas=$C" for (M, N, K, C) in [
+            (128, 256, 512, 1),   # bisector: proven core shape, 1 tile
             (256, 512, 256, 1),   # 4 tiles, 1 CTA → 4 tiles serially
             (256, 512, 128, 2),   # 4 tiles, 2 CTAs → 2 tiles each
-            (128, 256, 512, 1),   # 1 tile, 8 K-iters (persistent body)
         ]
         @test _run_ghb_persistent(M, N, K, C)
     end
