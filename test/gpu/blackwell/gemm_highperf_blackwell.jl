@@ -37,6 +37,7 @@ using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
 using PTX.MBarriers: BarrierArray, barrier_init, barrier_arrive,
                      barrier_arrive_expect_tx, barrier_try_wait
 using CUDACore
+using CUDACore: cluster_arrive, cluster_wait
 using Random
 
 const GHB_BM      = 128
@@ -270,19 +271,29 @@ end
 # total_tiles. TMEM is alloc'd ONCE and reused for every tile (the
 # accumulator is re-zeroed per tile via the ki==0&&kk==0 predicate).
 #
-# Faithful to pyptx EXCEPT the thread count: pyptx declares
-# `block=(256,1,1)` but its epilogue does `row = m_base + tid`
-# unguarded — tid≥128 writes outside the BM=128 tile (OOB). The
-# warp-specialized pipeline only uses tid 0 / 32, so 256 buys nothing
-# for correctness; we keep the **B200-proven 128-thread block** from
-# `build_gemm`. Everything else is verbatim, including the non-obvious
-# per-tile mbarrier re-init + the `slot_use_index` parity scheme
-# (`supt = 1 + (k_iters-1-slot)÷STAGES`, `sui = iter*supt + ki÷STAGES`)
-# and the `tcgen05.fence::after_thread_sync` after the consumed-wait.
-# That init-vs-phase interaction is the suspect area if a B200 run
-# hangs (memory blackwell-parity-faithful: replicate, let hardware
-# judge — do NOT pre-"fix" it; that is the deviation that bit
-# gemm_experimental). v0 also skips the serpentine rasterization.
+# Two deviations from pyptx, both diagnosed (not casual):
+#
+#  1. Thread count: pyptx declares `block=(256,1,1)` but its epilogue
+#     does `row = m_base + tid` unguarded — tid≥128 writes outside the
+#     BM=128 tile (OOB). The warp-specialized pipeline only uses tid
+#     0 / 32, so 256 buys nothing; we keep the **B200-proven
+#     128-thread block** from `build_gemm`.
+#
+#  2. Ring parity: pyptx's `slot_use_index = tile_iter*supt + ki÷S`
+#     accumulates across tiles, but pyptx ALSO re-inits every mbarrier
+#     per tile (required for bar_mma's literal-0 epilogue wait, which
+#     resets phase to 0). Those contradict: a re-init'd barrier is at
+#     phase 0, but slot_use_index says wait parity 1 at tile_iter≥1 →
+#     infinite spin. **B200-confirmed**: the (256,512,256, ctas=1) /
+#     4-tiles-1-CTA case hung exactly at tile_iter=1, precisely as
+#     flagged. Per blackwell-parity-faithful we replicated verbatim
+#     first and let hardware localise it — it did, cleanly. The fix:
+#     phase resets per tile (`sui = ki÷STAGES`), reducing the per-tile
+#     k-loop to the exact B200-proven `build_gemm` scheme. The
+#     `tcgen05.fence::after_thread_sync` and per-tile re-init are kept
+#     (pyptx-intended, not the bug).
+#
+# v0 also skips the serpentine rasterization (pure L2 perf).
 
 function _ghb_persistent_kernel!(
         D::CuDeviceVector{Float32, 1},
@@ -349,8 +360,15 @@ function _ghb_persistent_kernel!(
             ki = UInt32(0)
             while ki < kiters
                 slot = ki & UInt32(GHB_STAGES - 1)
-                supt = UInt32(1) + ((kiters - UInt32(1) - slot) >> 2)
-                sui  = tile_iter * supt + (ki >> 2)
+                # Per-tile phase = the B200-proven build_gemm scheme.
+                # mbarriers are re-init'd each tile (required for bar_mma's
+                # literal-0 epilogue wait), so phase MUST reset per tile.
+                # pyptx's cross-tile `tile_iter*supt + ki÷S` contradicts
+                # the per-tile re-init and deadlocks at tile_iter≥1 —
+                # B200-confirmed hang (memory blackwell-parity-faithful:
+                # the hang localised the contradiction; this is the
+                # diagnosed fix, not a casual parity tweak).
+                sui  = ki >> 2
                 a_ptr  = a_base + Int(slot) * GHB_A_STAGE
                 b_ptr  = b_base + Int(slot) * GHB_B_STAGE
                 mbar_l = bl[slot]
@@ -372,8 +390,7 @@ function _ghb_persistent_kernel!(
             ki = UInt32(0)
             while ki < kiters
                 slot = ki & UInt32(GHB_STAGES - 1)
-                supt = UInt32(1) + ((kiters - UInt32(1) - slot) >> 2)
-                sui  = tile_iter * supt + (ki >> 2)
+                sui  = ki >> 2                  # per-tile phase (see producer)
                 barrier_try_wait(bl[slot], sui & UInt32(1))
                 a_addr = smem_addr_u32(a_base) + UInt32(slot) * UInt32(GHB_A_STAGE)
                 b_addr = smem_addr_u32(b_base) + UInt32(slot) * UInt32(GHB_B_STAGE)
