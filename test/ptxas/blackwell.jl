@@ -379,3 +379,73 @@ end
     @test occursin("tcgen05.ld.sync.aligned.16x256b.x4.b32", ptx)
     @test occursin("tcgen05.st.sync.aligned.16x256b.x4.b32", ptx)
 end
+
+
+# --- blackwell-2: cluster / 2-SM gating wrappers --------------------------
+#
+# The genuinely-missing surface for the production gemm_highperf_blackwell
+# 2-SM cooperative path (its 1-SM persistent path needs no new wrappers —
+# already shipped in blackwell-1 + the Hopper TMA waves):
+#
+#   * tcgen05.commit.multicast::cluster + u16 mask — the MMA-retire arrive
+#     fires on every cluster CTA's local mbarrier (mask bit set). Cluster
+#     state space ONLY: ptxas rejects `.shared::cta` here ("State space
+#     incorrect for instruction 'tcgen05.commit'"), so the multicast verb
+#     registers `shared::cluster` only (pyptx's builder is syntactically
+#     permissive about space; the assembler is not).
+#   * cp.async.bulk.tensor.<N>d.cta_group::2.* — Blackwell 2-SM cooperative
+#     load. Purely additive: `.cta_group::2` is inserted after `.<N>d`;
+#     cta_group::1 emitted strings are byte-identical, so the proven
+#     Hopper / grouped_gemm TMA Operations are untouched.
+#
+# Ported from pyptx _Tcgen05.commit(multicast=True) /
+# _CpAsyncBulkTensor._tile_load(cta_group=2).
+
+# cta_group::1 and ::2 must be in SEPARATE functions — ptxas: a function
+# "uses single CTA and CTA pair granularity and that is not allowed"
+# (digest §11.2: every tcgen05 op in a kernel shares one .cta_group).
+function _bw_tcgen05_commit_mc1!(mbar::UInt32)
+    ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64"(mbar, UInt16(0x3))
+    return nothing
+end
+
+function _bw_tcgen05_commit_mc2!(mbar::UInt32)
+    ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64"(mbar, UInt16(0x3))
+    return nothing
+end
+
+@testset "tcgen05.commit.multicast::cluster at sm_100a" begin
+    @test ptxas_compiles(_bw_tcgen05_commit_mc1!, Tuple{UInt32};
+                         cap = v"10.0", feature_set = :arch)
+    ptx = emit_ptx(_bw_tcgen05_commit_mc1!, Tuple{UInt32};
+                   cap = v"10.0", feature_set = :arch)
+    @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64", ptx)
+
+    @test ptxas_compiles(_bw_tcgen05_commit_mc2!, Tuple{UInt32};
+                         cap = v"10.0", feature_set = :arch)
+    ptx = emit_ptx(_bw_tcgen05_commit_mc2!, Tuple{UInt32};
+                   cap = v"10.0", feature_set = :arch)
+    @test occursin("tcgen05.commit.cta_group::2.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64", ptx)
+end
+
+function _bw_tma_cta_group2!(dst::Core.LLVMPtr{UInt16, PTX.AS.Shared},
+                             tm::Core.LLVMPtr{UInt8, PTX.AS.Const},
+                             mbar::Core.LLVMPtr{UInt64, PTX.AS.Shared})
+    ptx"cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(dst, tm, 0, 0, mbar)
+    ptx"cp.async.bulk.tensor.2d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"(dst, tm, 0, 0, mbar)
+    ptx"cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(dst, tm, 0, 0, mbar, UInt16(0x3))
+    return nothing
+end
+
+@testset "cp.async.bulk.tensor.cta_group::2 at sm_100a" begin
+    types = Tuple{Core.LLVMPtr{UInt16, PTX.AS.Shared},
+                  Core.LLVMPtr{UInt8, PTX.AS.Const},
+                  Core.LLVMPtr{UInt64, PTX.AS.Shared}}
+    @test ptxas_compiles(_bw_tma_cta_group2!, types;
+                         cap = v"10.0", feature_set = :arch)
+    ptx = emit_ptx(_bw_tma_cta_group2!, types;
+                   cap = v"10.0", feature_set = :arch)
+    @test occursin("cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes", ptx)
+    @test occursin("cp.async.bulk.tensor.2d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes", ptx)
+    @test occursin("multicast::cluster", ptx)
+end
