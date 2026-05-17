@@ -6,14 +6,25 @@
 
 # `direction = :load` emits the G2S form `[dst], [tmap, {coords}], [mbar]`.
 # `direction = :store` emits the S2G form `[tmap, {coords}], [src]`.
-function tma_spec(ndim::Int, direction::Symbol, dst_ss::Symbol)
+#
+# `cta_group = 2` inserts `.cta_group::2` right after `.<N>d` (pyptx
+# `_CpAsyncBulkTensor._tile_load` mod order) — the Blackwell 2-SM
+# cooperative load (gemm_highperf_blackwell cluster path); both cluster
+# CTAs issue the same instruction and the hardware splits the global
+# read. `cta_group = 1` (default) is byte-identical to the pre-existing
+# string — the proven Hopper / grouped_gemm wrappers are untouched.
+function tma_spec(ndim::Int, direction::Symbol, dst_ss::Symbol;
+                  cta_group::Int = 1)
     1 <= ndim <= 5 || error("tma_spec: ndim must be 1..5, got $ndim")
+    cta_group in (1, 2) ||
+        error("tma_spec: cta_group must be 1 or 2, got $cta_group")
+    cg = cta_group == 2 ? ".cta_group::2" : ""
 
     if direction === :load
         dst_ss in (Symbol("shared::cluster"), Symbol("shared::cta")) ||
             error("tma_spec: load dst_ss must be Symbol(\"shared::cluster\") or Symbol(\"shared::cta\"), got :$dst_ss")
         ss_text = dst_ss === Symbol("shared::cluster") ? "shared::cluster" : "shared::cta"
-        head = "cp.async.bulk.tensor.$(ndim)d.$ss_text.global.tile.mbarrier::complete_tx::bytes"
+        head = "cp.async.bulk.tensor.$(ndim)d$cg.$ss_text.global.tile.mbarrier::complete_tx::bytes"
         coord_slots = join(("\$$(i+1)" for i in 1:ndim), ", ")
         mbar_slot   = ndim + 2
         asm = "$head [\$0], [\$1, {$coord_slots}], [\$$mbar_slot];"
@@ -24,7 +35,7 @@ function tma_spec(ndim::Int, direction::Symbol, dst_ss::Symbol)
         # one global read across the CTAs whose bits are set in the u16 mask).
         # Same operand layout as `:load` but appends the mask as a scalar
         # operand after the mbar address (no brackets).
-        head = "cp.async.bulk.tensor.$(ndim)d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"
+        head = "cp.async.bulk.tensor.$(ndim)d$cg.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"
         coord_slots = join(("\$$(i+1)" for i in 1:ndim), ", ")
         mbar_slot   = ndim + 2
         mask_slot   = ndim + 3
@@ -47,9 +58,10 @@ end
 # @asmcall boundary so callers don't have to spell out `Int32(0)` etc.
 _tma_coord_param(c::Symbol) = Expr(:(::), c, :Integer)
 
-function _tma_load_register(ndim::Int, dst_ss::Symbol)
-    spec = tma_spec(ndim, :load, dst_ss)
-    mods = (:async, :bulk, :tensor, Symbol("$(ndim)d"),
+function _tma_load_register(ndim::Int, dst_ss::Symbol; cta_group::Int = 1)
+    spec = tma_spec(ndim, :load, dst_ss; cta_group)
+    cg = cta_group == 2 ? (Symbol("cta_group::2"),) : ()
+    mods = (:async, :bulk, :tensor, Symbol("$(ndim)d"), cg...,
             dst_ss, :global, :tile, Symbol("mbarrier::complete_tx::bytes"))
     coords = [Symbol("c$i") for i in 1:ndim]
     coord_params = [_tma_coord_param(c) for c in coords]
@@ -74,9 +86,10 @@ function _tma_load_register(ndim::Int, dst_ss::Symbol)
     eval(fdef)
 end
 
-function _tma_load_multicast_register(ndim::Int)
-    spec = tma_spec(ndim, :load_multicast, Symbol("shared::cluster"))
-    mods = (:async, :bulk, :tensor, Symbol("$(ndim)d"),
+function _tma_load_multicast_register(ndim::Int; cta_group::Int = 1)
+    spec = tma_spec(ndim, :load_multicast, Symbol("shared::cluster"); cta_group)
+    cg = cta_group == 2 ? (Symbol("cta_group::2"),) : ()
+    mods = (:async, :bulk, :tensor, Symbol("$(ndim)d"), cg...,
             Symbol("shared::cluster"), :global, :tile,
             Symbol("mbarrier::complete_tx::bytes"),
             Symbol("multicast::cluster"))
@@ -140,4 +153,17 @@ end
 
 for ndim in 1:5
     _tma_store_register(ndim)
+end
+
+# Blackwell 2-SM cooperative variants (`.cta_group::2`). Additive — the
+# cta_group::1 Operations above are unchanged. Consumed by the
+# gemm_highperf_blackwell cluster path (load + multicast load; the TMEM→
+# regs→st.global epilogue means no cta_group store consumer, so none is
+# registered — north-star: port what the consumer uses).
+for ndim in 1:5, dst_ss in (Symbol("shared::cluster"), Symbol("shared::cta"))
+    _tma_load_register(ndim, dst_ss; cta_group = 2)
+end
+
+for ndim in 1:5
+    _tma_load_multicast_register(ndim; cta_group = 2)
 end

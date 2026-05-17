@@ -191,8 +191,7 @@ for which in (:ld, :st)
 end
 
 # `tcgen05.commit` — arrive-on-one of an mbarrier after the MMA group
-# retires. Single 32-bit shared mbarrier address. The `.multicast::cluster`
-# + u16 mask variant (cta_group::2 datacenter cluster GEMM) is deferred.
+# retires. Single 32-bit shared mbarrier address.
 function _tcgen05_commit_register(cta::Int, space::Symbol)
     mods = (:commit, Symbol("cta_group::", cta),
             Symbol("mbarrier::arrive::one"), Symbol("shared::", space), :b64)
@@ -208,6 +207,36 @@ end
 
 for cta in (1, 2), space in (:cta, :cluster)
     _tcgen05_commit_register(cta, space)
+end
+
+# Multicast variant (cta_group::2 datacenter cluster GEMM, e.g. pyptx
+# gemm_highperf_blackwell 2-SM path): the MMA-retire arrive fires on the
+# local mbarrier of every CTA whose bit is set in the u16 `mask`, so both
+# cluster CTAs' consumer barriers transition together. pyptx
+# `_Tcgen05.commit(multicast=True)` mod order:
+#   .commit.cta_group::N.mbarrier::arrive::one.multicast::cluster
+#       .shared::cluster.b64 [mbar], mask;
+# `.multicast::cluster` is **cluster-state-space only** — ptxas rejects
+# `.shared::cta` here ("State space incorrect for instruction
+# 'tcgen05.commit'"), so only `shared::cluster` is registered (pyptx's
+# builder accepts `space='cta'` syntactically but it never assembles).
+function _tcgen05_commit_multicast_register(cta::Int)
+    mods = (:commit, Symbol("cta_group::", cta),
+            Symbol("mbarrier::arrive::one"), Symbol("multicast::cluster"),
+            Symbol("shared::cluster"), :b64)
+    asm = "tcgen05.commit.cta_group::$cta.mbarrier::arrive::one." *
+          "multicast::cluster.shared::cluster.b64 [\$0], \$1;"
+    @eval function (::Operation{:tcgen05, $mods})(mbar::UInt32, mask::Integer)
+        Base.@inline
+        @asmcall($asm, "r,h,~{memory}", true, Nothing,
+                 Tuple{UInt32, UInt16}, mbar, UInt16(mask))
+        nothing
+    end
+    nothing
+end
+
+for cta in (1, 2)
+    _tcgen05_commit_multicast_register(cta)
 end
 
 # `tcgen05.mma` — dense F16/BF16/TF32/FP8 path (ROADMAP item 10, first
