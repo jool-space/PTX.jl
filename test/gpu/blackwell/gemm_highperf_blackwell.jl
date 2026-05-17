@@ -336,11 +336,12 @@ function _ghb_persistent_kernel!(
     total_tiles  = UInt32(M ÷ Int32(GHB_BM)) * tile_n_iters
     kiters       = UInt32(K ÷ Int32(GHB_BK))
 
-    tile_iter = UInt32(0)
-    while true
-        tile_linear = cta_x + tile_iter * nctas
-        tile_linear >= total_tiles && break
-
+    # Condition-loop (the proven grouped_gemm / build_gemm idiom), NOT
+    # `while true … && break` — the one structural form not inherited
+    # from a hardware-validated kernel.
+    tile_iter   = UInt32(0)
+    tile_linear = cta_x
+    while tile_linear < total_tiles
         tile_m = tile_linear ÷ tile_n_iters         # v0: no serpentine
         tile_n = tile_linear % tile_n_iters
         m_base = tile_m << UInt32(7)
@@ -432,7 +433,8 @@ function _ghb_persistent_kernel!(
             end
         end
         ptx"bar.sync"(Val(0))
-        tile_iter += UInt32(1)
+        tile_iter  += UInt32(1)
+        tile_linear = cta_x + tile_iter * nctas
     end
 
     if tid < UInt32(32)
