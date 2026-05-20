@@ -30,5 +30,5 @@ the [Transpiler](https://jool-space.github.io/PTX.jl/dev/transpiler/) docs.
 ## Credits
 
 Primary design inspiration: [pyptx](https://github.com/patrick-toulme/pyptx)
-by Patrick Toulmé. The parser, IR, and several wrappers and example kernels
+ The parser, IR, and several wrappers and example kernels
 are ported from pyptx (Apache 2.0); see per-file headers and `LICENSE`.
