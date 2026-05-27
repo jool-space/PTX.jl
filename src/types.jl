@@ -55,6 +55,26 @@ const NO_RETURN_PREFIXES = Set{Tuple{Vararg{Symbol}}}((
     # of the mbarrier address, not a return type. The chain would (wrongly)
     # reserve $0 as a UInt64 output.
     (:cp, :async, :mbarrier, :arrive),
+    # `multimem.st{.async}` / `multimem.red{.async}` — destination is a
+    # bracketed multimem address, terminal `.type` describes the value being
+    # written/reduced (not a return). `multimem.ld_reduce` deliberately omitted
+    # — it IS a load and the terminal `.type` correctly drives its rettype.
+    (:multimem, :st),
+    (:multimem, :red),
+    # `cp.async.bulk{.tensor}.*` and `cp.reduce.async.bulk.*` — bulk copies/
+    # reductions whose terminal `.type` (.b32/.b64/.b128/.f32/.f16/.bf16/...)
+    # describes the operand element type, not a return. PTX 9.3 added .sem/
+    # .scope on the non-tensor forms (terminal becomes a real dtype suffix:
+    # .b128 for cp.async.bulk, .b32/.u64/.f16/etc. for cp.reduce.async.bulk).
+    # Most of these dtypes are in DTYPE_RETTYPE → without this gate the chain
+    # default reserves $0 and ptxas rejects with "Arguments mismatch".
+    # `cp.async.bulk` covers cp.async.bulk.prefetch too.
+    (:cp, :async, :bulk),
+    (:cp, :reduce, :async, :bulk),
+    # `multimem.cp.async.bulk` / `multimem.cp.reduce.async.bulk` — same as
+    # above, opcode-prefixed by :multimem. Doesn't conflict with the
+    # `(:multimem, :st)` / `(:multimem, :red)` entries (disjoint mods[1]).
+    (:multimem, :cp),
 ))
 
 # Prefixes are stored as `(opcode, mod1, mod2, ...)` for compactness.

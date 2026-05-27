@@ -29,3 +29,70 @@ end
         nothing
     end
 end
+
+# --- Fabric proxy fences (PTX 9.3, sm_100+) -------------------------------
+# `fence.proxy.<to::from>.alias.<sem>.sys;` — uni-directional proxy ordering
+# between the fabric proxy (used by `fabric.*` ops on the CFT/NVLink path)
+# and the generic proxy. All three handle directions × {acquire, release}
+# are enumerated. `.alias` and `.sys` are mandatory per the PTX 9.3 spec
+# (§9.7.14.4); no scope/sem variation beyond what's shown.
+
+@generated function (::Operation{:fence, (:proxy, Symbol("generic::fabric"), :alias, :acquire, :sys)})()
+    quote
+        Base.@inline
+        @asmcall("fence.proxy.generic::fabric.alias.acquire.sys;",
+                 "~{memory}", true, Nothing,
+                 Tuple{})
+        nothing
+    end
+end
+
+@generated function (::Operation{:fence, (:proxy, Symbol("generic::fabric"), :alias, :release, :sys)})()
+    quote
+        Base.@inline
+        @asmcall("fence.proxy.generic::fabric.alias.release.sys;",
+                 "~{memory}", true, Nothing,
+                 Tuple{})
+        nothing
+    end
+end
+
+@generated function (::Operation{:fence, (:proxy, Symbol("fabric::generic"), :alias, :acquire, :sys)})()
+    quote
+        Base.@inline
+        @asmcall("fence.proxy.fabric::generic.alias.acquire.sys;",
+                 "~{memory}", true, Nothing,
+                 Tuple{})
+        nothing
+    end
+end
+
+@generated function (::Operation{:fence, (:proxy, Symbol("fabric::generic"), :alias, :release, :sys)})()
+    quote
+        Base.@inline
+        @asmcall("fence.proxy.fabric::generic.alias.release.sys;",
+                 "~{memory}", true, Nothing,
+                 Tuple{})
+        nothing
+    end
+end
+
+@generated function (::Operation{:fence, (:proxy, Symbol("fabric::fabric"), :alias, :acquire, :sys)})()
+    quote
+        Base.@inline
+        @asmcall("fence.proxy.fabric::fabric.alias.acquire.sys;",
+                 "~{memory}", true, Nothing,
+                 Tuple{})
+        nothing
+    end
+end
+
+@generated function (::Operation{:fence, (:proxy, Symbol("fabric::fabric"), :alias, :release, :sys)})()
+    quote
+        Base.@inline
+        @asmcall("fence.proxy.fabric::fabric.alias.release.sys;",
+                 "~{memory}", true, Nothing,
+                 Tuple{})
+        nothing
+    end
+end

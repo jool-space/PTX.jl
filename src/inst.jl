@@ -274,7 +274,7 @@ end
 const NONPURE_OPCODES = Set{Symbol}((
     :bar, :mbarrier, :fence, :wgmma, :tcgen05, :cluster, :cp,
     :setmaxnreg, :elect, :prefetch, :tensormap,
-    :ld, :st, :atom, :red, :ldmatrix, :stmatrix,
+    :ld, :st, :atom, :red, :ldmatrix, :stmatrix, :multimem,
     # Warp-collective ops: each lane's result depends on every other lane's
     # input. Without `~{memory}` LLVM hoists/constant-folds them as if pure
     # and silently loses the cross-lane semantics.
@@ -289,12 +289,16 @@ const NONPURE_OPCODES = Set{Symbol}((
     :mapa, :getctarank,
     # Inter-launch / kernel-control.
     :griddepcontrol, :clusterlaunchcontrol, :exit,
+    # sm_100 fabric / CUDA Compute Fabric Transport (CFT) — async NVLink ops
+    # with observable cross-GPU visibility. Without ~{memory} LLVM is free to
+    # reorder around mbarrier submit/wait, breaking the lifecycle invariants.
+    :fabric,
 ))
 
 # Memory-op opcodes whose pointer args render as `[%addr]`; cvta/mov etc. don't.
 const BRACKET_PTR_OPCODES = Set{Symbol}((
     :ld, :st, :atom, :red, :cp, :mbarrier, :ldmatrix, :stmatrix,
-    :prefetch, :tcgen05, :tensormap, :fence,
+    :prefetch, :tcgen05, :tensormap, :fence, :multimem,
 ))
 
 is_nonpure_opcode(op::Symbol) = op in NONPURE_OPCODES

@@ -20,6 +20,7 @@ export @ptx_str, @sreg_str
 
 include("wrappers/cp_async.jl")
 include("wrappers/cvt.jl")
+include("wrappers/fabric.jl")
 include("wrappers/fence.jl")
 include("wrappers/ldmatrix.jl")
 include("wrappers/mapa.jl")
