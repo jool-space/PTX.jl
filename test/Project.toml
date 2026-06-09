@@ -19,6 +19,7 @@ CUPTI = {rev = "main", subdir = "lib/cupti", url = "https://github.com/JuliaGPU/
 [compat]
 CUDACore = "6"
 CUDATools = "6"
+CUPTI = "6.1.0"
 KernelAbstractions = "0.9"
 Microfloats = "0.2"
 ParallelTestRunner = "2.6.0"
