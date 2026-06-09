@@ -11,10 +11,10 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [sources]
-CUDACore = {rev = "feature-set", subdir = "CUDACore", url = "https://github.com/AntonOresten/CUDA.jl"}
-CUDATools = {rev = "feature-set", subdir = "CUDATools", url = "https://github.com/AntonOresten/CUDA.jl"}
-NVML = {rev = "feature-set", subdir = "lib/nvml", url = "https://github.com/AntonOresten/CUDA.jl"}
-CUPTI = {rev = "feature-set", subdir = "lib/cupti", url = "https://github.com/AntonOresten/CUDA.jl"}
+CUDACore = {rev = "main", subdir = "CUDACore", url = "https://github.com/JuliaGPU/CUDA.jl"}
+CUDATools = {rev = "main", subdir = "CUDATools", url = "https://github.com/JuliaGPU/CUDA.jl"}
+NVML = {rev = "main", subdir = "lib/nvml", url = "https://github.com/JuliaGPU/CUDA.jl"}
+CUPTI = {rev = "main", subdir = "lib/cupti", url = "https://github.com/JuliaGPU/CUDA.jl"}
 
 [compat]
 CUDACore = "6"
