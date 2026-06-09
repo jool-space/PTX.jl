@@ -27,17 +27,6 @@ let
 end
 ```
 
-PTX.jl fills the gap CUDA.jl leaves uncovered: full TensorCore shape coverage
-(incl. TF32, FP8, sub-byte), TMA descriptors, cluster APIs, mbarriers, FP8
-conversions, `setmaxnreg`, `match.sync`, `prmt`, and the rest of what
-`<mma.h>`, `<cuda_pipeline.h>`, and `<cuda/barrier>` ultimately compile down
-to. Composition with CUDA.jl is strictly additive — CUDA.jl owns launch,
-memory, and control flow; PTX.jl owns specialty op emission.
-
-`ptx_to_julia(source)` turns a `.ptx` file into idiomatic Julia where each
-register is a variable and each instruction is a `ptx"..."(...)` call. See
-the [Transpiler](https://jool-space.github.io/PTX.jl/dev/transpiler/) docs.
-
 ## Credits
 
 Primary design inspiration: [pyptx](https://github.com/patrick-toulme/pyptx)
