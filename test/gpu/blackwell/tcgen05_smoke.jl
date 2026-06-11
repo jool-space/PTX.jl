@@ -189,7 +189,7 @@ if v"10.0" <= DEV_CAP < v"11.0"
                 (_tcgen05_mma_only_kernel!,   22.0f0),
                 (_tcgen05_ld_only_kernel!,    33.0f0))
             O = CUDACore.zeros(Float32, 1)
-            kern = @cuda launch=false feature_set=:arch kernel!(O)
+            kern = @cuda launch=false kernel!(O)
             attrs = CUDACore.attributes(kern.fun)
             attrs[CUDACore.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES] = TCS_SMEM
             kern(O; blocks = 1, threads = 128, shmem = TCS_SMEM)

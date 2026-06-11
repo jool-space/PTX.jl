@@ -72,7 +72,7 @@ end
 if v"10.0" <= DEV_CAP < v"11.0"
     @testset "tcgen05 TMEM roundtrip (B300 runtime)" begin
         O = CUDACore.zeros(Float32, TCR_ROWS * TCR_COLS)
-        @cuda blocks=1 threads=128 feature_set=:arch _tcgen05_roundtrip_kernel!(O)
+        @cuda blocks=1 threads=128 _tcgen05_roundtrip_kernel!(O)
         CUDACore.synchronize()
 
         got = reshape(Array(O), TCR_COLS, TCR_ROWS)   # row-major (row, col)

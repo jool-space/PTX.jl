@@ -467,7 +467,7 @@ if v"9.0" <= DEV_CAP < v"10.0"
         # than the default 48 KB dynamic SMEM must explicitly set
         # MAX_DYNAMIC_SHARED_SIZE_BYTES on the function before launch
         # (Hopper allows up to ~228 KB per CTA when opted in).
-        kern = @cuda launch=false feature_set=:arch _ghh_gemm_kernel!(
+        kern = @cuda launch=false _ghh_gemm_kernel!(
             C_d, A.ptr, B.ptr, Cd.ptr, sched_d,
             Int32(M_total), Int32(N_total), Int32(K_test))
         attrs = CUDACore.attributes(kern.fun)

@@ -1,5 +1,4 @@
 # REQUIRES CC 10.0
-import CUDACore: CUDACompilerJob, GPUCompiler
 using CUDACore.LLVM
 
 pack_f32x2(lo::Float32, hi::Float32) =

@@ -6,9 +6,9 @@ using Microfloats: NanOnlyAllOnes, IEEE, SAT, OVF
 #
 # Several of these ops (e2m3x2, e3m2x2, ue8m0x2, scaled cvts) are
 # arch-specific — ptxas only accepts them under the `a` target suffix
-# (e.g. `.target sm_121a`). The `feature_set=:arch` kwarg on `@cuda`
-# tells CUDACore to rewrite both the `.target` directive and the
-# `--gpu-name` ptxas flag with the `a` suffix matching the live device.
+# (e.g. `.target sm_121a`). By default `@cuda` selects the arch-specific
+# feature set, so both the `.target` directive and the `--gpu-name`
+# ptxas flag carry the `a` suffix matching the live device.
 
 # Microfloats reference types — most sub-byte FP types are `FiniteOnly` so
 # their default policy is SAT; ue8m0 needs an explicit SAT twin.
@@ -63,7 +63,7 @@ end
     n  = length(xs)
     out_d = CUDACore.zeros(UInt16, n)
     threads = min(n, 256); blocks = cld(n, threads)
-    @cuda threads=threads blocks=blocks feature_set=:arch _cvt_e2m1x2!(out_d, CuArray(xs))
+    @cuda threads=threads blocks=blocks _cvt_e2m1x2!(out_d, CuArray(xs))
     CUDACore.synchronize()
     # Wrapper packs the .b8 cvt result into the low byte of a UInt16; high
     # byte is zero by the `mov.b16 dst, {t, 0}` form.
@@ -100,7 +100,7 @@ end
     n  = length(xs)
     out_d = CUDACore.zeros(UInt16, n)
     threads = min(n, 256); blocks = cld(n, threads)
-    @cuda threads=threads blocks=blocks feature_set=:arch _cvt_e2m3x2!(out_d, CuArray(xs))
+    @cuda threads=threads blocks=blocks _cvt_e2m3x2!(out_d, CuArray(xs))
     CUDACore.synchronize()
     expected = UInt16[let b = UInt16(_mf6_e2m3(x))
                           (b << 8) | b
@@ -126,7 +126,7 @@ end
     n  = length(xs)
     out_d = CUDACore.zeros(UInt16, n)
     threads = min(n, 256); blocks = cld(n, threads)
-    @cuda threads=threads blocks=blocks feature_set=:arch _cvt_e3m2x2!(out_d, CuArray(xs))
+    @cuda threads=threads blocks=blocks _cvt_e3m2x2!(out_d, CuArray(xs))
     CUDACore.synchronize()
     expected = UInt16[let b = UInt16(_mf6_e3m2(x))
                           (b << 8) | b
@@ -158,7 +158,7 @@ end
     n  = length(xs)
     out_d = CUDACore.zeros(UInt16, n)
     threads = min(n, 256); blocks = cld(n, threads)
-    @cuda threads=threads blocks=blocks feature_set=:arch _cvt_ue8m0x2!(out_d, CuArray(xs))
+    @cuda threads=threads blocks=blocks _cvt_ue8m0x2!(out_d, CuArray(xs))
     CUDACore.synchronize()
     expected = UInt16[let b = UInt16(_mf8_ue8m0_rz(x))
                           (b << 8) | b
@@ -201,8 +201,8 @@ end
     threads = min(n, 256); blocks = cld(n, threads)
     # `n2::ue8m0` packs *per-lane* scales into the UInt16 — high byte scales
     # the high bf16 lane, low byte scales the low one — so set both bytes.
-    @cuda threads=threads blocks=blocks feature_set=:arch _cvt_scaled!(scaled_d, CuArray(xs), UInt16(0x7F7F))
-    @cuda threads=threads blocks=blocks feature_set=:arch _cvt_unscaled!(unscaled_d, CuArray(xs))
+    @cuda threads=threads blocks=blocks _cvt_scaled!(scaled_d, CuArray(xs), UInt16(0x7F7F))
+    @cuda threads=threads blocks=blocks _cvt_unscaled!(unscaled_d, CuArray(xs))
     CUDACore.synchronize()
     @test Array(scaled_d) == Array(unscaled_d)
 end
@@ -236,7 +236,7 @@ end
     n = length(xs)
     out_d = CUDACore.zeros(UInt32, n)
     threads = min(n, 256); blocks = cld(n, threads)
-    @cuda threads=threads blocks=blocks feature_set=:arch _cvt_e2m3_unpack_roundtrip!(out_d, CuArray(xs))
+    @cuda threads=threads blocks=blocks _cvt_e2m3_unpack_roundtrip!(out_d, CuArray(xs))
     CUDACore.synchronize()
     got = Array(out_d)
     expected = Float16[Float16(Float6_E2M3FN(x)) for x in xs]
@@ -262,7 +262,7 @@ end
     n = length(xs)
     out_d = CUDACore.zeros(UInt32, n)
     threads = min(n, 256); blocks = cld(n, threads)
-    @cuda threads=threads blocks=blocks feature_set=:arch _cvt_e3m2_unpack_roundtrip!(out_d, CuArray(xs))
+    @cuda threads=threads blocks=blocks _cvt_e3m2_unpack_roundtrip!(out_d, CuArray(xs))
     CUDACore.synchronize()
     got = Array(out_d)
     expected = Float16[Float16(Float6_E3M2FN(x)) for x in xs]
@@ -288,7 +288,7 @@ end
     n = length(xs)
     out_d = CUDACore.zeros(UInt32, n)
     threads = min(n, 256); blocks = cld(n, threads)
-    @cuda threads=threads blocks=blocks feature_set=:arch _cvt_e2m1_unpack_roundtrip!(out_d, CuArray(xs))
+    @cuda threads=threads blocks=blocks _cvt_e2m1_unpack_roundtrip!(out_d, CuArray(xs))
     CUDACore.synchronize()
     got = Array(out_d)
     expected = Float16[Float16(Float4_E2M1FN(x)) for x in xs]

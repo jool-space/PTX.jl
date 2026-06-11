@@ -222,7 +222,7 @@ if v"10.0" <= DEV_CAP < v"11.0"
 
         C_d = CUDACore.zeros(Float32, G * M * N)
         grid = (N ÷ GGB_BN, M ÷ GGB_BM, G)
-        @cuda threads=GGB_THREADS blocks=grid feature_set=:arch _grouped_gemm_bw_kernel!(
+        @cuda threads=GGB_THREADS blocks=grid _grouped_gemm_bw_kernel!(
             C_d, a_const.ptr, b_const.ptr, Int32(M), Int32(N), Int32(K))
         CUDACore.synchronize()
 

@@ -232,7 +232,7 @@ if v"9.0" <= DEV_CAP < v"10.0"
         B = upload_tma_descriptor(tmap_B)
 
         C_d = CUDACore.zeros(Float32, PC_BM * PC_BN)
-        @cuda threads = PC_THREADS feature_set = :arch _pc_gemm_kernel!(
+        @cuda threads = PC_THREADS _pc_gemm_kernel!(
             C_d, A.ptr, B.ptr, Int32(K_test))
         CUDACore.synchronize()
 
@@ -273,7 +273,7 @@ if v"9.0" <= DEV_CAP < v"10.0"
         B = upload_tma_descriptor(tmap_B)
 
         C_d = CUDACore.zeros(Float32, PC_BM * PC_BN)
-        @cuda threads = PC_THREADS feature_set = :arch _pc_gemm_kernel!(
+        @cuda threads = PC_THREADS _pc_gemm_kernel!(
             C_d, A.ptr, B.ptr, Int32(K_test))
         CUDACore.synchronize()
 

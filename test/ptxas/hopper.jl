@@ -53,8 +53,8 @@ end
     ptx = emit_ptx(_wgmma_compile_bf16!, types;
                    cap = v"9.0", feature_set = :arch)
     @test occursin("wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16", ptx)
-    # Tied operands: same %fN regs appear in both input and output roles.
-    @test occursin(r"wgmma\.mma_async[^;]*\{%f\d+, %f\d+, %f\d+, %f\d+\}", ptx)
+    # 4 f32 d-regs in brace (%f, or untyped b32 %r on newer NVPTX backends).
+    @test occursin(r"wgmma\.mma_async[^;]*\{%[fr]\d+, %[fr]\d+, %[fr]\d+, %[fr]\d+\}", ptx)
     # Imms baked in (scaleD=1, scaleA=1, transA=0, transB=0).
     @test occursin("1, 1, 0, 0;", ptx)
 end
@@ -76,8 +76,8 @@ end
     ptx = emit_ptx(_wgmma_compile_e4m3!, types;
                    cap = v"9.0", feature_set = :arch)
     @test occursin("wgmma.mma_async.sync.aligned.m64n16k32.f32.e4m3.e4m3", ptx)
-    # 8 d-regs in brace.
-    @test occursin(r"e4m3\.e4m3 \{%f\d+(?:, %f\d+){7}\}", ptx)
+    # 8 d-regs in brace (%f, or untyped b32 %r on newer NVPTX backends).
+    @test occursin(r"e4m3\.e4m3 \{%[fr]\d+(?:, %[fr]\d+){7}\}", ptx)
     # FP8 has no transA/transB imms — only scaleD, scaleA.
     @test occursin(", 1, 1;", ptx)
 end

@@ -171,7 +171,7 @@ if v"10.0" <= DEV_CAP < v"11.0"
         B_d = CuArray(pack(_tbp_B))
         O_d = CUDACore.zeros(Float32, TBP_EPI_ROWS * TBP_BN)
 
-        @cuda blocks=1 threads=128 feature_set=:arch _tcgen05_b128_probe_kernel!(
+        @cuda blocks=1 threads=128 _tcgen05_b128_probe_kernel!(
             O_d, A_d, B_d)
         CUDACore.synchronize()
 

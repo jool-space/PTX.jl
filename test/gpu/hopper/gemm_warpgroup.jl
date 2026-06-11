@@ -194,7 +194,7 @@ if v"9.0" <= DEV_CAP < v"10.0"
         # kernel writes (frag_row * BN + frag_col) byte offsets — N-innermost
         # in global memory, matching the per-lane v2.f32 stride.
         D = CUDACore.zeros(Float32, HOPPER_BM * HOPPER_BN)
-        @cuda threads = HOPPER_THREADS feature_set = :arch _hopper_warpgroup_gemm_kernel!(
+        @cuda threads = HOPPER_THREADS _hopper_warpgroup_gemm_kernel!(
             D, a_const.ptr, b_const.ptr)
         CUDACore.synchronize()
 

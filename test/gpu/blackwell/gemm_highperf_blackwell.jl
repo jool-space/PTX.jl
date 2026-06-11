@@ -241,7 +241,7 @@ if v"10.0" <= DEV_CAP < v"11.0"
         D_d = CUDACore.zeros(Float32, M * N)
         grid = (N ÷ GHB_BN, M ÷ GHB_BM, 1)
 
-        kern = @cuda launch=false feature_set=:arch _ghb_gemm_kernel!(
+        kern = @cuda launch=false _ghb_gemm_kernel!(
             D_d, a_const.ptr, b_const.ptr, Int32(M), Int32(N), Int32(K))
         attrs = CUDACore.attributes(kern.fun)
         attrs[CUDACore.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES] = GHB_SMEM
@@ -489,7 +489,7 @@ if v"10.0" <= DEV_CAP < v"11.0"
         b_const = upload_tma_descriptor(tmap_B)
 
         D_d = CUDACore.zeros(Float32, M * N)
-        kern = @cuda launch=false feature_set=:arch _ghb_persistent_kernel!(
+        kern = @cuda launch=false _ghb_persistent_kernel!(
             D_d, a_const.ptr, b_const.ptr, Int32(M), Int32(N), Int32(K))
         attrs = CUDACore.attributes(kern.fun)
         attrs[CUDACore.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES] = GHB_SMEM

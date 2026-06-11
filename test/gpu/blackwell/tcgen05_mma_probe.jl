@@ -121,7 +121,7 @@ end
 if v"10.0" <= DEV_CAP < v"11.0"
     @testset "tcgen05 single-MMA probe (B300 runtime, A·B = 16)" begin
         O = CUDACore.zeros(Float32, 32 * 64)
-        @cuda blocks=1 threads=128 feature_set=:arch _tcgen05_mma_probe_kernel!(O)
+        @cuda blocks=1 threads=128 _tcgen05_mma_probe_kernel!(O)
         CUDACore.synchronize()
         got = reshape(Array(O), 64, 32)          # row-major (col, row)
         @test got == fill(16.0f0, 64, 32)

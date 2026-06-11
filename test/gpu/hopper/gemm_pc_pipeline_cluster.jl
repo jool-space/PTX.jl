@@ -282,7 +282,7 @@ if v"9.0" <= DEV_CAP < v"10.0"
         grid = (PCC_CLUSTERS * num_n_tiles, num_m_clusters, 1)
 
         C_d = CUDACore.zeros(Float32, M_total * N_total)
-        @cuda blocks = grid threads = PCC_THREADS clustersize = (PCC_CLUSTERS, 1, 1) feature_set = :arch _pcc_gemm_kernel!(
+        @cuda blocks = grid threads = PCC_THREADS clustersize = (PCC_CLUSTERS, 1, 1) _pcc_gemm_kernel!(
             C_d, A.ptr, B.ptr, Int32(M_total), Int32(N_total), Int32(K_test))
         CUDACore.synchronize()
 

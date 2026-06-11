@@ -28,7 +28,7 @@ end
 
 @testset "mma.sync.aligned.kind::f8f6f4 m16n8k32 e4m3 smoke (a=b=0 → d == c)" begin
     out = CUDACore.zeros(Float32, 32 * 4)
-    @cuda threads=32 feature_set=:arch _sm121a_mma_kind_f8f6f4_smoke!(out)
+    @cuda threads=32 _sm121a_mma_kind_f8f6f4_smoke!(out)
     CUDACore.synchronize()
     got = Array(out)
     expected = [Float32(t) * 4f0 + Float32(j) for t in 0:31 for j in 0:3]
@@ -57,7 +57,7 @@ end
 
 @testset "mma.sync.aligned.kind::f8f6f4 e4m3 correctness (A=B=1.0, C=0 → D==32.0)" begin
     out = CUDACore.zeros(Float32, 32 * 4)
-    @cuda threads=32 feature_set=:arch _sm121a_mma_kind_f8f6f4_correct!(out)
+    @cuda threads=32 _sm121a_mma_kind_f8f6f4_correct!(out)
     CUDACore.synchronize()
     @test all(Array(out) .== 32.0f0)
 end
@@ -80,7 +80,7 @@ end
 
 @testset "mma.sync.aligned.kind::f8f6f4 m16n8k16 e4m3 correctness (A=B=1.0 → D==16.0)" begin
     out = CUDACore.zeros(Float32, 32 * 4)
-    @cuda threads=32 feature_set=:arch _sm121a_mma_kind_f8f6f4_k16_correct!(out)
+    @cuda threads=32 _sm121a_mma_kind_f8f6f4_k16_correct!(out)
     CUDACore.synchronize()
     @test all(Array(out) .== 16.0f0)
 end
@@ -117,7 +117,7 @@ end
 
 @testset "mma.sync.aligned.kind::mxf8f6f4 e4m3 ue8m0 correctness (scale=1 → D==32.0)" begin
     out = CUDACore.zeros(Float32, 32 * 4)
-    @cuda threads=32 feature_set=:arch _sm121a_mma_kind_mxf8f6f4_correct!(out)
+    @cuda threads=32 _sm121a_mma_kind_mxf8f6f4_correct!(out)
     CUDACore.synchronize()
     @test all(Array(out) .== 32.0f0)
 end
@@ -142,7 +142,7 @@ end
 
 @testset "mma.sync.aligned.kind::mxf4 e2m1 ue8m0 correctness (scale=1 → D==64.0)" begin
     out = CUDACore.zeros(Float32, 32 * 4)
-    @cuda threads=32 feature_set=:arch _sm121a_mma_kind_mxf4_correct!(out)
+    @cuda threads=32 _sm121a_mma_kind_mxf4_correct!(out)
     CUDACore.synchronize()
     @test all(Array(out) .== 64.0f0)
 end
@@ -167,7 +167,7 @@ end
 
 @testset "mma.sync.aligned.kind::mxf4nvf4 e2m1 ue4m3 correctness (scale=1 → D==64.0)" begin
     out = CUDACore.zeros(Float32, 32 * 4)
-    @cuda threads=32 feature_set=:arch _sm121a_mma_kind_mxf4nvf4_correct!(out)
+    @cuda threads=32 _sm121a_mma_kind_mxf4nvf4_correct!(out)
     CUDACore.synchronize()
     @test all(Array(out) .== 64.0f0)
 end

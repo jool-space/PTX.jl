@@ -28,10 +28,15 @@ const DEV_CAP = CUDACore.functional() ?
 # LLVM NVPTX backend → PTX text. No ptxas, no driver. Compiled with
 # kernel ABI so `kernel_state` intrinsics (e.g. ptx"mov.u32"(sreg"%tid.x"))
 # resolve correctly.
+#
+# Since CUDACore 6.2 the feature set is part of the target (`SMVersion`),
+# not a separate compiler kwarg; the helpers keep the (cap, feature_set)
+# signature so the ~100 call sites stay as they are.
 function emit_ptx(f, tt::Type{<:Tuple};
                   cap::VersionNumber, feature_set::Symbol = :baseline)
     io = IOBuffer()
-    CUDATools.code_ptx(io, f, tt; cap, feature_set, kernel = true)
+    arch = SMVersion(cap.major, cap.minor, feature_set)
+    CUDATools.code_ptx(io, f, tt; arch, kernel = true)
     String(take!(io))
 end
 
@@ -40,8 +45,9 @@ end
 function ptxas_compiles(f, tt::Type{<:Tuple};
                         cap::VersionNumber, feature_set::Symbol = :baseline)
     source = methodinstance(typeof(f), Base.to_tuple_type(tt))
+    arch = SMVersion(cap.major, cap.minor, feature_set)
     config = CUDACore.compiler_config(CUDACore.device();
-                                      kernel = true, cap, feature_set)
+                                      kernel = true, arch)
     job = CompilerJob(source, config)
     CUDACore.invoke_frozen(CUDACore.compile, job)
     true

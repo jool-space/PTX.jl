@@ -56,7 +56,7 @@ const _PTXAS = CUDACore.CUDA_Compiler.ptxas()
 # Max PTX ISA the managed assembler accepts (CUDA 13.2 → 9.2). Tracks the
 # shipped toolkit automatically; never below any feature floor, never
 # above the binary's ceiling.
-const _ISA = maximum(CUDACore.cuda_ptx_support(CUDACore.compiler_version()))
+const _ISA = maximum(CUDACore.ptxas_ptx_support(CUDACore.compiler_version()))
 
 # Many LLVM-testsuite-derived corpus files are filecheck fixtures that
 # generate PTX from IR without emitting a full prologue. They share one of

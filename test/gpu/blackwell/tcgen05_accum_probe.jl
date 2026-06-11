@@ -129,7 +129,7 @@ end
 if v"10.0" <= DEV_CAP < v"11.0"
     @testset "tcgen05 accumulation probe (B300 runtime, 4·A·B = 64)" begin
         O = CUDACore.zeros(Float32, 32 * 64)
-        @cuda blocks=1 threads=128 feature_set=:arch _tcgen05_accum_probe_kernel!(O)
+        @cuda blocks=1 threads=128 _tcgen05_accum_probe_kernel!(O)
         CUDACore.synchronize()
         got = reshape(Array(O), 64, 32)
         @test got == fill(64.0f0, 64, 32)

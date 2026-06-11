@@ -432,7 +432,7 @@ if v"9.0" <= DEV_CAP < v"10.0"
         v_const = upload_tma_descriptor(tmap_V)
 
         O_d = CUDACore.zeros(Float32, M_q * HD)
-        @cuda threads = FA_THREADS blocks = (M_q ÷ FA_BM, 1, 1) feature_set = :arch _fa_kernel!(
+        @cuda threads = FA_THREADS blocks = (M_q ÷ FA_BM, 1, 1) _fa_kernel!(
             O_d, q_const.ptr, k_const.ptr, v_const.ptr, Int32(N_seq), sm_scale * FA_LOG2E)
         CUDACore.synchronize()
 
