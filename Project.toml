@@ -18,7 +18,7 @@ CUDACore = "bd0ed864-bdfe-4181-a5ed-ce625a5fdea2"
 PTXCUDACoreExt = "CUDACore"
 
 [compat]
-CUDACore = "6"
+CUDACore = "6.2"
 EnumX = "1"
 LLVM = "9.7.1"
 Republic = "2"

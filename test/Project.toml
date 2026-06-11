@@ -1,8 +1,6 @@
 [deps]
 CUDACore = "bd0ed864-bdfe-4181-a5ed-ce625a5fdea2"
 CUDATools = "9ec180c6-1c07-47c7-9e6e-ebefa4d1f6d0"
-CUPTI = "9e67e8f6-ba02-4b6c-a7db-3b11ae1e7ab7"
-NVML = "611af6d1-644e-4c5d-bd58-854d7d1254b9"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 Microfloats = "31c70f10-a750-4521-b13c-797315ae2933"
 PTX = "7a3554bf-f3bf-40cd-9a57-3cf23ff3bbf8"
@@ -10,15 +8,9 @@ ParallelTestRunner = "d3525ed8-44d0-4b2c-a655-542cee43accc"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
-[sources]
-CUDACore = {rev = "main", subdir = "CUDACore", url = "https://github.com/JuliaGPU/CUDA.jl"}
-CUDATools = {rev = "main", subdir = "CUDATools", url = "https://github.com/JuliaGPU/CUDA.jl"}
-NVML = {rev = "main", subdir = "lib/nvml", url = "https://github.com/JuliaGPU/CUDA.jl"}
-CUPTI = {rev = "main", subdir = "lib/cupti", url = "https://github.com/JuliaGPU/CUDA.jl"}
-
 [compat]
-CUDACore = "6"
-CUDATools = "6"
+CUDACore = "6.2"
+CUDATools = "6.2"
 KernelAbstractions = "0.9"
 Microfloats = "0.2"
 ParallelTestRunner = "2.6.0"
