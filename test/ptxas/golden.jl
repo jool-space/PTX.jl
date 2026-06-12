@@ -77,3 +77,58 @@ end
     @test golden_test("mbarrier@sm90", _golden_mbarrier_sm90!,
                       Tuple{CuDeviceVector{UInt64, 1}}; cap = v"9.0")
 end
+
+
+# --- TMA (cp.async.bulk.tensor): tile loads/stores ---------------------------
+# Rank spread (1d/2d/5d) plus the qualifier axes: multicast::cluster, the
+# shared::cta destination, and (at sm_100a) cta_group::2. The shared::cta ×
+# cta_group::2 combination stays asm-tier (no NVVM intrinsic carries both)
+# and is pinned in the sm_100a golden to prove the migration left it alone.
+
+function _golden_tma_sm90!(tmap::Core.LLVMPtr{UInt8, PTX.AS.Const}, c::Int32)
+    buf = CuStaticSharedArray(UInt16, 64)
+    bar = CuStaticSharedArray(Int64, 1)
+    dst = pointer(buf)
+    mbar = pointer(bar)
+    ptx"cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
+        dst, tmap, c, mbar)
+    ptx"cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
+        dst, tmap, c, c, mbar)
+    ptx"cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
+        dst, tmap, c, c, c, c, c, mbar)
+    ptx"cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
+        dst, tmap, c, c, mbar, UInt16(0x3))
+    ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
+        dst, tmap, c, c, mbar)
+    ptx"cp.async.bulk.tensor.1d.global.shared::cta.tile.bulk_group"(tmap, c, dst)
+    ptx"cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group"(tmap, c, c, dst)
+    ptx"cp.async.bulk.tensor.5d.global.shared::cta.tile.bulk_group"(
+        tmap, c, c, c, c, c, dst)
+    return nothing
+end
+
+@testset "golden: tma tile forms at sm_90" begin
+    @test golden_test("tma@sm90", _golden_tma_sm90!,
+                      Tuple{Core.LLVMPtr{UInt8, PTX.AS.Const}, Int32};
+                      cap = v"9.0")
+end
+
+function _golden_tma_sm100a!(tmap::Core.LLVMPtr{UInt8, PTX.AS.Const}, c::Int32)
+    buf = CuStaticSharedArray(UInt16, 64)
+    bar = CuStaticSharedArray(Int64, 1)
+    dst = pointer(buf)
+    mbar = pointer(bar)
+    ptx"cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
+        dst, tmap, c, c, mbar)
+    ptx"cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
+        dst, tmap, c, c, mbar, UInt16(0x3))
+    ptx"cp.async.bulk.tensor.2d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
+        dst, tmap, c, c, mbar)
+    return nothing
+end
+
+@testset "golden: tma cta_group::2 forms at sm_100a" begin
+    @test golden_test("tma@sm100a", _golden_tma_sm100a!,
+                      Tuple{Core.LLVMPtr{UInt8, PTX.AS.Const}, Int32};
+                      cap = v"10.0", feature_set = :arch)
+end
