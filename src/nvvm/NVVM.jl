@@ -176,4 +176,6 @@ All registered intrinsic names starting with `prefix`, sorted.
 matching(prefix::AbstractString) =
     sort!(filter(startswith(String(prefix)), collect(keys(TABLE))))
 
+include("emit.jl")
+
 end # module NVVM

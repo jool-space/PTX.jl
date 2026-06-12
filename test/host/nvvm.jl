@@ -1,6 +1,7 @@
 using PTX: NVVM
 using PTX.NVVM: Intrinsic, intrinsic, isintrinsic, matching, overloaded,
-                llvmtype, ptr, slot, anyptr, anyint, anyfloat, TABLE
+                llvmtype, ptr, slot, anyptr, anyint, anyfloat, TABLE,
+                synthesize, IntrinsicCall, @nvvm_str
 
 # The registry's contract (DESIGN.md, "The registry"): the committed table
 # is the backend's intrinsic surface, queryable, with no silent gaps. The
@@ -111,4 +112,129 @@ end
         sprint(showerror, e)
     end
     @test occursin("no registered names share a prefix", err)
+end
+
+# --- Synthesis (emit.jl) ----------------------------------------------------
+#
+# Host-side checks of the llvmcall IR the @generated path splices. The same
+# IR was validated against the real 22.1.7 llc during development (every
+# case below selected its instruction); the ptxas/ and gpu/ tiers re-prove
+# that continuously through the actual pipeline. Here we pin the *text*: the
+# declaration, the attribute groups, mangling, glue, and repacking.
+
+@testset "synthesize: plain signature, convergent attrs" begin
+    s = synthesize("llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta",
+                   (Core.LLVMPtr{Int64,3}, UInt32))
+    @test occursin("declare i64 @\"llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta\"(ptr addrspace(3), i32) #0", s.ir)
+    @test occursin("attributes #0 = { convergent nounwind nocallback }", s.ir)
+    @test occursin("attributes #1 = { alwaysinline }", s.ir)
+    @test s.rettype == UInt64
+    @test s.tupletype == Tuple{Core.LLVMPtr{Int64,3}, UInt32}
+    @test s.runtime == [1, 2]
+end
+
+@testset "synthesize: mangling and aggregate repack (ldmatrix)" begin
+    s = synthesize("llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16",
+                   (Core.LLVMPtr{UInt16,3},))
+    @test occursin("@\"llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16.p3\"", s.ir)
+    @test occursin("memory(argmem: read)", s.ir)
+    @test occursin("ptr addrspace(3) readonly nocapture", s.ir)
+    @test occursin("insertvalue [4 x i32]", s.ir)
+    @test s.rettype == NTuple{4,UInt32}
+
+    # the address space drives the suffix
+    s = synthesize("llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16",
+                   (Core.LLVMPtr{UInt16,0},))
+    @test occursin(".b16.p0\"", s.ir)
+end
+
+@testset "synthesize: two-slot mangle in canonical order (atomic)" begin
+    # ret slot (f32) precedes the pointer slot (p1) — the order llc's
+    # remangler normalizes to (CONCERNS.md, mangling)
+    s = synthesize("llvm.nvvm.atomic.add.gen.f.cta",
+                   (Core.LLVMPtr{Float32,1}, Float32))
+    @test occursin("@\"llvm.nvvm.atomic.add.gen.f.cta.f32.p1\"", s.ir)
+    @test occursin("nocapture", s.ir)
+    @test s.rettype == Float32
+
+    # the value argument binds the ret slot — Float64 flips it to .f64
+    s = synthesize("llvm.nvvm.atomic.add.gen.f.cta",
+                   (Core.LLVMPtr{Float64,1}, Float64))
+    @test occursin(".f64.p1\"", s.ir)
+    @test s.rettype == Float64
+end
+
+@testset "synthesize: heterogeneous struct return (shfl pred variant)" begin
+    s = synthesize("llvm.nvvm.shfl.sync.idx.i32p", (UInt32, UInt32, UInt32, UInt32))
+    @test occursin("call { i32, i1 }", s.ir)              # intrinsic side
+    @test occursin("define { i32, i8 } @entry", s.ir)     # Julia ABI side
+    @test occursin("zext i1", s.ir)
+    @test s.rettype == Tuple{UInt32,Bool}
+end
+
+@testset "synthesize: Bool <-> i1 glue (vote)" begin
+    s = synthesize("llvm.nvvm.vote.all.sync", (UInt32, Bool))
+    @test occursin("trunc i8 %a1 to i1", s.ir)            # param glue
+    @test occursin("zext i1 %r to i8", s.ir)              # return glue
+    @test occursin("define i8 @entry(i32 %a0, i8 %a1)", s.ir)
+    @test s.rettype == Bool
+end
+
+@testset "synthesize: immediate operands" begin
+    s = synthesize("llvm.nvvm.tcgen05.mma.shared",
+                   (Core.LLVMPtr{UInt32,6}, UInt64, UInt64, UInt32, Bool,
+                    Val{2}, Val{1}, Val{0}))
+    # immargs spliced as literals, not entry parameters
+    @test occursin("i32 2, i32 1, i32 0)", s.ir)
+    @test s.runtime == [1, 2, 3, 4, 5]
+    @test occursin("define void @entry(ptr addrspace(6) %a0, i64 %a1, i64 %a2, i32 %a3, i8 %a4)", s.ir)
+
+    # errors: missing Val, out-of-range, named operand label from the .td
+    bad(args) = try synthesize("llvm.nvvm.tcgen05.mma.shared", args); ""
+                catch e sprint(showerror, e) end
+    @test occursin("immediate operand: pass Val(x)",
+                   bad((Core.LLVMPtr{UInt32,6}, UInt64, UInt64, UInt32, Bool,
+                        UInt32, Val{1}, Val{0})))
+    @test occursin("outside the legal range [0, 3]",
+                   bad((Core.LLVMPtr{UInt32,6}, UInt64, UInt64, UInt32, Bool,
+                        Val{9}, Val{1}, Val{0})))
+    named = try synthesize("llvm.nvvm.tcgen05.mma.tensor",
+                           (Core.LLVMPtr{UInt32,6}, Core.LLVMPtr{UInt32,6},
+                            UInt64, UInt32, Bool, UInt32, Val{1}, Val{0})); ""
+            catch e sprint(showerror, e) end
+    @test occursin("`kind`", named)   # operand name surfaces in the error
+end
+
+@testset "synthesize: rejections" begin
+    msg(name, args) = try synthesize(name, args); ""
+                      catch e sprint(showerror, e) end
+    @test occursin("expects 4 arguments, got 3",
+                   msg("llvm.nvvm.shfl.sync.idx.i32", (UInt32, UInt32, UInt32)))
+    @test occursin("expected UInt32/Int32, got Float32",
+                   msg("llvm.nvvm.shfl.sync.idx.i32", (UInt32, Float32, UInt32, UInt32)))
+    @test occursin("expected Core.LLVMPtr{T,6}",
+                   msg("llvm.nvvm.tcgen05.mma.shared",
+                       (Core.LLVMPtr{UInt32,3}, UInt64, UInt64, UInt32, Bool,
+                        Val{2}, Val{1}, Val{0})))
+    # ldu's loaded-value type is a return-only overload slot — not inferable
+    # from arguments (explicit slot binding is future work, if ever needed)
+    @test occursin("appears only in the return type",
+                   msg("llvm.nvvm.ldu.global.i", (Core.LLVMPtr{UInt32,1}, UInt32)))
+    @test occursin("metadata-typed",
+                   msg("llvm.nvvm.texsurf.handle", (Core.LLVMPtr{UInt8,1},)))
+end
+
+@testset "synthesize: pointer return placeholder" begin
+    s = synthesize("llvm.nvvm.mapa.shared.cluster", (Core.LLVMPtr{Float32,3}, UInt32))
+    @test s.rettype == Core.LLVMPtr{UInt8,7}
+    @test occursin("declare ptr addrspace(7)", s.ir)
+end
+
+@testset "nvvm\"\" macro" begin
+    op = nvvm"llvm.nvvm.activemask"
+    @test op isa IntrinsicCall{Symbol("llvm.nvvm.activemask")}
+    @test nvvm"activemask" === op           # prefix is implied
+    @test sprint(show, op) == "nvvm\"llvm.nvvm.activemask\""
+    # unknown names die at macro expansion, with suggestions
+    @test_throws LoadError @eval nvvm"llvm.nvvm.activemask.sync.warp"
 end

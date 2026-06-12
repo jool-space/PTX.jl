@@ -92,19 +92,27 @@ on raw asm is the duplication direction, per the convergence spike's logic.)
 
 ### Mangling of overloaded intrinsics
 
-**Status: scoped 2026-06-12 (queried from `gen/nvvm_intrinsics_22.1.7.json`);
-one decision encoded, one spot test pending.**
+**Status: RESOLVED 2026-06-12 — scheme pinned against the 22.1.7 `llc`.**
 
 306 of 2569 records are overloaded (signatures containing `llvm_any*` types):
 228 legacy `wmma` (not a migration target), 22 `atomic` (tier-1 core IR), and
 relevantly `ldmatrix` (18), `stmatrix` (9), `tensormap` (11) — overloaded on
-pointer address space. The aggregate spike called ldmatrix with an *unmangled*
-name and it worked end-to-end, which means an upgrade/acceptance path exists —
-but that's the kind of thing that vanishes at a major bump. Decision: the
-generator emits LLVM-mangled names (e.g. `.p3` suffix) for overloaded
-intrinsics, derived from the concrete types at the call site; the registry
-data marks which records need it. Pending: one spot test of the mangled
-spelling against `llc` to pin the exact scheme.
+pointer address space. The canonical scheme, confirmed via `-print-after`
+(parse-time IR, after the auto-upgrader has normalized names): one suffix per
+overload slot, in slot order — AnyTok appearance across (ret..., params...),
+the same numbering the registry uses — spelled `pN` for a pointer in
+address space N and by VT name otherwise (`f32`, `i64`, `v4i32`).
+`ldmatrix...b16.p3` and `atomic.add.gen.f.cta.f32.p0` (ret slot first) both
+select the expected instruction.
+
+A finding with teeth: `llc` *accepts and silently remangles* wrong spellings —
+the swapped `.p0.f32` parsed fine and was rewritten to `.f32.p0`, and the
+aggregate spike's fully *unmangled* ldmatrix also worked. So acceptance
+testing cannot catch mangling bugs on our side; the synthesizer emits
+canonical names by construction and the conformance harness should compare
+post-parse IR, not rely on llc rejecting mistakes. (The leniency itself is
+upgrader behavior that may tighten at a major bump — another reason to be
+canonical now.)
 
 ### Weakdep compat as the backend pin
 
