@@ -132,3 +132,47 @@ end
                       Tuple{Core.LLVMPtr{UInt8, PTX.AS.Const}, Int32};
                       cap = v"10.0", feature_set = :arch)
 end
+
+
+# --- tcgen05: lifecycle, data movement, dense mma ----------------------------
+# One straight-line kernel touching every wrapped verb: alloc/dealloc/
+# relinquish, cp, shift, ld/st (scalar and multi-register shapes), waits,
+# commit (cta + cluster spellings, multicast), dense mma (f16 cg1, tf32
+# cg2) and one mx kind (block-scale operands are not in the notation
+# surface — pinned to prove the migration leaves it on the asm tier).
+
+function _golden_tcgen05_sm100a!(out::CuDeviceVector{UInt32, 1},
+                                 s_desc::UInt64, idesc::UInt32)
+    slot = CuStaticSharedArray(UInt32, 1)
+    bar = CuStaticSharedArray(Int64, 1)
+    slot_addr = PTX.smem_addr_u32(pointer(slot))
+    mbar_addr = PTX.smem_addr_u32(pointer(bar))
+    ptx"tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32"(
+        slot_addr, UInt32(64))
+    taddr = @inbounds slot[1]
+    ptx"tcgen05.cp.cta_group::1.128x128b"(taddr, s_desc)
+    ptx"tcgen05.mma.cta_group::1.kind::f16"(taddr, s_desc, s_desc, idesc, false)
+    ptx"tcgen05.mma.cta_group::2.kind::tf32"(taddr, s_desc, s_desc, idesc, true)
+    ptx"tcgen05.mma.cta_group::1.kind::mxf8f6f4"(taddr, s_desc, s_desc, idesc, false)
+    ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cta.b64"(mbar_addr)
+    ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64"(mbar_addr)
+    ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64"(
+        mbar_addr, UInt16(0x3))
+    r1 = ptx"tcgen05.ld.sync.aligned.32x32b.x1.b32"(taddr)
+    r2 = ptx"tcgen05.ld.sync.aligned.16x128b.x2.b32"(taddr)
+    ptx"tcgen05.wait::ld.sync.aligned"()
+    ptx"tcgen05.st.sync.aligned.32x32b.x1.b32"(taddr, (r1,))
+    ptx"tcgen05.st.sync.aligned.16x128b.x2.b32"(taddr, r2)
+    ptx"tcgen05.wait::st.sync.aligned"()
+    ptx"tcgen05.shift.cta_group::1.down"(taddr)
+    ptx"tcgen05.dealloc.cta_group::1.sync.aligned.b32"(taddr, UInt32(64))
+    ptx"tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned"()
+    @inbounds out[1] = r1 + r2[1]
+    return nothing
+end
+
+@testset "golden: tcgen05 family at sm_100a" begin
+    @test golden_test("tcgen05@sm100a", _golden_tcgen05_sm100a!,
+                      Tuple{CuDeviceVector{UInt32, 1}, UInt64, UInt32};
+                      cap = v"10.0", feature_set = :arch)
+end
