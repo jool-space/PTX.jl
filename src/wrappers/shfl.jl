@@ -9,24 +9,37 @@
 # modifier for the (data, in-range-pred) form. The intrinsic takes the
 # membermask first; the reorder happens here. The pred form maps to the
 # `.i32p` intrinsic's {i32, i1} aggregate return — no more pipe-operand asm.
+#
+# Methods are written out literally (no name-building loop) so every
+# intrinsic this file stands on is greppable — test/host/conformance.jl
+# scans for `nvvm"..."` literals and requires a probe for each.
 
 const SHFL_MODES = (:up, :down, :bfly, :idx)
 
-for mode in SHFL_MODES
-    data = "llvm.nvvm.shfl.sync.$mode.i32"
-    pred = data * "p"
-    NVVM.isintrinsic(data) && NVVM.isintrinsic(pred) ||
-        error("shfl: $data[p] missing from the backend intrinsic table")
-    dataop = NVVM.IntrinsicCall{Symbol(data)}()
-    predop = NVVM.IntrinsicCall{Symbol(pred)}()
-    mods = (:sync, mode, :b32)
-    mods_pred = (:sync, mode, :b32, :pred)
-    @eval begin
-        @inline (::Operation{:shfl, $mods})(a::UInt32, b::UInt32, c::UInt32,
-                                            membermask::UInt32) =
-            $dataop(membermask, a, b, c)
-        @inline (::Operation{:shfl, $mods_pred})(a::UInt32, b::UInt32, c::UInt32,
-                                                 membermask::UInt32) =
-            $predop(membermask, a, b, c)
-    end
-end
+@inline (::Operation{:shfl, (:sync, :idx, :b32)})(a::UInt32, b::UInt32,
+        c::UInt32, membermask::UInt32) =
+    nvvm"shfl.sync.idx.i32"(membermask, a, b, c)
+@inline (::Operation{:shfl, (:sync, :idx, :b32, :pred)})(a::UInt32, b::UInt32,
+        c::UInt32, membermask::UInt32) =
+    nvvm"shfl.sync.idx.i32p"(membermask, a, b, c)
+
+@inline (::Operation{:shfl, (:sync, :up, :b32)})(a::UInt32, b::UInt32,
+        c::UInt32, membermask::UInt32) =
+    nvvm"shfl.sync.up.i32"(membermask, a, b, c)
+@inline (::Operation{:shfl, (:sync, :up, :b32, :pred)})(a::UInt32, b::UInt32,
+        c::UInt32, membermask::UInt32) =
+    nvvm"shfl.sync.up.i32p"(membermask, a, b, c)
+
+@inline (::Operation{:shfl, (:sync, :down, :b32)})(a::UInt32, b::UInt32,
+        c::UInt32, membermask::UInt32) =
+    nvvm"shfl.sync.down.i32"(membermask, a, b, c)
+@inline (::Operation{:shfl, (:sync, :down, :b32, :pred)})(a::UInt32, b::UInt32,
+        c::UInt32, membermask::UInt32) =
+    nvvm"shfl.sync.down.i32p"(membermask, a, b, c)
+
+@inline (::Operation{:shfl, (:sync, :bfly, :b32)})(a::UInt32, b::UInt32,
+        c::UInt32, membermask::UInt32) =
+    nvvm"shfl.sync.bfly.i32"(membermask, a, b, c)
+@inline (::Operation{:shfl, (:sync, :bfly, :b32, :pred)})(a::UInt32, b::UInt32,
+        c::UInt32, membermask::UInt32) =
+    nvvm"shfl.sync.bfly.i32p"(membermask, a, b, c)

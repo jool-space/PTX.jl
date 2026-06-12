@@ -116,14 +116,29 @@ canonical now.)
 
 ### Weakdep compat as the backend pin
 
-**Status: open, low risk.**
+**Status: RESOLVED 2026-06-12 — implemented and enforcement verified
+empirically.**
 
-The plan is `NVPTX_LLVM_Backend_jll` as a *weak* dependency with compat naming
-the registry's generation major — host-side use of PTX.jl (parsing, layouts,
-registry queries) shouldn't force a ~100 MB artifact download, and weakdep
-compat still constrains any environment that contains the JLL (i.e. every
-CUDA 6.2 environment). Verify Pkg actually enforces weakdep compat in the
-resolution paths that matter; if it doesn't, fall back to a hard dependency.
+`NVPTX_LLVM_Backend_jll` is a weak dependency with compat `"22"` (the
+registry's generation major); host-side use of PTX.jl never downloads the
+~60 MB artifact. Pkg enforcement was verified in both directions on a
+fresh environment: a `=22.1.5` pin *steered* resolution away from 22.1.7,
+and an unsatisfiable `"23"` produced a resolver conflict naming both PTX
+and the JLL. Extension-less weakdep compat is honored.
+
+The pin is backed by a standing conformance harness
+(`test/host/conformance.jl`): (1) the resolved artifact's version must
+equal `NVVM.BACKEND_LLVM_VERSION`; (2) the committed table's 2569 names
+must diff empty against the `llvm.nvvm.*` name table embedded in the
+resolved `llc` binary, both directions; (3) every intrinsic the wrappers
+stand on has a selection probe — synthesized IR through the artifact llc,
+asserting the *expected instruction* (acceptance alone is meaningless;
+llc remangles and upgrades silently). The probe list is self-policing: a
+scan of `src/` for `nvvm"..."` literals fails the suite if any used
+intrinsic lacks a probe — which is also why wrappers spell intrinsic
+names literally instead of building them in loops. This is the mechanism
+that turns the legacy-intrinsic exposure (see the mbarrier ledger entry)
+from a silent break into a red test at bump time.
 
 ## Diligence — per-op care, never globally discharged
 
