@@ -579,6 +579,17 @@ function _parse_address_operand!(s::ParserState)
         throw(_err(s, "Expected register or symbol in address, got $(repr(t.text))"))
     end
 
+    # TMA tensor-coordinate form `[base, {c1, c2, ...}]` — structured, so
+    # canonical renaming reaches the coordinate registers.
+    if _peek_kind(s) == TokenKind.COMMA &&
+       s.pos + 1 <= length(s.tokens) &&
+       s.tokens[s.pos + 1].kind == TokenKind.LBRACE
+        _advance!(s)   # the comma
+        coords = _parse_vector_operand!(s).elements
+        _expect!(s, TokenKind.RBRACKET)
+        return AddressOperand(base, nothing, coords)
+    end
+
     offset::Union{String, Nothing} = nothing
     if _peek_kind(s) != TokenKind.RBRACKET
         parts = String[]

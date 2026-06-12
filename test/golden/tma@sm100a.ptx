@@ -11,9 +11,9 @@ mov.b64 %rd1, var1;
 cvt.u32.u64 %r1, %rd1;
 ld.param.b64 %rd2, [param1];
 ld.param.b32 %r2, [param2];
-cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes [%r0], [%rd2+, {%r2, %r2}], [%r1];
+cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes [%r0], [%rd2, {%r2, %r2}], [%r1];
 mov.b16 %rs0, 3;
-cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster [%r0], [%rd2+, {%r2, %r2}], [%r1], %rs0;
-cp.async.bulk.tensor.2d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes [%r0], [%rd2+, {%r2, %r2}], [%r1];
+cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster [%r0], [%rd2, {%r2, %r2}], [%r1], %rs0;
+cp.async.bulk.tensor.2d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes [%r0], [%rd2, {%r2, %r2}], [%r1];
 ret;
 }

@@ -71,7 +71,9 @@ _canon_op(rn::_Renamer, op::ParenthesizedOperand) =
     ParenthesizedOperand(Tuple(_canon_op(rn, o) for o in op.elements))
 _canon_op(rn::_Renamer, op::AddressOperand) =
     AddressOperand(_sym(rn, op.base),
-                   op.offset === nothing ? nothing : _sym(rn, op.offset))
+                   op.offset === nothing ? nothing : _sym(rn, op.offset),
+                   op.coords === nothing ? nothing :
+                       Tuple(_canon_op(rn, o) for o in op.coords))
 
 _canon_pred(::_Renamer, ::Nothing) = nothing
 _canon_pred(rn::_Renamer, p::Predicate) =
