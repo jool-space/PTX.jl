@@ -936,42 +936,41 @@ end
     end
 end
 
-@testset "shfl.sync hand-written wrapper" begin
+@testset "shfl.sync wrapper (tier-2 intrinsic lowering)" begin
     # shfl.sync.<mode>.b32 d, a, b, c, mask;        — UInt32 output
     # shfl.sync.<mode>.b32 d|p, a, b, c, mask;      — (UInt32, Bool) output
-    # All four modes share the same operand layout; the `:pred` modifier
-    # flips the output form.
+    # First migrated family (DESIGN.md): the notation surface is unchanged
+    # but lowering goes through llvm.nvvm.shfl.sync.<mode>.i32[p] — the
+    # registry supplies convergent, the .i32p aggregate replaces the
+    # pipe-operand asm, and the wrapper reorders (a, b, c, mask) to the
+    # intrinsic's mask-first convention. Golden: test/golden/shfl@sm75.ptx.
 
-    spec = PTX.shfl_spec(:idx)
-    @test spec.asm == "shfl.sync.idx.b32 \$0, \$1, \$2, \$3, \$4;"
-    @test spec.constraints == "=r,r,r,r,r,~{memory}"
-    @test spec.rettype === UInt32
-
-    spec = PTX.shfl_spec(:up)
-    @test spec.asm == "shfl.sync.up.b32 \$0, \$1, \$2, \$3, \$4;"
-    spec = PTX.shfl_spec(:down)
-    @test spec.asm == "shfl.sync.down.b32 \$0, \$1, \$2, \$3, \$4;"
-    spec = PTX.shfl_spec(:bfly)
-    @test spec.asm == "shfl.sync.bfly.b32 \$0, \$1, \$2, \$3, \$4;"
-
-    # Pred-output form: `=r,=b` heads the constraints, asm uses pipe operand.
-    spec = PTX.shfl_spec(:idx; pred = true)
-    @test spec.asm == "shfl.sync.idx.b32 \$0|\$1, \$2, \$3, \$4, \$5;"
-    @test spec.constraints == "=r,=b,r,r,r,r,~{memory}"
-    @test spec.rettype === Tuple{UInt32, Bool}
-
-    spec = PTX.shfl_spec(:bfly; pred = true)
-    @test spec.asm == "shfl.sync.bfly.b32 \$0|\$1, \$2, \$3, \$4, \$5;"
-
-    # Unknown mode.
-    @test_throws ErrorException PTX.shfl_spec(:bogus)
-
-    # Methods registered for all four modes, both forms.
     for mode in (:up, :down, :bfly, :idx)
-        @test which(Operation{:shfl, (:sync, mode, :b32)}(),
-                    (UInt32, UInt32, UInt32, UInt32)).module == PTX
-        @test which(Operation{:shfl, (:sync, mode, :b32, :pred)}(),
-                    (UInt32, UInt32, UInt32, UInt32)).module == PTX
+        # the intrinsics the wrapper stands on are in the backend table,
+        # marked convergent
+        for name in ("llvm.nvvm.shfl.sync.$mode.i32",
+                     "llvm.nvvm.shfl.sync.$mode.i32p")
+            @test PTX.NVVM.isintrinsic(name)
+            @test :convergent in PTX.NVVM.intrinsic(name).props
+        end
+
+        # methods registered for both forms; bodies route to the intrinsic
+        # callable rather than @asmcall
+        m = which(Operation{:shfl, (:sync, mode, :b32)}(),
+                  (UInt32, UInt32, UInt32, UInt32))
+        @test m.module == PTX
+        ci, rt = first(Base.code_typed(Operation{:shfl, (:sync, mode, :b32)}(),
+                                       (UInt32, UInt32, UInt32, UInt32)))
+        @test rt === UInt32
+        @test occursin("shfl.sync.$mode.i32", string(ci))
+
+        mp = which(Operation{:shfl, (:sync, mode, :b32, :pred)}(),
+                   (UInt32, UInt32, UInt32, UInt32))
+        @test mp.module == PTX
+        ci, rt = first(Base.code_typed(Operation{:shfl, (:sync, mode, :b32, :pred)}(),
+                                       (UInt32, UInt32, UInt32, UInt32)))
+        @test rt === Tuple{UInt32, Bool}
+        @test occursin("shfl.sync.$mode.i32p", string(ci))
     end
 end
 
@@ -1324,12 +1323,8 @@ end
     @test which(Operation{:setp, (:dual, :eq, :s32)}(),
                 (Int32, Int32)).module == PTX
 
-    # ---- _shfl_register (registers both data-only + pred forms) ----
-    silent() do
-        for mode in (:up, :down, :bfly, :idx)
-            PTX._shfl_register(mode)
-        end
-    end
+    # ---- shfl: no _register helper since the tier-2 migration (methods
+    # come from a top-level loop in wrappers/shfl.jl); dispatch sanity only
     @test which(Operation{:shfl, (:sync, :idx, :b32)}(),
                 (UInt32, UInt32, UInt32, UInt32)).module == PTX
     @test which(Operation{:shfl, (:sync, :bfly, :b32, :pred)}(),

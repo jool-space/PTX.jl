@@ -1,48 +1,32 @@
-# Warp-level register shuffle (PTX 9.2 §9.7.4). Both output forms — data only
-# and (data, in-range-pred). The pred form takes a trailing `.pred` chain
-# modifier; transpiler injects it when the parser produces a `PipeOperand`
-# destination.
+# Warp-level register shuffle (PTX 9.2 §9.7.4) — the first family migrated
+# to tier-2 intrinsic lowering (DESIGN.md, "Lowering tiers"): the backend
+# selects the instruction from `llvm.nvvm.shfl.sync.<mode>.i32[p]`, with the
+# registry supplying `convergent` (shfl is the convergence guinea pig — see
+# spikes/convergence.jl for what its absence does).
+#
+# The notation surface is unchanged: `ptx"shfl.sync.<mode>.b32"(a, b, c,
+# membermask)` in PTX operand order, with the trailing `.pred` chain
+# modifier for the (data, in-range-pred) form. The intrinsic takes the
+# membermask first; the reorder happens here. The pred form maps to the
+# `.i32p` intrinsic's {i32, i1} aggregate return — no more pipe-operand asm.
 
 const SHFL_MODES = (:up, :down, :bfly, :idx)
 
-function shfl_spec(mode::Symbol; pred::Bool = false)
-    mode in SHFL_MODES || error("shfl_spec: unknown mode :$mode")
-    if pred
-        (; asm = "shfl.sync.$mode.b32 \$0|\$1, \$2, \$3, \$4, \$5;",
-           constraints = "=r,=b,r,r,r,r,~{memory}",
-           rettype = Tuple{UInt32, Bool})
-    else
-        (; asm = "shfl.sync.$mode.b32 \$0, \$1, \$2, \$3, \$4;",
-           constraints = "=r,r,r,r,r,~{memory}",
-           rettype = UInt32)
-    end
-end
-
-function _shfl_register(mode::Symbol)
-    mods = (:sync, mode, :b32)
-    spec = shfl_spec(mode)
-    asm, constraints = spec.asm, spec.constraints
-    @eval function (::Operation{:shfl, $mods})(a::UInt32, b::UInt32, c::UInt32,
-                                                membermask::UInt32)
-        Base.@inline
-        @asmcall($asm, $constraints, true,
-                 UInt32, Tuple{UInt32, UInt32, UInt32, UInt32},
-                 a, b, c, membermask)
-    end
-
-    mods_pred = (:sync, mode, :b32, :pred)
-    spec_pred = shfl_spec(mode; pred = true)
-    asm_pred, constraints_pred = spec_pred.asm, spec_pred.constraints
-    @eval function (::Operation{:shfl, $mods_pred})(a::UInt32, b::UInt32, c::UInt32,
-                                                     membermask::UInt32)
-        Base.@inline
-        @asmcall($asm_pred, $constraints_pred, true,
-                 Tuple{UInt32, Bool}, Tuple{UInt32, UInt32, UInt32, UInt32},
-                 a, b, c, membermask)
-    end
-    nothing
-end
-
 for mode in SHFL_MODES
-    _shfl_register(mode)
+    data = "llvm.nvvm.shfl.sync.$mode.i32"
+    pred = data * "p"
+    NVVM.isintrinsic(data) && NVVM.isintrinsic(pred) ||
+        error("shfl: $data[p] missing from the backend intrinsic table")
+    dataop = NVVM.IntrinsicCall{Symbol(data)}()
+    predop = NVVM.IntrinsicCall{Symbol(pred)}()
+    mods = (:sync, mode, :b32)
+    mods_pred = (:sync, mode, :b32, :pred)
+    @eval begin
+        @inline (::Operation{:shfl, $mods})(a::UInt32, b::UInt32, c::UInt32,
+                                            membermask::UInt32) =
+            $dataop(membermask, a, b, c)
+        @inline (::Operation{:shfl, $mods_pred})(a::UInt32, b::UInt32, c::UInt32,
+                                                 membermask::UInt32) =
+            $predop(membermask, a, b, c)
+    end
 end

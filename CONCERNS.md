@@ -143,6 +143,13 @@ pressure, form selection). Each family migration gets a golden-PTX diff, and
 the MXFP8 GEMM numbers serve as the end-to-end benchmark baseline. Regressions
 aren't necessarily blockers, but they must be *seen*, not discovered later.
 
+Per-family ledger:
+- **shfl** (2026-06-12, `test/golden/shfl@sm75.ptx` diff): strict win. Inline
+  asm's `r` constraints forced every immediate into a register; ISel folds
+  them into the instruction (`shfl.sync.idx.b32 %r1, %r0, %r0, 31, -1` —
+  four `mov.b32` eliminated in the 8-form golden kernel). Same shfl
+  sequence otherwise; pred forms still lower the i1 via `selp`.
+
 ## Process — plumbing and ecosystem
 
 ### Obtaining llvm-tblgen at the backend's version
