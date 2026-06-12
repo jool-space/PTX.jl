@@ -1,9 +1,6 @@
 [deps]
+JSON = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
 LLVM_full_jll = "a3ccf953-465e-511d-b87f-60a6490c289d"
 
 [compat]
-# tblgen must understand the target tag's TableGen language (22.x needs
-# !listflatten, added in 19). 21.1.8 is the registry's newest full JLL and
-# parses the 22.1.7 tree; re-check the 2569-record conformance count when
-# bumping (see extract_intrinsics.sh).
 LLVM_full_jll = "21.1.8"

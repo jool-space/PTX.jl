@@ -12,6 +12,9 @@ include("codegen/Codegen.jl")
 using .Codegen: ptx_to_julia, ir_to_julia
 export ptx_to_julia, ir_to_julia
 
+include("nvvm/NVVM.jl")
+using .NVVM: NVVM
+
 include("address_space.jl")
 include("types.jl")
 

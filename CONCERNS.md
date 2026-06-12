@@ -139,7 +139,14 @@ aren't necessarily blockers, but they must be *seen*, not discovered later.
 
 ### Obtaining llvm-tblgen at the backend's version
 
-**Status: RESOLVED 2026-06-12 — `gen/extract_intrinsics.sh`, run end-to-end.**
+**Status: RESOLVED 2026-06-12 — `gen/extract_intrinsics.sh`, run end-to-end.
+Conformance strengthened the same day: all 2569 *derived names* (default
+rule + the 353 LLVMName overrides) now diff exactly against the name table
+in the 22.1.7 llc binary, not just the count. The extraction also resolves
+tblgen's anonymous records — per-argument ImmArg positions, value ranges
+(`Range`), .td operand names (`ArgInfo`), and pointer address spaces — so
+the registry knows which operands must be immediates and what their legal
+values are.**
 
 No source build needed: tblgen need only understand the tag's TableGen
 *language*, not match its version. LLVM 18's tblgen chokes on 22's
