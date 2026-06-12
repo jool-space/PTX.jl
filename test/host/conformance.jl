@@ -49,8 +49,11 @@ const I4 = (UInt32, UInt32, UInt32, UInt32)
 
 # (name, argtypes, mcpu, mattr, expected instruction regex) — a vector, not
 # a dict, so one intrinsic can carry several probes (immarg flag combos
-# select different instruction qualifiers).
-const PROBES = [
+# select different instruction qualifiers). Families with regular
+# shape×count grids (tcgen05 ld/st) append their probes in loops below the
+# literal — the probe *data* may be generated; only wrapper sources must
+# spell intrinsic names literally.
+const PROBES = Tuple{String, Tuple, String, String, Regex}[
     # shfl (wrappers/shfl.jl) — data and {i32,i1}-pred forms
     ("llvm.nvvm.shfl.sync.idx.i32",   I4, "sm_70", "+ptx60", r"shfl\.sync\.idx\.b32 \s*%r\d+,"),
     ("llvm.nvvm.shfl.sync.idx.i32p",  I4, "sm_70", "+ptx60", r"shfl\.sync\.idx\.b32 \s*%r\d+\|%p\d+,"),
@@ -156,6 +159,60 @@ const PROBES = [
         (pS8, p0, Int32, Int32, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
         r"cp\.async\.bulk\.tensor\.5d\.global\.shared::cta\.tile\.bulk_group \["),
 ]
+
+# tcgen05 (wrappers/tcgen05.jl) — datacenter Blackwell only (consumer
+# sm_12x has no tensor memory; ISel enforces what ptxas did). Expected
+# spellings per the golden diff: commit emits `.shared::cluster` for both
+# state-space notations and orders multicast after the space; dense mma is
+# the maskless form with collector::a::discard explicit (PTX 8.8).
+const p6 = Core.LLVMPtr{UInt8, 6}
+for cg in (1, 2)
+    append!(PROBES, [
+        ("llvm.nvvm.tcgen05.shift.down.cg$cg", (p6,), "sm_100a", "+ptx86",
+            Regex("tcgen05\\.shift\\.cta_group::$cg\\.down")),
+        ("llvm.nvvm.tcgen05.dealloc.cg$cg", (p6, UInt32), "sm_100a", "+ptx86",
+            Regex("tcgen05\\.dealloc\\.cta_group::$cg\\.sync\\.aligned\\.b32")),
+        ("llvm.nvvm.tcgen05.alloc.shared.cg$cg", (pS8, UInt32), "sm_100a", "+ptx86",
+            Regex("tcgen05\\.alloc\\.cta_group::$cg\\.sync\\.aligned\\.shared::cta\\.b32")),
+        ("llvm.nvvm.tcgen05.relinq.alloc.permit.cg$cg", (), "sm_100a", "+ptx86",
+            Regex("tcgen05\\.relinquish_alloc_permit\\.cta_group::$cg\\.sync\\.aligned")),
+        ("llvm.nvvm.tcgen05.commit.shared.cg$cg", (pS8,), "sm_100a", "+ptx86",
+            Regex("tcgen05\\.commit\\.cta_group::$cg\\.mbarrier::arrive::one\\.shared::cluster\\.b64")),
+        ("llvm.nvvm.tcgen05.commit.mc.shared.cg$cg", (pS8, UInt16), "sm_100a", "+ptx86",
+            Regex("tcgen05\\.commit\\.cta_group::$cg\\.mbarrier::arrive::one\\.shared::cluster\\.multicast::cluster\\.b64")),
+    ])
+    for shape in ("128x256b", "4x256b", "128x128b")
+        push!(PROBES, ("llvm.nvvm.tcgen05.cp.$shape.cg$cg", (p6, UInt64),
+                       "sm_100a", "+ptx86",
+                       Regex("tcgen05\\.cp\\.cta_group::$cg\\.$shape")))
+    end
+end
+for w in ("ld", "st")
+    push!(PROBES, ("llvm.nvvm.tcgen05.wait.$w", (), "sm_100a", "+ptx86",
+                   Regex("tcgen05\\.wait::$w\\.sync\\.aligned")))
+end
+for (shape, base) in (("16x64b", 1), ("32x32b", 1), ("16x128b", 2), ("16x256b", 4)),
+    c in (1, 2, 4, 8, 16, 32, 64, 128)
+    n = base * c
+    n > 128 && continue
+    push!(PROBES, ("llvm.nvvm.tcgen05.ld.$shape.x$c", (p6, Val{false}),
+                   "sm_100a", "+ptx86",
+                   Regex("tcgen05\\.ld\\.sync\\.aligned\\.$shape\\.x$c\\.b32")))
+    data = n == 1 ? UInt32 : NTuple{n, VecElement{UInt32}}
+    push!(PROBES, ("llvm.nvvm.tcgen05.st.$shape.x$c", (p6, data, Val{false}),
+                   "sm_100a", "+ptx86",
+                   Regex("tcgen05\\.st\\.sync\\.aligned\\.$shape\\.x$c\\.b32")))
+end
+for (kind, kv) in (("f16", 0), ("tf32", 1), ("f8f6f4", 2), ("i8", 3))
+    push!(PROBES, ("llvm.nvvm.tcgen05.mma.shared",
+                   (p6, UInt64, UInt64, UInt32, Bool, Val{kv}, Val{1}, Val{0}),
+                   "sm_100a", "+ptx88",
+                   Regex("tcgen05\\.mma\\.cta_group::1\\.kind::$kind\\.collector::a::discard")))
+end
+push!(PROBES, ("llvm.nvvm.tcgen05.mma.shared",
+               (p6, UInt64, UInt64, UInt32, Bool, Val{0}, Val{2}, Val{0}),
+               "sm_100a", "+ptx88",
+               r"tcgen05\.mma\.cta_group::2\.kind::f16\.collector::a::discard"))
 
 "All intrinsic names spelled as nvvm\"...\" literals under src/."
 function used_intrinsics()

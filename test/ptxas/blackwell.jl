@@ -421,13 +421,13 @@ end
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tcgen05_commit_mc1!, Tuple{UInt32};
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64", ptx)
+    @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.multicast::cluster.b64", ptx)
 
     @test ptxas_compiles(_bw_tcgen05_commit_mc2!, Tuple{UInt32};
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tcgen05_commit_mc2!, Tuple{UInt32};
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("tcgen05.commit.cta_group::2.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64", ptx)
+    @test occursin("tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.multicast::cluster.b64", ptx)
 end
 
 function _bw_tma_cta_group2!(dst::Core.LLVMPtr{UInt16, PTX.AS.Shared},

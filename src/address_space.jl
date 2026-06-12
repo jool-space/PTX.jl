@@ -14,6 +14,10 @@ const Param   = 101
 # (cp.async.bulk.tensor g2s, cluster mbarrier sinks) take pointers here.
 const SharedCluster = 7
 
+# LLVM NVPTX addrspace(6) = tensor memory (Blackwell TMEM; 32-bit in the
+# backend's datalayout). tcgen05 intrinsics take taddr operands here.
+const Tmem = 6
+
 end # module AS
 
 """
@@ -44,5 +48,19 @@ two retypes the tier-2 wrappers need:
         Base.@inline
         Base.llvmcall($ir, Core.LLVMPtr{$T, $To},
                       Tuple{Core.LLVMPtr{$T, $From}}, p)
+    end
+end
+
+# 32-bit raw-address form, for surfaces that carry addresses as UInt32
+# rather than pointers (TMEM taddr from tcgen05.alloc, 32-bit SMEM offsets
+# from smem_addr_u32). Same bit-preservation contract as above.
+@generated function reinterpret_addrspace(::Val{To}, addr::UInt32) where {To}
+    spell(n) = n == 0 ? "ptr" : "ptr addrspace($n)"
+    ir = """
+        %p = inttoptr i32 %0 to $(spell(To))
+        ret $(spell(To)) %p"""
+    quote
+        Base.@inline
+        Base.llvmcall($ir, Core.LLVMPtr{UInt8, $To}, Tuple{UInt32}, addr)
     end
 end

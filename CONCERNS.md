@@ -200,6 +200,29 @@ Per-family ledger:
   TMA coordinate bracket into a raw offset string, so canonical renaming
   never reached the coordinate registers (raw names leaked, collisions
   possible) — fixed structurally before the baseline capture.
+- **tcgen05** (2026-06-12, `test/golden/tcgen05@sm100a.ptx` diff): win,
+  with two explicit-default spellings and one widening cost. Dense mma
+  (kinds f16/tf32/f8f6f4/i8) lowers through `mma.shared` with kind /
+  cta_group / collector_usage immargs — the MASKLESS dense form, so the
+  asm tier's all-zero disable-output-lane mask (4/8 zero words per call)
+  disappears; the output spells the ISA-default `.collector::a::discard`
+  explicitly. commit lowers through `commit[.mc].shared.cgN` and emits
+  the `.shared::cluster` spelling for both state-space notations (a
+  shared::cta mbar address is valid in the cluster window) with multicast
+  ordered after the space (pyptx put it first; ptxas accepts both).
+  Address spaces: TMEM is addrspace(6), 32-bit in the backend datalayout,
+  so the surface's raw `UInt32` taddr stays a 32-bit register —
+  `reinterpret_addrspace(Val(AS.Tmem), ::UInt32)` is a free inttoptr; the
+  p3 operands (alloc destination slot, commit mbar) widen via one CSEd
+  `cvt.u64.u32` per kernel (asm used 32-bit `r`). ld/st move data as LLVM
+  vectors (`v<N>i32`); wrappers repack to the surface's plain tuples
+  (folds to the same registers). ISel floors: family ops PTX 8.6, mma
+  PTX 8.8, datacenter-Blackwell targets only (sm_100/103; consumer sm_12x
+  has no tensor memory — ISel now enforces what ptxas did). Residue: mx
+  kinds (mxf8f6f4/mxf4/mxf4nvf4) stay asm-tier — their intrinsics are
+  `.block_scale` forms requiring TMEM scale_a/scale_b operands the
+  notation surface does not carry; revisit with the block-scale surface
+  design.
 
 ## Process — plumbing and ecosystem
 

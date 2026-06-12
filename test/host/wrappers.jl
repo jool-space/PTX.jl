@@ -760,6 +760,74 @@ end
     end
 end
 
+@testset "tcgen05 wrapper (tier-2 intrinsic lowering)" begin
+    # Fourth migrated family — see wrappers/tcgen05.jl for the mapping.
+    # The notation surface keeps raw UInt32 taddr/SMEM-offset operands;
+    # bodies must route to the intrinsic literals. mx mma kinds stay
+    # asm-tier (block-scale operands are not in the notation surface).
+    cg1 = Symbol("cta_group::1")
+    cg2 = Symbol("cta_group::2")
+
+    for (mods, argts, intr) in (
+            ((:shift, cg1, :down), (UInt32,), "tcgen05.shift.down.cg1"),
+            ((:dealloc, cg2, :sync, :aligned, :b32), (UInt32, UInt32),
+             "tcgen05.dealloc.cg2"),
+            ((:cp, cg1, Symbol("128x128b")), (UInt32, UInt64),
+             "tcgen05.cp.128x128b.cg1"),
+            ((:alloc, cg1, :sync, :aligned, Symbol("shared::cta"), :b32),
+             (UInt32, UInt32), "tcgen05.alloc.shared.cg1"),
+            ((:relinquish_alloc_permit, cg1, :sync, :aligned), (),
+             "tcgen05.relinq.alloc.permit.cg1"),
+            ((Symbol("wait::ld"), :sync, :aligned), (), "tcgen05.wait.ld"),
+            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
+              Symbol("shared::cta"), :b64), (UInt32,),
+             "tcgen05.commit.shared.cg1"),
+            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
+              Symbol("multicast::cluster"), Symbol("shared::cluster"), :b64),
+             (UInt32, UInt16), "tcgen05.commit.mc.shared.cg1"))
+        @test which(Operation{:tcgen05, mods}(), argts).module == PTX
+        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), argts))
+        @test rt === Nothing
+        @test occursin(intr, string(ci))
+    end
+
+    # ld/st: the full Table-49 grid — arity, inferred return, intrinsic
+    for (shape, base) in (("16x64b", 1), ("32x32b", 1),
+                          ("16x128b", 2), ("16x256b", 4)),
+        c in (1, 2, 4, 8, 16, 32, 64, 128)
+
+        n = base * c
+        n > 128 && continue
+        sh = Symbol(shape)
+        cnt = Symbol("x$c")
+        ld = Operation{:tcgen05, (:ld, :sync, :aligned, sh, cnt, :b32)}()
+        ci, rt = first(Base.code_typed(ld, (UInt32,)))
+        @test rt === (n == 1 ? UInt32 : NTuple{n, UInt32})
+        @test occursin("tcgen05.ld.$shape.x$c", string(ci))
+        st = Operation{:tcgen05, (:st, :sync, :aligned, sh, cnt, :b32)}()
+        ci2, rt2 = first(Base.code_typed(st, (UInt32, NTuple{n, UInt32})))
+        @test rt2 === Nothing
+        @test occursin("tcgen05.st.$shape.x$c", string(ci2))
+    end
+
+    # dense mma kinds route to mma.shared (immarg-selected kind/cta_group)
+    for kind in ("f16", "tf32", "f8f6f4", "i8"), cg in (cg1, cg2)
+        mods = (:mma, cg, Symbol("kind::$kind"))
+        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(),
+                                       (UInt32, UInt64, UInt64, UInt32, Bool)))
+        @test rt === Nothing
+        @test occursin("tcgen05.mma.shared", string(ci))
+    end
+
+    # residue: mx kinds stay asm-tier (match truncated at the bracket)
+    for kind in ("mxf8f6f4", "mxf4", "mxf4nvf4")
+        mods = (:mma, cg1, Symbol("kind::$kind"))
+        ci, _ = first(Base.code_typed(Operation{:tcgen05, mods}(),
+                                      (UInt32, UInt64, UInt64, UInt32, Bool)))
+        @test occursin("tcgen05.mma.cta_group::1.kind::$kind [", string(ci))
+    end
+end
+
 @testset "tuple args → braced operand groups" begin
     # Homogeneous tuple types render as `{$N, $N+1, ...}` and contribute one
     # LLVM input slot per lane. Used by ldmatrix / mma / .rs cvt forms where
@@ -1256,33 +1324,8 @@ end
         PTX._wgmma_mma_async_register(:s32, :s8,   :s8,   8,  32, false)
     end
 
-    # ---- _tcgen05_ld_register / _tcgen05_st_register ----
-    silent() do
-        PTX._tcgen05_ld_register(Symbol("16x128b"), :x1, 2)
-        PTX._tcgen05_st_register(Symbol("16x128b"), :x1, 2)
-        # Early-return: per-lane reg count > 128 is "NA" per Table 49.
-        @test PTX._tcgen05_ld_register(Symbol("16x256b"), :x128, 4) === nothing
-        @test PTX._tcgen05_st_register(Symbol("16x256b"), :x128, 4) === nothing
-    end
-
-    # ---- _tcgen05_shift_register / _dealloc / _cp ----
-    silent() do
-        PTX._tcgen05_shift_register(1)
-        PTX._tcgen05_shift_register(2)
-        PTX._tcgen05_dealloc_register(1)
-        PTX._tcgen05_dealloc_register(2)
-        PTX._tcgen05_cp_register(1, Symbol("128x256b"))
-        PTX._tcgen05_cp_register(2, Symbol("4x256b"))
-    end
-    @test which(Operation{:tcgen05,
-            (:shift, Symbol("cta_group::1"), :down)}(),
-        (UInt32,)).module == PTX
-    @test which(Operation{:tcgen05,
-            (:dealloc, Symbol("cta_group::1"), :sync, :aligned, :b32)}(),
-        (UInt32, UInt32)).module == PTX
-    @test which(Operation{:tcgen05,
-            (:cp, Symbol("cta_group::1"), Symbol("128x256b"))}(),
-        (UInt32, UInt64)).module == PTX
+    # (tcgen05 migrated to tier-2 literal methods — no register helpers
+    # left; dispatch is asserted in its own testset above)
 
     # ---- _setp_dual_register ----
     silent() do
