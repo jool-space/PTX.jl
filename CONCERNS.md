@@ -149,6 +149,18 @@ Per-family ledger:
   them into the instruction (`shfl.sync.idx.b32 %r1, %r0, %r0, 31, -1` —
   four `mov.b32` eliminated in the 8-form golden kernel). Same shfl
   sequence otherwise; pred forms still lower the i1 via `selp`.
+- **mbarrier** (2026-06-12, `test/golden/mbarrier@sm{80,90}.ptx` diffs):
+  strict win plus one renamed spelling. The asm tier's `r` pointer
+  constraint forced `mov.b64` + `cvt.u32.u64` address materialization;
+  ISel addresses the shared variable symbolically (`[var0]`) — both
+  instructions gone. Standalone expect_tx now emits
+  `mbarrier.expect_tx.relaxed.cta.shared.b64`: `.relaxed` is its only
+  legal sem and `.cta` the default scope, i.e. the explicit spelling of
+  the identical operation (notation is non-WYSIWYG by design). Cap-floor
+  note: the scoped count-form `arrive.scope.cta.space.cta` cannot ISel at
+  sm_80 — requirements live in ISel predicates, so the sm_80 forms ride
+  the legacy `*.shared` intrinsics. Cluster-space sink forms stayed
+  asm-tier pending AS-7 (`shared::cluster`) pointer modeling.
 
 ## Process — plumbing and ecosystem
 

@@ -267,112 +267,65 @@ end
                 (Core.LLVMPtr{UInt16, PTX.AS.Shared}, UInt32)).module == PTX
 end
 
-@testset "mbarrier hand-written wrapper" begin
-    # Nothing-return — init takes (addr, count).
-    spec = PTX.mbarrier_spec(:init, :addr_count)
-    @test spec.asm == "mbarrier.init.shared.b64 [\$0], \$1;"
-    @test spec.constraints == "r,r,~{memory}"
-    @test spec.rettype === Nothing
-
-    # Nothing-return — inval takes only (addr).
-    spec = PTX.mbarrier_spec(:inval, :addr_only)
-    @test spec.asm == "mbarrier.inval.shared.b64 [\$0];"
-    @test spec.constraints == "r,~{memory}"
-    @test spec.rettype === Nothing
-
-    # State-token return — arrive returns UInt64.
-    spec = PTX.mbarrier_spec(:arrive, :state_addr)
-    @test spec.asm == "mbarrier.arrive.shared.b64 \$0, [\$1];"
-    @test spec.constraints == "=l,r,~{memory}"
-    @test spec.rettype === UInt64
-
-    # State-token return with extra input — arrive.noComplete.
-    spec = PTX.mbarrier_spec(Symbol("arrive.noComplete"), :state_addr_n)
-    @test spec.asm == "mbarrier.arrive.noComplete.shared.b64 \$0, [\$1], \$2;"
-    @test spec.constraints == "=l,r,r,~{memory}"
-    @test spec.rettype === UInt64
-
-    # Hopper-only fused arrive+expect_tx.
-    spec = PTX.mbarrier_spec(Symbol("arrive.expect_tx"), :state_addr_n)
-    @test spec.asm == "mbarrier.arrive.expect_tx.shared.b64 \$0, [\$1], \$2;"
-
-    # Hopper-only standalone expect_tx — Nothing return.
-    spec = PTX.mbarrier_spec(:expect_tx, :addr_count)
-    @test spec.asm == "mbarrier.expect_tx.shared.b64 [\$0], \$1;"
-    @test spec.rettype === Nothing
-
-    # Pred-return token form — test_wait p, [mbar], state.
-    spec = PTX.mbarrier_spec(:test_wait, :pred_addr_state)
-    @test spec.asm == "mbarrier.test_wait.shared.b64 \$0, [\$1], \$2;"
-    @test spec.constraints == "=b,r,l,~{memory}"
-    @test spec.rettype === Bool
-
-    # Pred-return phase form — test_wait.parity p, [mbar], phase.
-    spec = PTX.mbarrier_spec(Symbol("test_wait.parity"), :pred_addr_phase)
-    @test spec.asm == "mbarrier.test_wait.parity.shared.b64 \$0, [\$1], \$2;"
-    @test spec.constraints == "=b,r,r,~{memory}"
-    @test spec.rettype === Bool
-
-    # Hopper-only try_wait variants share the test_wait shape.
-    spec = PTX.mbarrier_spec(:try_wait, :pred_addr_state)
-    @test spec.asm == "mbarrier.try_wait.shared.b64 \$0, [\$1], \$2;"
-    spec = PTX.mbarrier_spec(Symbol("try_wait.parity"), :pred_addr_phase)
-    @test spec.asm == "mbarrier.try_wait.parity.shared.b64 \$0, [\$1], \$2;"
-
-    # Unknown layout — caller error with informative message.
-    @test_throws ErrorException PTX.mbarrier_spec(:init, :bogus_layout)
-
-    # Methods registered on the chain singletons for representative variants.
-    @test which(Operation{:mbarrier, (:init, :shared, :b64)}(),
-                (Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt32)).module == PTX
-    @test which(Operation{:mbarrier, (:arrive, :shared, :b64)}(),
-                (Core.LLVMPtr{UInt64, PTX.AS.Shared},)).module == PTX
-    @test which(Operation{:mbarrier, (:test_wait, :parity, :shared, :b64)}(),
-                (Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt32)).module == PTX
-    @test which(Operation{:mbarrier, (:try_wait, :shared, :b64)}(),
-                (Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt64)).module == PTX
-end
-
-@testset "mbarrier @generated body expansion" begin
-    # Each `Operation{:mbarrier, ...}` is `@generated` — its body computes the
-    # spec and builds an `@asmcall(...)` quote at type-inference time. We can
-    # trigger expansion via `Base.code_typed` without ever executing
-    # `@asmcall` (which would emit inline asm — GPU-only). The lowered IR
-    # embeds the asm string and constraint string as the llvmcall payload;
-    # we match the opcode prefix + constraint pair, which together pin down
-    # the (asm shape, register-class output) the @generated body produced.
+@testset "mbarrier wrapper (tier-2 intrinsic lowering)" begin
+    # Second migrated family (DESIGN.md): the ten ::cta forms lower through
+    # llvm.nvvm.mbarrier.* — legacy *.shared intrinsics where the form is
+    # sm_80 (the scoped count-form arrive can't ISel below sm_90), scoped
+    # *.scope.cta.space.cta for parity waits (no legacy exists) and the
+    # sm_90 forms. Goldens: test/golden/mbarrier@sm{80,90}.ptx. The
+    # cluster-space sink forms stay asm-tier pending AS-7 modeling.
     pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
-
     cases = [
-        ((:init, :shared, :b64),                  (pS, UInt32),
-            "mbarrier.init.shared.b64",                  "r,r,~{memory}"),
-        ((:inval, :shared, :b64),                 (pS,),
-            "mbarrier.inval.shared.b64",                 "r,~{memory}"),
-        ((:arrive, :shared, :b64),                (pS,),
-            "mbarrier.arrive.shared.b64",                "=l,r,~{memory}"),
-        ((:arrive, :noComplete, :shared, :b64),   (pS, UInt32),
-            "mbarrier.arrive.noComplete.shared.b64",     "=l,r,r,~{memory}"),
-        ((:arrive, :expect_tx, :shared, :b64),    (pS, UInt32),
-            "mbarrier.arrive.expect_tx.shared.b64",      "=l,r,r,~{memory}"),
-        ((:expect_tx, :shared, :b64),             (pS, UInt32),
-            "mbarrier.expect_tx.shared.b64",             "r,r,~{memory}"),
-        ((:test_wait, :shared, :b64),             (pS, UInt64),
-            "mbarrier.test_wait.shared.b64",             "=b,r,l,~{memory}"),
-        ((:test_wait, :parity, :shared, :b64),    (pS, UInt32),
-            "mbarrier.test_wait.parity.shared.b64",      "=b,r,r,~{memory}"),
-        ((:try_wait, :shared, :b64),              (pS, UInt64),
-            "mbarrier.try_wait.shared.b64",              "=b,r,l,~{memory}"),
-        ((:try_wait, :parity, :shared, :b64),     (pS, UInt32),
-            "mbarrier.try_wait.parity.shared.b64",       "=b,r,r,~{memory}"),
+        ((:init, :shared, :b64),                (pS, UInt32), Nothing,
+            "llvm.nvvm.mbarrier.init.shared"),
+        ((:inval, :shared, :b64),               (pS,),        Nothing,
+            "llvm.nvvm.mbarrier.inval.shared"),
+        ((:arrive, :shared, :b64),              (pS,),        UInt64,
+            "llvm.nvvm.mbarrier.arrive.shared"),
+        ((:arrive, :noComplete, :shared, :b64), (pS, UInt32), UInt64,
+            "llvm.nvvm.mbarrier.arrive.noComplete.shared"),
+        ((:arrive, :expect_tx, :shared, :b64),  (pS, UInt32), UInt64,
+            "llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta"),
+        ((:expect_tx, :shared, :b64),           (pS, UInt32), Nothing,
+            "llvm.nvvm.mbarrier.expect.tx.scope.cta.space.cta"),
+        ((:test_wait, :shared, :b64),           (pS, UInt64), Bool,
+            "llvm.nvvm.mbarrier.test.wait.shared"),
+        ((:test_wait, :parity, :shared, :b64),  (pS, UInt32), Bool,
+            "llvm.nvvm.mbarrier.test.wait.parity.scope.cta.space.cta"),
+        ((:try_wait, :shared, :b64),            (pS, UInt64), Bool,
+            "llvm.nvvm.mbarrier.try.wait.scope.cta.space.cta"),
+        ((:try_wait, :parity, :shared, :b64),   (pS, UInt32), Bool,
+            "llvm.nvvm.mbarrier.try.wait.parity.scope.cta.space.cta"),
     ]
-    for (mods, argts, expected_op, expected_cons) in cases
+    for (mods, argts, rettype, intr) in cases
+        # the intrinsic is registered and convergent
+        @test PTX.NVVM.isintrinsic(intr)
+        @test :convergent in PTX.NVVM.intrinsic(intr).props
+        # the method dispatches and routes to that intrinsic
         op = Operation{:mbarrier, mods}()
-        ci, _ = first(Base.code_typed(op, argts))
-        s = string(ci)
-        @test occursin(expected_op,   s)
-        @test occursin(expected_cons, s)
+        @test which(op, argts).module == PTX
+        ci, rt = first(Base.code_typed(op, argts))
+        @test rt === rettype
+        @test occursin(intr, string(ci))
+    end
+
+    # integer-flexible signatures still convert (count::Integer etc.)
+    ci, rt = first(Base.code_typed(Operation{:mbarrier, (:init, :shared, :b64)}(),
+                                   (pS, Int)))
+    @test rt === Nothing
+
+    # cluster-space sink forms remain on the asm tier
+    for (mods, argts, asm) in [
+        ((:arrive, Symbol("shared::cluster"), :b64), (pS,),
+            "mbarrier.arrive.shared::cluster.b64 _, ["),
+        ((:arrive, :expect_tx, Symbol("shared::cluster"), :b64), (pS, UInt32),
+            "mbarrier.arrive.expect_tx.shared::cluster.b64 _, ["),
+    ]
+        ci, _ = first(Base.code_typed(Operation{:mbarrier, mods}(), argts))
+        @test occursin(asm, string(ci))
     end
 end
+
 
 @testset "wgmma sync ops" begin
     # wgmma.fence/commit_group/wait_group flow through the chain default.

@@ -305,7 +305,10 @@ end
                          cap = v"9.0", feature_set = :arch)
     ptx = emit_ptx(_mbarrier_compile_expect_tx!, types_etx;
                    cap = v"9.0", feature_set = :arch)
-    @test occursin("mbarrier.expect_tx.shared.b64", ptx)
+    # since the tier-2 migration the backend spells the defaults out:
+    # .relaxed is expect_tx's only legal sem, .cta the default scope —
+    # the same operation in explicit form
+    @test occursin("mbarrier.expect_tx.relaxed.cta.shared.b64", ptx)
 
     types_aetx = Tuple{CuDeviceVector{UInt64, 1},
                         Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt32}

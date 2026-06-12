@@ -13,7 +13,7 @@ using .Codegen: ptx_to_julia, ir_to_julia
 export ptx_to_julia, ir_to_julia
 
 include("nvvm/NVVM.jl")
-using .NVVM: NVVM
+using .NVVM: NVVM, @nvvm_str
 
 include("address_space.jl")
 include("types.jl")

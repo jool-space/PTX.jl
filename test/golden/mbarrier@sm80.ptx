@@ -1,0 +1,24 @@
+.version 9.3
+.target sm_80
+.address_size 64
+.visible .entry entry0(.param .align 8 .b8 param0[16], .param .align 8 .b8 param1[32])
+{
+.shared .align 32 .b8 var0[8];
+ld.param.b64 %rd0, [param1];
+mov.b32 %r0, 32;
+mbarrier.init.shared.b64 [var0], %r0;
+mbarrier.arrive.shared.b64 %rd1, [var0];
+mov.b32 %r1, 2;
+mbarrier.arrive.noComplete.shared.b64 %rd2, [var0], %r1;
+mbarrier.test_wait.shared.b64 %p0, [var0], %rd1;
+mov.b32 %r2, 0;
+mbarrier.test_wait.parity.shared.b64 %p1, [var0], %r2;
+mbarrier.inval.shared.b64 [var0];
+selp.b64 %rd3, 1, 0, %p0;
+selp.b64 %rd4, 1, 0, %p1;
+add.s64 %rd5, %rd2, %rd1;
+add.s64 %rd6, %rd5, %rd3;
+add.s64 %rd7, %rd6, %rd4;
+st.global.b64 [%rd0], %rd7;
+ret;
+}
