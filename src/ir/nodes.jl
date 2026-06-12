@@ -207,5 +207,6 @@ end
 
 include("format.jl")
 include("normalize.jl")
+include("canonical.jl")
 
 end # module IR

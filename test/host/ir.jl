@@ -516,3 +516,54 @@ end
     @test any(line -> occursin("LBL:",          line), d)
     @test any(line -> occursin("PragmaDirective", line), d)
 end
+
+@testset "canonicalize: equal modulo naming" begin
+    # Same instruction sequence, different allocator numbering, label
+    # numbers, kernel/param mangles, and .reg counts — the exact noise the
+    # golden harness must ignore.
+    a = """
+        .version 8.3
+        .target sm_90
+        .address_size 64
+        .visible .entry julia_k_1234(.param .b64 julia_k_1234_param_0)
+        {
+        .reg .b32 %r<14>;
+        .reg .pred %p<3>;
+        ld.param.b64 %rd3, [julia_k_1234_param_0];
+        mov.u32 %r7, %tid.x;
+        setp.lt.u32 %p2, %r7, 16;
+        @%p2 bra \$L__BB0_7;
+        add.s32 %r9, %r7, 1;
+        \$L__BB0_7:
+        st.global.b32 [%rd3], %r9;
+        ret;
+        }
+        """
+    b = """
+        .version 8.3
+        .target sm_90
+        .address_size 64
+        .visible .entry julia_k_99(.param .b64 julia_k_99_param_0)
+        {
+        .reg .b32 %r<2>;
+        .reg .pred %p<1>;
+        ld.param.b64 %rd0, [julia_k_99_param_0];
+        mov.u32 %r1, %tid.x;
+        setp.lt.u32 %p0, %r1, 16;
+        @%p0 bra \$L__BB0_1;
+        add.s32 %r5, %r1, 1;
+        \$L__BB0_1:
+        st.global.b32 [%rd0], %r5;
+        ret;
+        }
+        """
+    canon(s) = PTX.IR.format(PTX.IR.canonicalize(PTX.Parser.parse(s)))
+    @test canon(a) == canon(b)
+
+    # ...but a changed instruction is visible
+    c = replace(b, "add.s32" => "sub.s32")
+    @test canon(a) != canon(c)
+    # ...and so is a changed operand role (register identity, not name)
+    d = replace(b, "st.global.b32 [%rd0], %r5;" => "st.global.b32 [%rd0], %r1;")
+    @test canon(a) != canon(d)
+end

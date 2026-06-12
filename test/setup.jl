@@ -92,3 +92,42 @@ function bf16_gemm_ref(A::Array{Float32, 2}, B::Array{Float32, 2})
     end
     return D
 end
+
+# --- Golden-PTX harness ------------------------------------------------------
+#
+# Locks emitted PTX for migration review (DESIGN.md, "Approach"): comparison
+# is structural — parsed with the package's own parser, canonicalized modulo
+# register/label/name numbering (IR.canonicalize) — so allocator churn never
+# trips it, while any change to the instruction sequence does. Golden files
+# live in test/golden/ and are committed; a deliberate lowering change
+# regenerates them with PTX_UPDATE_GOLDEN=1 and the *git diff of the golden
+# file* is the review artifact.
+
+const GOLDEN_DIR = joinpath(@__DIR__, "golden")
+
+canonical_ptx(f, tt::Type{<:Tuple}; cap::VersionNumber,
+              feature_set::Symbol = :baseline) =
+    PTX.IR.format(PTX.IR.canonicalize(PTX.Parser.parse(
+        emit_ptx(f, tt; cap, feature_set))))
+
+function golden_test(name::String, f, tt::Type{<:Tuple}; cap::VersionNumber,
+                     feature_set::Symbol = :baseline)
+    got = canonical_ptx(f, tt; cap, feature_set)
+    path = joinpath(GOLDEN_DIR, name * ".ptx")
+    if get(ENV, "PTX_UPDATE_GOLDEN", "") == "1" || !isfile(path)
+        mkpath(GOLDEN_DIR)
+        write(path, got)
+        @info "golden written — review the git diff" name path
+        return true
+    end
+    want = read(path, String)
+    want == got && return true
+    println("=== golden mismatch: $name (regenerate with PTX_UPDATE_GOLDEN=1) ===")
+    wl, gl = split(want, "\n"), split(got, "\n")
+    for i in 1:max(length(wl), length(gl))
+        a = i <= length(wl) ? wl[i] : "<missing>"
+        b = i <= length(gl) ? gl[i] : "<missing>"
+        a == b || println("  golden: ", a, "\n  got:    ", b)
+    end
+    return false
+end
