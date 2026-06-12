@@ -5,20 +5,18 @@
 {
 .shared .align 32 .b8 var0[128];
 .shared .align 32 .b8 var1[8];
-mov.b64 %rd0, var0;
-cvt.u32.u64 %r0, %rd0;
-mov.b64 %rd1, var1;
-cvt.u32.u64 %r1, %rd1;
-ld.param.b64 %rd2, [param1];
-ld.param.b32 %r2, [param2];
-cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [%r0], [%rd2, {%r2}], [%r1];
-cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [%r0], [%rd2, {%r2, %r2}], [%r1];
-cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [%r0], [%rd2, {%r2, %r2, %r2, %r2, %r2}], [%r1];
-mov.b16 %rs0, 3;
-cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster [%r0], [%rd2, {%r2, %r2}], [%r1], %rs0;
-cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes [%r0], [%rd2, {%r2, %r2}], [%r1];
-cp.async.bulk.tensor.1d.global.shared::cta.tile.bulk_group [%rd2, {%r2}], [%r0];
-cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group [%rd2, {%r2, %r2}], [%r0];
-cp.async.bulk.tensor.5d.global.shared::cta.tile.bulk_group [%rd2, {%r2, %r2, %r2, %r2, %r2}], [%r0];
+ld.param.b64 %rd0, [param1];
+ld.param.b32 %r0, [param2];
+mov.b64 %rd1, 0;
+mov.b16 %rs0, 0;
+cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [var0], [%rd0, {%r0}], [var1];
+cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [var0], [%rd0, {%r0, %r0}], [var1];
+cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [var0], [%rd0, {%r0, %r0, %r0, %r0, %r0}], [var1];
+mov.b16 %rs1, 3;
+cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster [var0], [%rd0, {%r0, %r0}], [var1], %rs1;
+cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes [var0], [%rd0, {%r0, %r0}], [var1];
+cp.async.bulk.tensor.1d.global.shared::cta.tile.bulk_group [%rd0, {%r0}], [var0];
+cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group [%rd0, {%r0, %r0}], [var0];
+cp.async.bulk.tensor.5d.global.shared::cta.tile.bulk_group [%rd0, {%r0, %r0, %r0, %r0, %r0}], [var0];
 ret;
 }

@@ -684,58 +684,80 @@ end
     @test BlackwellLayout.B32          == 6
 end
 
-@testset "tma (cp.async.bulk.tensor) hand-written wrapper" begin
-    # Load form: $0 = dst_smem (r), $1 = tmap (l), $2.. = coords (r), last = mbar (r).
-    spec = PTX.tma_spec(2, :load, Symbol("shared::cluster"))
-    @test spec.asm == "cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [\$0], [\$1, {\$2, \$3}], [\$4];"
-    @test spec.constraints == "r,l,r,r,r,~{memory}"
+@testset "tma (cp.async.bulk.tensor) wrapper (tier-2 intrinsic lowering)" begin
+    # Third migrated family. Cluster-destination loads lower through
+    # llvm.nvvm.cp.async.bulk.tensor.g2s.tile.<N>d — multicast and
+    # cta_group are immarg-selected qualifiers on the same intrinsic;
+    # shared::cta loads through g2s.cta.tile.<N>d (PTX 8.6 ISel floor);
+    # stores through s2g.tile.<N>d. The wrapper retypes dst → addrspace(7)
+    # and tmap → generic raw (reinterpret_addrspace — never addrspacecast,
+    # see address_space.jl). Goldens: test/golden/tma@sm{90,100a}.ptx.
+    # shared::cta × cta_group::2 stays asm-tier (no intrinsic carries both).
 
-    spec = PTX.tma_spec(1, :load, Symbol("shared::cta"))
-    @test spec.asm == "cp.async.bulk.tensor.1d.shared::cta.global.tile.mbarrier::complete_tx::bytes [\$0], [\$1, {\$2}], [\$3];"
-    @test spec.constraints == "r,l,r,r,~{memory}"
+    pSh = Core.LLVMPtr{Float32, PTX.AS.Shared}
+    pTm = Core.LLVMPtr{UInt8, PTX.AS.Const}
+    pMb = Core.LLVMPtr{UInt64, PTX.AS.Shared}
+    cluster = Symbol("shared::cluster")
+    cta     = Symbol("shared::cta")
+    cg2     = Symbol("cta_group::2")
+    mc      = Symbol("multicast::cluster")
+    cmpl    = Symbol("mbarrier::complete_tx::bytes")
 
-    spec = PTX.tma_spec(5, :load, Symbol("shared::cluster"))
-    @test spec.asm == "cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [\$0], [\$1, {\$2, \$3, \$4, \$5, \$6}], [\$7];"
-    @test spec.constraints == "r,l,r,r,r,r,r,r,~{memory}"
+    for n in 1:5
+        nd = Symbol("$(n)d")
+        coords = ntuple(_ -> Int32, n)
 
-    # Store form: $0 = tmap (l), $1.. = coords (r), last = src_smem (r). No mbar; bulk_group.
-    spec = PTX.tma_spec(2, :store, :_)
-    @test spec.asm == "cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group [\$0, {\$1, \$2}], [\$3];"
-    @test spec.constraints == "l,r,r,r,~{memory}"
+        # the intrinsics the wrappers stand on: registered and convergent
+        for name in ("llvm.nvvm.cp.async.bulk.tensor.g2s.tile.$(n)d",
+                     "llvm.nvvm.cp.async.bulk.tensor.g2s.cta.tile.$(n)d",
+                     "llvm.nvvm.cp.async.bulk.tensor.s2g.tile.$(n)d")
+            @test PTX.NVVM.isintrinsic(name)
+            @test :convergent in PTX.NVVM.intrinsic(name).props
+        end
 
-    spec = PTX.tma_spec(3, :store, :_)
-    @test spec.asm == "cp.async.bulk.tensor.3d.global.shared::cta.tile.bulk_group [\$0, {\$1, \$2, \$3}], [\$4];"
-    @test spec.constraints == "l,r,r,r,r,~{memory}"
+        # cluster loads (plain / multicast / cta_group::2 / both) all route
+        # to g2s.tile.<N>d, differing only in immargs and the mask operand
+        for (mods, argtypes) in (
+                ((:async, :bulk, :tensor, nd, cluster, :global, :tile, cmpl),
+                 (pSh, pTm, coords..., pMb)),
+                ((:async, :bulk, :tensor, nd, cluster, :global, :tile, cmpl, mc),
+                 (pSh, pTm, coords..., pMb, UInt16)),
+                ((:async, :bulk, :tensor, nd, cg2, cluster, :global, :tile, cmpl),
+                 (pSh, pTm, coords..., pMb)),
+                ((:async, :bulk, :tensor, nd, cg2, cluster, :global, :tile, cmpl, mc),
+                 (pSh, pTm, coords..., pMb, UInt16)))
+            @test which(Operation{:cp, mods}(), argtypes).module == PTX
+            ci, rt = first(Base.code_typed(Operation{:cp, mods}(), argtypes))
+            @test rt === Nothing
+            @test occursin("g2s.tile.$(n)d", string(ci))
+        end
 
-    # Argument validation — caller errors on out-of-range ndim or bogus dst_ss.
-    @test_throws ErrorException PTX.tma_spec(0, :load, Symbol("shared::cta"))
-    @test_throws ErrorException PTX.tma_spec(6, :load, Symbol("shared::cta"))
-    @test_throws ErrorException PTX.tma_spec(2, :load, :global)
-    @test_throws ErrorException PTX.tma_spec(2, :wat, :_)
+        # shared::cta load → g2s.cta.tile.<N>d
+        mods = (:async, :bulk, :tensor, nd, cta, :global, :tile, cmpl)
+        @test which(Operation{:cp, mods}(),
+                    (pSh, pTm, coords..., pMb)).module == PTX
+        ci, rt = first(Base.code_typed(Operation{:cp, mods}(),
+                                       (pSh, pTm, coords..., pMb)))
+        @test rt === Nothing
+        @test occursin("g2s.cta.tile.$(n)d", string(ci))
 
-    # Methods registered on chain singletons — load (both shared destinations) + store.
-    load_cluster_2d = (:async, :bulk, :tensor, Symbol("2d"), Symbol("shared::cluster"),
-                       :global, :tile, Symbol("mbarrier::complete_tx::bytes"))
-    @test which(Operation{:cp, load_cluster_2d}(),
-                (Core.LLVMPtr{Float32, PTX.AS.Shared},
-                 Core.LLVMPtr{Nothing, PTX.AS.Const},
-                 Int32, Int32,
-                 Core.LLVMPtr{UInt64, PTX.AS.Shared})).module == PTX
+        # store → s2g.tile.<N>d
+        mods = (:async, :bulk, :tensor, nd, :global, cta, :tile, :bulk_group)
+        @test which(Operation{:cp, mods}(),
+                    (pTm, coords..., pSh)).module == PTX
+        ci, rt = first(Base.code_typed(Operation{:cp, mods}(),
+                                       (pTm, coords..., pSh)))
+        @test rt === Nothing
+        @test occursin("s2g.tile.$(n)d", string(ci))
 
-    load_cta_3d = (:async, :bulk, :tensor, Symbol("3d"), Symbol("shared::cta"),
-                   :global, :tile, Symbol("mbarrier::complete_tx::bytes"))
-    @test which(Operation{:cp, load_cta_3d}(),
-                (Core.LLVMPtr{Float32, PTX.AS.Shared},
-                 Core.LLVMPtr{Nothing, PTX.AS.Const},
-                 Int32, Int32, Int32,
-                 Core.LLVMPtr{UInt64, PTX.AS.Shared})).module == PTX
-
-    store_2d = (:async, :bulk, :tensor, Symbol("2d"), :global, Symbol("shared::cta"),
-                :tile, :bulk_group)
-    @test which(Operation{:cp, store_2d}(),
-                (Core.LLVMPtr{Nothing, PTX.AS.Const},
-                 Int32, Int32,
-                 Core.LLVMPtr{Float32, PTX.AS.Shared})).module == PTX
+        # residue: shared::cta × cta_group::2 stays asm-tier (match
+        # truncated before the operand brackets — CodeInfo escapes `$`)
+        mods = (:async, :bulk, :tensor, nd, cg2, cta, :global, :tile, cmpl)
+        ci, _ = first(Base.code_typed(Operation{:cp, mods}(),
+                                      (pSh, pTm, coords..., pMb)))
+        @test occursin("cp.async.bulk.tensor.$(n)d.cta_group::2.shared::cta" *
+                       ".global.tile.mbarrier::complete_tx::bytes [", string(ci))
+    end
 end
 
 @testset "tuple args → braced operand groups" begin
@@ -1216,13 +1238,8 @@ end
             (:sync, :aligned, :m8n8, :x1, :shared, :b16)}(),
         (Core.LLVMPtr{UInt16, PTX.AS.Shared}, UInt32)).module == PTX
 
-    # ---- _tma_load_register / _tma_store_register ----
-    silent() do
-        PTX._tma_load_register(2, Symbol("shared::cluster"))
-        PTX._tma_load_register(5, Symbol("shared::cta"))
-        PTX._tma_store_register(2)
-        PTX._tma_store_register(3)
-    end
+    # (tma migrated to tier-2 literal methods — no register helper left;
+    # dispatch is asserted in its own testset above)
 
     # ---- _vec_ld_register / _vec_st_register ----
     silent() do

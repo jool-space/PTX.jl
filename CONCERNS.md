@@ -176,6 +176,30 @@ Per-family ledger:
   sm_80 — requirements live in ISel predicates, so the sm_80 forms ride
   the legacy `*.shared` intrinsics. Cluster-space sink forms stayed
   asm-tier pending AS-7 (`shared::cluster`) pointer modeling.
+- **tma / cp.async.bulk.tensor** (2026-06-12, `test/golden/tma@sm{90,100a}.ptx`
+  diffs): win, with one visible cost and one renamed spelling. The asm
+  tier's `r` constraints forced `mov.b64` + `cvt.u32.u64` materialization
+  of the shared dst/mbar addresses; ISel addresses both symbolically
+  (`[var0]`). New cost: the intrinsics carry every optional operand
+  (multicast mask, cache hint), so unused ones materialize as zero
+  registers — CSEd across all TMA calls in the kernel and trivially dead
+  for ptxas, but visible in the PTX. Spelling: ISel renders `.cta_group::2`
+  after the completion mechanism where the asm tier (pyptx order) put it
+  after `.<N>d`; ptxas accepts both (validated sm_100a). Address spaces:
+  the cluster-destination forms go through `g2s.tile.<N>d` whose dst is
+  `ptr addrspace(7)` and all forms take the tensormap as a *generic*
+  pointer — the wrapper raw-retypes both (`reinterpret_addrspace`,
+  ptrtoint/inttoptr), never `addrspacecast`: NVPTX lowers the cast to
+  `cvta` translation, a wasted round-trip for shared→cluster and
+  *corrupting* for the descriptor (a global address typed AS.Const by
+  convention). `shared::cta` loads ride `g2s.cta.tile.<N>d`, ISel floor
+  PTX 8.6 — the same floor ptxas already imposed on that spelling.
+  Residue: `shared::cta` × `cta_group::2` has no intrinsic (g2s.cta lacks
+  cta_group; g2s renders shared::cluster) — stays asm-tier. En passant the
+  migration exposed a golden-harness soundness bug: the parser dumped the
+  TMA coordinate bracket into a raw offset string, so canonical renaming
+  never reached the coordinate registers (raw names leaked, collisions
+  possible) — fixed structurally before the baseline capture.
 
 ## Process — plumbing and ecosystem
 

@@ -393,10 +393,12 @@ end
 #     incorrect for instruction 'tcgen05.commit'"), so the multicast verb
 #     registers `shared::cluster` only (pyptx's builder is syntactically
 #     permissive about space; the assembler is not).
-#   * cp.async.bulk.tensor.<N>d.cta_group::2.* — Blackwell 2-SM cooperative
-#     load. Purely additive: `.cta_group::2` is inserted after `.<N>d`;
-#     cta_group::1 emitted strings are byte-identical, so the proven
-#     Hopper / grouped_gemm TMA Operations are untouched.
+#   * cp.async.bulk.tensor.<N>d ... .cta_group::2 — Blackwell 2-SM
+#     cooperative load. The cluster-destination forms lower via the
+#     g2s.tile intrinsics, whose ISel renders `.cta_group::2` after the
+#     completion mechanism (notation keeps the pyptx post-rank order; see
+#     wrappers/tma.jl). The shared::cta × cta_group::2 form is asm-tier
+#     and keeps the post-rank spelling — ptxas accepts both.
 #
 # Ported from pyptx _Tcgen05.commit(multicast=True) /
 # _CpAsyncBulkTensor._tile_load(cta_group=2).
@@ -445,7 +447,7 @@ end
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tma_cta_group2!, types;
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes", ptx)
+    @test occursin("cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.cta_group::2", ptx)
+    @test occursin("cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster.cta_group::2", ptx)
     @test occursin("cp.async.bulk.tensor.2d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes", ptx)
-    @test occursin("multicast::cluster", ptx)
 end
