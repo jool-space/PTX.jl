@@ -272,3 +272,23 @@ end
                             UInt32, UInt32, UInt16, UInt16};
                       cap = v"12.1", feature_set = :arch)
 end
+
+
+# --- proxy / init fences -----------------------------------------------------
+# The three special fences that fence a specific memory proxy (async,
+# mbarrier-init) rather than ordering generic memory — not expressible as a
+# core-IR `fence`, so tier-2 intrinsics. The generic memory fences
+# (fence.sc.*, fence.acq_rel.*) stay asm/tier-1 (core-IR `fence` with
+# ordering+syncscope — a semantic translation, deferred).
+
+function _golden_fences!()
+    ptx"fence.proxy.async"()
+    ptx"fence.proxy.async.shared::cta"()
+    ptx"fence.mbarrier_init.release.cluster"()
+    return nothing
+end
+
+@testset "golden: proxy/init fences at sm_90a" begin
+    @test golden_test("fences@sm90a", _golden_fences!, Tuple{};
+                      cap = v"9.0", feature_set = :arch)
+end
