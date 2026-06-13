@@ -36,14 +36,17 @@ end
         types = Tuple{CuDeviceVector{Float32, 1}, CuDeviceVector{Float32, 1},
                       CuDeviceVector{Float32, 1}, Val{512}, Val{128}}
         ptx, julia = _roundtrip_emit_and_transpile(_swiglu_v4_kernel!, types)
-        @test occursin("ld.global.v4.f32", ptx)
-        @test occursin("st.global.v4.f32", ptx)
+        # tier-1 vec ld/st canonicalizes float vector ld/st to the `.b32` bit
+        # spelling (registers are typeless); the transpiler round-trips that
+        # emitted PTX back to a `ptx"...v4.b32"` call accordingly.
+        @test occursin("ld.global.v4.b32", ptx)
+        @test occursin("st.global.v4.b32", ptx)
         @test occursin("ex2.approx.f32", ptx)
         @test occursin("rcp.approx.f32", ptx)
         @test _parses_cleanly(julia)
         # Vector ld/st surface as tuple-destructure / tuple-construct.
-        @test occursin(r"=\s*ptx\"ld\.global\.v4\.f32\"\(", julia)
-        @test occursin(r"ptx\"st\.global\.v4\.f32\"\([^,]+,\s*\(", julia)
+        @test occursin(r"=\s*ptx\"ld\.global\.v4\.b32\"\(", julia)
+        @test occursin(r"ptx\"st\.global\.v4\.b32\"\([^,]+,\s*\(", julia)
     end
 
     @testset "rms_norm" begin

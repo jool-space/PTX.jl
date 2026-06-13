@@ -174,7 +174,8 @@ end
     @test occursin("wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16", ptx)
     @test occursin("cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes", ptx)
     @test occursin("mbarrier.test_wait.parity.shared.b64", ptx)
-    @test occursin("st.global.v2.f32", ptx)
+    # tier-1 vec ld/st canonicalizes float stores to the `.b32` bit spelling
+    @test occursin("st.global.v2.b32", ptx)
     # Z-grid plumbing: ctaid.z reads + the M / K multipliers folded in.
     @test occursin("%ctaid.z", ptx)
 end

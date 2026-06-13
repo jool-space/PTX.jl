@@ -234,21 +234,23 @@ function _baseline_vec_ldst!(out_f::CuDeviceVector{Float32, 1},
     p_u32 = pointer(out_u32)
     p_u16 = pointer(out_u16)
 
-    # Loads: v2.f32 / v4.f32 / v2.b32 / v4.b32 / v2.b16 / v4.b16
-    f2 = ptx"ld.global.v2.f32"(p_f)
-    f4 = ptx"ld.global.v4.f32"(p_f)
-    u32_2 = ptx"ld.global.v2.b32"(p_u32)
-    u32_4 = ptx"ld.global.v4.b32"(p_u32)
-    u16_2 = ptx"ld.global.v2.b16"(p_u16)
-    u16_4 = ptx"ld.global.v4.b16"(p_u16)
+    # Tier-1 loads/stores are real (no `~{memory}` barrier), so a same-address
+    # round-trip would be dead-store-eliminated to nothing. Store back at a
+    # distinct offset to keep the access live, and touch each b16 lane so the
+    # backend keeps the narrow `v{2,4}.b16` form (an opaque b16 passthrough
+    # legally coalesces into a wider `.b32` access).
+    ptx"st.global.v2.f32"(p_f + 32, ptx"ld.global.v2.f32"(p_f))
+    ptx"st.global.v4.f32"(p_f + 64, ptx"ld.global.v4.f32"(p_f + 16))
+    ptx"st.global.v2.b32"(p_u32 + 32, ptx"ld.global.v2.b32"(p_u32))
+    ptx"st.global.v4.b32"(p_u32 + 64, ptx"ld.global.v4.b32"(p_u32 + 16))
 
-    # Stores — round-trip the loaded tuples.
-    ptx"st.global.v2.f32"(p_f, f2)
-    ptx"st.global.v4.f32"(p_f, f4)
-    ptx"st.global.v2.b32"(p_u32, u32_2)
-    ptx"st.global.v4.b32"(p_u32, u32_4)
-    ptx"st.global.v2.b16"(p_u16, u16_2)
-    ptx"st.global.v4.b16"(p_u16, u16_4)
+    u16_2 = ptx"ld.global.v2.b16"(p_u16)
+    ptx"st.global.v2.b16"(p_u16 + 16,
+        (ptx"add.s16"(u16_2[1], UInt16(1)), ptx"add.s16"(u16_2[2], UInt16(1))))
+    u16_4 = ptx"ld.global.v4.b16"(p_u16 + 8)
+    ptx"st.global.v4.b16"(p_u16 + 32,
+        (ptx"add.s16"(u16_4[1], UInt16(1)), ptx"add.s16"(u16_4[2], UInt16(1)),
+         ptx"add.s16"(u16_4[3], UInt16(1)), ptx"add.s16"(u16_4[4], UInt16(1))))
     return nothing
 end
 
@@ -258,14 +260,14 @@ end
                   CuDeviceVector{UInt16, 1}}
     @test ptxas_compiles(_baseline_vec_ldst!, types; cap = v"7.5")
     ptx = emit_ptx(_baseline_vec_ldst!, types; cap = v"7.5")
-    @test occursin("ld.global.v2.f32", ptx)
-    @test occursin("ld.global.v4.f32", ptx)
+    # NVPTX canonicalizes float vector ld/st to the `.b32` bit spelling
+    # (registers are typeless), so the f32 forms appear as `.b32`.
     @test occursin("ld.global.v2.b32", ptx)
     @test occursin("ld.global.v4.b32", ptx)
+    @test occursin("st.global.v2.b32", ptx)
+    @test occursin("st.global.v4.b32", ptx)
     @test occursin("ld.global.v2.b16", ptx)
     @test occursin("ld.global.v4.b16", ptx)
-    @test occursin("st.global.v2.f32", ptx)
-    @test occursin("st.global.v4.f32", ptx)
     @test occursin("st.global.v2.b16", ptx)
     @test occursin("st.global.v4.b16", ptx)
 end

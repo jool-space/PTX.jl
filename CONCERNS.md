@@ -147,9 +147,10 @@ from a silent break into a red test at bump time.
 PTX orderings/scopes → LLVM orderings/syncscopes is a semantic translation
 with miscompile potential (see DESIGN.md, lowering tiers). Current exposure is
 small — the package wraps no atomics; the generic memory fences
-(`fence.sc.*`, `fence.acq_rel.*`) and vector ld/st are the tier-1 surface
-today — but every tier-1 entry needs an explicit mapping decision and a
-golden-output test. No batch sign-off.
+(`fence.sc.*`, `fence.acq_rel.*`) are the tier-1 surface still pending a
+mapping decision — but every tier-1 entry needs an explicit mapping decision
+and a golden-output test. No batch sign-off. (Vector ld/st was the other
+tier-1 candidate; migrated 2026-06-13 — see below.)
 
 Split clarified 2026-06-13: the *proxy/init* fences are NOT tier-1. A
 core-IR `fence` orders generic memory with an ordering+syncscope; it cannot
@@ -165,17 +166,40 @@ explicit mapping decision): the generic `fence.sc.gpu/sys`,
 `fence.acq_rel.cta`. `fence.proxy.tensormap::generic.*` takes operands and
 rides with the unmigrated `tensormap.replace` path.
 
-### Vector ld/st as tier-1 core IR — deferred decision
+### Vector ld/st as tier-1 core IR — MIGRATED 2026-06-13
 
-`ld.global.v{2,4}` / `st.global.v{2,4}` (wrappers/vec_ldst.jl) currently
-emit asm with a `~{memory}` clobber — a hard barrier. A core-IR
-`load <4 x float>, ptr addrspace(1), align 16` lowers to the same
-`ld.global.v4` (verified, llc 22.1.7), but as a *normal* load: optimizable,
-reorderable, CSE-able. That is usually the better behavior (the optimizer
-can coalesce/hoist), but it is a semantic change to working code that real
-GEMM load paths depend on, and the surface would need `<N x T>` ⇄ `NTuple`
-repack plus explicit addrspace/alignment modeling. Left as asm pending the
-conscious decision — exactly the "no batch sign-off" tier-1 case.
+`ld.global.v{2,4}` / `st.global.v{2,4}` (wrappers/vec_ldst.jl) now lower to
+core-IR `load`/`store <N x T>` on `ptr addrspace(1)` with `align N*sizeof(T)`,
+dropping the asm `~{memory}` clobber. The body repacks between the LLVM vector
+type `<N x T>` (what load/store want) and the array type `[N x T]` (how Julia
+represents the homogeneous `NTuple` surface) via extractelement/insertvalue
+pairs that ISel coalesces into the instruction's register group.
+
+The decision the deferral was waiting on — *is dropping the barrier safe for
+the working GEMM load paths?* — resolved **yes**, with the behavior verified
+explicitly (not assumed):
+
+- **The v{2,4} alignment was already a hard hardware requirement** of the asm
+  instruction; asserting `align` adds no new caller obligation. Callers that
+  fed misaligned pointers would already have faulted.
+- **`.f32` → `.b32` is a cosmetic respelling**, not a semantic change. NVPTX
+  canonicalizes float vector ld/st to the bit spelling because registers are
+  typeless — verified that even with `mul.f32` consumers the load stays
+  `ld.global.v4.b32` and ptxas emits identical SASS. (Tests assert `.b32`.)
+- **Narrow b16 vectors are preserved when lanes are individually used** (the
+  realistic case) — verified `ld.global.v4.b16` survives lane-wise arithmetic.
+  An *opaque* b16 passthrough legally coalesces into a wider `.b32` access
+  (same bytes, same transaction count), which is why the golden/baseline
+  kernels touch each lane to lock the per-lane contract rather than the
+  optimizer's packing choice.
+- **Dead-store elimination is now live** and is the point: a same-address
+  load→store round-trip is correctly eliminated to nothing (the asm barrier
+  used to pin it). Test kernels store at a *distinct* offset to keep the
+  access observable. Real GEMM paths transform the loaded values before
+  storing, so nothing of value is eliminated — but this is the optimization
+  the migration unlocks (offset folding into the addressing mode, reorder,
+  CSE). Golden `test/golden/vec_ldst@sm70.ptx` pins the diff: the asm tier's
+  per-offset `add.s64` scaffolding folds into `[%rd+imm]`.
 
 ### Performance parity per migrated family
 
@@ -278,6 +302,16 @@ Per-family ledger:
   Gating note: `kind::f8f6f4` and the fp8 paths are consumer-Blackwell
   (sm_120a+, the GB10 sub-byte FP accelerator) — the *opposite* of
   tcgen05's datacenter-only floor.
+- **vec ld/st.global** (2026-06-13, `test/golden/vec_ldst@sm70.ptx` diff):
+  WIN. Tier-1 core IR (`load`/`store <N x T>`), no NVVM intrinsic. Dropping
+  the `~{memory}` barrier lets the backend fold each constant store offset
+  into the addressing mode — the asm tier's per-offset `add.s64` scaffolding
+  (`add.s64 %rd3,%rd0,32; ... [%rd3]`) collapses into `[%rd0+32]`. Same
+  vector instructions otherwise; `.f32` canonicalizes to the `.b32` bit
+  spelling (cosmetic — identical SASS). No perf regression; the freed
+  reorder/CSE/DSE is the upside. See the dedicated section above for the
+  safety verification (alignment was already required, narrow b16 preserved
+  under lane use, DSE is intended).
 
 ## Process — plumbing and ecosystem
 

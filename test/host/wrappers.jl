@@ -1035,39 +1035,41 @@ end
     end
 end
 
-@testset "vec ld/st.global hand-written wrapper" begin
-    # ld.global.v{2,4}.{f32,b32,b16} / st.global.v{2,4}.{f32,b32,b16}.
-    # Brace operand groups are emitted directly — the chain default's
-    # per-arg renderer can't group args into a single brace.
+@testset "vec ld/st.global tier-1 wrapper" begin
+    # ld.global.v{2,4}.{f32,b32,b16} / st.global.v{2,4}.{f32,b32,b16} lower to
+    # core LLVM IR (`load`/`store <N x T>`), not asm — no `~{memory}` barrier,
+    # so the backend can fold offsets / reorder / CSE them. The surface is
+    # `NTuple{N, T}`, so the body repacks between the LLVM vector type
+    # `<N x T>` (what load/store want) and the array type `[N x T]` (how Julia
+    # represents the homogeneous tuple).
 
-    # v4.f32 load: 4 outputs in braces, 1 input pointer slot.
-    spec = PTX.vec_ld_spec(4, :f32, "f")
-    @test spec.asm == "ld.global.v4.f32 {\$0, \$1, \$2, \$3}, [\$4];"
-    @test spec.constraints == "=f,=f,=f,=f,l,~{memory}"
+    # v4.f32 load: load <4 x float>, then unpack into the [4 x float] tuple.
+    ir = PTX.vec_ld_ir(4, :f32, 16)
+    @test occursin("load <4 x float>, ptr addrspace(1) %0, align 16", ir)
+    @test occursin("extractelement <4 x float> %v, i32 3", ir)
+    @test occursin("insertvalue [4 x float]", ir)
+    @test occursin("ret [4 x float]", ir)
+    @test !occursin("~{memory}", ir)   # no optimization barrier
 
-    # v2.f32 load.
-    spec = PTX.vec_ld_spec(2, :f32, "f")
-    @test spec.asm == "ld.global.v2.f32 {\$0, \$1}, [\$2];"
-    @test spec.constraints == "=f,=f,l,~{memory}"
+    # v2.b32 → i32 elements, align 8.
+    ir = PTX.vec_ld_ir(2, :b32, 8)
+    @test occursin("load <2 x i32>, ptr addrspace(1) %0, align 8", ir)
 
-    # v4.b32 load → `r` constraint.
-    spec = PTX.vec_ld_spec(4, :b32, "r")
-    @test spec.asm == "ld.global.v4.b32 {\$0, \$1, \$2, \$3}, [\$4];"
-    @test spec.constraints == "=r,=r,=r,=r,l,~{memory}"
+    # v4.b16 → i16 elements, align 8.
+    ir = PTX.vec_ld_ir(4, :b16, 8)
+    @test occursin("load <4 x i16>, ptr addrspace(1) %0, align 8", ir)
 
-    # v2.b16 load → `h` constraint.
-    spec = PTX.vec_ld_spec(2, :b16, "h")
-    @test spec.constraints == "=h,=h,l,~{memory}"
+    # v4.f32 store: unpack the [4 x float] arg (%1), build <4 x float>, store
+    # to the pointer arg (%0).
+    ir = PTX.vec_st_ir(4, :f32, 16)
+    @test occursin("extractvalue [4 x float] %1, 3", ir)
+    @test occursin("insertelement <4 x float>", ir)
+    @test occursin("store <4 x float> %v3, ptr addrspace(1) %0, align 16", ir)
+    @test occursin("ret void", ir)
 
-    # v4.f32 store: pointer slot first ($0), then 4 register inputs in braces.
-    spec = PTX.vec_st_spec(4, :f32, "f")
-    @test spec.asm == "st.global.v4.f32 [\$0], {\$1, \$2, \$3, \$4};"
-    @test spec.constraints == "l,f,f,f,f,~{memory}"
-
-    # v2.b16 store.
-    spec = PTX.vec_st_spec(2, :b16, "h")
-    @test spec.asm == "st.global.v2.b16 [\$0], {\$1, \$2};"
-    @test spec.constraints == "l,h,h,~{memory}"
+    # v2.b16 store, align 4.
+    ir = PTX.vec_st_ir(2, :b16, 4)
+    @test occursin("store <2 x i16> %v1, ptr addrspace(1) %0, align 4", ir)
 
     # Methods registered for representative variants.
     @test which(Operation{:ld, (:global, :v4, :f32)}(),
@@ -1081,16 +1083,15 @@ end
                 (Core.LLVMPtr{Float32, PTX.AS.Global},
                  NTuple{4, Float32})).module == PTX
 
-    # vec ld is `@eval @generated function ...`, so `code_typed` triggers
-    # body expansion at host. (vec st is plain @eval; its body only runs
-    # when invoked from a kernel.)
-    for (n, dt, T, letter) in PTX._VEC_LDST_VARIANTS
+    # vec ld is `@eval @generated function ...`, so `code_typed` triggers body
+    # expansion at host. Every variant bakes its alignment as N*sizeof(T).
+    for (n, dt, T) in PTX._VEC_LDST_VARIANTS
         op = Operation{:ld, (:global, Symbol("v", n), dt)}()
         ci, _ = first(Base.code_typed(op,
             (Core.LLVMPtr{T, PTX.AS.Global},)))
         s = string(ci)
-        @test occursin("ld.global.v$n.$dt", s)
-        @test occursin(join(fill("=$letter", n), ","),  s)
+        @test occursin("load <$n x", s)
+        @test occursin("align $(n * sizeof(T))", s)
     end
 end
 
@@ -1327,12 +1328,12 @@ end
     # (tma migrated to tier-2 literal methods — no register helper left;
     # dispatch is asserted in its own testset above)
 
-    # ---- _vec_ld_register / _vec_st_register ----
+    # ---- _vec_ld_register / _vec_st_register (tier-1; 3-arg) ----
     silent() do
-        PTX._vec_ld_register(2, :f32, Float32, "f")
-        PTX._vec_ld_register(4, :b32, UInt32,  "r")
-        PTX._vec_st_register(4, :f32, Float32, "f")
-        PTX._vec_st_register(2, :b16, UInt16,  "h")
+        PTX._vec_ld_register(2, :f32, Float32)
+        PTX._vec_ld_register(4, :b32, UInt32)
+        PTX._vec_st_register(4, :f32, Float32)
+        PTX._vec_st_register(2, :b16, UInt16)
     end
 
     # ---- _wgmma_mma_async_register ----

@@ -147,7 +147,8 @@ end
     @test occursin("wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16", ptx)
     @test occursin("wgmma.commit_group.sync.aligned",                ptx)
     @test occursin("wgmma.wait_group.sync.aligned 0",                ptx)
-    @test occursin("st.global.v2.f32",                               ptx)
+    # tier-1 vec ld/st canonicalizes float stores to the `.b32` bit spelling
+    @test occursin("st.global.v2.b32",                               ptx)
 
     # Descriptor build constant-folds the layout-picked offsets into a single
     # OR with the runtime SMEM address (verified compile-only).
