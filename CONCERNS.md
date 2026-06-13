@@ -146,9 +146,36 @@ from a silent break into a red test at bump time.
 
 PTX orderings/scopes → LLVM orderings/syncscopes is a semantic translation
 with miscompile potential (see DESIGN.md, lowering tiers). Current exposure is
-small — the package wraps no atomics; fences and vector ld/st are the tier-1
-surface today — but every tier-1 entry needs an explicit mapping decision and
-a golden-output test. No batch sign-off.
+small — the package wraps no atomics; the generic memory fences
+(`fence.sc.*`, `fence.acq_rel.*`) and vector ld/st are the tier-1 surface
+today — but every tier-1 entry needs an explicit mapping decision and a
+golden-output test. No batch sign-off.
+
+Split clarified 2026-06-13: the *proxy/init* fences are NOT tier-1. A
+core-IR `fence` orders generic memory with an ordering+syncscope; it cannot
+name a memory *proxy*. So `fence.proxy.async`, `fence.proxy.async.shared::cta`,
+and `fence.mbarrier_init.release.cluster` are tier-2 — migrated to
+`llvm.nvvm.fence.*` intrinsics (`test/golden/fences@sm90a.ptx`,
+byte-identical: the intrinsics emit exactly the asm spellings). They are not
+`convergent` (the registry marks them `nocallback` only), which is correct —
+duplicating an idempotent ordering fence is harmless, unlike the
+warp-collective ops the convergence spike was about. What remains genuinely
+tier-1 (core-IR `fence <ordering> syncscope(...)`, deferred behind an
+explicit mapping decision): the generic `fence.sc.gpu/sys`,
+`fence.acq_rel.cta`. `fence.proxy.tensormap::generic.*` takes operands and
+rides with the unmigrated `tensormap.replace` path.
+
+### Vector ld/st as tier-1 core IR — deferred decision
+
+`ld.global.v{2,4}` / `st.global.v{2,4}` (wrappers/vec_ldst.jl) currently
+emit asm with a `~{memory}` clobber — a hard barrier. A core-IR
+`load <4 x float>, ptr addrspace(1), align 16` lowers to the same
+`ld.global.v4` (verified, llc 22.1.7), but as a *normal* load: optimizable,
+reorderable, CSE-able. That is usually the better behavior (the optimizer
+can coalesce/hoist), but it is a semantic change to working code that real
+GEMM load paths depend on, and the surface would need `<N x T>` ⇄ `NTuple`
+repack plus explicit addrspace/alignment modeling. Left as asm pending the
+conscious decision — exactly the "no batch sign-off" tier-1 case.
 
 ### Performance parity per migrated family
 

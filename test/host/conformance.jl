@@ -263,6 +263,14 @@ append!(PROBES, [
          UInt32,UInt16,UInt16,UInt32,UInt16,UInt16),
         "sm_121a", "+ptx88",
         r"mma\.sync\.aligned\.m16n8k64\.row\.col\.kind::mxf4nvf4\.block_scale\.scale_vec::4X\.f32\.e2m1\.e2m1\.f32\.ue4m3"),
+
+    # proxy/init fences (wrappers/fence.jl)
+    ("llvm.nvvm.fence.proxy.async", (), "sm_90a", "+ptx80",
+        r"fence\.proxy\.async;"),
+    ("llvm.nvvm.fence.proxy.async.shared_cta", (), "sm_90a", "+ptx80",
+        r"fence\.proxy\.async\.shared::cta;"),
+    ("llvm.nvvm.fence.mbarrier_init.release.cluster", (), "sm_90a", "+ptx80",
+        r"fence\.mbarrier_init\.release\.cluster;"),
 ])
 
 "All intrinsic names spelled as nvvm\"...\" literals under src/."

@@ -760,6 +760,24 @@ end
     end
 end
 
+@testset "proxy/init fences (tier-2 intrinsic lowering)" begin
+    # The three proxy/init fences route to llvm.nvvm.fence.* intrinsics
+    # (a core-IR `fence` can't express a proxy fence). Generic memory
+    # fences stay asm-tier — see wrappers/fence.jl.
+    for (mods, intr) in (
+            ((:proxy, :async), "llvm.nvvm.fence.proxy.async"),
+            ((:proxy, :async, Symbol("shared::cta")),
+             "llvm.nvvm.fence.proxy.async.shared_cta"),
+            ((:mbarrier_init, :release, :cluster),
+             "llvm.nvvm.fence.mbarrier_init.release.cluster"))
+        @test PTX.NVVM.isintrinsic(intr)
+        @test which(Operation{:fence, mods}(), ()).module == PTX
+        ci, rt = first(Base.code_typed(Operation{:fence, mods}(), ()))
+        @test rt === Nothing
+        @test occursin(intr, string(ci))
+    end
+end
+
 @testset "tcgen05 wrapper (tier-2 intrinsic lowering)" begin
     # Fourth migrated family — see wrappers/tcgen05.jl for the mapping.
     # The notation surface keeps raw UInt32 taddr/SMEM-offset operands;
