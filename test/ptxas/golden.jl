@@ -292,3 +292,49 @@ end
     @test golden_test("fences@sm90a", _golden_fences!, Tuple{};
                       cap = v"9.0", feature_set = :arch)
 end
+
+
+# --- vec ld/st.global: all six forms (v{2,4} × {f32,b32,b16}) ---------------
+# Vectorized global load/store. The lowest-cap universal data path — no arch
+# gate. Migrating from an asm `~{memory}` barrier to a tier-1 core-IR
+# `load`/`store <N x T>` makes these real, optimizable, reorderable memory
+# ops; the golden pins the emitted ld.global.v* / st.global.v* sequence so
+# that change is a reviewable diff rather than an act of faith.
+
+function _golden_vec_ldst!(pf::CuDeviceVector{Float32, 1},
+                           pu::CuDeviceVector{UInt32, 1},
+                           ph::CuDeviceVector{UInt16, 1})
+    qf = pointer(pf); qu = pointer(pu); qh = pointer(ph)
+    @inbounds begin
+        # f32 / b32: load and store back at a distinct offset. The values flow
+        # through unmodified, but the store address differs from the load
+        # address, so the round-trip is a real, non-eliminable side effect.
+        # (NVPTX canonicalizes float vector ld/st to the `.b32` bit spelling —
+        # registers are typeless, so this is purely cosmetic vs `.f32`.)
+        ptx"st.global.v4.f32"(qf + 32, ptx"ld.global.v4.f32"(qf))
+        ptx"st.global.v2.f32"(qf + 64, ptx"ld.global.v2.f32"(qf + 16))
+        ptx"st.global.v4.b32"(qu + 32, ptx"ld.global.v4.b32"(qu))
+        ptx"st.global.v2.b32"(qu + 64, ptx"ld.global.v2.b32"(qu + 16))
+
+        # b16: touch each lane (add 1) so the backend keeps the narrow
+        # `v{2,4}.b16` form. An opaque b16 passthrough would legally coalesce
+        # into a wider `.b32` access (same bytes, same transaction) — pinning
+        # the per-lane form locks the wrapper's actual contract, not the
+        # optimizer's packing choice.
+        h4 = ptx"ld.global.v4.b16"(qh)
+        ptx"st.global.v4.b16"(qh + 16,
+            (ptx"add.s16"(h4[1], UInt16(1)), ptx"add.s16"(h4[2], UInt16(1)),
+             ptx"add.s16"(h4[3], UInt16(1)), ptx"add.s16"(h4[4], UInt16(1))))
+        h2 = ptx"ld.global.v2.b16"(qh + 8)
+        ptx"st.global.v2.b16"(qh + 24,
+            (ptx"add.s16"(h2[1], UInt16(1)), ptx"add.s16"(h2[2], UInt16(1))))
+    end
+    return nothing
+end
+
+@testset "golden: vec ld/st.global at sm_70" begin
+    @test golden_test("vec_ldst@sm70", _golden_vec_ldst!,
+                      Tuple{CuDeviceVector{Float32, 1},
+                            CuDeviceVector{UInt32, 1},
+                            CuDeviceVector{UInt16, 1}}; cap = v"7.0")
+end
