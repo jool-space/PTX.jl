@@ -207,14 +207,43 @@ naming. This, plus probe assertions in the conformance harness, is the
 parser's load-bearing role in the rework; it stops being justified by the
 transpiler.
 
+**Family coverage comes in two flavors.** Most families are spelled as
+hand-written `nvvm"..."` literals — one method per form, or a small
+script-expanded set of literal methods where a grid is regular (tcgen05's
+ld/st). The conformance harness scans `src/` for those literals and requires
+a selection probe for each, so the names are greppable by construction and an
+unprobed used intrinsic fails the suite. A few families have a dtype
+cross-product too large to spell literally — `mma`'s `kind::f8f6f4` alone is
+a hundred structurally-identical forms — and stay table-driven generators
+that emit `IntrinsicCall` directly, invisible to the literal scan. Those are
+covered instead by a registry-completeness assertion over the generator's
+emitted name list plus one selection probe per structural class: strictly
+stronger than per-form probing for a mechanical family, since it also catches
+a name the generator *could* emit that the registry no longer has. Both
+flavors converge on one guarantee — a JLL bump that renames or drops an
+intrinsic a wrapper stands on surfaces as a red test naming the family, never
+a silent miscompile. (The per-registry-entry trial-compile matrix in "The
+registry" above is the broader, still-pending verifier; this is the
+per-family standing defense that ships with each migration.) This settled the
+"do families need a descriptor mechanism?" open question in the negative: the
+generators carry the PTX↔NVVM translation in code, and conformance carries
+the coverage guarantee — no separate descriptor object earned its keep.
+
 **Family order by information per effort.** `shfl` first — the simplest
 convergent family, so it doubles as the convergence guinea pig in real use.
 `mbarrier` second — the largest wrapper count, one form already verified
 end-to-end. Then TMA, tcgen05, and the mma families (where the payoff is —
-block-scaled `mma.sync` replaces the largest asm surface). `cvt` and the
-tier-1 candidates (fences, vector ld/st) migrate as their semantic mapping
-decisions get made, not before. `wgmma` never migrates; it gets registered as
-asm-tier and stays there. Beyond that opening sequence, priority comes from
+block-scaled `mma.sync` replaces the largest asm surface). Then the fences:
+this split on contact — the *proxy/init* fences (`fence.proxy.*`,
+`fence.mbarrier_init.*`) name a memory proxy a core-IR `fence` cannot
+express, so they are tier-2 intrinsics and migrated cleanly; only the generic
+memory fences (`fence.sc.*`, `fence.acq_rel.*`) are the true tier-1 case
+(core-IR `fence` with an ordering and a syncscope — a semantic translation).
+`cvt` and the remaining tier-1 candidates (generic fences, vector ld/st)
+migrate as their semantic mapping decisions get made, not before — vector
+ld/st in particular trades a `~{memory}` barrier for an optimizable load,
+which is a behavior change to working code, not a free win. `wgmma` never
+migrates; it gets registered as asm-tier and stays there. Beyond that opening sequence, priority comes from
 data, not completionism: parse a corpus of real kernels (own packages,
 CUTLASS dumps) and rank unregistered forms by frequency.
 
@@ -250,12 +279,21 @@ it's still sequenced after the harness can prove what it breaks.
   selection patterns, not intrinsic definitions. Likely answer: derive
   empirically by trial-compiling each entry across a matrix of `-mcpu`/`-mattr`
   targets (the harness exists anyway); hand-curate only where that's ambiguous.
-- Whether the family descriptors can be partially derived from the ISA grammar
-  rather than written by hand. Unclear it's worth it at ~15 families.
-- Convergence attributes in the middle end: explicit attribute groups on
-  declarations should suffice, but this deserves a focused miscompile test
-  (divergent-branch duplication around a convergent intrinsic) before trusting
-  it broadly.
+- ~~Whether the family descriptors can be partially derived from the ISA
+  grammar rather than written by hand.~~ Resolved, in the negative, by the
+  migrations themselves (see "Family coverage comes in two flavors"): there
+  are no descriptor *objects* to derive. The PTX↔NVVM translation lives in the
+  per-family generator code, and the coverage guarantee lives in conformance;
+  no queryable descriptor earned its keep across the migrated families.
+- ~~Convergence attributes in the middle end.~~ Resolved — the spike ran on
+  the GB10 and validated it (explicit attribute groups survive the pipeline
+  and bind; the unattributed variant miscompiles exactly as predicted). See
+  `CONCERNS.md`, "Convergence attributes through the middle end."
 - Whether `cvt`-style ops that have both core-IR and intrinsic lowerings should
   prefer optimizability (core IR) or exactness of form (intrinsic) — probably
-  per-op, decided in the registry, but the default is undecided.
+  per-op, decided in the registry, but the default is undecided. The fence
+  split is the first concrete data point: proxy fences took the intrinsic
+  (exactness — a proxy fence has no core-IR form), while the generic memory
+  fences and vector ld/st are where optimizability would actually buy
+  something, and remain undecided precisely because that optimizability is a
+  behavior change, not a free win.
