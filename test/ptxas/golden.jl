@@ -176,3 +176,99 @@ end
                       Tuple{CuDeviceVector{UInt32, 1}, UInt64, UInt32};
                       cap = v"10.0", feature_set = :arch)
 end
+
+
+# --- mma.sync.aligned: the three dense data conventions ----------------------
+# bf16/tf32/fp8 inputs pack into UInt32 fragments; pure-f16 inputs and f16
+# accumulators move as packed UInt32 too at the notation surface (the
+# intrinsics use i32 vs v2f16 internally — the migration's repack is what
+# this golden pins). One kernel per accumulator/input convention at the
+# Hopper floor; fp8 + kind::f8f6f4 are consumer-Blackwell (sm_120a+, the
+# GB10 path) and ride a separate golden.
+
+function _golden_mma_classic!(out::CuDeviceVector{Float32, 1},
+        a1::UInt32, a2::UInt32, a3::UInt32, a4::UInt32, b1::UInt32, b2::UInt32,
+        h1::UInt32, h2::UInt32, h3::UInt32)
+    a4t = (a1, a2, a3, a4); b2t = (b1, b2); c = (0f0, 0f0, 0f0, 0f0)
+    # bf16 inputs, f32 acc — i32 A/B, f32 C/D
+    d = ptx"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(a4t, b2t, c)
+    @inbounds out[1] = d[1]
+    # f16 inputs, f32 acc — intrinsic wants v2f16 A/B
+    d = ptx"mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32"(a4t, b2t, c)
+    @inbounds out[2] = d[1]
+    # f16 inputs, f16 acc — v2f16 everywhere; C/D packed UInt32 at the surface
+    ch = (h1, h2)
+    e = ptx"mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16"(a4t, b2t, ch)
+    @inbounds out[3] = reinterpret(Float32, e[1])
+    # tf32 inputs, f32 acc, k8 — i32 A/B
+    a2t = (a1, a2); b1t = (b1,)
+    d = ptx"mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32"(a2t, b1t, c)
+    @inbounds out[4] = d[1]
+    return nothing
+end
+
+@testset "golden: mma dense (classic conventions) at sm_90a" begin
+    @test golden_test("mma@sm90a", _golden_mma_classic!,
+                      Tuple{CuDeviceVector{Float32, 1},
+                            UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
+                            UInt32, UInt32, UInt32};
+                      cap = v"9.0", feature_set = :arch)
+end
+
+# fp8 (e4m3/e5m2) and kind::f8f6f4 — consumer-Blackwell sub-byte FP.
+function _golden_mma_fp8!(out::CuDeviceVector{Float32, 1},
+        a1::UInt32, a2::UInt32, a3::UInt32, a4::UInt32, b1::UInt32, b2::UInt32,
+        h1::UInt32, h2::UInt32)
+    a2t = (a1, a2); b1t = (b1,); c = (0f0, 0f0, 0f0, 0f0)
+    # k16 fp8, f32 acc — 2 A regs, 1 B reg
+    d = ptx"mma.sync.aligned.m16n8k16.row.col.f32.e4m3.e4m3.f32"(a2t, b1t, c)
+    @inbounds out[1] = d[1]
+    # k16 fp8, f16 acc — C/D v2f16 internally, packed UInt32 at surface
+    ch = (h1, h2)
+    e = ptx"mma.sync.aligned.m16n8k16.row.col.f16.e4m3.e4m3.f16"(a2t, b1t, ch)
+    @inbounds out[2] = reinterpret(Float32, e[1])
+    # k32 kind::f8f6f4 mixed, f32 acc — 4 A regs, 2 B regs
+    a4t = (a1, a2, a3, a4); b2t = (b1, b2)
+    d = ptx"mma.sync.aligned.kind::f8f6f4.m16n8k32.row.col.f32.e2m1.e3m2.f32"(a4t, b2t, c)
+    @inbounds out[3] = d[1]
+    return nothing
+end
+
+@testset "golden: mma fp8 + kind::f8f6f4 at sm_121a" begin
+    @test golden_test("mma_fp8@sm121a", _golden_mma_fp8!,
+                      Tuple{CuDeviceVector{Float32, 1},
+                            UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
+                            UInt32, UInt32};
+                      cap = v"12.1", feature_set = :arch)
+end
+
+# Block-scaled (mxf8f6f4/mxf4/mxf4nvf4) — the microscaling path. mxf4nvf4
+# scale_vec::4X with ue8m0 stays asm-tier (no intrinsic), pinned to prove
+# the migration left it alone.
+function _golden_mma_scaled!(out::CuDeviceVector{Float32, 1},
+        a1::UInt32, a2::UInt32, a3::UInt32, a4::UInt32, b1::UInt32, b2::UInt32,
+        sa::UInt32, sb::UInt32, bid::UInt16, tid::UInt16)
+    a4t = (a1, a2, a3, a4); b2t = (b1, b2); c = (0f0, 0f0, 0f0, 0f0)
+    d = ptx"mma.sync.aligned.kind::mxf8f6f4.block_scale.scale_vec::1X.m16n8k32.row.col.f32.e4m3.e4m3.f32.ue8m0"(
+        a4t, b2t, c, sa, bid, tid, sb, bid, tid)
+    @inbounds out[1] = d[1]
+    d = ptx"mma.sync.aligned.kind::mxf4.block_scale.scale_vec::2X.m16n8k64.row.col.f32.e2m1.e2m1.f32.ue8m0"(
+        a4t, b2t, c, sa, bid, tid, sb, bid, tid)
+    @inbounds out[2] = d[1]
+    d = ptx"mma.sync.aligned.kind::mxf4nvf4.block_scale.scale_vec::4X.m16n8k64.row.col.f32.e2m1.e2m1.f32.ue4m3"(
+        a4t, b2t, c, sa, bid, tid, sb, bid, tid)
+    @inbounds out[3] = d[1]
+    # residue: no intrinsic for nvf4 scale_vec::4X with ue8m0 stype
+    d = ptx"mma.sync.aligned.kind::mxf4nvf4.block_scale.scale_vec::4X.m16n8k64.row.col.f32.e2m1.e2m1.f32.ue8m0"(
+        a4t, b2t, c, sa, bid, tid, sb, bid, tid)
+    @inbounds out[4] = d[1]
+    return nothing
+end
+
+@testset "golden: mma block-scaled at sm_121a" begin
+    @test golden_test("mma_scaled@sm121a", _golden_mma_scaled!,
+                      Tuple{CuDeviceVector{Float32, 1},
+                            UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
+                            UInt32, UInt32, UInt16, UInt16};
+                      cap = v"12.1", feature_set = :arch)
+end
