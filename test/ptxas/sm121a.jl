@@ -41,7 +41,10 @@ end
     ptx = emit_ptx(_sm121a_mma_kind_f8f6f4!, types;
                    cap = v"12.1", feature_set = :arch)
     @test occursin(".target sm_121a", ptx)
-    @test occursin("mma.sync.aligned.kind::f8f6f4.m16n8k32.row.col.f32.e4m3.e4m3.f32", ptx)
+    # tier-2: ISel renders the kind qualifier after row.col (shape-before-
+    # kind), where the asm tier put it first. ptxas accepts both. The
+    # m16n8k16 kind form below has no intrinsic and keeps the asm order.
+    @test occursin("mma.sync.aligned.m16n8k32.row.col.kind::f8f6f4.f32.e4m3.e4m3.f32", ptx)
 end
 
 # Mixed sub-byte FP: kind::f8f6f4 admits any A,B ∈ {e4m3,e5m2,e3m2,e2m3,e2m1};
@@ -72,7 +75,7 @@ end
                          cap = v"12.1", feature_set = :arch)
     ptx = emit_ptx(_sm121a_mma_kind_f8f6f4_mixed!, types;
                    cap = v"12.1", feature_set = :arch)
-    @test occursin("mma.sync.aligned.kind::f8f6f4.m16n8k32.row.col.f32.e2m1.e3m2.f32", ptx)
+    @test occursin("mma.sync.aligned.m16n8k32.row.col.kind::f8f6f4.f32.e2m1.e3m2.f32", ptx)
 end
 
 # --- mma.sync.aligned.kind::f8f6f4 m16n8k16 ------------------------------

@@ -1260,15 +1260,15 @@ end
     # an existing method.
     silent(f) = redirect_stderr(devnull) do; f(); end
 
-    # ---- _mma_register ----
+    # ---- _mma_register (migrated to tier-2; now 5-arg, row.col only) ----
     silent() do
-        PTX._mma_register(:m16n8k16, :row, :col, :f32, :bf16, :bf16, :f32)
-        PTX._mma_register(:m16n8k16, :row, :col, :f16, :f16, :f16, :f16)
-        PTX._mma_register(:m16n8k32, :row, :col, :f32, :e4m3, :e4m3, :f32;
-                          kind = :f8f6f4)
+        PTX._mma_register(:m16n8k16, :f32, :bf16, :bf16, :f32)
+        PTX._mma_register(:m16n8k16, :f16, :f16, :f16, :f16)
+        PTX._mma_register(:m16n8k32, :f32, :e4m3, :e4m3, :f32; kind = :f8f6f4)
+        # Asm-tier fallback path: kind::f8f6f4 has no intrinsic at m16n8k16.
+        PTX._mma_register(:m16n8k16, :f32, :e4m3, :e4m3, :f32; kind = :f8f6f4)
         # Early-return path: shape/dtype not in MMA_SYNC_FRAGS.
-        @test PTX._mma_register(:m99n99k99, :row, :col,
-                                 :f32, :bf16, :bf16, :f32) === nothing
+        @test PTX._mma_register(:m99n99k99, :f32, :bf16, :bf16, :f32) === nothing
     end
     @test which(Operation{:mma,
             (:sync, :aligned, :m16n8k16, :row, :col, :f32, :bf16, :bf16, :f32)}(),
