@@ -223,6 +223,34 @@ Per-family ledger:
   `.block_scale` forms requiring TMEM scale_a/scale_b operands the
   notation surface does not carry; revisit with the block-scale surface
   design.
+- **mma.sync (dense + block-scaled)** (2026-06-13,
+  `test/golden/mma@sm90a.ptx`, `mma_fp8@sm121a.ptx`,
+  `mma_scaled@sm121a.ptx`): NEUTRAL — the migration's value is uniformity,
+  the convergent-attribute correctness story, and a dead-form cleanup, not
+  perf. mma operands are register-bound either way and the family has no
+  immargs, so the emitted instructions are byte-identical; golden diffs are
+  only (a) f32 zero-accumulator spelling `0`→`0f00000000`, (b) register
+  renumbering, (c) the ISel qualifier reorder shape-before-kind for the
+  kind/block_scale forms (`kind::f8f6f4.m16n8k32`→`m16n8k32.row.col.kind::
+  f8f6f4`; ptxas accepts both — the *notation input* surface stays
+  kind-first, only the emitted spelling reorders). The packed-UInt32 ⇄
+  `<2 x half>` repack for f16-input/f16-acc forms is a free bitcast.
+  Cleanup: the asm tier registered all four layA×layB combos, but modern
+  m16n8k* shapes only support `.row.col` (ptxas rejects the rest, and the
+  registry has no intrinsic) — three of every four were dead methods that
+  emitted ptxas-rejected asm; the migration registers `.row.col` only, so
+  a bogus-layout call is now a clean MethodError. Residue (asm-tier
+  fallback, automatic where LLVM 22.1.7 lacks an intrinsic): the 50
+  `kind::f8f6f4` forms at m16n8k16, and `mxf4nvf4` `scale_vec::4X` with a
+  `ue8m0` scale type. First GENERATED family migrated (vs hand-literal):
+  the dtype cross-product (`kind::f8f6f4` alone is 100 forms) makes literal
+  `nvvm"..."` methods absurd, so the generator emits `IntrinsicCall`
+  directly and conformance covers it by a registry-completeness assertion
+  over the generated name list plus one selection probe per structural
+  class — the src/ literal-scan only governs the hand-literal families.
+  Gating note: `kind::f8f6f4` and the fp8 paths are consumer-Blackwell
+  (sm_120a+, the GB10 sub-byte FP accelerator) — the *opposite* of
+  tcgen05's datacenter-only floor.
 
 ## Process — plumbing and ecosystem
 
