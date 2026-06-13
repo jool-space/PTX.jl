@@ -214,6 +214,57 @@ push!(PROBES, ("llvm.nvvm.tcgen05.mma.shared",
                "sm_100a", "+ptx88",
                r"tcgen05\.mma\.cta_group::2\.kind::f16\.collector::a::discard"))
 
+# mma.sync (wrappers/mma.jl, mma_scaled.jl) — a GENERATED family, not
+# hand-literal, so the src/ literal-scan can't see it. One probe per
+# structural class instead (the dtype cross-product within a class shares
+# the i32/v2f16 convention and fragment counts); the full name list is
+# guarded by the completeness assertion below. Expected spellings are the
+# ISel order (kind/scale_vec after row.col).
+const V2H = NTuple{2, VecElement{Float16}}
+append!(PROBES, [
+    # bf16 / tf32 inputs → i32 A/B (classic, Hopper floor)
+    ("llvm.nvvm.mma.m16n8k16.row.col.bf16",
+        (UInt32,UInt32,UInt32,UInt32,UInt32,UInt32,Float32,Float32,Float32,Float32),
+        "sm_90a", "+ptx80", r"mma\.sync\.aligned\.m16n8k16\.row\.col\.f32\.bf16\.bf16\.f32"),
+    ("llvm.nvvm.mma.m16n8k8.row.col.tf32",
+        (UInt32,UInt32,UInt32,UInt32,UInt32,UInt32,Float32,Float32,Float32,Float32),
+        "sm_90a", "+ptx80", r"mma\.sync\.aligned\.m16n8k8\.row\.col\.f32\.tf32\.tf32\.f32"),
+    # pure-f16 inputs → v2f16 A/B; f32 vs f16 accumulator
+    ("llvm.nvvm.mma.m16n8k16.row.col.f32.f32",
+        (V2H,V2H,V2H,V2H,V2H,V2H,Float32,Float32,Float32,Float32),
+        "sm_90a", "+ptx80", r"mma\.sync\.aligned\.m16n8k16\.row\.col\.f32\.f16\.f16\.f32"),
+    ("llvm.nvvm.mma.m16n8k16.row.col.f16.f16",
+        (V2H,V2H,V2H,V2H,V2H,V2H,V2H,V2H),
+        "sm_90a", "+ptx80", r"mma\.sync\.aligned\.m16n8k16\.row\.col\.f16\.f16\.f16\.f16"),
+    # fp8 e4m3 → i32 A/B; f32 and v2f16(C) accumulators (consumer-Blackwell)
+    ("llvm.nvvm.mma.m16n8k16.row.col.f32.e4m3.e4m3.f32",
+        (UInt32,UInt32,UInt32,Float32,Float32,Float32,Float32),
+        "sm_121a", "+ptx88", r"mma\.sync\.aligned\.m16n8k16\.row\.col\.f32\.e4m3\.e4m3\.f32"),
+    ("llvm.nvvm.mma.m16n8k16.row.col.f16.e4m3.e4m3.f16",
+        (UInt32,UInt32,UInt32,V2H,V2H),
+        "sm_121a", "+ptx88", r"mma\.sync\.aligned\.m16n8k16\.row\.col\.f16\.e4m3\.e4m3\.f16"),
+    # kind::f8f6f4 mixed → i32 A/B (the GB10 sub-byte FP path); ISel order
+    ("llvm.nvvm.mma.m16n8k32.row.col.kind.f8f6f4.f32.e2m1.e3m2.f32",
+        (UInt32,UInt32,UInt32,UInt32,UInt32,UInt32,Float32,Float32,Float32,Float32),
+        "sm_121a", "+ptx88", r"mma\.sync\.aligned\.m16n8k32\.row\.col\.kind::f8f6f4\.f32\.e2m1\.e3m2\.f32"),
+    # block-scaled — one per kind
+    ("llvm.nvvm.mma.block.scale.m16n8k32.row.col.mxf8f6f4.scale.1x.f32.e4m3.e4m3.f32.ue8m0",
+        (UInt32,UInt32,UInt32,UInt32,UInt32,UInt32,Float32,Float32,Float32,Float32,
+         UInt32,UInt16,UInt16,UInt32,UInt16,UInt16),
+        "sm_121a", "+ptx88",
+        r"mma\.sync\.aligned\.m16n8k32\.row\.col\.kind::mxf8f6f4\.block_scale\.scale_vec::1X\.f32\.e4m3\.e4m3\.f32\.ue8m0"),
+    ("llvm.nvvm.mma.block.scale.m16n8k64.row.col.mxf4.scale.2x.f32.e2m1.e2m1.f32.ue8m0",
+        (UInt32,UInt32,UInt32,UInt32,UInt32,UInt32,Float32,Float32,Float32,Float32,
+         UInt32,UInt16,UInt16,UInt32,UInt16,UInt16),
+        "sm_121a", "+ptx88",
+        r"mma\.sync\.aligned\.m16n8k64\.row\.col\.kind::mxf4\.block_scale\.scale_vec::2X\.f32\.e2m1\.e2m1\.f32\.ue8m0"),
+    ("llvm.nvvm.mma.block.scale.m16n8k64.row.col.mxf4nvf4.scale.4x.f32.e2m1.e2m1.f32.ue4m3",
+        (UInt32,UInt32,UInt32,UInt32,UInt32,UInt32,Float32,Float32,Float32,Float32,
+         UInt32,UInt16,UInt16,UInt32,UInt16,UInt16),
+        "sm_121a", "+ptx88",
+        r"mma\.sync\.aligned\.m16n8k64\.row\.col\.kind::mxf4nvf4\.block_scale\.scale_vec::4X\.f32\.e2m1\.e2m1\.f32\.ue4m3"),
+])
+
 "All intrinsic names spelled as nvvm\"...\" literals under src/."
 function used_intrinsics()
     used = Set{String}()
@@ -241,6 +292,23 @@ end
     isempty(unprobed) ||
         @info "add probes to test/host/conformance.jl for:" unprobed
     @test isempty(unprobed)
+end
+
+# The mma family is generated (not hand-literal), so the scan above can't
+# see it. Its standing guarantee instead: every name the generators route
+# to tier 2 must exist in the registry — re-checking the generators'
+# load-time contract here means a name-table churn at an LLVM bump surfaces
+# as a red test naming the family, not a silent miss. Per-class selection
+# is covered by the mma probes above.
+@testset "mma generated-family names exist in the registry" begin
+    names = vcat(PTX.MMA_INTRINSIC_NAMES, PTX.MMA_SCALED_INTRINSIC_NAMES)
+    @test length(PTX.MMA_INTRINSIC_NAMES) == 66    # dense tier-2 forms
+    @test length(PTX.MMA_SCALED_INTRINSIC_NAMES) == 28
+    @test all(NVVM.isintrinsic, names)
+    # every per-class mma probe is one of the names the family stands on
+    mma_probes = filter(p -> startswith(p[1], "llvm.nvvm.mma."), PROBES)
+    @test !isempty(mma_probes)
+    @test all(p -> p[1] in names, mma_probes)
 end
 
 @testset "selection probes through the artifact llc" begin

@@ -144,7 +144,7 @@ end
     ptx = emit_ptx(_sm121a_mma_kind_mxf8f6f4!, types;
                    cap = v"12.1", feature_set = :arch)
     @test occursin(
-        "mma.sync.aligned.kind::mxf8f6f4.block_scale.scale_vec::1X.m16n8k32.row.col.f32.e4m3.e4m3.f32.ue8m0",
+        "mma.sync.aligned.m16n8k32.row.col.kind::mxf8f6f4.block_scale.scale_vec::1X.f32.e4m3.e4m3.f32.ue8m0",
         ptx)
 end
 
@@ -181,7 +181,7 @@ end
     ptx = emit_ptx(_sm121a_mma_kind_mxf4!, types;
                    cap = v"12.1", feature_set = :arch)
     @test occursin(
-        "mma.sync.aligned.kind::mxf4.block_scale.scale_vec::2X.m16n8k64.row.col.f32.e2m1.e2m1.f32.ue8m0",
+        "mma.sync.aligned.m16n8k64.row.col.kind::mxf4.block_scale.scale_vec::2X.f32.e2m1.e2m1.f32.ue8m0",
         ptx)
 end
 
@@ -218,6 +218,6 @@ end
     ptx = emit_ptx(_sm121a_mma_kind_mxf4nvf4!, types;
                    cap = v"12.1", feature_set = :arch)
     @test occursin(
-        "mma.sync.aligned.kind::mxf4nvf4.block_scale.scale_vec::4X.m16n8k64.row.col.f32.e2m1.e2m1.f32.ue4m3",
+        "mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue4m3",
         ptx)
 end
