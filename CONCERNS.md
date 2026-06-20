@@ -140,6 +140,30 @@ names literally instead of building them in loops. This is the mechanism
 that turns the legacy-intrinsic exposure (see the mbarrier ledger entry)
 from a silent break into a red test at bump time.
 
+Two further layers were added 2026-06-20 after auditing what the first three
+*don't* cover: (4) **attribute-extraction faithfulness** — a pin asserting the
+exact `props` tuple of a representative per attribute archetype (the
+`convergent` set plus the memory-effect archetypes). This exists because
+attributes can't be checked the way names are: the artifact llc **ignores the
+attributes we attach and re-derives its own** — verified directly by declaring
+`read.ptx.sreg.tid.x` as `memory(write)` and watching llc still CSE two reads.
+So a trial-compile-through-llc matrix is *blind* to attributes; they are
+load-bearing only for the in-process LLVM (the convergence-spike miscompile
+path), and the realistic rot vector is an extraction-map regression in `gen/`
+on a re-gen, which this pin trips. Anchor tuples were spot-checked against the
+22.1.7 `IntrinsicsNVVM.td` source (`bar.warp.sync`, the `barrier.cluster.arrive`
+family, `add.rn.f`, `read.ptx.sreg.tid.x` via `NVVMPureIntrinsic`,
+`atomic.add.gen.f.cta`, `fence.proxy.async`). (5) **type-token coverage beyond
+the used surface** — auditing the table, the only type tokens unique to
+never-used intrinsics are `i128` (4 `clusterlaunchcontrol.query_cancel.*`) and
+`Metadata` (1 legacy `texsurf.handle`); the wide-vector tokens are already
+exercised by the tcgen05 ld/st probes. The `i128` token is now compile-pinned
+through llc; `Metadata` has no normal SSA callsite and is the registry's sole
+known-uncompiled token, logged (not silently skipped). Net: this closes the
+"attributes/unused-surface unverified" gap noted earlier — see also the
+"Requirements provenance" item, which a full trial-compile matrix would
+*not* in fact discharge for attributes.
+
 ## Diligence — per-op care, never globally discharged
 
 ### Tier-1 semantic mappings
@@ -345,6 +369,17 @@ Per-form minimum sm / PTX ISA isn't in the intrinsic definitions (predicates
 live on ISel patterns). Derive empirically: trial-compile each registry entry
 across a target matrix with the artifact `llc`; hand-curate only ambiguous
 cases. Same harness as CI verification, different axis.
+
+Scope clarified 2026-06-20: a full trial-compile matrix validates *names*
+(already covered by the binary diff), *signatures*, and the *sm/PTX floor* —
+it does **not** validate attributes (llc ignores the attributes we attach; see
+the conformance harness layer 4 note). And the signature/token dimension is
+nearly closed already: layers 4–5 established that the only type tokens outside
+the used+probed surface are `i128` (now compile-pinned) and `Metadata` (no SSA
+callsite). So the remaining *unique* value of this matrix is the per-form
+sm/PTX floor for intrinsics we don't yet use — worth it when more of the
+registry gets wrapped, low-value before then. Not a prerequisite for the
+attribute-confidence question, which layer 4 answers directly.
 
 ### PTX.jl currently tracks CUDA.jl's main branch
 

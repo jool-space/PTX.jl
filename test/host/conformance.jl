@@ -335,3 +335,79 @@ end
         @test occursin(expect, ptx)
     end
 end
+
+# --- Layer 4: attribute-extraction faithfulness ------------------------------
+#
+# The three layers above cover names and the *instructions* the used surface
+# selects. They say nothing about the per-intrinsic attribute tuple — and that
+# tuple can't be checked the way names are. Two facts force a different test:
+#
+#   - The artifact llc IGNORES the attributes we attach. Verified directly:
+#     declaring `read.ptx.sreg.tid.x` as `memory(write)` (a lie that should
+#     suppress CSE) still lets llc fold two reads into one — it re-derives
+#     attributes from its own compiled-in table. So no llc probe can validate
+#     an attribute; a trial-compile matrix would be blind to this dimension.
+#   - The attributes are therefore load-bearing ONLY for the in-process LLVM
+#     (Julia's, which knows nothing of these names and is constrained solely by
+#     what we attach). A wrong-in-the-permissive-direction attribute — claiming
+#     `memory(none)`/`speculatable`, or dropping `convergent` — is exactly the
+#     miscompile the convergence spike reproduced (CONCERNS.md).
+#
+# The realistic rot vector is an extraction-map regression in gen/ (PROPS / the
+# jq filter) on a future JLL re-gen, silently changing a tuple while names stay
+# clean. This pins a representative per attribute archetype so that turns red.
+# Each anchor's expected tuple was checked against the 22.1.7 IntrinsicsNVVM.td
+# source where marked [td]; the rest pin the current extracted value (still a
+# regression tripwire, just not independently source-verified here).
+const ATTR_ANCHORS = Pair{String, Tuple{Vararg{Symbol}}}[
+    # convergent — the load-bearing one; absence = permission to duplicate
+    "llvm.nvvm.bar.warp.sync"                  => (:convergent, :nocallback),                  # [td]
+    "llvm.nvvm.barrier.cluster.arrive"         => (:convergent, :nocallback),                  # [td]
+    "llvm.nvvm.barrier.cluster.arrive.aligned" => (:convergent, :nocallback),                  # [td]
+    "llvm.nvvm.shfl.sync.idx.i32"              => (:inaccessiblememonly, :convergent, :nocallback),
+    "llvm.nvvm.activemask"                     => (:inaccessiblememonly, :convergent, :nocallback, :sideeffects),
+    # memory-effect archetypes — wrong-permissive here lets the optimizer
+    # hoist/CSE/DCE a call that actually touches memory
+    "llvm.nvvm.read.ptx.sreg.tid.x"            => (:nomem, :speculatable),                      # [td] NVVMPureIntrinsic
+    "llvm.nvvm.add.rn.f"                        => (:nomem, :speculatable, :commutative),        # [td]
+    "llvm.nvvm.atomic.add.gen.f.cta"           => (:argmemonly, :nocallback),                   # [td]
+    # a fence proxy — deliberately NOT convergent (idempotent ordering op);
+    # pins the distinction the fence migration turned on (CONCERNS.md)
+    "llvm.nvvm.fence.proxy.async"              => (:nocallback,),                               # [td]
+]
+
+@testset "registry attribute extraction is faithful" begin
+    for (name, expected) in ATTR_ANCHORS
+        @test NVVM.intrinsic(name).props == expected
+    end
+end
+
+# --- Layer 5: type-token coverage beyond the wrapper surface -----------------
+#
+# The selection probes compile only intrinsics the wrappers use, so a bug in a
+# type-token → IR mapping (NVVM.llvmtype / the generator's VTS set) is caught
+# only for tokens that surface there. Auditing the table, the wide-vector
+# tokens (v16/32/64/128i32) are already exercised by the tcgen05 ld/st probes;
+# the ONLY tokens unique to never-used intrinsics are `i128` (4
+# clusterlaunchcontrol.query_cancel.* entries) and `Metadata` (1 legacy
+# texsurf.handle). Compile-pin the i128 token here so its mapping isn't taken
+# on faith. `Metadata` is left uncompiled — it has no normal SSA callsite
+# (texsurf.handle takes a metadata operand) and no wrapper will ever use it;
+# this is the registry's sole known-uncompiled token, logged rather than
+# silently skipped.
+@testset "type tokens outside the wrapper surface lower (i128)" begin
+    exe = llc().exec[1]
+    name = "llvm.nvvm.clusterlaunchcontrol.query_cancel.get_first_ctaid.x"
+    s = synthesize(name, (UInt128,))   # i128 param
+    ll = "target triple = \"nvptx64-nvidia-cuda\"\n" * s.ir
+    out = IOBuffer(); err = IOBuffer()
+    ok = success(pipeline(`$exe -mcpu=sm_100a -mattr=+ptx86 -o -`;
+                          stdin = IOBuffer(ll), stdout = out, stderr = err))
+    ptx = String(take!(out))
+    ok || @info "i128 token probe failed" llc_error=String(take!(err)) ptx
+    @test ok
+    @test occursin("clusterlaunchcontrol.query_cancel.get_first_ctaid::x.b32.b128", ptx)
+
+    @info "registry token `Metadata` is left uncompiled (no SSA callsite): " *
+          "only llvm.nvvm.texsurf.handle uses it; no wrapper does"
+end
