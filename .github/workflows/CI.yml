@@ -41,6 +41,13 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/julia-runtest@v1
+        with:
+          # Pkg.test's default --check-bounds=yes overrides @inbounds inside
+          # device code, injecting bounds-check branches into the golden-PTX
+          # kernels and failing the structural comparison. The goldens pin
+          # the package's real emission, which callers get under normal
+          # bounds semantics.
+          check_bounds: 'auto'
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v7
         with:

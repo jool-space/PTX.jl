@@ -7,6 +7,14 @@
 #
 # One kernel per family, straight-line, touching every form the wrappers
 # expose, at the lowest cap that supports the family.
+#
+# Bounds-check sensitivity: run the suite via `julia --project=test
+# test/runtests.jl`, not bare `Pkg.test()` — Pkg.test defaults to
+# --check-bounds=yes, which overrides @inbounds inside device code and
+# injects bounds-check branches into these kernels, failing the structural
+# comparison. (CI sets `check_bounds: 'auto'` on julia-runtest for the same
+# reason.) The goldens pin the package's real emission under normal bounds
+# semantics.
 
 
 # --- shfl: all four modes, data and data|pred forms -------------------------
