@@ -383,10 +383,13 @@ attribute-confidence question, which layer 4 answers directly.
 
 ### PTX.jl currently tracks CUDA.jl's main branch
 
-Package sources point at the development branch (pre-6.2-release artifact of
-needing unreleased fixes). Now that 6.2 is tagged, repoint to the release and
-let compat do its job, or confirm what unreleased functionality is still
-needed and note it here.
+**Status: RESOLVED 2026-07-02 — on the tagged release.**
+
+Package sources pointed at the development branch (pre-6.2-release artifact
+of needing unreleased fixes). Compat now bounds `CUDACore = "6.2"`, a fresh
+resolve pulls the registered 6.2.0 release (no git source), and the full
+suite (26984 tests) passes against it — nothing still depends on unreleased
+functionality.
 
 ### Downstream migration
 

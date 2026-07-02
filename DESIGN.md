@@ -241,8 +241,9 @@ memory fences (`fence.sc.*`, `fence.acq_rel.*`) are the true tier-1 case
 (core-IR `fence` with an ordering and a syncscope — a semantic translation).
 `cvt` and the remaining tier-1 candidates (generic fences, vector ld/st)
 migrate as their semantic mapping decisions get made, not before — vector
-ld/st in particular trades a `~{memory}` barrier for an optimizable load,
-which is a behavior change to working code, not a free win. `wgmma` never
+ld/st traded a `~{memory}` barrier for an optimizable load, a behavior
+change to working code that was verified explicitly before landing
+(migrated 2026-06-13; see the CONCERNS.md ledger entry). `wgmma` never
 migrates; it gets registered as asm-tier and stays there. Beyond that opening sequence, priority comes from
 data, not completionism: parse a corpus of real kernels (own packages,
 CUTLASS dumps) and rank unregistered forms by frequency.
@@ -291,9 +292,10 @@ it's still sequenced after the harness can prove what it breaks.
   `CONCERNS.md`, "Convergence attributes through the middle end."
 - Whether `cvt`-style ops that have both core-IR and intrinsic lowerings should
   prefer optimizability (core IR) or exactness of form (intrinsic) — probably
-  per-op, decided in the registry, but the default is undecided. The fence
-  split is the first concrete data point: proxy fences took the intrinsic
-  (exactness — a proxy fence has no core-IR form), while the generic memory
-  fences and vector ld/st are where optimizability would actually buy
-  something, and remain undecided precisely because that optimizability is a
-  behavior change, not a free win.
+  per-op, decided in the registry, but the default is undecided. Two concrete
+  data points so far: proxy fences took the intrinsic (exactness — a proxy
+  fence has no core-IR form), and vector ld/st took core IR (optimizability —
+  migrated 2026-06-13 after the behavior change was verified explicitly; see
+  the CONCERNS.md ledger entry). The generic memory fences remain the pending
+  case: their ordering/scope mapping is the correctness-sensitive translation
+  and gets decided per-op, not by default.
