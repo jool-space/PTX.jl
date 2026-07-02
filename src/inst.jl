@@ -406,6 +406,78 @@ function format_call(::Operation{op, mods}, @nospecialize(argtypes::Type{<:Tuple
     build_call(op, mods, Tuple(argtypes.parameters)).asm
 end
 
+# --- convergent inline asm (warp-collective asm-tier forms) ------------------
+#
+# `@asmcall` cannot attach call-site attributes, and `sideeffect` alone does
+# NOT forbid duplicating a call site across a divergent branch (jump
+# threading, tail duplication) — only `convergent` does. For warp-/warpgroup-
+# collective instructions (wgmma.mma_async, the mma.sync asm fallbacks) a
+# split call site means different lanes execute different copies of a
+# collective op: the `active_mask` class of miscompile the convergence spike
+# reproduced on hardware. The attribute binds in the in-process middle end
+# only — llc neither checks nor needs it — so it is asserted by tests on the
+# emitted llvmcall IR, not by ptxas acceptance (see CONCERNS.md, "Convergence
+# on the asm tier").
+#
+# Mechanism validated by spikes/raw_asm_attrs.jl: a `convergent` attribute
+# group on an inline-asm call site parses through Base.llvmcall and survives
+# the optimized module. This helper builds the same shape `@asmcall` would —
+# asm callee returns a scalar or literal struct, entry returns Julia's
+# homogeneous-tuple `[N x T]` via extract/insertvalue, Bool passes as i8 —
+# plus `#0 = { convergent nounwind }` on the call.
+
+_asm_lltype(T::Type) =
+    T === Float32 ? "float" :
+    T === UInt32  ? "i32"   :
+    T === Int32   ? "i32"   :
+    T === UInt64  ? "i64"   :
+    T === Int64   ? "i64"   :
+    T === Bool    ? "i8"    :
+    error("convergent_asm_ir: no LLVM mapping for $T")
+
+function convergent_asm_ir(asm::String, constraints::String,
+                           rettype::Type, argtypes)::String
+    params = ["$(_asm_lltype(T)) %a$(k - 1)" for (k, T) in enumerate(argtypes)]
+    callargs = join(("$(_asm_lltype(T)) %a$(k - 1)"
+                     for (k, T) in enumerate(argtypes)), ", ")
+    asmcall(ret) = "call $ret asm sideeffect \"$asm\", \"$constraints\"($callargs) #0"
+
+    body = String[]
+    if rettype === Nothing
+        entryret = "void"
+        push!(body, "  " * asmcall("void"))
+        push!(body, "  ret void")
+    elseif rettype <: Tuple
+        comps = _asm_lltype.(collect(rettype.parameters))
+        # asm returns a scalar (1 output) or a literal struct (N>=2 outputs);
+        # Julia represents the homogeneous NTuple as [N x T].
+        callret = length(comps) == 1 ? comps[1] : "{ " * join(comps, ", ") * " }"
+        entryret = "[$(length(comps)) x $(comps[1])]"
+        push!(body, "  %r = " * asmcall(callret))
+        prev = "undef"
+        for k in 1:length(comps)
+            v = length(comps) == 1 ? "%r" : "%e$k"
+            length(comps) == 1 ||
+                push!(body, "  %e$k = extractvalue $callret %r, $(k - 1)")
+            push!(body, "  %t$k = insertvalue $entryret $prev, $(comps[k]) $v, $(k - 1)")
+            prev = "%t$k"
+        end
+        push!(body, "  ret $entryret $prev")
+    else
+        entryret = _asm_lltype(rettype)
+        push!(body, "  %r = " * asmcall(entryret))
+        push!(body, "  ret $entryret %r")
+    end
+
+    """
+    define $entryret @entry($(join(params, ", "))) #1 {
+    $(join(body, "\n"))
+    }
+    attributes #0 = { convergent nounwind }
+    attributes #1 = { alwaysinline }
+    """
+end
+
 # NVVM-backed shortcut for `mov.u32 %reg, %sreg`. Routing through
 # `llvm.nvvm.read.ptx.sreg.*` lets LLVM CSE redundant reads and propagate
 # range metadata — neither expressible via `@asmcall` + `~{memory}`. Only

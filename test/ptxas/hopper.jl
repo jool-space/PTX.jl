@@ -411,6 +411,47 @@ end
 end
 
 
+# --- wgmma convergence through the optimizer ---------------------------------
+# The spike shape (spikes/raw_asm_attrs.jl): identical collective calls
+# leading both arms of a divergent branch, checked on the OPTIMIZED module.
+# Guards two things the straight-line goldens cannot see:
+#   - the `convergent` attribute group survives to the optimized module and
+#     is bound to the asm call site (its loss is invisible to llc/ptxas —
+#     the attribute only ever binds in the in-process middle end);
+#   - both call sites are still distinct calls (not merged/hoisted/sunk into
+#     one, not duplicated further).
+
+function _hopper_wgmma_divergent!(out::CuDeviceVector{Float32, 1},
+                                  a_desc::UInt64, b_desc::UInt64)
+    tid = ptx"mov.u32"(sreg"tid.x")
+    zero4 = (0f0, 0f0, 0f0, 0f0)
+    d = if tid < UInt32(64)
+        ptx"wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16"(
+            zero4, a_desc, b_desc, Val(true))
+    else
+        ptx"wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16"(
+            zero4, a_desc, b_desc, Val(true))
+    end
+    @inbounds out[tid + 1] = d[1]
+    return nothing
+end
+
+@testset "wgmma convergent attribute survives optimization" begin
+    types = Tuple{CuDeviceVector{Float32, 1}, UInt64, UInt64}
+    llvm = sprint() do io
+        CUDATools.code_llvm(io, _hopper_wgmma_divergent!, types;
+                            arch = SMVersion(9, 0, :arch), kernel = true,
+                            dump_module = true)
+    end
+    # two distinct call sites, each carrying an attribute group
+    sites = collect(eachmatch(r"call [^\n]*asm sideeffect \"wgmma\.mma_async[^\n]*", llvm))
+    @test length(sites) == 2
+    @test all(m -> occursin(r"#\d+", m.match), sites)
+    # and the group they reference includes `convergent`
+    @test occursin(r"attributes #\d+ = \{[^}]*convergent", llvm)
+end
+
+
 # --- cluster-scope generic fences (tier-1 core IR, sm_90+ ISel floor) --------
 # fence.{sc,acq_rel}.cluster lower to `fence syncscope("cluster") ...`; ISel
 # rejects them below sm_90 with a loud error, so their pipeline validation

@@ -166,6 +166,53 @@ known-uncompiled token, logged (not silently skipped). Net: this closes the
 
 ## Diligence — per-op care, never globally discharged
 
+### Convergence on the asm tier
+
+**Status: curated collective forms covered 2026-07-02; chain default stays
+exposed by design until the blessing flip.**
+
+The asm tier's effect model is where silent-miscompile risk concentrates,
+because its properties are *hand-asserted and checked by nothing in the
+pipeline*: llc ignores call-site attributes and asm flags (it re-derives
+nothing for asm — it just obeys constraints), ptxas never sees them, and the
+golden/baseline kernels are straight-line, so a missing attribute changes
+nothing they can observe. The attribute binds only in the in-process middle
+end, and only manifests under optimizer-tempting control-flow shapes the
+test corpus doesn't naturally contain. Three distinct blindness modes, three
+distinct defenses:
+
+- **`sideeffect` vs `convergent` are different protections.** `sideeffect`
+  forbids deleting/hoisting/merging; only `convergent` forbids *duplicating*
+  a call site across a divergent branch (jump threading, tail duplication) —
+  and a split call site of a warp-collective op is the `active_mask`
+  miscompile the convergence spike reproduced on hardware. Fixed for the
+  curated collective forms: `wgmma.mma_async` (warpgroup-collective) and the
+  `mma.sync` asm fallbacks now emit through `convergent_asm_ir` (inst.jl) —
+  llvmcall IR with `#0 = { convergent nounwind }` on the asm call site, the
+  mechanism validated by `spikes/raw_asm_attrs.jl`. Emission is byte-
+  identical (goldens unchanged): convergent only *restricts* the optimizer.
+  Tripwires: test/host/wrappers.jl pins the attribute in every wrapper's
+  emitted IR; test/ptxas/hopper.jl checks the spike shape (identical calls
+  in both arms of a divergent branch) on the *optimized* module — attribute
+  present, both call sites intact. Teeth verified: stripping `convergent`
+  from the helper flips exactly those testsets red.
+- **The chain default is permissive by default.** An opcode not listed in
+  `NONPURE_OPCODES` gets no flags at all — CSE/DCE/hoist legal — so the
+  failure mode of *forgetting* an entry is a miscompile, not slowness
+  (inverted from the ratified raw-tier posture of "slow before wrong").
+  And even NONPURE collective opcodes reached through the chain default
+  (`vote`, `match`, `redux`, `elect`, unregistered `shfl` forms) get
+  sideeffect + `~{memory}` but NOT `convergent` — the duplication direction
+  stays open. Accepted as a known residual: these forms are exactly what
+  the blessing flip retires (unregistered chains error; `ptx"..."raw` gets
+  the pessimistic default *including* convergent, per DESIGN). If a
+  collective chain-default form gets registered before the flip, it must
+  route through `convergent_asm_ir` like wgmma/mma.
+- **Asm memory effects are binary.** `~{memory}` or nothing — inline asm
+  cannot express `argmemonly`-grade precision, so every asm memory op is a
+  full optimization barrier. Not fixable within the tier; it is the
+  standing argument for migrating hot forms.
+
 ### Tier-1 semantic mappings
 
 PTX orderings/scopes → LLVM orderings/syncscopes is a semantic translation

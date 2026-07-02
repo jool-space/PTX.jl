@@ -99,10 +99,17 @@ function _wgmma_mma_async_register(
             Symbol("m64n", n, "k", k),
             dtype_d, dtype_a, dtype_b)
 
+    # wgmma.mma_async is warpgroup-collective: all 128 threads must execute
+    # the same call site. Emitted via convergent_asm_ir (not @asmcall) so the
+    # call carries `convergent` — sideeffect alone permits jump-threading
+    # duplication across divergent branches, the active_mask miscompile class
+    # (see inst.jl, "convergent inline asm").
+
     # Variant 1: runtime scale_d::Bool (tied d input, b constraint).
     let spec = wgmma_mma_async_spec(dtype_d, dtype_a, dtype_b, n, k, has_trans)
         nd, asm, constraints = spec.nd, spec.asm, spec.constraints
         flat_argtypes = vcat([UInt64, UInt64, Bool], fill(d_J, nd))
+        ir = convergent_asm_ir(asm, constraints, NTuple{nd, d_J}, flat_argtypes)
         d_args = [:(d[$i]) for i in 1:nd]
         @eval function (::Operation{:wgmma, $mods})(
                 d::NTuple{$nd, $d_J},
@@ -110,10 +117,10 @@ function _wgmma_mma_async_register(
                 b_desc::UInt64,
                 scale_d::Bool)
             Base.@inline
-            @asmcall($asm, $constraints, true,
-                     NTuple{$nd, $d_J},
-                     Tuple{$(flat_argtypes...)},
-                     a_desc, b_desc, scale_d, $(d_args...))
+            Base.llvmcall(($ir, "entry"),
+                          NTuple{$nd, $d_J},
+                          Tuple{$(flat_argtypes...)},
+                          a_desc, b_desc, scale_d, $(d_args...))
         end
     end
 
@@ -122,6 +129,7 @@ function _wgmma_mma_async_register(
                                      scale_d_imm = true)
         nd, asm, constraints = spec.nd, spec.asm, spec.constraints
         flat_argtypes = vcat([UInt64, UInt64], fill(d_J, nd))
+        ir = convergent_asm_ir(asm, constraints, NTuple{nd, d_J}, flat_argtypes)
         d_args = [:(d[$i]) for i in 1:nd]
         @eval function (::Operation{:wgmma, $mods})(
                 d::NTuple{$nd, $d_J},
@@ -129,29 +137,31 @@ function _wgmma_mma_async_register(
                 b_desc::UInt64,
                 ::Val{true})
             Base.@inline
-            @asmcall($asm, $constraints, true,
-                     NTuple{$nd, $d_J},
-                     Tuple{$(flat_argtypes...)},
-                     a_desc, b_desc, $(d_args...))
+            Base.llvmcall(($ir, "entry"),
+                          NTuple{$nd, $d_J},
+                          Tuple{$(flat_argtypes...)},
+                          a_desc, b_desc, $(d_args...))
         end
     end
 
     # Variant 3: compile-time scale_d=Val{false} — bakes "0", DROPS tied d.
     # The `_d` parameter is accepted for API uniformity but never reaches
-    # @asmcall, so LLVM can DCE upstream zero initialization.
+    # the asm, so LLVM can DCE upstream zero initialization.
     let spec = wgmma_mma_async_spec(dtype_d, dtype_a, dtype_b, n, k, has_trans;
                                      scale_d_imm = false)
         nd, asm, constraints = spec.nd, spec.asm, spec.constraints
+        ir = convergent_asm_ir(asm, constraints, NTuple{nd, d_J},
+                               [UInt64, UInt64])
         @eval function (::Operation{:wgmma, $mods})(
                 _d::NTuple{$nd, $d_J},
                 a_desc::UInt64,
                 b_desc::UInt64,
                 ::Val{false})
             Base.@inline
-            @asmcall($asm, $constraints, true,
-                     NTuple{$nd, $d_J},
-                     Tuple{UInt64, UInt64},
-                     a_desc, b_desc)
+            Base.llvmcall(($ir, "entry"),
+                          NTuple{$nd, $d_J},
+                          Tuple{UInt64, UInt64},
+                          a_desc, b_desc)
         end
     end
 

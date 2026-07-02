@@ -400,6 +400,48 @@ end
                 (NTuple{8, Float32}, UInt64, UInt64, Bool)).module == PTX
 end
 
+@testset "collective asm forms carry `convergent`" begin
+    # wgmma.mma_async and the mma.sync asm fallbacks are warp(group)-
+    # collective: `sideeffect` alone permits jump-threading duplication of
+    # the call site across a divergent branch — the active_mask miscompile
+    # class. The wrappers emit llvmcall IR with a `convergent` call-site
+    # attribute group (inst.jl, convergent_asm_ir). This attribute binds in
+    # the *in-process* middle end only — llc ignores it — so no ptxas/golden
+    # test can catch its loss; this IR-level pin is the tripwire.
+    # (The optimizer-shape counterpart lives in test/ptxas/hopper.jl.)
+    unescape(s) = replace(s, "\\\"" => "\"")
+
+    # wgmma: all three scale_d variants of a representative form.
+    wg = Operation{:wgmma, (:mma_async, :sync, :aligned,
+                            :m64n8k16, :f32, :bf16, :bf16)}()
+    for argts in ((NTuple{4, Float32}, UInt64, UInt64, Bool),
+                  (NTuple{4, Float32}, UInt64, UInt64, Val{true}),
+                  (NTuple{4, Float32}, UInt64, UInt64, Val{false}))
+        ci, rt = first(Base.code_typed(wg, argts))
+        @test rt === NTuple{4, Float32}
+        s = unescape(string(ci))
+        @test occursin("asm sideeffect", s)
+        @test occursin("convergent", s)
+    end
+
+    # mma asm fallback: kind::f8f6f4 at m16n8k16 (no intrinsic at 22.1.7).
+    mma_fb = Operation{:mma, (:sync, :aligned, Symbol("kind::f8f6f4"),
+                              :m16n8k16, :row, :col,
+                              :f32, :e4m3, :e4m3, :f32)}()
+    ci, rt = first(Base.code_typed(mma_fb,
+        (NTuple{2, UInt32}, NTuple{1, UInt32}, NTuple{4, Float32})))
+    @test rt === NTuple{4, Float32}
+    s = unescape(string(ci))
+    @test occursin("asm sideeffect", s)
+    @test occursin("convergent", s)
+
+    # Contrast: a pure chain-default form (cvt) must stay unattributed and
+    # side-effect-free — CSE/DCE of pure conversions is intended.
+    spec = build_call(:cvt, (:rn, :f16, :f32), (Float32,))
+    @test spec.side_effects == false
+    @test !occursin("~{memory}", spec.constraints)
+end
+
 @testset "wgmma.mma_async — full _WGMMA_VARIANTS coverage" begin
     # Per-variant goldens for every entry of `_WGMMA_VARIANTS` in
     # src/wrappers/wgmma.jl. The encoder is cross-checked against pyptx's

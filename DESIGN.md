@@ -144,7 +144,9 @@ produces identical kernels with better errors.
   treated as convergent): slow before wrong. Raw means raw in instruction
   choice only — the string still rides through the backend, the ISA-version
   header, and ptxas. Greppable by design. Distinct from the curated asm tier
-  (`wgmma`), which is registered and hand-constrained.
+  (`wgmma`), which is registered, hand-constrained, and convergent-attributed
+  where the instruction is warp-collective (CONCERNS.md, "Convergence on the
+  asm tier").
 - **`nvvm"..."`** (internal, exposed for power users with a pinned-to-backend
   caveat): direct intrinsic calls in the `llvm.nvvm.*` vocabulary, with
   registry-checked names and signatures, attribute-correct llvmcall synthesis,

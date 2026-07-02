@@ -159,6 +159,12 @@ function _mma_register_asm(mods, shape, a_ty, b_ty, c_ty, kind,
     constraints = join(vcat(fill("=$cd_let", n_cd), fill("r", n_a + n_b),
                             fill(cd_let, n_cd), ["~{memory}"]), ",")
     flat = vcat(fill(:UInt32, n_a + n_b), fill(cd_J, n_cd))
+    # mma.sync is warp-collective — emitted with a `convergent` call-site
+    # attribute, same reasoning as wgmma (see inst.jl, "convergent inline
+    # asm"). @asmcall can't attach it.
+    cdT = c_ty === :f32 ? Float32 : UInt32
+    flat_types = vcat(fill(UInt32, n_a + n_b), fill(cdT, n_cd))
+    ir = convergent_asm_ir(asm, constraints, NTuple{n_cd, cdT}, flat_types)
     a_args = [:(a[$i]) for i in 1:n_a]
     b_args = [:(b[$i]) for i in 1:n_b]
     c_args = [:(c[$i]) for i in 1:n_cd]
@@ -166,8 +172,9 @@ function _mma_register_asm(mods, shape, a_ty, b_ty, c_ty, kind,
             a::NTuple{$n_a, UInt32}, b::NTuple{$n_b, UInt32},
             c::NTuple{$n_cd, $cd_J})
         Base.@inline
-        @asmcall($asm, $constraints, true, NTuple{$n_cd, $cd_J},
-                 Tuple{$(flat...)}, $(a_args...), $(b_args...), $(c_args...))
+        Base.llvmcall(($ir, "entry"),
+                      NTuple{$n_cd, $cd_J}, Tuple{$(flat...)},
+                      $(a_args...), $(b_args...), $(c_args...))
     end
     nothing
 end
