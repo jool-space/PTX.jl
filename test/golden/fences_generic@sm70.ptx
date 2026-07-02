@@ -1,0 +1,21 @@
+.version 9.3
+.target sm_70
+.address_size 64
+.visible .entry entry0(.param .align 8 .b8 param0[16], .param .align 8 .b8 param1[32])
+{
+ld.param.b64 %rd0, [param1];
+st.global.b32 [%rd0], 1;
+fence.sc.cta;
+st.global.b32 [%rd0+4], 2;
+fence.sc.gpu;
+st.global.b32 [%rd0+8], 3;
+fence.sc.sys;
+st.global.b32 [%rd0+12], 4;
+fence.acq_rel.cta;
+st.global.b32 [%rd0+16], 5;
+fence.acq_rel.gpu;
+st.global.b32 [%rd0+20], 6;
+fence.acq_rel.sys;
+st.global.b32 [%rd0+24], 7;
+ret;
+}

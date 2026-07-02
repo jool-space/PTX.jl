@@ -285,9 +285,7 @@ end
 # --- proxy / init fences -----------------------------------------------------
 # The three special fences that fence a specific memory proxy (async,
 # mbarrier-init) rather than ordering generic memory — not expressible as a
-# core-IR `fence`, so tier-2 intrinsics. The generic memory fences
-# (fence.sc.*, fence.acq_rel.*) stay asm/tier-1 (core-IR `fence` with
-# ordering+syncscope — a semantic translation, deferred).
+# core-IR `fence`, so tier-2 intrinsics.
 
 function _golden_fences!()
     ptx"fence.proxy.async"()
@@ -299,6 +297,58 @@ end
 @testset "golden: proxy/init fences at sm_90a" begin
     @test golden_test("fences@sm90a", _golden_fences!, Tuple{};
                       cap = v"9.0", feature_set = :arch)
+end
+
+
+# --- generic memory fences: {sc, acq_rel} × {cta, gpu, sys} (+cluster) ------
+# The true tier-1 candidates: core-IR `fence <ordering> syncscope(...)` is a
+# *semantic* translation of the PTX sem/scope pair, not a renaming
+# (DESIGN.md, lowering tiers). Stores between the fences keep each fence's
+# program position observable, so the golden pins the ordering of the whole
+# sequence — including once the fences become real core-IR ordering ops the
+# optimizer is allowed to look through (a fence pins memory ops; nothing
+# pins two adjacent fences except the accesses between them).
+
+function _golden_fences_generic!(out::CuDeviceVector{UInt32, 1})
+    @inbounds begin
+        out[1] = UInt32(1)
+        ptx"fence.sc.cta"()
+        out[2] = UInt32(2)
+        ptx"fence.sc.gpu"()
+        out[3] = UInt32(3)
+        ptx"fence.sc.sys"()
+        out[4] = UInt32(4)
+        ptx"fence.acq_rel.cta"()
+        out[5] = UInt32(5)
+        ptx"fence.acq_rel.gpu"()
+        out[6] = UInt32(6)
+        ptx"fence.acq_rel.sys"()
+        out[7] = UInt32(7)
+    end
+    return nothing
+end
+
+# Cluster scope is sm_90+ (ISel enforces the floor loudly: "Requires SM >= 90
+# and PTX >= 78"); the other six forms are pinned at the sm_70 floor above.
+function _golden_fences_generic_sm90!(out::CuDeviceVector{UInt32, 1})
+    @inbounds begin
+        out[1] = UInt32(1)
+        ptx"fence.sc.cluster"()
+        out[2] = UInt32(2)
+        ptx"fence.acq_rel.cluster"()
+        out[3] = UInt32(3)
+    end
+    return nothing
+end
+
+@testset "golden: generic memory fences at sm_70" begin
+    @test golden_test("fences_generic@sm70", _golden_fences_generic!,
+                      Tuple{CuDeviceVector{UInt32, 1}}; cap = v"7.0")
+end
+
+@testset "golden: generic memory fences (cluster scope) at sm_90" begin
+    @test golden_test("fences_generic@sm90", _golden_fences_generic_sm90!,
+                      Tuple{CuDeviceVector{UInt32, 1}}; cap = v"9.0")
 end
 
 
