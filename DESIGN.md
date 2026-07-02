@@ -236,14 +236,15 @@ end-to-end. Then TMA, tcgen05, and the mma families (where the payoff is —
 block-scaled `mma.sync` replaces the largest asm surface). Then the fences:
 this split on contact — the *proxy/init* fences (`fence.proxy.*`,
 `fence.mbarrier_init.*`) name a memory proxy a core-IR `fence` cannot
-express, so they are tier-2 intrinsics and migrated cleanly; only the generic
+express, so they are tier-2 intrinsics and migrated cleanly; the generic
 memory fences (`fence.sc.*`, `fence.acq_rel.*`) are the true tier-1 case
-(core-IR `fence` with an ordering and a syncscope — a semantic translation).
-`cvt` and the remaining tier-1 candidates (generic fences, vector ld/st)
-migrate as their semantic mapping decisions get made, not before — vector
-ld/st traded a `~{memory}` barrier for an optimizable load, a behavior
-change to working code that was verified explicitly before landing
-(migrated 2026-06-13; see the CONCERNS.md ledger entry). `wgmma` never
+(core-IR `fence` with an ordering and a syncscope — a semantic translation),
+migrated 2026-07-02 with the mapping pinned in CONCERNS.md. The tier-1
+candidates migrate as their semantic mapping decisions get made, not
+before — vector ld/st traded a `~{memory}` barrier for an optimizable load,
+a behavior change to working code that was verified explicitly before
+landing (migrated 2026-06-13; see the CONCERNS.md ledger entry); `cvt`
+remains the open case. `wgmma` never
 migrates; it gets registered as asm-tier and stays there. Beyond that opening sequence, priority comes from
 data, not completionism: parse a corpus of real kernels (own packages,
 CUTLASS dumps) and rank unregistered forms by frequency.
@@ -292,10 +293,11 @@ it's still sequenced after the harness can prove what it breaks.
   `CONCERNS.md`, "Convergence attributes through the middle end."
 - Whether `cvt`-style ops that have both core-IR and intrinsic lowerings should
   prefer optimizability (core IR) or exactness of form (intrinsic) — probably
-  per-op, decided in the registry, but the default is undecided. Two concrete
-  data points so far: proxy fences took the intrinsic (exactness — a proxy
-  fence has no core-IR form), and vector ld/st took core IR (optimizability —
-  migrated 2026-06-13 after the behavior change was verified explicitly; see
-  the CONCERNS.md ledger entry). The generic memory fences remain the pending
-  case: their ordering/scope mapping is the correctness-sensitive translation
-  and gets decided per-op, not by default.
+  per-op, decided in the registry, but the default is undecided. Three
+  concrete data points so far: proxy fences took the intrinsic (exactness —
+  a proxy fence has no core-IR form), while vector ld/st (2026-06-13) and
+  the generic memory fences (2026-07-02) took core IR (optimizability — in
+  both cases the behavior change was verified explicitly before landing;
+  see the CONCERNS.md ledger entries). `cvt` is the remaining undecided
+  case, and the only one where both lowerings genuinely exist for the same
+  form — the first true test of the default.

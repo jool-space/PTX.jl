@@ -763,7 +763,7 @@ end
 @testset "proxy/init fences (tier-2 intrinsic lowering)" begin
     # The three proxy/init fences route to llvm.nvvm.fence.* intrinsics
     # (a core-IR `fence` can't express a proxy fence). Generic memory
-    # fences stay asm-tier — see wrappers/fence.jl.
+    # fences are tier-1 core IR — see the next testset.
     for (mods, intr) in (
             ((:proxy, :async), "llvm.nvvm.fence.proxy.async"),
             ((:proxy, :async, Symbol("shared::cta")),
@@ -775,6 +775,30 @@ end
         ci, rt = first(Base.code_typed(Operation{:fence, mods}(), ()))
         @test rt === Nothing
         @test occursin(intr, string(ci))
+    end
+end
+
+@testset "generic memory fences (tier-1 core IR)" begin
+    # fence.{sc,acq_rel}.{cta,cluster,gpu,sys} lower to a core-IR
+    # `fence <ordering> syncscope(...)` — the PTX↔LLVM mapping is pinned
+    # in wrappers/fence.jl (sc↔seq_cst, acq_rel↔acq_rel; cta↔"block",
+    # cluster↔"cluster", gpu↔"device", sys↔system default). Each body must
+    # be the fence instruction, not asm.
+    for (sem, ordering) in ((:sc, "seq_cst"), (:acq_rel, "acq_rel"))
+        for (scope, syncscope) in ((:cta,     "syncscope(\"block\") "),
+                                   (:cluster, "syncscope(\"cluster\") "),
+                                   (:gpu,     "syncscope(\"device\") "),
+                                   (:sys,     ""))
+            mods = (sem, scope)
+            @test which(Operation{:fence, mods}(), ()).module == PTX
+            ci, rt = first(Base.code_typed(Operation{:fence, mods}(), ()))
+            @test rt === Nothing
+            # CodeInfo printing escapes the quotes inside the llvmcall IR
+            # string; unescape before matching the syncscope clause.
+            s = replace(string(ci), "\\\"" => "\"")
+            @test occursin("fence $syncscope$ordering", s)
+            @test !occursin("asm", s)   # tier 1: real ordering op, no asm
+        end
     end
 end
 

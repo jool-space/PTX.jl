@@ -301,13 +301,12 @@ end
 
 
 # --- generic memory fences: {sc, acq_rel} × {cta, gpu, sys} (+cluster) ------
-# The true tier-1 candidates: core-IR `fence <ordering> syncscope(...)` is a
-# *semantic* translation of the PTX sem/scope pair, not a renaming
-# (DESIGN.md, lowering tiers). Stores between the fences keep each fence's
-# program position observable, so the golden pins the ordering of the whole
-# sequence — including once the fences become real core-IR ordering ops the
-# optimizer is allowed to look through (a fence pins memory ops; nothing
-# pins two adjacent fences except the accesses between them).
+# Tier-1 core IR: `fence <ordering> syncscope(...)` is a *semantic*
+# translation of the PTX sem/scope pair, not a renaming (mapping pinned in
+# wrappers/fence.jl and CONCERNS.md). Stores between the fences keep each
+# fence's program position observable, so the golden pins the ordering of
+# the whole sequence — a real core-IR fence pins memory ops, and nothing
+# pins two adjacent fences except the accesses between them.
 
 function _golden_fences_generic!(out::CuDeviceVector{UInt32, 1})
     @inbounds begin

@@ -169,12 +169,13 @@ known-uncompiled token, logged (not silently skipped). Net: this closes the
 ### Tier-1 semantic mappings
 
 PTX orderings/scopes → LLVM orderings/syncscopes is a semantic translation
-with miscompile potential (see DESIGN.md, lowering tiers). Current exposure is
-small — the package wraps no atomics; the generic memory fences
-(`fence.sc.*`, `fence.acq_rel.*`) are the tier-1 surface still pending a
-mapping decision — but every tier-1 entry needs an explicit mapping decision
-and a golden-output test. No batch sign-off. (Vector ld/st was the other
-tier-1 candidate; migrated 2026-06-13 — see below.)
+with miscompile potential (see DESIGN.md, lowering tiers). Every tier-1
+entry needs an explicit mapping decision and a golden-output test. No batch
+sign-off. Current exposure: the package wraps no atomics; both standing
+tier-1 candidates are now migrated with their mappings pinned — vector
+ld/st 2026-06-13, the generic memory fences 2026-07-02 (see the dedicated
+sections below). The next tier-1 surface to arrive (atomics, `cvt`) re-opens
+this concern; it is never globally discharged.
 
 Split clarified 2026-06-13: the *proxy/init* fences are NOT tier-1. A
 core-IR `fence` orders generic memory with an ordering+syncscope; it cannot
@@ -185,10 +186,51 @@ byte-identical: the intrinsics emit exactly the asm spellings). They are not
 `convergent` (the registry marks them `nocallback` only), which is correct —
 duplicating an idempotent ordering fence is harmless, unlike the
 warp-collective ops the convergence spike was about. What remains genuinely
-tier-1 (core-IR `fence <ordering> syncscope(...)`, deferred behind an
-explicit mapping decision): the generic `fence.sc.gpu/sys`,
-`fence.acq_rel.cta`. `fence.proxy.tensormap::generic.*` takes operands and
-rides with the unmigrated `tensormap.replace` path.
+tier-1 (core-IR `fence <ordering> syncscope(...)`): the generic
+`fence.sc.*` / `fence.acq_rel.*` — migrated 2026-07-02, see the next
+section. `fence.proxy.tensormap::generic.*` takes operands and rides with
+the unmigrated `tensormap.replace` path.
+
+### Generic memory fences as tier-1 core IR — MIGRATED 2026-07-02
+
+`fence.{sc,acq_rel}.{cta,cluster,gpu,sys}` (wrappers/fence.jl) now lower to
+core-IR `fence <ordering> syncscope(...)`, off the asm chain default. The
+mapping — the explicit decision this family was deferred behind:
+
+    PTX sem    LLVM ordering      PTX scope   LLVM syncscope
+    .sc        seq_cst            .cta        "block"
+    .acq_rel   acq_rel            .cluster    "cluster"
+                                  .gpu        "device"
+                                  .sys        (default — system scope)
+
+A clean bijection on the notation surface: PTX has exactly two generic
+fence sems and LLVM's remaining orderings (acquire, release) have no PTX
+generic-fence spelling, so nothing is lossy in either direction. Verified
+by trial compilation through the artifact llc 22.1.7 (expected instruction
+asserted, per the mangling lesson — llc acceptance alone proves nothing):
+
+- All eight forms emit exactly the written PTX spelling at sm_70/sm_90
+  (`fence.sc.cta` … `fence.acq_rel.cluster`). Goldens byte-identical
+  across the migration (`test/golden/fences_generic@sm{70,90}.ptx`),
+  matching the proxy-fence precedent.
+- Cluster scope below its sm_90 floor fails ISel *loudly* ("Requires
+  SM >= 90 and PTX >= 78") — never a silent scope downgrade.
+- Below sm_70/PTX 6.0 the backend legalizes to the pre-Volta
+  `membar.{cta,gl,sys}` equivalents (sem distinction collapses,
+  conservatively) — where the asm tier handed ptxas an instruction it
+  rejects. Non-WYSIWYG by design; strictly wider availability.
+- The in-process LLVM 18 parses and preserves the target syncscopes
+  through Julia codegen (asserted in test/host/wrappers.jl), so the
+  ordering constraint binds in the middle end too — which is the point:
+  unlike the asm tier's opaque sideeffect call, the optimizer now *knows*
+  these order memory.
+
+Like the proxy fences, not `convergent` (idempotent ordering ops). The
+behavior change mirrors vec ld/st: the asm tier's sideeffect call pinned
+all surrounding code motion; a core-IR fence pins memory accesses across
+it (its actual semantics) and nothing else. Golden/baseline kernels
+interleave stores between fences so each fence's position stays observable
+regardless.
 
 ### Vector ld/st as tier-1 core IR — MIGRATED 2026-06-13
 
@@ -336,6 +378,13 @@ Per-family ledger:
   reorder/CSE/DSE is the upside. See the dedicated section above for the
   safety verification (alignment was already required, narrow b16 preserved
   under lane use, DSE is intended).
+- **generic memory fences** (2026-07-02,
+  `test/golden/fences_generic@sm{70,90}.ptx`): NEUTRAL on emission —
+  byte-identical goldens, all eight forms emit exactly the written
+  spelling. The migration's value is semantic honesty: the optimizer now
+  sees a real ordering op (memory pinned across it) instead of an opaque
+  sideeffect asm call (everything pinned). Mapping decision and
+  verification in the dedicated tier-1 section above.
 
 ## Process — plumbing and ecosystem
 

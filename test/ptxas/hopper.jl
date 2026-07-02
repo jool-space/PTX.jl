@@ -411,6 +411,34 @@ end
 end
 
 
+# --- cluster-scope generic fences (tier-1 core IR, sm_90+ ISel floor) --------
+# fence.{sc,acq_rel}.cluster lower to `fence syncscope("cluster") ...`; ISel
+# rejects them below sm_90 with a loud error, so their pipeline validation
+# lives here rather than in ptxas/baseline.jl. Stores between the fences
+# keep each one's position observable.
+
+function _hopper_cluster_fences!(out)
+    @inbounds begin
+        out[1] = UInt32(1)
+        ptx"fence.sc.cluster"()
+        out[2] = UInt32(2)
+        ptx"fence.acq_rel.cluster"()
+        out[3] = UInt32(3)
+    end
+    return nothing
+end
+
+@testset "cluster-scope generic fences at sm_90" begin
+    types = Tuple{CuDeviceVector{UInt32, 1}}
+    @test ptxas_compiles(_hopper_cluster_fences!, types;
+                         cap = v"9.0", feature_set = :arch)
+    ptx = emit_ptx(_hopper_cluster_fences!, types;
+                   cap = v"9.0", feature_set = :arch)
+    @test occursin("fence.sc.cluster;",      ptx)
+    @test occursin("fence.acq_rel.cluster;", ptx)
+end
+
+
 # --- tensormap descriptor mutation (host-side TMA descriptor build) ------
 #
 # Triton's matmul_tma_sm120a kernel patches a shared-memory copy of the TMA

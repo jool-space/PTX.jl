@@ -326,6 +326,44 @@ end
 end
 
 
+# --- generic memory fences at sm_75 (tier-1 core IR) ------------------------
+#
+# fence.{sc,acq_rel}.{cta,gpu,sys} through the full pipeline including
+# ptxas. Cluster scope is sm_90+ (ISel-enforced) and rides in
+# ptxas/hopper.jl. Stores between the fences keep each one's position
+# observable (a core-IR fence pins memory ops, not other fences).
+
+function _baseline_fences_generic!(out)
+    @inbounds begin
+        out[1] = UInt32(1)
+        ptx"fence.sc.cta"()
+        out[2] = UInt32(2)
+        ptx"fence.sc.gpu"()
+        out[3] = UInt32(3)
+        ptx"fence.sc.sys"()
+        out[4] = UInt32(4)
+        ptx"fence.acq_rel.cta"()
+        out[5] = UInt32(5)
+        ptx"fence.acq_rel.gpu"()
+        out[6] = UInt32(6)
+        ptx"fence.acq_rel.sys"()
+        out[7] = UInt32(7)
+    end
+    return nothing
+end
+
+@testset "generic memory fences at sm_75" begin
+    types = Tuple{CuDeviceVector{UInt32, 1}}
+    @test ptxas_compiles(_baseline_fences_generic!, types; cap = v"7.5")
+    ptx = emit_ptx(_baseline_fences_generic!, types; cap = v"7.5")
+    for form in ("fence.sc.cta", "fence.sc.gpu", "fence.sc.sys",
+                 "fence.acq_rel.cta", "fence.acq_rel.gpu",
+                 "fence.acq_rel.sys")
+        @test occursin(form * ";", ptx)
+    end
+end
+
+
 # `feature_set = :arch` is gated to sm_90+ in CUDACore (sm_89a doesn't
 # exist as a target). The :arch path is exercised in ptxas/hopper.jl
 # (cap=9.0) and ptxas/blackwell.jl (cap=10.0).
