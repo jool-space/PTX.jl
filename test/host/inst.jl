@@ -161,6 +161,15 @@ end
     @test spec.asm == "discard.global.L2 [\$0], 128;"
 end
 
+@testset "sreg whitelist targets exist in the backend registry" begin
+    # The mov.u32-from-sreg fast path emits a tier-2 IntrinsicCall; a name
+    # missing from the registry would error at first use. (The in-process
+    # LLVM need not know these — see the NVVM_SREG_U32 comment.)
+    for suffix in values(PTX.NVVM_SREG_U32)
+        @test PTX.NVVM.isintrinsic("llvm.nvvm.read.ptx.sreg." * suffix)
+    end
+end
+
 @testset "sreg\"...\" string macro + SpecialReg render" begin
     # Macro produces SpecialReg{Symbol("%name")}() for both naked and
     # %-prefixed input forms.

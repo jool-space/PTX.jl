@@ -499,8 +499,12 @@ end
 # invariant-per-thread sregs are listed; volatile ones (clock, clock64,
 # globaltimer, activemask, pm0..7, smid, warpid, nsmid, gridid) deliberately
 # fall through to the asm path so LLVM doesn't collapse repeated reads.
-# Whitelist matches the set LLVM 15 (Julia 1.10's bundled LLVM) exposes,
-# cross-checked against CUDA.jl's CUDACore/src/device/intrinsics/indexing.jl.
+# Names must exist in the backend registry (asserted in test/host/inst.jl);
+# the IN-PROCESS LLVM need not know them — emission goes through the tier-2
+# IntrinsicCall (declare+call), not `ccall(name, llvmcall, ...)`, precisely
+# because ccall resolves against the in-process intrinsic table and demotes
+# unknown names (the cluster sregs on LLVM ≤ 16 / Julia ≤ 1.11) to a
+# runtime trap.
 const NVVM_SREG_U32 = Dict{Symbol, String}(
     Symbol("%tid.x")    => "tid.x",    Symbol("%tid.y")    => "tid.y",    Symbol("%tid.z")    => "tid.z",
     Symbol("%ntid.x")   => "ntid.x",   Symbol("%ntid.y")   => "ntid.y",   Symbol("%ntid.z")   => "ntid.z",
@@ -530,7 +534,7 @@ const NVVM_SREG_U32 = Dict{Symbol, String}(
     suffix = get(NVVM_SREG_U32, S, nothing)
     if suffix !== nothing
         intr = "llvm.nvvm.read.ptx.sreg." * suffix
-        return :( ccall($intr, llvmcall, UInt32, ()) )
+        return :( $(NVVM.IntrinsicCall{Symbol(intr)}())() )
     end
     spec = build_call(:mov, (:u32,), (SpecialReg{S},))
     quote
