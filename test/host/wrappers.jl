@@ -377,7 +377,7 @@ end
     @test format_call(ptx"wgmma.wait_group.sync.aligned",   Tuple{Val{0}}) == "wgmma.wait_group.sync.aligned 0;"
     @test format_call(ptx"wgmma.wait_group.sync.aligned",   Tuple{Val{2}}) == "wgmma.wait_group.sync.aligned 2;"
 
-    # `:wgmma` is in NONPURE_OPCODES → memory clobber + side_effects.
+    # `:wgmma` is registered nonpure (src/forms.jl) → memory clobber + side_effects.
     spec = build_call(:wgmma, (:fence, :sync, :aligned), ())
     @test spec.side_effects == true
     @test occursin("~{memory}", spec.constraints)
@@ -961,12 +961,16 @@ end
     # op where PTX requires a register-vector operand (ldmatrix / stmatrix /
     # mma once built this by hand on the asm tier; all three are tier-2
     # now). The chain default does it via `render_arg(::Type{<:Tuple})`.
+    # :fakeop is deliberately unregistered — rendering is exercised with an
+    # explicit permissive contract (the registry gate itself is tested in
+    # host/inst.jl).
+    fake = PTX.FormContract(pure = true)
 
     # Hypothetical fma form taking a 4-lane tuple of f32s as the first
     # operand. Not a real PTX op — we just want to exercise the braced
     # rendering. Real ops with this shape (mma.sync, ldmatrix, etc.) have
     # hand-written wrappers; this confirms the chain default also works.
-    spec = build_call(:fakeop, (:f32,), (NTuple{4, Float32},))
+    spec = build_call(:fakeop, (:f32,), (NTuple{4, Float32},); contract = fake)
     @test spec.asm == "fakeop.f32 \$0, {\$1, \$2, \$3, \$4};"
     @test spec.rettype === Float32
     @test spec.constraints == "=f,f,f,f,f"
@@ -974,7 +978,7 @@ end
     @test spec.passthrough_indices === ((1, 1), (1, 2), (1, 3), (1, 4))
 
     # Mix scalar and tuple args — slot numbering interleaves correctly.
-    spec = build_call(:fakeop, (:f32,), (Float32, NTuple{2, UInt32}, Float32))
+    spec = build_call(:fakeop, (:f32,), (Float32, NTuple{2, UInt32}, Float32); contract = fake)
     @test spec.asm == "fakeop.f32 \$0, \$1, {\$2, \$3}, \$4;"
     @test spec.constraints == "=f,f,r,r,f"
     @test spec.passthrough_indices ===
@@ -983,7 +987,7 @@ end
     # NTuple{1, T} is still tuple-shaped — emits `{$N}` (single-element
     # brace group). Real PTX accepts this; e.g. `stmatrix.x1` uses
     # `{$1}` not `$1` per the spec.
-    spec = build_call(:fakeop, (), (NTuple{1, UInt32},))
+    spec = build_call(:fakeop, (), (NTuple{1, UInt32},); contract = fake)
     @test spec.asm == "fakeop {\$0};"
     @test spec.constraints == "r"
     @test spec.passthrough_indices === ((1, 1),)
@@ -991,10 +995,10 @@ end
     # Heterogeneous tuple is rejected — there's no single constraint
     # letter that works.
     @test_throws ErrorException build_call(:fakeop, (),
-                                            (Tuple{Float32, Int32},))
+                                            (Tuple{Float32, Int32},); contract = fake)
 
     # Empty tuple is rejected — no operand mapping.
-    @test_throws ErrorException build_call(:fakeop, (), (Tuple{},))
+    @test_throws ErrorException build_call(:fakeop, (), (Tuple{},); contract = fake)
 end
 
 @testset "setp dual-pred hand-written wrapper" begin

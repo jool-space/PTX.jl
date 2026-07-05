@@ -3,7 +3,8 @@
 # via LLVM tied operands (`=X,...,0,1,...,nd-1`) so input and output bind to
 # the same physical register file. `imm_scale_a/b` and `imm_trans_a/b` are
 # baked. Sync ops (`wgmma.fence/commit_group/wait_group`) flow through the
-# chain — `:wgmma` is in NONPURE_OPCODES. Source: PTX 9.2 §9.7.14.5.
+# chain — `:wgmma` is registered nonpure + convergent in the form
+# registry (src/forms.jl). Source: PTX 9.2 §9.7.14.5.
 #
 # Three variants per shape:
 #   1. `scale_d::Bool`        — runtime SREG (b constraint, $nd+2 slot).

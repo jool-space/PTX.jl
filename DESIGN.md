@@ -112,13 +112,18 @@ build artifact.
   Reference documentation for the instruction surface is generated from the
   registry, so the package documents itself rather than deferring to the ISA
   PDF.
-- **A blessing boundary.** Registered chains get the verified lowering with
-  correct attributes. Unregistered chains no longer silently fall through to
-  the naive asm synthesizer; raw synthesis becomes an explicit opt-in. This is
-  a deliberate breaking change to today's `ptx"..."` (which accepts any chain
-  via the generic fallback) — it ships as a breaking release, with the
-  `ptx"..."raw` suffix flag as the migration path for chains the registry
-  doesn't know yet: the error message says exactly that.
+- **A blessing boundary** (landed 2026-07-06, src/forms.jl). Registered
+  chains get the verified lowering with correct attributes — including
+  `convergent nomerge` for the collective families, which the old chain
+  default could not attach. Unregistered chains error at chain build time;
+  raw synthesis is the explicit `ptx"..."raw` opt-in, whose contract is
+  maximally conservative (sideeffect + memory clobber + convergent, pointer
+  operands bracketed). A deliberate breaking change to the old `ptx"..."`
+  (which accepted any chain via the generic fallback), shipped pre-1.0; the
+  error message carries the exact migration path. The registry also powers
+  the property notation: `ptx"cvt".rn.f32.f16` composes in the type domain,
+  and `propertynames` suggests valid continuations (REPL tab completion as
+  ISA explorer).
 
 The method table is *not* the registry. Dispatch is already fully resolved by
 the `Operation{op, mods}` singleton; enumerating the product space as eager
@@ -256,9 +261,12 @@ source checked into the repo, not a build-time artifact: a JLL bump becomes a
 reviewable PR diff, which is exactly the churn-inspection mechanism the design
 wants anyway.
 
-**The blessing flip lands last**, after the families that known downstream
-kernels use are registered. Pre-1.0, so the breaking release is cheap — but
-it's still sequenced after the harness can prove what it breaks.
+**The blessing flip landed 2026-07-06** — sequenced as ratified: after the
+family migrations (shfl, mbarrier, TMA, tcgen05, mma, vec_ldst, fences,
+ldmatrix/stmatrix) and with the registry seeded from a harvest of every
+chain the package and suite surface use. The harness proved what it breaks:
+nothing — full suite green on 1.10/1.11/1.12 across the flip, goldens
+byte-identical.
 
 ## Non-goals
 

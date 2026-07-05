@@ -16,6 +16,7 @@ include("nvvm/NVVM.jl")
 using .NVVM: NVVM, @nvvm_str
 
 include("address_space.jl")
+include("forms.jl")
 include("types.jl")
 
 include("inst.jl")

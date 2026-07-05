@@ -256,7 +256,8 @@ end
 # the TMEM-address ops have typed wrappers in src/wrappers/tcgen05.jl,
 # ported from pyptx's _Tcgen05 operand discipline.
 #
-# Per-prefix NO_RETURN_PREFIXES gate in src/types.jl suppresses the
+# Per-prefix returns=false overrides in the form registry (src/forms.jl)
+# suppress the
 # spurious `.b32`/`.b64` return-type inference for `alloc`, `commit`,
 # `relinquish_alloc_permit`.
 #

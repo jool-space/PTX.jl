@@ -196,18 +196,17 @@ end
     @test build_call(:mov, (:u32,), (typeof(sreg"%tid.x"),)).side_effects == true
 end
 
-@testset "infer_rettype + _has_no_return_prefix" begin
-    # Single-element prefixes in NO_RETURN_PREFIXES suppress the trailing-dtype
-    # rule. `st.global.b32` ends in :b32 but the value is being *written*, not
-    # returned — so rettype must be Nothing.
+@testset "infer_rettype + registry returns gate" begin
+    # Sink forms carry `returns=false` in the form registry (src/forms.jl),
+    # suppressing the trailing-dtype rule. `st.global.b32` ends in :b32 but
+    # the value is being *written*, not returned — so rettype must be Nothing.
     @test PTX.infer_rettype(:st, (:global, :b32)) === Nothing
     @test PTX.infer_rettype(:red, (:global, :add, :u32)) === Nothing
     @test PTX.infer_rettype(:setmaxnreg, (:inc, :sync, :aligned, :u32)) === Nothing
     @test PTX.infer_rettype(:tensormap, (:replace, :tile, :global_address, :b1024, :b32)) === Nothing
 
-    # Multi-element prefixes — exercises the inner `for i in 1:nrest` loop in
-    # src/types.jl:60-66. tcgen05 mixes ops; only the three sink forms are in
-    # the NO_RETURN list.
+    # Prefix overrides — tcgen05 mixes ops; only the three sink prefixes
+    # carry returns=false.
     @test PTX.infer_rettype(:tcgen05,
         (:alloc, Symbol("cta_group::1"), :sync, :aligned, :b32)) === Nothing
     @test PTX.infer_rettype(:tcgen05,
@@ -216,8 +215,8 @@ end
     @test PTX.infer_rettype(:tcgen05,
         (:relinquish_alloc_permit, Symbol("cta_group::1"), :sync, :aligned)) === Nothing
 
-    # Negative — `:tcgen05, :ld, ...` is NOT in NO_RETURN_PREFIXES; the trailing
-    # dtype rule fires and the rettype is the carrier of `:b32` → UInt32.
+    # Negative — `:tcgen05, :ld, ...` has no returns=false override; the
+    # trailing dtype rule fires and the rettype is the carrier of `:b32` → UInt32.
     @test PTX.infer_rettype(:tcgen05,
         (:ld, :sync, :aligned, Symbol("16x128b"), :x1, :b32)) === UInt32
 
@@ -236,11 +235,94 @@ end
     @test PTX.infer_rettype(:multimem,
         (:ld_reduce, :relaxed, :sys, :global, :add, :u32)) === UInt32
 
-    # Direct check of the prefix predicate.
-    @test PTX._has_no_return_prefix(:st, (:global, :b32)) === true
-    @test PTX._has_no_return_prefix(:tcgen05,
-        (:alloc, Symbol("cta_group::1"), :sync, :aligned, :b32)) === true
-    @test PTX._has_no_return_prefix(:tcgen05,
-        (:dealloc, Symbol("cta_group::1"))) === false
-    @test PTX._has_no_return_prefix(:add, (:f32,)) === false
+    # Direct check of the registry lookup: longest-prefix override wins,
+    # non-matching prefixes fall back to the family default.
+    @test PTX.form_contract(:st, (:global, :b32)).returns === false
+    @test PTX.form_contract(:tcgen05,
+        (:alloc, Symbol("cta_group::1"), :sync, :aligned, :b32)).returns === false
+    @test PTX.form_contract(:tcgen05,
+        (:dealloc, Symbol("cta_group::1"))).returns === true
+    @test PTX.form_contract(:add, (:f32,)).returns === true
+    @test PTX.form_contract(:add, (:f32,)).pure === true
+    # Unregistered opcode → nothing (the chain default errors on it).
+    @test PTX.form_contract(:frobnicate, ()) === nothing
+end
+
+@testset "blessing boundary: unregistered chains error, raw tier opts in" begin
+    # The chain default refuses opcodes absent from the form registry — the
+    # optimizer promises must be reviewed per form, not guessed (the old
+    # permissive default's failure mode was a miscompile, not slowness).
+    err = try
+        PTX.build_call(:frobnicate, (:x2,), (UInt32,)); ""
+    catch e
+        sprint(showerror, e)
+    end
+    @test occursin("form registry", err)
+    @test occursin("ptx\"...\"raw", err)
+    # Calling the Operation errors the same way (generator-time).
+    @test_throws Exception PTX.Operation{:frobnicate, (:x2,)}()(UInt32(1))
+
+    # ptx"..."raw gets RAW_CONTRACT: sideeffect + clobber + convergent,
+    # pointer operands bracketed, trailing-dtype return inference.
+    r = ptx"frobnicate.global.u32"raw
+    @test r isa PTX.RawOperation{:frobnicate, (:global, :u32)}
+    spec = PTX.build_call(:frobnicate, (:global, :u32),
+                          (Core.LLVMPtr{UInt32, 1}, UInt32);
+                          contract = PTX.RAW_CONTRACT)
+    @test spec.side_effects == true
+    @test spec.convergent == true
+    @test endswith(spec.constraints, "~{memory}")
+    @test spec.asm == "frobnicate.global.u32 \$0, [\$1], \$2;"
+    @test spec.rettype === UInt32
+
+    # Raw composes like Operation.
+    @test ptx"frobnicate.x2"raw * :u32 ===
+          PTX.RawOperation{:frobnicate, (:x2, :u32)}()
+    @test ptx"frobnicate"raw * mod"x2.u32" ===
+          PTX.RawOperation{:frobnicate, (:x2, :u32)}()
+
+    # Raw is static-only and validates its flag.
+    @test_throws LoadError @eval ptx"frobnicate.$x"raw
+    @test_throws LoadError @eval ptx"frobnicate.x"nosuchflag
+end
+
+@testset "collective chain forms carry convergent nomerge (registry)" begin
+    # Registered convergent families route through convergent_asm_ir — the
+    # IR-level tripwire (llc ignores the attribute; goldens can't observe
+    # its loss). This retires the pre-registry residual where chain-default
+    # collectives got sideeffect but NOT convergent.
+    for (op, argts) in [
+        (ptx"vote.sync.ballot.b32", (Bool, UInt32)),
+        (ptx"bar.sync",             (Val{0},)),
+        (ptx"redux.sync.add.s32",   (Int32, UInt32)),
+        (ptx"activemask.b32",       ()),
+    ]
+        ci, _ = first(Base.code_typed(op, argts))
+        @test occursin("convergent nomerge", string(ci))
+    end
+    # Non-collective side effects stay on plain @asmcall (no attr group).
+    ci, _ = first(Base.code_typed(ptx"membar.gl", ()))
+    @test !occursin("convergent", string(ci))
+end
+
+@testset "property notation: composition + completion" begin
+    # Dot chains compose in the type domain exactly like `*` — same
+    # singleton, device-safe folding.
+    @test ptx"cvt".rn.f32.f16 === ptx"cvt.rn.f32.f16"
+    @test ptx"add".f32 === ptx"add.f32"
+    @test ptx"st".var"shared::cta".b32 ===
+          Operation{:st, (Symbol("shared::cta"), :b32)}()
+    @test mod"row".col === mod"row.col"
+    @test ptx"frobnicate.x2"raw.u32 ===
+          PTX.RawOperation{:frobnicate, (:x2, :u32)}()
+    let f() = ptx"cvt".rn.f32.f16
+        @test @inferred(f()) === ptx"cvt.rn.f32.f16"
+    end
+
+    # propertynames suggests continuations: registry override prefixes...
+    @test :st in propertynames(ptx"multimem")
+    @test :alloc in propertynames(ptx"tcgen05")
+    # ...and NVVM intrinsic-table segments (best effort).
+    @test :cluster in propertynames(ptx"barrier")
+    @test :arrive in propertynames(ptx"barrier".cluster)
 end

@@ -36,53 +36,15 @@ const DTYPE_RETTYPE = Dict{Symbol, Type}(
 # `setp.eq.s32` returns Bool, not Int32 — trailing dtype is the input compare type.
 const PRED_RESULT_OPCODES = Set{Symbol}((:setp,))
 
-# Chains whose terminal modifier looks like a dtype but describes an *operand*,
-# not a return value. Without this gate `infer_rettype` would emit a leading
-# output reg and ptxas would reject with "Arguments mismatch".
-const NO_RETURN_PREFIXES = Set{Tuple{Vararg{Symbol}}}((
-    (:setmaxnreg,),
-    (:tensormap,),
-    (:tcgen05, :alloc),
-    (:tcgen05, :commit),
-    (:tcgen05, :relinquish_alloc_permit),
-    # `st.<space>.<dtype>` and `red.<space>.<op>.<dtype>` end in a dtype-suffix
-    # but describe the *value being written*, not a return — without this gate
-    # the chain reserves $0 for a phantom output and ptxas rejects with
-    # "Arguments mismatch for instruction 'st'".
-    (:st,),
-    (:red,),
-    # `cp.async.mbarrier.arrive{.noinc}.shared.b64` — `.b64` is the width
-    # of the mbarrier address, not a return type. The chain would (wrongly)
-    # reserve $0 as a UInt64 output.
-    (:cp, :async, :mbarrier, :arrive),
-    # `nanosleep.u32 t;` — `.u32` is the width of the duration operand.
-    (:nanosleep,),
-    # `multimem.st` / `multimem.red` write memory; the trailing dtype is the
-    # value written. `multimem.ld_reduce` DOES return and stays on the
-    # trailing-dtype rule.
-    (:multimem, :st),
-    (:multimem, :red),
-))
-
-# Prefixes are stored as `(opcode, mod1, mod2, ...)` for compactness.
-function _has_no_return_prefix(op::Symbol, mods::Tuple{Vararg{Symbol}})
-    for prefix in NO_RETURN_PREFIXES
-        op === prefix[1] || continue
-        nrest = length(prefix) - 1
-        length(mods) < nrest && continue
-        match = true
-        for i in 1:nrest
-            mods[i] === prefix[i + 1] || (match = false; break)
-        end
-        match && return true
-    end
-    return false
-end
-
 # `cvt` grammar is `cvt.<modifiers...>.<dst>.<src>` — destination is mods[end-1].
+# Sink forms whose dtype tail names an *operand* (st, red, nanosleep, ...) are
+# gated by the form registry's `returns` flag (src/forms.jl) — without that
+# gate the chain would reserve $0 for a phantom output and ptxas would reject
+# with "Arguments mismatch".
 function infer_rettype(op::Symbol, mods::Tuple{Vararg{Symbol}})
     op in PRED_RESULT_OPCODES && return Bool
-    _has_no_return_prefix(op, mods) && return Nothing
+    c = form_contract(op, mods)
+    c !== nothing && !c.returns && return Nothing
     if op === :cvt && length(mods) >= 2
         rettype = get(DTYPE_RETTYPE, mods[end - 1], nothing)
         rettype === nothing || return rettype

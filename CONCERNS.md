@@ -196,18 +196,26 @@ distinct defenses:
   in both arms of a divergent branch) on the *optimized* module — attribute
   present, both call sites intact. Teeth verified: stripping `convergent`
   from the helper flips exactly those testsets red.
-- **The chain default is permissive by default.** An opcode not listed in
-  `NONPURE_OPCODES` gets no flags at all — CSE/DCE/hoist legal — so the
-  failure mode of *forgetting* an entry is a miscompile, not slowness
-  (inverted from the ratified raw-tier posture of "slow before wrong").
-  And even NONPURE collective opcodes reached through the chain default
-  (`vote`, `match`, `redux`, `elect`, unregistered `shfl` forms) get
-  sideeffect + `~{memory}` but NOT `convergent` — the duplication direction
-  stays open. Accepted as a known residual: these forms are exactly what
-  the blessing flip retires (unregistered chains error; `ptx"..."raw` gets
-  the pessimistic default *including* convergent, per DESIGN). If a
-  collective chain-default form gets registered before the flip, it must
-  route through `convergent_asm_ir` like wgmma/mma.
+- **The chain default is permissive by default — RETIRED 2026-07-06 by the
+  blessing flip.** Historical posture: an opcode not listed in
+  `NONPURE_OPCODES` got no flags at all (CSE/DCE/hoist legal), so the
+  failure mode of *forgetting* an entry was a miscompile, not slowness —
+  and even NONPURE collective opcodes reached through the chain default got
+  sideeffect but NOT `convergent` (the duplication direction stayed open).
+  Both residuals are gone: classification now lives in the form registry
+  (src/forms.jl — opcode defaults, prefix overrides, one auditable table),
+  unregistered opcodes ERROR at chain build time, registered collective
+  families (`vote`, `match`, `redux`, `elect`, `activemask`, `shfl`, `bar`,
+  `barrier`, `wgmma`, `mma`, `ldmatrix`, `stmatrix`, `tcgen05`,
+  `setmaxnreg`) route through `convergent_asm_ir` and carry
+  `convergent nomerge`, and `ptx"..."raw` is the explicit opt-in whose
+  RAW_CONTRACT is maximally conservative (sideeffect + clobber +
+  convergent). The direction of error is now "slow before wrong"
+  everywhere. Verified: goldens byte-identical across the flip; full suite
+  green on 1.10/1.11/1.12. Residual: registration is opcode-granular — a
+  typo'd *modifier* under a registered opcode still reaches ptxas (loud,
+  not silent); per-form modifier validation is the registry-enumeration
+  milestone (B4).
 - **Asm memory effects are binary.** `~{memory}` or nothing — inline asm
   cannot express `argmemonly`-grade precision, so every asm memory op is a
   full optimization barrier. Not fixable within the tier; it is the
@@ -566,6 +574,10 @@ functionality.
 
 The blessing-boundary flip (unregistered chains error instead of hitting the
 naive synthesizer) breaks any chain users relied on implicitly — including
-this author's own kernels in dependent packages. Pre-1.0 makes this cheap, but
-the golden-diff harness should run dependents' kernels too, and the flip lands
-last, after the families those kernels use are registered.
+this author's own kernels in dependent packages. LANDED 2026-07-06: the
+registry seeds every opcode the package + suite surface uses (the harvest
+was grep-driven over src/ and test/), the full suite passed the flip on the
+first run on all three Julia versions, and goldens are byte-identical.
+Dependent packages hitting the error get the exact remediation in the
+message (register the form or `ptx"..."raw`). Pre-1.0, breaking release as
+ratified.
