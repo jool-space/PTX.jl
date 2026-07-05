@@ -128,7 +128,7 @@ end
     s = synthesize("llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta",
                    (Core.LLVMPtr{Int64,3}, UInt32))
     @test occursin("declare i64 @\"llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta\"(i8 addrspace(3)*, i32) #0", s.ir)
-    @test occursin("attributes #0 = { convergent nounwind nocallback }", s.ir)
+    @test occursin("attributes #0 = { convergent nomerge nounwind nocallback }", s.ir)
     @test occursin("attributes #1 = { alwaysinline }", s.ir)
     @test s.rettype == UInt64
     @test s.tupletype == Tuple{Core.LLVMPtr{Int64,3}, UInt32}

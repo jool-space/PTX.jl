@@ -453,6 +453,9 @@ function convergent_asm_ir(asm::String, constraints::String,
     callargs = join(("$(_asm_lltype(T)) %a$(k - 1)"
                      for (k, T) in enumerate(argtypes)), ", ")
     asmcall(ret) = "call $ret asm sideeffect \"$asm\", \"$constraints\"($callargs) #0"
+    # `nomerge` alongside `convergent`: LLVM ≤ 16 (Julia ≤ 1.11) hoists
+    # identical convergent calls from both arms of a divergent branch into
+    # one site — the collective-op miscompile. See NVVM.fnattrs.
 
     body = String[]
     if rettype === Nothing
@@ -485,7 +488,7 @@ function convergent_asm_ir(asm::String, constraints::String,
     define $entryret @entry($(join(params, ", "))) #1 {
     $(join(body, "\n"))
     }
-    attributes #0 = { convergent nounwind }
+    attributes #0 = { convergent nomerge nounwind }
     attributes #1 = { alwaysinline }
     """
 end

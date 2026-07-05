@@ -126,7 +126,18 @@ end
 
 function fnattrs(i::Intrinsic)::String
     attrs = String[]
-    :convergent in i.props && push!(attrs, "convergent")
+    if :convergent in i.props
+        push!(attrs, "convergent")
+        # LLVM ≤ 16 (Julia ≤ 1.11) does not derive merge-protection from
+        # `convergent`: SimplifyCFG hoists identical convergent calls from
+        # both arms of a divergent branch into one pre-branch site — the
+        # activemask miscompile, reproduced on 1.11 (LLVM ≥ 17 blocks the
+        # hoist on `convergent` alone; verified both ways 2026-07-05).
+        # `nomerge` forbids exactly that call-site merging, on every
+        # version — emitted unconditionally so all versions run one code
+        # path, harmless where `convergent` already suffices.
+        push!(attrs, "nomerge")
+    end
     push!(attrs, "nounwind")  # LLVM intrinsics cannot unwind, categorically
     for (p, a) in ((:nocallback, "nocallback"), (:nofree, "nofree"),
                    (:willreturn, "willreturn"), (:speculatable, "speculatable"),
