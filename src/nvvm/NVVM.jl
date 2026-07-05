@@ -55,8 +55,17 @@ function llvmtype(tok::Symbol)
     m !== nothing && return "<" * m.captures[1] * " x " * SCALAR_IR[Symbol(m.captures[2])] * ">"
     error("unknown type token :$tok")
 end
+# Pointers are spelled TYPED (`i8 addrspace(3)*`), not opaque
+# (`ptr addrspace(3)`): Julia ≤ 1.11 parses llvmcall IR in the *device*
+# context with typed pointers — the opaque spelling fails to parse there
+# and Julia demotes the call site to a runtime trap (a stub kernel, no
+# compile error). Julia ≥ 1.12 auto-upgrades typed spellings on parse, so
+# one spelling serves every supported version; `i8` matches Julia's own
+# LLVMPtr lowering in typed mode, so @entry parameters bind without glue.
+# Known-to-old-LLVM intrinsics need an exact pointee — see TYPED_POINTEE
+# in emit.jl. Revert to opaque wholesale when Julia ≤ 1.11 support ends.
 llvmtype(tok::PtrTok) =
-    tok.addrspace == 0 ? "ptr" : "ptr addrspace($(tok.addrspace))"
+    tok.addrspace == 0 ? "i8*" : "i8 addrspace($(tok.addrspace))*"
 llvmtype(tok::AnyTok) =
     error("overload slot ($(tok.kind)) has no fixed LLVM type; bind a concrete type first")
 llvmtype(tok::SlotTok) =

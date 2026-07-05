@@ -39,7 +39,11 @@ function vec_ld_ir(n::Int, dtype::Symbol, align::Int)
     et  = _vec_llvm_elt(dtype)
     vec = "<$n x $et>"
     arr = "[$n x $et]"
-    lines = ["%v = load $vec, ptr addrspace(1) %0, align $align"]
+    # Typed pointer spelling + pointer-to-vector bitcast: required by the
+    # typed-pointer device context on Julia ≤ 1.11, folded away by the
+    # opaque upgrade on ≥ 1.12 (see NVVM.llvmtype).
+    lines = ["%vp = bitcast i8 addrspace(1)* %0 to $vec addrspace(1)*",
+             "%v = load $vec, $vec addrspace(1)* %vp, align $align"]
     for i in 0:n-1
         push!(lines, "%e$i = extractelement $vec %v, i32 $i")
     end
@@ -67,7 +71,9 @@ function vec_st_ir(n::Int, dtype::Symbol, align::Int)
         push!(lines, "%v$i = insertelement $vec $prev, $et %a$i, i32 $i")
         prev = "%v$i"
     end
-    push!(lines, "store $vec $prev, ptr addrspace(1) %0, align $align")
+    # Same typed-spelling treatment as vec_ld_ir above.
+    push!(lines, "%sp = bitcast i8 addrspace(1)* %0 to $vec addrspace(1)*")
+    push!(lines, "store $vec $prev, $vec addrspace(1)* %sp, align $align")
     push!(lines, "ret void")
     join(lines, "\n")
 end

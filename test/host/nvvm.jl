@@ -79,9 +79,11 @@ end
     @test llvmtype(:v2bf16) == "<2 x bfloat>"
     @test llvmtype(:v4i32) == "<4 x i32>"
     @test llvmtype(:v128i32) == "<128 x i32>"
-    @test llvmtype(ptr(0)) == "ptr"
-    @test llvmtype(ptr(3)) == "ptr addrspace(3)"
-    @test llvmtype(ptr(6)) == "ptr addrspace(6)"   # tensor memory
+    # Typed spellings by design — parse on Julia ≤ 1.11's typed-pointer
+    # device context, auto-upgrade to opaque on ≥ 1.12 (see NVVM.llvmtype).
+    @test llvmtype(ptr(0)) == "i8*"
+    @test llvmtype(ptr(3)) == "i8 addrspace(3)*"
+    @test llvmtype(ptr(6)) == "i8 addrspace(6)*"   # tensor memory
     @test_throws ErrorException llvmtype(:notatype)
     @test_throws ErrorException llvmtype(anyptr)   # unbound overload slot
     @test_throws ErrorException llvmtype(slot(0))
@@ -125,7 +127,7 @@ end
 @testset "synthesize: plain signature, convergent attrs" begin
     s = synthesize("llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta",
                    (Core.LLVMPtr{Int64,3}, UInt32))
-    @test occursin("declare i64 @\"llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta\"(ptr addrspace(3), i32) #0", s.ir)
+    @test occursin("declare i64 @\"llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta\"(i8 addrspace(3)*, i32) #0", s.ir)
     @test occursin("attributes #0 = { convergent nounwind nocallback }", s.ir)
     @test occursin("attributes #1 = { alwaysinline }", s.ir)
     @test s.rettype == UInt64
@@ -134,33 +136,38 @@ end
 end
 
 @testset "synthesize: mangling and aggregate repack (ldmatrix)" begin
+    # Typed-pointer LLVMs (≤ 16 / Julia ≤ 1.11) mangle pointer overloads
+    # with the pointee; opaque with the address space alone.
+    psuf = Base.libllvm_version < v"17" ? "i8" : ""
+
     s = synthesize("llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16",
                    (Core.LLVMPtr{UInt16,3},))
-    @test occursin("@\"llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16.p3\"", s.ir)
+    @test occursin("@\"llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16.p3$psuf\"", s.ir)
     @test occursin("memory(argmem: read)", s.ir)
-    @test occursin("ptr addrspace(3) readonly nocapture", s.ir)
+    @test occursin("i8 addrspace(3)* readonly nocapture", s.ir)
     @test occursin("insertvalue [4 x i32]", s.ir)
     @test s.rettype == NTuple{4,UInt32}
 
     # the address space drives the suffix
     s = synthesize("llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16",
                    (Core.LLVMPtr{UInt16,0},))
-    @test occursin(".b16.p0\"", s.ir)
+    @test occursin(".b16.p0$psuf\"", s.ir)
 end
 
 @testset "synthesize: two-slot mangle in canonical order (atomic)" begin
+    psuf = Base.libllvm_version < v"17" ? "i8" : ""
     # ret slot (f32) precedes the pointer slot (p1) — the order llc's
     # remangler normalizes to (CONCERNS.md, mangling)
     s = synthesize("llvm.nvvm.atomic.add.gen.f.cta",
                    (Core.LLVMPtr{Float32,1}, Float32))
-    @test occursin("@\"llvm.nvvm.atomic.add.gen.f.cta.f32.p1\"", s.ir)
+    @test occursin("@\"llvm.nvvm.atomic.add.gen.f.cta.f32.p1$psuf\"", s.ir)
     @test occursin("nocapture", s.ir)
     @test s.rettype == Float32
 
     # the value argument binds the ret slot — Float64 flips it to .f64
     s = synthesize("llvm.nvvm.atomic.add.gen.f.cta",
                    (Core.LLVMPtr{Float64,1}, Float64))
-    @test occursin(".f64.p1\"", s.ir)
+    @test occursin(".f64.p1$psuf\"", s.ir)
     @test s.rettype == Float64
 end
 
@@ -187,7 +194,7 @@ end
     # immargs spliced as literals, not entry parameters
     @test occursin("i32 2, i32 1, i32 0)", s.ir)
     @test s.runtime == [1, 2, 3, 4, 5]
-    @test occursin("define void @entry(ptr addrspace(6) %a0, i64 %a1, i64 %a2, i32 %a3, i8 %a4)", s.ir)
+    @test occursin("define void @entry(i8 addrspace(6)* %a0, i64 %a1, i64 %a2, i32 %a3, i8 %a4)", s.ir)
 
     # errors: missing Val, out-of-range, named operand label from the .td
     bad(args) = try synthesize("llvm.nvvm.tcgen05.mma.shared", args); ""
@@ -227,7 +234,7 @@ end
 @testset "synthesize: pointer return placeholder" begin
     s = synthesize("llvm.nvvm.mapa.shared.cluster", (Core.LLVMPtr{Float32,3}, UInt32))
     @test s.rettype == Core.LLVMPtr{UInt8,7}
-    @test occursin("declare ptr addrspace(7)", s.ir)
+    @test occursin("declare i8 addrspace(7)*", s.ir)
 end
 
 @testset "nvvm\"\" macro" begin

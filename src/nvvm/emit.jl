@@ -86,7 +86,11 @@ end
 
 "Mangling suffix contributed by the Julia type bound to an overload slot."
 function mangle(@nospecialize(T))::String
-    T <: Core.LLVMPtr && return "p$(T.parameters[2])"
+    # Typed-pointer in-process LLVMs (≤ 16, Julia ≤ 1.11) mangle pointer
+    # overloads with the pointee (`p3i8`); opaque (≥ 17) with the address
+    # space alone (`p3`). The artifact llc remangles either canonically.
+    T <: Core.LLVMPtr && return Base.libllvm_version < v"17" ?
+        "p$(T.parameters[2])i8" : "p$(T.parameters[2])"
     E = _vecelem(T)
     E === nothing || return "v$(length(T.parameters))" * mangle(E)
     for (tok, (_, types)) in SCALARS
@@ -142,6 +146,30 @@ const PARAM_ATTRS = Dict(:nocapture => "nocapture", :noalias => "noalias",
 
 paramattrs(i::Intrinsic, pos::Int)::String =
     join((PARAM_ATTRS[a] for (p, a) in i.argattrs if p == pos), " ")
+
+# --- Typed-pointer compatibility ----------------------------------------------
+#
+# All pointer types are spelled typed with an `i8` pointee (see
+# NVVM.llvmtype) — parses natively on the typed-pointer in-process LLVMs
+# (Julia ≤ 1.11 device context) and auto-upgrades to opaque on ≥ 1.12.
+# The wrinkle: intrinsics KNOWN to LLVM 15/16 have their pointer params
+# signature-verified against an exact pointee there, so those positions
+# bitcast from the i8 ABI pointer at the call site (the opaque upgrade
+# folds the cast away). Unknown intrinsics — the modern families — accept
+# any pointee. Keyed (intrinsic name, 1-based param position); anything
+# absent uses i8. Dies together with Julia ≤ 1.11 support.
+const TYPED_POINTEE = Dict{Tuple{String,Int},String}(
+    ("llvm.nvvm.mbarrier.init.shared", 1)               => "i64",
+    ("llvm.nvvm.mbarrier.inval.shared", 1)              => "i64",
+    ("llvm.nvvm.mbarrier.arrive.shared", 1)             => "i64",
+    ("llvm.nvvm.mbarrier.arrive.noComplete.shared", 1)  => "i64",
+    ("llvm.nvvm.mbarrier.test.wait.shared", 1)          => "i64",
+)
+
+_typed_pointee(name::String, pos::Int) = get(TYPED_POINTEE, (name, pos), "i8")
+
+_ptrspell(pointee::String, as::Int) =
+    as == 0 ? "$pointee*" : "$pointee addrspace($as)*"
 
 # --- Synthesis --------------------------------------------------------------
 
@@ -221,6 +249,11 @@ function synthesize(name::String, argtypes)
         if tok === :i1
             push!(glue, "  %b$k = trunc i8 %a$k to i1")
             push!(callargs, "i1 %b$k")
+        elseif tok isa PtrTok && _typed_pointee(i.name, pos) != "i8"
+            # Known-to-old-LLVM pointee bridge (see TYPED_POINTEE above).
+            pt = _ptrspell(_typed_pointee(i.name, pos), tok.addrspace)
+            push!(glue, "  %p$k = bitcast $(abityp(T)) %a$k to $pt")
+            push!(callargs, "$pt %p$k")
         else
             push!(callargs, "$(abityp(T)) %a$k")
         end
@@ -256,6 +289,7 @@ function synthesize(name::String, argtypes)
     for (pos, tok) in enumerate(i.params)
         t = tok isa AnyTok ? abityp(argtypes[pos]) :
             tok isa SlotTok ? abityp(bindings[tok.slot+1]) :
+            tok isa PtrTok  ? _ptrspell(_typed_pointee(i.name, pos), tok.addrspace) :
             llvmtype(tok)
         pa = paramattrs(i, pos)
         push!(decl, isempty(pa) ? t : "$t $pa")
