@@ -117,6 +117,50 @@ end
     @test spec.side_effects == true   # cp prefix → nonpure
 end
 
+@testset "build_call: side-effecting opcodes must never classify pure" begin
+    # The chain default's failure mode for a forgotten NONPURE entry is a
+    # miscompile, not slowness (CONCERNS.md, "the chain default is
+    # permissive by default"). These are the gaps found 2026-07-04 — each
+    # was pure + clobber-free before.
+
+    # multimem.st writes memory: nonpure, void (the dtype suffix is the
+    # value being written), bracketed address.
+    spec = build_call(:multimem, (:st, :relaxed, :sys, :global, :u32),
+                      (Core.LLVMPtr{UInt32, 1}, UInt32))
+    @test spec.side_effects == true
+    @test spec.rettype === Nothing
+    @test spec.asm == "multimem.st.relaxed.sys.global.u32 [\$0], \$1;"
+    @test endswith(spec.constraints, "~{memory}")
+
+    # multimem.ld_reduce returns a value — the trailing-dtype rule still
+    # fires — but is nonpure and brackets its pointer.
+    spec = build_call(:multimem,
+                      (:ld_reduce, :relaxed, :sys, :global, :add, :u32),
+                      (Core.LLVMPtr{UInt32, 1},))
+    @test spec.side_effects == true
+    @test spec.rettype === UInt32
+    @test spec.asm ==
+          "multimem.ld_reduce.relaxed.sys.global.add.u32 \$0, [\$1];"
+
+    # nanosleep.u32: `.u32` is the duration operand's width, not a return —
+    # a phantom $0 output makes ptxas reject with "Arguments mismatch".
+    spec = build_call(:nanosleep, (:u32,), (UInt32,))
+    @test spec.side_effects == true
+    @test spec.rettype === Nothing
+    @test spec.asm == "nanosleep.u32 \$0;"
+
+    # trap / brkpt / pmevent: void control ops. Pure classification made
+    # them legal to reorder and left them alive only by DCE conservatism.
+    @test build_call(:trap, (), ()).side_effects == true
+    @test build_call(:brkpt, (), ()).side_effects == true
+    @test build_call(:pmevent, (), (Val{0},)).side_effects == true
+
+    # Cache-control ops: nonpure + bracketed memory operand.
+    spec = build_call(:discard, (:global, :L2,), (Core.LLVMPtr{UInt8, 1}, Val{128}))
+    @test spec.side_effects == true
+    @test spec.asm == "discard.global.L2 [\$0], 128;"
+end
+
 @testset "sreg\"...\" string macro + SpecialReg render" begin
     # Macro produces SpecialReg{Symbol("%name")}() for both naked and
     # %-prefixed input forms.
@@ -174,6 +218,14 @@ end
     # incorrectly return Nothing.
     @test PTX.infer_rettype(:tcgen05,
         (:dealloc, Symbol("cta_group::1"), :sync, :aligned, :b32)) === UInt32
+
+    # nanosleep / multimem sinks suppress the trailing-dtype rule;
+    # multimem.ld_reduce keeps it.
+    @test PTX.infer_rettype(:nanosleep, (:u32,)) === Nothing
+    @test PTX.infer_rettype(:multimem, (:st, :relaxed, :sys, :global, :u32)) === Nothing
+    @test PTX.infer_rettype(:multimem, (:red, :relaxed, :sys, :global, :add, :u32)) === Nothing
+    @test PTX.infer_rettype(:multimem,
+        (:ld_reduce, :relaxed, :sys, :global, :add, :u32)) === UInt32
 
     # Direct check of the prefix predicate.
     @test PTX._has_no_return_prefix(:st, (:global, :b32)) === true

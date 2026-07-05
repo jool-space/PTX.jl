@@ -289,12 +289,24 @@ const NONPURE_OPCODES = Set{Symbol}((
     :mapa, :getctarank,
     # Inter-launch / kernel-control.
     :griddepcontrol, :clusterlaunchcontrol, :exit,
+    # Aborts and timing. No memory operand, but observable: classified pure
+    # they are legal to CSE/reorder, and a void pure asm call survives DCE
+    # only because LLVM refuses to delete calls without `willreturn` — an
+    # accident of the optimizer, not a contract.
+    :trap, :brkpt, :nanosleep, :pmevent,
+    # multimem (sm_90 NVLink-switch memory): ld_reduce/st/red all touch
+    # memory. st/red additionally end in a dtype suffix that describes the
+    # *value written*, not a return — see NO_RETURN_PREFIXES.
+    :multimem,
+    # Cache-control ops with memory operands.
+    :discard, :applypriority,
 ))
 
 # Memory-op opcodes whose pointer args render as `[%addr]`; cvta/mov etc. don't.
 const BRACKET_PTR_OPCODES = Set{Symbol}((
     :ld, :st, :atom, :red, :cp, :mbarrier, :ldmatrix, :stmatrix,
     :prefetch, :tcgen05, :tensormap, :fence,
+    :multimem, :discard, :applypriority,
 ))
 
 is_nonpure_opcode(op::Symbol) = op in NONPURE_OPCODES

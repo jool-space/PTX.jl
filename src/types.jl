@@ -55,6 +55,13 @@ const NO_RETURN_PREFIXES = Set{Tuple{Vararg{Symbol}}}((
     # of the mbarrier address, not a return type. The chain would (wrongly)
     # reserve $0 as a UInt64 output.
     (:cp, :async, :mbarrier, :arrive),
+    # `nanosleep.u32 t;` — `.u32` is the width of the duration operand.
+    (:nanosleep,),
+    # `multimem.st` / `multimem.red` write memory; the trailing dtype is the
+    # value written. `multimem.ld_reduce` DOES return and stays on the
+    # trailing-dtype rule.
+    (:multimem, :st),
+    (:multimem, :red),
 ))
 
 # Prefixes are stored as `(opcode, mod1, mod2, ...)` for compactness.
