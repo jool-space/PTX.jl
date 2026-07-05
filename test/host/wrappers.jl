@@ -234,37 +234,80 @@ end
     @test spec.side_effects == true
 end
 
-@testset "stmatrix.sync.aligned hand-written wrapper" begin
-    # m8n8.x4.shared.b16 — canonical 4-fragment store (Ada+).
-    spec = PTX.stmatrix_spec(:m8n8, :x4, false, :shared, :b16)
-    @test spec.n_in == 4
-    @test spec.asm ==
-        "stmatrix.sync.aligned.m8n8.x4.shared.b16 " *
-        "[\$0], {\$1, \$2, \$3, \$4};"
-    @test spec.constraints == "r,r,r,r,r,~{memory}"
+@testset "ldmatrix/stmatrix wrapper (tier-2 intrinsic lowering)" begin
+    # Migrated family (DESIGN.md, "Lowering tiers"): the plain-`.shared`
+    # and b8 forms
+    # lower through llvm.nvvm.{ld,st}matrix.* (state space carried by the
+    # pointer's address space); the explicit `shared::cta` spellings ride
+    # convergent_asm_ir. Goldens: test/golden/{ldmatrix@sm75,stmatrix@sm90,
+    # ldst_matrix_b8@sm100a}.ptx.
+    pSh  = Core.LLVMPtr{UInt16, PTX.AS.Shared}
+    pSh8 = Core.LLVMPtr{UInt8, PTX.AS.Shared}
+    T2 = NTuple{2, UInt32}; T4 = NTuple{4, UInt32}
+    cases = [
+        (:ldmatrix, (:sync, :aligned, :m8n8, :x1, :shared, :b16),
+            (pSh,), UInt32, "llvm.nvvm.ldmatrix.sync.aligned.m8n8.x1.b16"),
+        (:ldmatrix, (:sync, :aligned, :m8n8, :x2, :trans, :shared, :b16),
+            (pSh,), T2, "llvm.nvvm.ldmatrix.sync.aligned.m8n8.x2.trans.b16"),
+        (:ldmatrix, (:sync, :aligned, :m8n8, :x4, :shared, :b16),
+            (pSh,), T4, "llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16"),
+        # b8: TWO regs per count step — the arity the old asm generator got
+        # wrong (it assumed 1; ptxas rejected every b8 form it emitted).
+        (:ldmatrix, (:sync, :aligned, :m16n16, :x1, :trans, :shared, :b8),
+            (pSh8,), T2, "llvm.nvvm.ldmatrix.sync.aligned.m16n16.x1.trans.b8"),
+        (:ldmatrix, (:sync, :aligned, :m16n16, :x2, :trans, :shared, :b8),
+            (pSh8,), T4, "llvm.nvvm.ldmatrix.sync.aligned.m16n16.x2.trans.b8"),
+        (:stmatrix, (:sync, :aligned, :m8n8, :x1, :shared, :b16),
+            (pSh, UInt32), Nothing, "llvm.nvvm.stmatrix.sync.aligned.m8n8.x1.b16"),
+        (:stmatrix, (:sync, :aligned, :m8n8, :x2, :trans, :shared, :b16),
+            (pSh, T2), Nothing, "llvm.nvvm.stmatrix.sync.aligned.m8n8.x2.trans.b16"),
+        (:stmatrix, (:sync, :aligned, :m8n8, :x4, :shared, :b16),
+            (pSh, T4), Nothing, "llvm.nvvm.stmatrix.sync.aligned.m8n8.x4.b16"),
+        (:stmatrix, (:sync, :aligned, :m16n8, :x4, :trans, :shared, :b8),
+            (pSh8, T4), Nothing, "llvm.nvvm.stmatrix.sync.aligned.m16n8.x4.trans.b8"),
+    ]
+    for (opsym, mods, argts, rettype, intr) in cases
+        # the intrinsic is registered and convergent
+        @test PTX.NVVM.isintrinsic(intr)
+        @test :convergent in PTX.NVVM.intrinsic(intr).props
+        # the method dispatches and routes to that intrinsic
+        op = Operation{opsym, mods}()
+        @test which(op, argts).module == PTX
+        ci, rt = first(Base.code_typed(op, argts))
+        @test rt === rettype
+        @test occursin(intr, string(ci))
+    end
 
-    # x1 — scalar-input form (no NTuple wrapper).
-    spec1 = PTX.stmatrix_spec(:m8n8, :x1, false, :shared, :b16)
-    @test spec1.n_in == 1
-    @test spec1.asm ==
-        "stmatrix.sync.aligned.m8n8.x1.shared.b16 [\$0], {\$1};"
-    @test spec1.constraints == "r,r,~{memory}"
+    # `shared::cta` spellings stay asm-tier, with convergent nomerge on the
+    # call (the IR-level tripwire — llc ignores the attribute and goldens
+    # can't observe its loss).
+    for (opsym, mods, argts, asm) in [
+        (:ldmatrix, (:sync, :aligned, :m8n8, :x1, Symbol("shared::cta"), :b16),
+            (pSh,), "ldmatrix.sync.aligned.m8n8.x1.shared::cta.b16"),
+        (:ldmatrix, (:sync, :aligned, :m8n8, :x4, :trans, Symbol("shared::cta"), :b16),
+            (pSh,), "ldmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16"),
+        (:stmatrix, (:sync, :aligned, :m8n8, :x1, Symbol("shared::cta"), :b16),
+            (pSh, UInt32), "stmatrix.sync.aligned.m8n8.x1.shared::cta.b16"),
+        (:stmatrix, (:sync, :aligned, :m8n8, :x4, :trans, Symbol("shared::cta"), :b16),
+            (pSh, T4), "stmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16"),
+    ]
+        ci, _ = first(Base.code_typed(Operation{opsym, mods}(), argts))
+        s = string(ci)
+        @test occursin(asm, s)
+        @test occursin("convergent nomerge", s)
+    end
 
-    # x2 with .trans and .shared::cta state-space.
-    spec2 = PTX.stmatrix_spec(:m8n8, :x2, true, :shared_cta, :b16)
-    @test spec2.asm ==
-        "stmatrix.sync.aligned.m8n8.x2.trans.shared::cta.b16 " *
-        "[\$0], {\$1, \$2};"
-
-    # Hopper m16n8.b8 — declared but unreachable on Ada.
-    spec_h = PTX.stmatrix_spec(:m16n8, :x4, false, :shared, :b8)
-    @test occursin("m16n8.x4.shared.b8", spec_h.asm)
-
-    # Methods registered for representative variants.
-    @test which(Operation{:stmatrix, (:sync, :aligned, :m8n8, :x4, :shared, :b16)}(),
-                (Core.LLVMPtr{UInt16, PTX.AS.Shared}, NTuple{4, UInt32})).module == PTX
-    @test which(Operation{:stmatrix, (:sync, :aligned, :m8n8, :x1, :shared, :b16)}(),
-                (Core.LLVMPtr{UInt16, PTX.AS.Shared}, UInt32)).module == PTX
+    # The ptxas-invalid b8 forms (non-trans, m16n16 x4) no longer have
+    # dedicated methods — they fall through to the chain default like any
+    # unregistered form.
+    for (opsym, mods, argts) in [
+        (:ldmatrix, (:sync, :aligned, :m16n16, :x1, :shared, :b8), (pSh8,)),
+        (:ldmatrix, (:sync, :aligned, :m16n16, :x4, :trans, :shared, :b8), (pSh8,)),
+        (:stmatrix, (:sync, :aligned, :m16n8, :x1, :shared, :b8), (pSh8, UInt32)),
+    ]
+        m = which(Operation{opsym, mods}(), argts)
+        @test !occursin("m16n16", string(m.sig)) && !occursin("m16n8", string(m.sig))
+    end
 end
 
 @testset "mbarrier wrapper (tier-2 intrinsic lowering)" begin
@@ -914,10 +957,10 @@ end
 
 @testset "tuple args → braced operand groups" begin
     # Homogeneous tuple types render as `{$N, $N+1, ...}` and contribute one
-    # LLVM input slot per lane. Used by ldmatrix / mma / .rs cvt forms where
-    # PTX requires a register-vector operand. Hand-written wrappers like
-    # `wrappers/stmatrix.jl` build this manually; the chain default now does
-    # too via `render_arg(::Type{<:Tuple})`.
+    # LLVM input slot per lane. Used by .rs cvt forms and any chain-default
+    # op where PTX requires a register-vector operand (ldmatrix / stmatrix /
+    # mma once built this by hand on the asm tier; all three are tier-2
+    # now). The chain default does it via `render_arg(::Type{<:Tuple})`.
 
     # Hypothetical fma form taking a 4-lane tuple of f32s as the first
     # operand. Not a real PTX op — we just want to exercise the braced
@@ -1377,24 +1420,9 @@ end
             :m99n99k99, :row, :col, :f32, :e2m1, :e2m1, :f32, :ue8m0) === nothing
     end
 
-    # ---- _ldmatrix_register ----
-    silent() do
-        PTX._ldmatrix_register(:m8n8, :x4, false, :shared, :b16)
-        PTX._ldmatrix_register(:m8n8, :x1, true,  :shared_cta, :b16)
-        PTX._ldmatrix_register(:m16n16, :x1, false, :shared, :b8)
-    end
-    @test which(Operation{:ldmatrix,
-            (:sync, :aligned, :m8n8, :x4, :shared, :b16)}(),
-        (Core.LLVMPtr{UInt16, PTX.AS.Shared},)).module == PTX
-
-    # ---- _stmatrix_register (also coverage for n_in==1 vs n_in>1 branches) ----
-    silent() do
-        PTX._stmatrix_register(:m8n8, :x1, false, :shared, :b16)       # n_in=1 path
-        PTX._stmatrix_register(:m8n8, :x4, true,  :shared_cta, :b16)   # n_in>1 + trans
-    end
-    @test which(Operation{:stmatrix,
-            (:sync, :aligned, :m8n8, :x1, :shared, :b16)}(),
-        (Core.LLVMPtr{UInt16, PTX.AS.Shared}, UInt32)).module == PTX
+    # (ldmatrix/stmatrix migrated to tier-2 literal methods; the ::cta asm
+    # forms are built by include-time loops — no register helper left.
+    # Dispatch sanity lives in the tier-2 wrapper testset above.)
 
     # (tma migrated to tier-2 literal methods — no register helper left;
     # dispatch is asserted in its own testset above)

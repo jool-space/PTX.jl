@@ -220,7 +220,10 @@ end
 # --- stmatrix --------------------------------------------------------------
 #
 # stmatrix was added in PTX 8.0 / sm_90 (Hopper). ptxas rejects it on Ada
-# and lower. Validates the asm string + tied-input constraint set.
+# and lower. Validates instruction text + operand shape through real ptxas.
+# Since the tier-2 migration the address may be a 64-bit register (%rd, the
+# intrinsic takes the pointer directly) instead of the asm tier's forced
+# 32-bit %r — ptxas accepts both for .shared instructions.
 
 function _stmatrix_compile_x1!(addr::Core.LLVMPtr{UInt16, PTX.AS.Shared},
                                 v::UInt32)
@@ -248,7 +251,7 @@ end
                       cap = v"9.0", feature_set = :arch)
     @test occursin("stmatrix.sync.aligned.m8n8.x1.shared.b16", ptx_x1)
     # Operand order: address first, then 1-element brace.
-    @test occursin(r"stmatrix\.sync\.aligned\.m8n8\.x1\.shared\.b16\s+\[%r\d+\]\s*,\s*\{%r\d+\}", ptx_x1)
+    @test occursin(r"stmatrix\.sync\.aligned\.m8n8\.x1\.shared\.b16\s+\[%rd?\d+\]\s*,\s*\{%r\d+\}", ptx_x1)
 
     types_x4 = Tuple{Core.LLVMPtr{UInt16, PTX.AS.Shared}, UInt32, UInt32, UInt32, UInt32}
     @test ptxas_compiles(_stmatrix_compile_x4!, types_x4;
@@ -257,7 +260,7 @@ end
                       cap = v"9.0", feature_set = :arch)
     @test occursin("stmatrix.sync.aligned.m8n8.x4.shared.b16", ptx_x4)
     # 4-element brace input.
-    @test occursin(r"\[%r\d+\]\s*,\s*\{%r\d+(?:, %r\d+){3}\}", ptx_x4)
+    @test occursin(r"\[%rd?\d+\]\s*,\s*\{%r\d+(?:, %r\d+){3}\}", ptx_x4)
 
     @test ptxas_compiles(_stmatrix_compile_x4_trans!, types_x4;
                          cap = v"9.0", feature_set = :arch)

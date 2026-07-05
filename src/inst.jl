@@ -445,6 +445,11 @@ _asm_lltype(T::Type) =
     T === UInt64  ? "i64"   :
     T === Int64   ? "i64"   :
     T === Bool    ? "i8"    :
+    # Pointers pass straight into the asm operand (what @asmcall does via
+    # the builder API); `i8` pointee to match Julia's LLVMPtr lowering,
+    # typed spelling for the Julia ≤ 1.11 device context (NVVM.llvmtype).
+    T <: Core.LLVMPtr ? (T.parameters[2] == 0 ? "i8*" :
+                         "i8 addrspace($(T.parameters[2]))*") :
     error("convergent_asm_ir: no LLVM mapping for $T")
 
 function convergent_asm_ir(asm::String, constraints::String,

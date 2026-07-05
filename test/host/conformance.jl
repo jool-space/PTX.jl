@@ -43,6 +43,7 @@ end
 
 const pS  = Core.LLVMPtr{UInt64, 3}
 const pS8 = Core.LLVMPtr{UInt8, 3}
+const pS16 = Core.LLVMPtr{UInt16, 3}
 const p7  = Core.LLVMPtr{UInt8, 7}    # shared::cluster
 const p0  = Core.LLVMPtr{UInt8, 0}    # generic (TMA descriptor)
 const I4 = (UInt32, UInt32, UInt32, UInt32)
@@ -77,6 +78,63 @@ const PROBES = Tuple{String, Tuple, String, String, Regex}[
         (), "sm_90", "+ptx80", r"barrier\.cluster\.arrive\.relaxed\.aligned;"),
     ("llvm.nvvm.barrier.cluster.wait.aligned",
         (), "sm_90", "+ptx78", r"barrier\.cluster\.wait\.aligned;"),
+
+    # ldmatrix/stmatrix (wrappers/{ldmatrix,stmatrix}.jl) — b16 shapes at
+    # their family floors, b8 shapes at sm_100a (family-specific). The
+    # brace groups in the regexes pin destination/source arity — the b8
+    # shapes are 2 regs per count step, the bug class the old asm
+    # generator had.
+    ("llvm.nvvm.ldmatrix.sync.aligned.m8n8.x1.b16",
+        (pS16,), "sm_75", "+ptx65",
+        r"ldmatrix\.sync\.aligned\.m8n8\.x1\.shared\.b16 \s*\{%r\d+\},"),
+    ("llvm.nvvm.ldmatrix.sync.aligned.m8n8.x1.trans.b16",
+        (pS16,), "sm_75", "+ptx65",
+        r"ldmatrix\.sync\.aligned\.m8n8\.x1\.trans\.shared\.b16 \s*\{%r\d+\},"),
+    ("llvm.nvvm.ldmatrix.sync.aligned.m8n8.x2.b16",
+        (pS16,), "sm_75", "+ptx65",
+        r"ldmatrix\.sync\.aligned\.m8n8\.x2\.shared\.b16 \s*\{%r\d+, %r\d+\},"),
+    ("llvm.nvvm.ldmatrix.sync.aligned.m8n8.x2.trans.b16",
+        (pS16,), "sm_75", "+ptx65",
+        r"ldmatrix\.sync\.aligned\.m8n8\.x2\.trans\.shared\.b16 \s*\{%r\d+, %r\d+\},"),
+    ("llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16",
+        (pS16,), "sm_75", "+ptx65",
+        r"ldmatrix\.sync\.aligned\.m8n8\.x4\.shared\.b16 \s*\{%r\d+, %r\d+, %r\d+, %r\d+\},"),
+    ("llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.trans.b16",
+        (pS16,), "sm_75", "+ptx65",
+        r"ldmatrix\.sync\.aligned\.m8n8\.x4\.trans\.shared\.b16 \s*\{%r\d+, %r\d+, %r\d+, %r\d+\},"),
+    ("llvm.nvvm.ldmatrix.sync.aligned.m16n16.x1.trans.b8",
+        (pS8,), "sm_100a", "+ptx86",
+        r"ldmatrix\.sync\.aligned\.m16n16\.x1\.trans\.shared\.b8 \s*\{%r\d+, %r\d+\},"),
+    ("llvm.nvvm.ldmatrix.sync.aligned.m16n16.x2.trans.b8",
+        (pS8,), "sm_100a", "+ptx86",
+        r"ldmatrix\.sync\.aligned\.m16n16\.x2\.trans\.shared\.b8 \s*\{%r\d+, %r\d+, %r\d+, %r\d+\},"),
+    ("llvm.nvvm.stmatrix.sync.aligned.m8n8.x1.b16",
+        (pS16, UInt32), "sm_90", "+ptx78",
+        r"stmatrix\.sync\.aligned\.m8n8\.x1\.shared\.b16 \s*\[%rd?\d+\], \{%r\d+\};"),
+    ("llvm.nvvm.stmatrix.sync.aligned.m8n8.x1.trans.b16",
+        (pS16, UInt32), "sm_90", "+ptx78",
+        r"stmatrix\.sync\.aligned\.m8n8\.x1\.trans\.shared\.b16 \s*\[%rd?\d+\], \{%r\d+\};"),
+    ("llvm.nvvm.stmatrix.sync.aligned.m8n8.x2.b16",
+        (pS16, UInt32, UInt32), "sm_90", "+ptx78",
+        r"stmatrix\.sync\.aligned\.m8n8\.x2\.shared\.b16 \s*\[%rd?\d+\], \{%r\d+, %r\d+\};"),
+    ("llvm.nvvm.stmatrix.sync.aligned.m8n8.x2.trans.b16",
+        (pS16, UInt32, UInt32), "sm_90", "+ptx78",
+        r"stmatrix\.sync\.aligned\.m8n8\.x2\.trans\.shared\.b16 \s*\[%rd?\d+\], \{%r\d+, %r\d+\};"),
+    ("llvm.nvvm.stmatrix.sync.aligned.m8n8.x4.b16",
+        (pS16, UInt32, UInt32, UInt32, UInt32), "sm_90", "+ptx78",
+        r"stmatrix\.sync\.aligned\.m8n8\.x4\.shared\.b16 \s*\[%rd?\d+\], \{%r\d+, %r\d+, %r\d+, %r\d+\};"),
+    ("llvm.nvvm.stmatrix.sync.aligned.m8n8.x4.trans.b16",
+        (pS16, UInt32, UInt32, UInt32, UInt32), "sm_90", "+ptx78",
+        r"stmatrix\.sync\.aligned\.m8n8\.x4\.trans\.shared\.b16 \s*\[%rd?\d+\], \{%r\d+, %r\d+, %r\d+, %r\d+\};"),
+    ("llvm.nvvm.stmatrix.sync.aligned.m16n8.x1.trans.b8",
+        (pS8, UInt32), "sm_100a", "+ptx86",
+        r"stmatrix\.sync\.aligned\.m16n8\.x1\.trans\.shared\.b8 \s*\[%rd?\d+\], \{%r\d+\};"),
+    ("llvm.nvvm.stmatrix.sync.aligned.m16n8.x2.trans.b8",
+        (pS8, UInt32, UInt32), "sm_100a", "+ptx86",
+        r"stmatrix\.sync\.aligned\.m16n8\.x2\.trans\.shared\.b8 \s*\[%rd?\d+\], \{%r\d+, %r\d+\};"),
+    ("llvm.nvvm.stmatrix.sync.aligned.m16n8.x4.trans.b8",
+        (pS8, UInt32, UInt32, UInt32, UInt32), "sm_100a", "+ptx86",
+        r"stmatrix\.sync\.aligned\.m16n8\.x4\.trans\.shared\.b8 \s*\[%rd?\d+\], \{%r\d+, %r\d+, %r\d+, %r\d+\};"),
 
     # mbarrier (wrappers/mbarrier.jl) — legacy intrinsics at the sm_80
     # floor, scoped ones for parity and the sm_90 forms; expected spellings

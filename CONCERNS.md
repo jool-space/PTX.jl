@@ -432,6 +432,28 @@ Per-family ledger:
   sees a real ordering op (memory pinned across it) instead of an opaque
   sideeffect asm call (everything pinned). Mapping decision and
   verification in the dedicated tier-1 section above.
+- **ldmatrix / stmatrix** (2026-07-06,
+  `test/golden/{ldmatrix@sm75,stmatrix@sm90,ldst_matrix_b8@sm100a}.ptx`
+  diffs): win, plus the convergence fix that motivated it and one family
+  rebuilt outright. The intrinsics carry `convergent` from the registry —
+  the asm tier's sideeffect-only calls were duplicable across divergent
+  branches, the worst hazard class for warp-collective ops. Golden diff
+  mirrors mbarrier's: the asm `r` pointer constraint forced `mov.b64` +
+  `cvt.u32.u64` address materialization, ISel addresses the shared symbol
+  directly (`[var0]`); instruction spellings and arities byte-identical
+  otherwise. State space rides the pointer's AS (llc emits plain
+  `.shared`), so the explicit `shared::cta` chain forms stay asm-tier via
+  `convergent_asm_ir` — same emission as before, now with
+  `convergent nomerge` on the call (pinned in host/wrappers.jl; ptxas
+  accepts the intrinsic path's 64-bit `[%rd]` shared addressing where the
+  asm tier forced 32-bit `%r`, hopper.jl checks both). The b8 shapes were
+  rebuilt, not migrated: every form the old generator emitted was
+  ptxas-rejected — `.trans` is mandatory for m16n16/m16n8, m16n16 count
+  tops out at x2, and the arity was wrong (m16n16 is TWO regs per count
+  step; the generator assumed one). The registry surface is exactly the
+  ptxas-valid surface; conformance probes pin the brace arity per name and
+  the never-compilable forms now fall to the chain default (retired for
+  good by the B3 blessing flip).
 
 ### In-process LLVM dialect compatibility (Julia 1.10/1.11)
 

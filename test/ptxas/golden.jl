@@ -101,13 +101,32 @@ end
                             UInt32, UInt32, UInt32, UInt32}; cap = v"9.0")
 end
 
-# The b8 shapes (ldmatrix m16n16, stmatrix m16n8) are deliberately NOT
-# locked here: every form the asm tier currently generates is
-# ptxas-rejected — non-trans and m16n16-x4 are invalid modifier combos,
-# and the "valid" .trans forms emit the wrong destination arity (m16n16
-# is 2 regs per x1 count, the generator assumed 1). There is no working
-# emission to lock; the migration rebuilds the family on the registry
-# surface and introduces its golden then.
+# The b8 shapes (ldmatrix m16n16, stmatrix m16n8) had no pre-migration
+# lock: every form the old asm generator produced was ptxas-rejected
+# (non-trans and m16n16-x4 are invalid modifier combos; the .trans forms
+# had the wrong destination arity — m16n16 is 2 regs per count step, the
+# generator assumed 1). This golden was born at the migration, locking
+# the rebuilt tier-2 family.
+
+function _golden_ldst_matrix_b8!(out::CuDeviceVector{UInt32, 1},
+                                 a::UInt32, b::UInt32, c::UInt32, d::UInt32)
+    buf = CuStaticSharedArray(UInt8, 512)
+    addr = pointer(buf)
+    r1 = ptx"ldmatrix.sync.aligned.m16n16.x1.trans.shared.b8"(addr)
+    r2 = ptx"ldmatrix.sync.aligned.m16n16.x2.trans.shared.b8"(addr)
+    ptx"stmatrix.sync.aligned.m16n8.x1.trans.shared.b8"(addr, a)
+    ptx"stmatrix.sync.aligned.m16n8.x2.trans.shared.b8"(addr, (a, b))
+    ptx"stmatrix.sync.aligned.m16n8.x4.trans.shared.b8"(addr, (a, b, c, d))
+    @inbounds out[1] = r1[1] + r1[2] + r2[4] + UInt32(buf[1])
+    return nothing
+end
+
+@testset "golden: ldmatrix/stmatrix b8 shapes at sm_100a" begin
+    @test golden_test("ldst_matrix_b8@sm100a", _golden_ldst_matrix_b8!,
+                      Tuple{CuDeviceVector{UInt32, 1},
+                            UInt32, UInt32, UInt32, UInt32};
+                      cap = v"10.0", feature_set = :arch)
+end
 
 
 # --- mbarrier: ::cta forms at their cap floors -------------------------------
