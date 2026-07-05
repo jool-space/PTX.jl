@@ -433,6 +433,59 @@ Per-family ledger:
   sideeffect asm call (everything pinned). Mapping decision and
   verification in the dedicated tier-1 section above.
 
+### In-process LLVM dialect compatibility (Julia 1.10/1.11)
+
+**Status: RESOLVED 2026-07-05 — full suite green on 1.10.11 (LLVM 15),
+1.11.9 (LLVM 16), 1.12.6 (LLVM 18); 27,085 tests each, identical counts.**
+
+The rework was developed and spike-validated exclusively on Julia 1.12.
+Running 1.10/1.11 surfaced four distinct dialect gaps, each with a nasty
+failure mode: Julia demotes an unparseable/unresolvable llvmcall to a
+*runtime trap stub* — the kernel compiles cleanly and traps at launch, no
+compile error. Findings and resolutions, all verified empirically:
+
+- **Typed vs opaque pointers.** Julia ≤ 1.11 parses llvmcall IR in the
+  *device* context with typed pointers (the 1.11 host context is opaque —
+  which is why host tests caught nothing). Opaque `ptr addrspace(N)`
+  spellings stubbed every pointer-carrying tier-1/2 call site. Resolution:
+  all pointer types are spelled typed (`i8 addrspace(N)*`), unconditionally
+  — ≥ 1.12 auto-upgrades on parse, so every version runs one code path, and
+  `i8` matches Julia's LLVMPtr lowering in typed mode. Intrinsics *known*
+  to LLVM 15/16 verify exact pointees there: `TYPED_POINTEE` (emit.jl)
+  carries the five legacy mbarrier positions (i64) and bitcasts from the
+  i8 ABI pointer; unknown intrinsics take any pointee. Overload mangling
+  is `p3i8` on ≤ 16, `p3` on ≥ 17 (one conditional in `mangle`).
+- **`convergent` does not protect the merge direction on LLVM ≤ 16.**
+  SimplifyCFG hoisted the two activemask sites of the convergence-spike
+  shape into one — the miscompile reproduced at runtime on 1.11 hardware
+  (both arms read 0xffffffff). LLVM ≥ 17 blocks the hoist on `convergent`
+  alone; ≤ 16 needs `nomerge`, which forbids exactly that call-site
+  merging. Emitted unconditionally alongside `convergent` (fnattrs and
+  convergent_asm_ir) — harmless where redundant. Verified both ways on
+  1.11: convergent-alone → 1 site, +nomerge → 2 sites; and the hardware
+  masks are correct on 1.10/1.11 after the fix.
+- **`ccall(name, llvmcall, ...)` resolves against the in-process intrinsic
+  table.** The sreg fast path and CUDACore's `cluster_arrive`/`cluster_wait`
+  both stub on ≤ 1.11 for names the old LLVM doesn't know (cluster sregs,
+  cluster barriers). The sreg path now emits through the tier-2
+  IntrinsicCall (declare+call passes unknown names through); the cluster
+  execution barriers got tier-2 wrappers (wrappers/barrier_cluster.jl —
+  also the first slice of the barrier-family migration, and convergent by
+  registry where the chain default was sideeffect-only). Test kernels no
+  longer use CUDACore's cluster intrinsics; upstream issue-worthy.
+- **LLVM 15 lacks `memory(...)` and Julia 1.10 lacks `Core.BFloat16`.**
+  memory_attr downgrades to the exact legacy spellings memory(...)
+  replaced (`readnone`, `argmemonly readonly`, ...) below libllvm 16;
+  bf16-typed intrinsic positions are unaccepted on 1.10 (no wrapped
+  intrinsic has one — bf16 mma moves packed i32 fragments).
+
+Standing defense: CI's 1.10/1.11 lanes run the same suite (the ptxas-tier
+`occursin` asserts are what catch stub kernels); the conformance probes
+pipe the typed spellings through the artifact llc, pinning that the
+opaque-side upgrade also holds. When Julia ≤ 1.11 support is dropped, the
+typed spellings, `TYPED_POINTEE`, the `mangle` conditional, and the
+memory-attr downgrade revert in one commit.
+
 ## Process — plumbing and ecosystem
 
 ### Obtaining llvm-tblgen at the backend's version
