@@ -5,7 +5,11 @@
 #
 #   - virtual registers (`%r5`, `%rd2`, `%p1`, ...) renamed per class in
 #     first-appearance order; non-matching names (`%SP`, sregs like `%tid.x`)
-#     are stable and pass through
+#     are stable and pass through. Digit-suffixed special registers
+#     (`%envreg0`, `%pm0`, `%clock64`) match the virtual-register shape and
+#     are excluded explicitly — renaming them first-appearance would make a
+#     kernel reading `%envreg3` canonicalize identically to one reading
+#     `%envreg0`, masking a real semantic change from the golden harness
 #   - labels (`$L__BB0_3`) renamed in first-appearance order
 #   - function names, parameters, and variable declarations renamed
 #     positionally (they embed gensym counters and kernel-name mangles)
@@ -28,6 +32,34 @@ _Renamer(names::Dict{String,String}, namecount::Int) =
     _Renamer(Dict{String,String}(), Dict{String,Int}(),
              Dict{String,String}(), names, namecount)
 
+# PTX special registers (PTX 9.2 §10). The authoritative list for both the
+# canonicalizer (names that must never be renamed as virtual registers) and
+# the transpiler (names that render as `sreg"..."` — Codegen aliases this
+# set). Most sregs contain `.` or `_` and can't match `_VREG` anyway; the
+# ones that can — `%envregN`, `%pmN`, `%clock64` — are why the exclusion in
+# `_sym` exists.
+const SPECIAL_REGS = Set{String}(vcat(
+    String[
+        "%tid.x", "%tid.y", "%tid.z",
+        "%ntid.x", "%ntid.y", "%ntid.z",
+        "%ctaid.x", "%ctaid.y", "%ctaid.z",
+        "%nctaid.x", "%nctaid.y", "%nctaid.z",
+        "%laneid", "%warpid", "%warpsize", "%clock", "%clock64",
+        "%globaltimer", "%globaltimer_lo", "%globaltimer_hi",
+        "%gridid", "%smid", "%nsmid",
+        "%cluster_ctarank", "%cluster_nctarank",
+        "%clusterid.x", "%clusterid.y", "%clusterid.z", "%clusterid.w",
+        "%nclusterid.x", "%nclusterid.y", "%nclusterid.z", "%nclusterid.w",
+        "%cluster_ctaid.x", "%cluster_ctaid.y", "%cluster_ctaid.z",
+        "%cluster_nctaid.x", "%cluster_nctaid.y", "%cluster_nctaid.z",
+        "%is_explicit_cluster",
+        "%lanemask_eq", "%lanemask_le", "%lanemask_lt", "%lanemask_ge", "%lanemask_gt",
+        "%total_smem_size", "%dynamic_smem_size",
+        "%pm0", "%pm1", "%pm2", "%pm3",
+    ],
+    String["%envreg$i" for i in 0:31],
+))
+
 const _VREG = r"^%([a-z]+)(\d+)$"
 
 function _reg(rn::_Renamer, name::String)
@@ -48,6 +80,9 @@ _label(rn::_Renamer, name::String) =
 function _sym(rn::_Renamer, s::String)
     n = get(rn.names, s, nothing)
     n !== nothing && return n
+    # Hardware names, stable by definition — checked before the virtual-
+    # register shape so `%envreg0`-class sregs never enter the renamer.
+    s in SPECIAL_REGS && return s
     Base.match(_VREG, s) !== nothing && return _reg(rn, s)
     startswith(s, "\$L") && return _label(rn, s)
     return s

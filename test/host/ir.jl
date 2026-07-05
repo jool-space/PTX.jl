@@ -567,3 +567,31 @@ end
     d = replace(b, "st.global.b32 [%rd0], %r5;" => "st.global.b32 [%rd0], %r1;")
     @test canon(a) != canon(d)
 end
+
+@testset "canonicalize: digit-suffixed special registers are stable" begin
+    # `%envreg0`, `%pm0`, `%clock64` match the virtual-register shape
+    # (letters+digits) but are hardware names. Renamed first-appearance,
+    # a kernel reading %envreg3 would canonicalize identically to one
+    # reading %envreg0 — a semantic change the golden harness must see.
+    src(sr) = """
+        .version 8.3
+        .target sm_90
+        .address_size 64
+        .visible .entry julia_k_1(.param .b64 julia_k_1_param_0)
+        {
+        ld.param.b64 %rd3, [julia_k_1_param_0];
+        mov.u32 %r7, $sr;
+        st.global.b32 [%rd3], %r7;
+        ret;
+        }
+        """
+    canon(s) = PTX.IR.format(PTX.IR.canonicalize(PTX.Parser.parse(s)))
+    for sr in ("%envreg0", "%envreg31", "%pm0", "%pm3", "%clock64")
+        @test occursin(sr, canon(src(sr)))
+    end
+    # Different env registers stay distinguishable...
+    @test canon(src("%envreg0")) != canon(src("%envreg3"))
+    # ...while the virtual registers around them still rename.
+    @test occursin("%r0", canon(src("%envreg0")))
+    @test !occursin("%r7", canon(src("%envreg0")))
+end

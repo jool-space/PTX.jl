@@ -77,26 +77,10 @@ function julia_label(name::AbstractString)
     s
 end
 
-const SPECIAL_REGS = Set{String}(vcat(
-    String[
-        "%tid.x", "%tid.y", "%tid.z",
-        "%ntid.x", "%ntid.y", "%ntid.z",
-        "%ctaid.x", "%ctaid.y", "%ctaid.z",
-        "%nctaid.x", "%nctaid.y", "%nctaid.z",
-        "%laneid", "%warpid", "%clock", "%clock64",
-        "%gridid", "%smid", "%nsmid",
-        "%cluster_ctarank", "%cluster_nctarank",
-        "%clusterid.x", "%clusterid.y", "%clusterid.z", "%clusterid.w",
-        "%nclusterid.x", "%nclusterid.y", "%nclusterid.z", "%nclusterid.w",
-        "%cluster_ctaid.x", "%cluster_ctaid.y", "%cluster_ctaid.z",
-        "%cluster_nctaid.x", "%cluster_nctaid.y", "%cluster_nctaid.z",
-        "%is_explicit_cluster",
-        "%lanemask_eq", "%lanemask_le", "%lanemask_lt", "%lanemask_ge", "%lanemask_gt",
-        "%total_smem_size", "%dynamic_smem_size",
-        "%pm0", "%pm1", "%pm2", "%pm3",
-    ],
-    String["%envreg$i" for i in 0:31],
-))
+# The authoritative sreg list lives in IR (src/ir/canonical.jl) — the same
+# names the canonicalizer must never rename are the names the transpiler
+# renders as `sreg"..."`. One list, two consumers.
+const SPECIAL_REGS = IR.SPECIAL_REGS
 
 sreg_val_expr(name::AbstractString) = "sreg\"" * name * "\""
 
