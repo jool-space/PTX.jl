@@ -1,9 +1,10 @@
-# REQUIRES CC 7.0
+# REQUIRES CC 9.0
 #
 # Smoke tests for `tensor_map_encode_tiled` — the host-side wrapper around
-# CUDA driver's `cuTensorMapEncodeTiled`. The descriptor it builds is only
-# consumed by Hopper+ (`cp.async.bulk.tensor.*`), but the encoder itself
-# works on any modern (CUDA 12+) driver, so we don't gate on sm_90.
+# CUDA driver's `cuTensorMapEncodeTiled`. Although encoding is a host-side
+# call, the driver checks the *device*'s TMA support and returns
+# ERROR_NOT_SUPPORTED (801) on pre-Hopper GPUs (verified on sm_89) — so
+# this is gated on CC 9.0 like the ops that consume the descriptor.
 
 using PTX: CuTensorMap, tensor_map_encode_tiled, tensor_map_tile_2d
 using CUDACore
