@@ -45,6 +45,71 @@ end
 end
 
 
+# --- ldmatrix / stmatrix: warp-cooperative matrix ld/st -----------------------
+# Locks taken ahead of the tier-2 migration (the fence recipe): every m8n8.b16
+# form the wrappers expose, both state-space spellings. Results/readbacks
+# thread through `out` so no call is removable.
+
+function _golden_ldmatrix!(out::CuDeviceVector{UInt32, 1})
+    buf = CuStaticSharedArray(UInt16, 256)
+    addr = pointer(buf)
+    r1  = ptx"ldmatrix.sync.aligned.m8n8.x1.shared.b16"(addr)
+    r1t = ptx"ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16"(addr)
+    r2  = ptx"ldmatrix.sync.aligned.m8n8.x2.shared.b16"(addr)
+    r2t = ptx"ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16"(addr)
+    r4  = ptx"ldmatrix.sync.aligned.m8n8.x4.shared.b16"(addr)
+    r4t = ptx"ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16"(addr)
+    c1  = ptx"ldmatrix.sync.aligned.m8n8.x1.shared::cta.b16"(addr)
+    c1t = ptx"ldmatrix.sync.aligned.m8n8.x1.trans.shared::cta.b16"(addr)
+    c2  = ptx"ldmatrix.sync.aligned.m8n8.x2.shared::cta.b16"(addr)
+    c2t = ptx"ldmatrix.sync.aligned.m8n8.x2.trans.shared::cta.b16"(addr)
+    c4  = ptx"ldmatrix.sync.aligned.m8n8.x4.shared::cta.b16"(addr)
+    c4t = ptx"ldmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16"(addr)
+    @inbounds out[1] = r1 + r1t + r2[1] + r2t[2] + r4[1] + r4t[4] +
+                       c1 + c1t + c2[1] + c2t[2] + c4[1] + c4t[4]
+    return nothing
+end
+
+@testset "golden: ldmatrix m8n8.b16 family at sm_75" begin
+    @test golden_test("ldmatrix@sm75", _golden_ldmatrix!,
+                      Tuple{CuDeviceVector{UInt32, 1}}; cap = v"7.5")
+end
+
+function _golden_stmatrix!(out::CuDeviceVector{UInt16, 1},
+                           a::UInt32, b::UInt32, c::UInt32, d::UInt32)
+    buf = CuStaticSharedArray(UInt16, 256)
+    addr = pointer(buf)
+    ptx"stmatrix.sync.aligned.m8n8.x1.shared.b16"(addr, a)
+    ptx"stmatrix.sync.aligned.m8n8.x1.trans.shared.b16"(addr, a)
+    ptx"stmatrix.sync.aligned.m8n8.x2.shared.b16"(addr, (a, b))
+    ptx"stmatrix.sync.aligned.m8n8.x2.trans.shared.b16"(addr, (a, b))
+    ptx"stmatrix.sync.aligned.m8n8.x4.shared.b16"(addr, (a, b, c, d))
+    ptx"stmatrix.sync.aligned.m8n8.x4.trans.shared.b16"(addr, (a, b, c, d))
+    ptx"stmatrix.sync.aligned.m8n8.x1.shared::cta.b16"(addr, a)
+    ptx"stmatrix.sync.aligned.m8n8.x1.trans.shared::cta.b16"(addr, a)
+    ptx"stmatrix.sync.aligned.m8n8.x2.shared::cta.b16"(addr, (a, b))
+    ptx"stmatrix.sync.aligned.m8n8.x2.trans.shared::cta.b16"(addr, (a, b))
+    ptx"stmatrix.sync.aligned.m8n8.x4.shared::cta.b16"(addr, (a, b, c, d))
+    ptx"stmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16"(addr, (a, b, c, d))
+    @inbounds out[1] = buf[1]
+    return nothing
+end
+
+@testset "golden: stmatrix m8n8.b16 family at sm_90" begin
+    @test golden_test("stmatrix@sm90", _golden_stmatrix!,
+                      Tuple{CuDeviceVector{UInt16, 1},
+                            UInt32, UInt32, UInt32, UInt32}; cap = v"9.0")
+end
+
+# The b8 shapes (ldmatrix m16n16, stmatrix m16n8) are deliberately NOT
+# locked here: every form the asm tier currently generates is
+# ptxas-rejected — non-trans and m16n16-x4 are invalid modifier combos,
+# and the "valid" .trans forms emit the wrong destination arity (m16n16
+# is 2 regs per x1 count, the generator assumed 1). There is no working
+# emission to lock; the migration rebuilds the family on the registry
+# surface and introduces its golden then.
+
+
 # --- mbarrier: ::cta forms at their cap floors -------------------------------
 # Two goldens: the sm_80 subset pins the cap floor (no sm_90-only forms),
 # sm_90 adds expect_tx and try_wait. Cluster-space (`shared::cluster`) sink
