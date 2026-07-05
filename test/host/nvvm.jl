@@ -139,11 +139,14 @@ end
     # Typed-pointer LLVMs (≤ 16 / Julia ≤ 1.11) mangle pointer overloads
     # with the pointee; opaque with the address space alone.
     psuf = Base.libllvm_version < v"17" ? "i8" : ""
+    # LLVM 15 (Julia 1.10) predates memory(...) — legacy spelling there.
+    argmem_read = Base.libllvm_version < v"16" ?
+        "argmemonly readonly" : "memory(argmem: read)"
 
     s = synthesize("llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16",
                    (Core.LLVMPtr{UInt16,3},))
     @test occursin("@\"llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16.p3$psuf\"", s.ir)
-    @test occursin("memory(argmem: read)", s.ir)
+    @test occursin(argmem_read, s.ir)
     @test occursin("i8 addrspace(3)* readonly nocapture", s.ir)
     @test occursin("insertvalue [4 x i32]", s.ir)
     @test s.rettype == NTuple{4,UInt32}

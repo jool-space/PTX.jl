@@ -17,6 +17,13 @@ export @nvvm_str
 # free). Bool is special-cased throughout: the token :i1 accepts Bool, whose
 # llvmcall ABI is i8, so emission inserts trunc/zext glue at i1 positions.
 
+# Core.BFloat16 arrived in Julia 1.11. On 1.10 bf16-typed intrinsic
+# positions are simply unaccepted (clear compile-time error) — nothing is
+# lost in practice: no wrapped intrinsic has one (bf16 mma moves packed
+# i32 fragments).
+const _BF16_TYPES = isdefined(Core, :BFloat16) ?
+    (getfield(Core, :BFloat16),) : ()
+
 const SCALARS = Dict{Symbol,Tuple{String,Tuple{Vararg{DataType}}}}(
     :i1   => ("i1",     (Bool,)),
     :i8   => ("i8",     (UInt8, Int8)),
@@ -25,7 +32,7 @@ const SCALARS = Dict{Symbol,Tuple{String,Tuple{Vararg{DataType}}}}(
     :i64  => ("i64",    (UInt64, Int64)),
     :i128 => ("i128",   (UInt128, Int128)),
     :f16  => ("half",   (Float16,)),
-    :bf16 => ("bfloat", (Core.BFloat16,)),
+    :bf16 => ("bfloat", _BF16_TYPES),
     :f32  => ("float",  (Float32,)),
     :f64  => ("double", (Float64,)),
 )
@@ -103,7 +110,7 @@ slotaccepts(kind::Symbol, @nospecialize(T)) =
     kind === :ptr ? (T <: Core.LLVMPtr && isconcretetype(T)) :
     kind === :int ? T in (UInt8, Int8, UInt16, Int16, UInt32, Int32,
                           UInt64, Int64, UInt128, Int128) :
-                    T in (Float16, Core.BFloat16, Float32, Float64)
+                    T in (Float16, _BF16_TYPES..., Float32, Float64)
 
 # --- Attribute rendering ----------------------------------------------------
 #
@@ -115,6 +122,19 @@ slotaccepts(kind::Symbol, @nospecialize(T)) =
 
 function memory_attr(props)::Union{String,Nothing}
     rw = :readmem in props ? "read" : :writemem in props ? "write" : "readwrite"
+    if Base.libllvm_version < v"16"
+        # LLVM 15 (Julia 1.10) predates the memory(...) attribute; these
+        # are the exact legacy spellings memory(...) replaced in LLVM 16 —
+        # semantically identical, natively understood by 15's optimizer.
+        suffix = rw == "read" ? " readonly" : rw == "write" ? " writeonly" : ""
+        :nomem in props                         && return "readnone"
+        :argmemonly in props                    && return "argmemonly" * suffix
+        :inaccessiblememonly in props           && return "inaccessiblememonly" * suffix
+        :inaccessiblemem_or_argmemonly in props && return "inaccessiblemem_or_argmemonly" * suffix
+        :readmem in props                       && return "readonly"
+        :writemem in props                      && return "writeonly"
+        return nothing
+    end
     :nomem in props                         && return "memory(none)"
     :argmemonly in props                    && return "memory(argmem: $rw)"
     :inaccessiblememonly in props           && return "memory(inaccessiblemem: $rw)"
