@@ -37,7 +37,8 @@ using PTX.MBarriers: BarrierArray,
                      barrier_wait, barrier_arrive_expect_tx, barrier_arrive_cluster
 using PTX.Pipelines: Pipeline, pipeline_init!, pipeline_cursor
 using CUDACore
-using CUDACore: cluster_arrive, cluster_wait
+# barrier.cluster via PTX tier-2 wrappers (CUDACore's cluster_arrive/wait
+# ccall-by-name silently traps on Julia ≤ 1.11 — see wrappers/barrier_cluster.jl)
 using Random
 
 # Warp-cooperative SMEM epilogue store via `stmatrix.x4.trans`. Mirrors
@@ -232,8 +233,8 @@ function _ghh_gemm_kernel!(
     end
     ptx"bar.sync"(Val(0))
 
-    cluster_arrive()
-    cluster_wait()
+    ptx"barrier.cluster.arrive"()
+    ptx"barrier.cluster.wait"()
 
     num_blocks_k = K ÷ Int32(GHH_BK_TILE)
 

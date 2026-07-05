@@ -21,6 +21,7 @@ include("types.jl")
 include("inst.jl")
 export @ptx_str, @sreg_str
 
+include("wrappers/barrier_cluster.jl")
 include("wrappers/cp_async.jl")
 include("wrappers/cvt.jl")
 include("wrappers/fence.jl")

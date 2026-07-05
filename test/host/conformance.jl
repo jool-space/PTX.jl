@@ -64,6 +64,20 @@ const PROBES = Tuple{String, Tuple, String, String, Regex}[
     ("llvm.nvvm.shfl.sync.bfly.i32",  I4, "sm_70", "+ptx60", r"shfl\.sync\.bfly\.b32 \s*%r\d+,"),
     ("llvm.nvvm.shfl.sync.bfly.i32p", I4, "sm_70", "+ptx60", r"shfl\.sync\.bfly\.b32 \s*%r\d+\|%p\d+,"),
 
+    # barrier.cluster (wrappers/barrier_cluster.jl) — sm_90 floor
+    ("llvm.nvvm.barrier.cluster.arrive",
+        (), "sm_90", "+ptx78", r"barrier\.cluster\.arrive;"),
+    ("llvm.nvvm.barrier.cluster.arrive.relaxed",
+        (), "sm_90", "+ptx80", r"barrier\.cluster\.arrive\.relaxed;"),
+    ("llvm.nvvm.barrier.cluster.wait",
+        (), "sm_90", "+ptx78", r"barrier\.cluster\.wait;"),
+    ("llvm.nvvm.barrier.cluster.arrive.aligned",
+        (), "sm_90", "+ptx78", r"barrier\.cluster\.arrive\.aligned;"),
+    ("llvm.nvvm.barrier.cluster.arrive.relaxed.aligned",
+        (), "sm_90", "+ptx80", r"barrier\.cluster\.arrive\.relaxed\.aligned;"),
+    ("llvm.nvvm.barrier.cluster.wait.aligned",
+        (), "sm_90", "+ptx78", r"barrier\.cluster\.wait\.aligned;"),
+
     # mbarrier (wrappers/mbarrier.jl) — legacy intrinsics at the sm_80
     # floor, scoped ones for parity and the sm_90 forms; expected spellings
     # per the golden diffs (expect_tx emits its explicit default)
