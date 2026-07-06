@@ -136,8 +136,28 @@ build artifact.
   where a family is irregular — `llvm.nvvm.mma.*` drops `.sync.aligned`
   and leads with the shape, so name-derived completion suggested segments
   invalid at that position while omitting the only valid one. Unwrapped
-  pure chains (`add`, plain-rounding `cvt`) suggest nothing until the
-  modifier-grammar enumeration lands in the registry.
+  pure chains (`add`, plain-rounding `cvt`) deliberately suggest nothing —
+  see the rejected full-grammar note below.
+- **Full-grammar enumeration: considered and rejected** (2026-07-06). The
+  tempting completion of the story — per-family modifier grammars in the
+  registry, closed validation at chain build, full-ISA tab completion —
+  was piloted on cvt with ptxas as the grammar oracle (enumerate a
+  candidate superset, trial-compile each across an arch ladder, commit
+  the accepted set as generated source; gen/sweep_cvt_grammar.jl, kept as
+  a research tool). The pilot's first run killed the idea honestly: the
+  oracle only answers correctly if the per-form operand synthesis
+  (register classes, arity, sub-word carriers) is right, and THAT
+  knowledge is hand-written and rot-prone — the oracle doesn't eliminate
+  transcription, it relocates it. Enforcement would convert an
+  already-loud ptxas error into an earlier loud error at the cost of a
+  second registry with its own maintenance treadmill (mandatory-vs-
+  optional flags, per-family modifier order, arch-specific surfaces, ISA
+  releases). The line that stands instead: enumeration is sound exactly
+  where wrapping forces it anyway (wrapped families get exact completion
+  as a side effect of being load-bearing, cross-checked by conformance
+  and exercised by tests); everything else stays open on the
+  trailing-modifier rule with ptxas as the late-but-loud gate. The
+  registry stays a *semantics* table — the part no oracle can answer.
 
 The method table is *not* the registry. Dispatch is already fully resolved by
 the `Operation{op, mods}` singleton; enumerating the product space as eager
