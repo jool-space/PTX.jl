@@ -100,3 +100,112 @@ end
         nothing
     end
 end
+
+# --- PTX 9.3 extensions (layout / phase_type / report), asm tier ------------
+# No NVVM intrinsics exist for any of these at 22.1.7 — asm tier by
+# necessity, same as the cluster-space forms above.
+
+# `mbarrier.init.layout::{v0,v1}.shared.b64 [mbar], count;` — explicit layout
+# selector. layout::v0 is the historical default; layout::v1 enables fabric
+# report tracking (see wrappers/fabric.jl). Same operand shape as plain
+# `mbarrier.init`; only the asm head differs.
+
+for lay in (:v0, :v1)
+    asm = "mbarrier.init.layout::$lay.shared.b64 [\$0], \$1;"
+    @eval @generated function (::Operation{:mbarrier, (:init, Symbol($("layout::$lay")), :shared, :b64)})(
+            mbar::Core.LLVMPtr{T, AS.Shared},
+            count::Integer) where T
+        quote
+            Base.@inline
+            @asmcall($$asm, "r,r,~{memory}", true, Nothing,
+                     Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
+                     mbar, UInt32(count))
+            nothing
+        end
+    end
+end
+
+# `mbarrier.check_layout.layout::{v0,v1}.shared.b64 p, [mbar];` — sets p=True
+# iff the mbarrier's actual layout matches the qualifier. Lets a callee
+# defensively verify a barrier passed in by a caller. sm_90+.
+
+for lay in (:v0, :v1)
+    asm = "mbarrier.check_layout.layout::$lay.shared.b64 \$0, [\$1];"
+    @eval @generated function (::Operation{:mbarrier, (:check_layout, Symbol($("layout::$lay")), :shared, :b64)})(
+            mbar::Core.LLVMPtr{T, AS.Shared}) where T
+        quote
+            Base.@inline
+            @asmcall($$asm, "=b,r,~{memory}", true,
+                     Bool, Tuple{Core.LLVMPtr{$T, AS.Shared}},
+                     mbar)
+        end
+    end
+end
+
+# `.phase_type::primary` report forms (dual-output):
+# `mbarrier.{test,try}_wait[.parity].phase_type::primary.shared.b64
+#     waitComplete, reportValue, [mbar], state-or-phase;`
+# Returns `(reportPredicate, reportValue)` as `Tuple{Bool, UInt64}` (the
+# dual-output asm shape mirrors setp's `.dual`; see wrappers/setp.jl). The
+# predicate is True iff the primary phase completed AND the payload report
+# is zero (no fabric op flagged an error). On layout::v0 mbarriers the value
+# is always zero — the predicate then collapses to plain phase-completion.
+#
+# `:report` is a synthetic modifier (no PTX counterpart, mirrors setp's
+# `:dual`) that flags the dual-output dispatch — the notation has no other
+# signal to choose between single-output and dual-output return shapes.
+
+for wait in (:test_wait, :try_wait)
+    # token form: UInt64 state from a prior arrive
+    asm = "mbarrier.$wait.phase_type::primary.shared.b64 \$0, \$1, [\$2], \$3;"
+    @eval @generated function (::Operation{:mbarrier, ($(QuoteNode(wait)), :report,
+                                                       Symbol("phase_type::primary"), :shared, :b64)})(
+            mbar::Core.LLVMPtr{T, AS.Shared},
+            state::Integer) where T
+        quote
+            Base.@inline
+            @asmcall($$asm, "=b,=l,r,l,~{memory}", true,
+                     Tuple{Bool, UInt64},
+                     Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt64},
+                     mbar, UInt64(state))
+        end
+    end
+
+    # parity form: 0/1 phase bit
+    asm_p = "mbarrier.$wait.parity.phase_type::primary.shared.b64 \$0, \$1, [\$2], \$3;"
+    @eval @generated function (::Operation{:mbarrier, ($(QuoteNode(wait)), :report, :parity,
+                                                       Symbol("phase_type::primary"), :shared, :b64)})(
+            mbar::Core.LLVMPtr{T, AS.Shared},
+            phase::Integer) where T
+        quote
+            Base.@inline
+            @asmcall($$asm_p, "=b,=l,r,r,~{memory}", true,
+                     Tuple{Bool, UInt64},
+                     Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
+                     mbar, UInt32(phase))
+        end
+    end
+end
+
+# `.phase_type::conditional` parity waits (single-output):
+# `mbarrier.{test,try}_wait.parity.phase_type::conditional.shared.b64
+#     waitComplete, [mbar], phaseParity;`
+# Layout::v1 only. Observes conditional-phase advance — which only happens
+# when the payload report is zero (no fabric errors). `.parity` is mandatory
+# per the PTX 9.3 syntax block. layout::v0 conditional and primary phases
+# advance in unison, so this variant is meaningful only with layout::v1.
+
+for wait in (:test_wait, :try_wait)
+    asm = "mbarrier.$wait.parity.phase_type::conditional.shared.b64 \$0, [\$1], \$2;"
+    @eval @generated function (::Operation{:mbarrier, ($(QuoteNode(wait)), :parity,
+                                                       Symbol("phase_type::conditional"), :shared, :b64)})(
+            mbar::Core.LLVMPtr{T, AS.Shared},
+            phase::Integer) where T
+        quote
+            Base.@inline
+            @asmcall($$asm, "=b,r,r,~{memory}", true,
+                     Bool, Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
+                     mbar, UInt32(phase))
+        end
+    end
+end

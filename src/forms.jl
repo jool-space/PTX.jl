@@ -79,7 +79,10 @@ const FORMS = Dict{Symbol, FormFamily}(
         :abs, :neg, :min, :max, :and, :or, :xor, :not, :shl, :shr, :shf,
         :bfe, :bfi, :brev, :popc, :clz, :prmt, :lop3, :sad, :dp4a, :dp2a,
         :ex2, :lg2, :sin, :cos, :sqrt, :rsqrt, :rcp, :tanh, :copysign,
-        :selp, :szext, :cvt, :cvta, :setp))...,
+        :selp, :szext, :cvt, :cvta, :setp,
+        # `clmad.{lo,hi}.type d, a, b, c;` — carryless multiply-add
+        # (PTX 9.3, sm_80+). Pure ALU; tail names the result type.
+        :clmad))...,
 
     # ── Non-collective side effects, no memory operand ───────────────────
     :membar            => FormFamily(_SIDEFX),
@@ -110,10 +113,19 @@ const FORMS = Dict{Symbol, FormFamily}(
     :cp       => FormFamily(_MEM, [
         # `.b64` tail is the mbarrier address width, not a return.
         (:async, :mbarrier, :arrive) => _MEMSINK,
+        # Bulk copies/reductions never return; PTX 9.3 added `.sem`/`.scope`
+        # forms whose terminal `.type` (.b128, .add.u64, ...) is an operand
+        # descriptor that DTYPE_RETTYPE would misread as a return slot.
+        # Covers cp.async.bulk.{tensor,prefetch} too.
+        (:async, :bulk)          => _MEMSINK,
+        (:reduce, :async, :bulk) => _MEMSINK,
     ]),
     :multimem => FormFamily(_MEM, [
         (:st,)  => _MEMSINK,                    # dtype tail = value written
         (:red,) => _MEMSINK,
+        # `multimem.cp.{async,reduce.async}.bulk` (PTX 9.3) — multicast bulk
+        # copy/reduce; same no-return shape as the :cp entries above.
+        (:cp,)  => _MEMSINK,
     ]),
 
     # ── Warp-/warpgroup-collective (convergent — every lane must reach the
