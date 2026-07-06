@@ -435,6 +435,53 @@ end
 end
 
 
+# --- bar / barrier: CTA execution barriers -----------------------------------
+# Locks taken ahead of the tier-2 migration (the fence recipe): every
+# (form, arity) pair in the migration scope — bar.sync with immediate and
+# register operands, bar.warp.sync, bar.arrive, and the barrier.* spellings
+# in both aligned flavors. Stores between barriers keep each form's program
+# position observable. bar.red/barrier.red are absent deliberately: the asm
+# tier never could express predicate operands, so there is nothing to lock.
+
+function _golden_barrier!(out::CuDeviceVector{UInt32, 1})
+    tid = ptx"mov.u32"(sreg"tid.x")
+    @inbounds begin
+        out[1] = UInt32(1)
+        ptx"bar.sync"(Val(0))
+        out[2] = UInt32(2)
+        ptx"bar.sync"(Val(1), Val(128))
+        out[3] = UInt32(3)
+        rid = tid & UInt32(0x7)
+        ptx"bar.sync"(rid)
+        out[4] = UInt32(4)
+        ptx"bar.sync"(rid, UInt32(128))
+        out[5] = UInt32(5)
+        ptx"bar.warp.sync"(UInt32(0xffffffff))
+        out[6] = UInt32(6)
+        ptx"bar.arrive"(Val(2), Val(128))
+        out[7] = UInt32(7)
+        ptx"barrier.sync"(Val(3))
+        out[8] = UInt32(8)
+        ptx"barrier.sync"(Val(4), Val(128))
+        out[9] = UInt32(9)
+        ptx"barrier.sync.aligned"(Val(5))
+        out[10] = UInt32(10)
+        ptx"barrier.sync.aligned"(Val(6), Val(128))
+        out[11] = UInt32(11)
+        ptx"barrier.arrive"(Val(7), Val(128))
+        out[12] = UInt32(12)
+        ptx"barrier.arrive.aligned"(Val(8), Val(128))
+        out[13] = tid
+    end
+    return nothing
+end
+
+@testset "golden: bar/barrier family at sm_75" begin
+    @test golden_test("barrier@sm75", _golden_barrier!,
+                      Tuple{CuDeviceVector{UInt32, 1}}; cap = v"7.5")
+end
+
+
 # --- vec ld/st.global: all six forms (v{2,4} × {f32,b32,b16}) ---------------
 # Vectorized global load/store. The lowest-cap universal data path — no arch
 # gate. Migrating from an asm `~{memory}` barrier to a tier-1 core-IR

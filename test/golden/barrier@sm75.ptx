@@ -1,0 +1,37 @@
+.version 9.3
+.target sm_75
+.address_size 64
+.visible .entry entry0(.param .align 8 .b8 param0[16], .param .align 8 .b8 param1[32])
+{
+ld.param.b64 %rd0, [param1];
+mov.u32 %r0, %tid.x;
+st.global.b32 [%rd0], 1;
+bar.sync 0;
+st.global.b32 [%rd0+4], 2;
+bar.sync 1, 128;
+st.global.b32 [%rd0+8], 3;
+and.b32 %r1, %r0, 7;
+bar.sync %r1;
+st.global.b32 [%rd0+12], 4;
+mov.b32 %r2, 128;
+bar.sync %r1, %r2;
+st.global.b32 [%rd0+16], 5;
+mov.b32 %r3, -1;
+bar.warp.sync %r3;
+st.global.b32 [%rd0+20], 6;
+bar.arrive 2, 128;
+st.global.b32 [%rd0+24], 7;
+barrier.sync 3;
+st.global.b32 [%rd0+28], 8;
+barrier.sync 4, 128;
+st.global.b32 [%rd0+32], 9;
+barrier.sync.aligned 5;
+st.global.b32 [%rd0+36], 10;
+barrier.sync.aligned 6, 128;
+st.global.b32 [%rd0+40], 11;
+barrier.arrive 7, 128;
+st.global.b32 [%rd0+44], 12;
+barrier.arrive.aligned 8, 128;
+st.global.b32 [%rd0+48], %r0;
+ret;
+}
