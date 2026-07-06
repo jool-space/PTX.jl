@@ -144,9 +144,25 @@ function memory_attr(props)::Union{String,Nothing}
     return nothing
 end
 
+# Upstream-props correction: IntrinsicsNVVM.td at 22.1.7 marks the whole
+# mma.sync surface (dense + block.scale, all 94 names) IntrNoMem but NOT
+# IntrConvergent — yet `mma.sync.aligned` is warp-collective by ISA
+# contract (mandatory .sync/.aligned: every lane must execute the same
+# instruction), so a call site duplicated across a divergent branch is the
+# activemask miscompile class. The overlay forces convergent(+nomerge) on
+# emission; `nomem` stays (pure AND unmovable-across-divergence is
+# coherent — CSE within a block remains legal). Candidate upstream patch;
+# pinned by the conformance props testset so a future table regeneration
+# that gains IntrConvergent shows up as a removable overlay, not a silent
+# double-source.
+const CONVERGENT_OVERLAY_PREFIXES = ("llvm.nvvm.mma.",)
+
+is_convergent(i::Intrinsic) = :convergent in i.props ||
+    any(p -> startswith(i.name, p), CONVERGENT_OVERLAY_PREFIXES)
+
 function fnattrs(i::Intrinsic)::String
     attrs = String[]
-    if :convergent in i.props
+    if is_convergent(i)
         push!(attrs, "convergent")
         # LLVM ≤ 16 (Julia ≤ 1.11) does not derive merge-protection from
         # `convergent`: SimplifyCFG hoists identical convergent calls from

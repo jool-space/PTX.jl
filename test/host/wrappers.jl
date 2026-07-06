@@ -478,6 +478,33 @@ end
     @test occursin("asm sideeffect", s)
     @test occursin("convergent", s)
 
+    # mma_scaled asm fallback: mxf4nvf4 scale_vec::4X ue8m0 (no intrinsic
+    # at 22.1.7). aeff3ee converted wgmma + dense mma but missed this file
+    # — found and fixed during B4; this pin keeps it fixed.
+    mma_sc_fb = Operation{:mma, (:sync, :aligned, Symbol("kind::mxf4nvf4"),
+                                 :block_scale, Symbol("scale_vec::4X"),
+                                 :m16n8k64, :row, :col,
+                                 :f32, :e2m1, :e2m1, :f32, :ue8m0)}()
+    ci, rt = first(Base.code_typed(mma_sc_fb,
+        (NTuple{4, UInt32}, NTuple{2, UInt32}, NTuple{4, Float32},
+         UInt32, UInt16, UInt16, UInt32, UInt16, UInt16)))
+    @test rt === NTuple{4, Float32}
+    s = unescape(string(ci))
+    @test occursin("asm sideeffect", s)
+    @test occursin("convergent nomerge", s)
+
+    # Tier-2 mma (dense + scaled): upstream props lack IntrConvergent (the
+    # whole 94-name surface is IntrNoMem only at 22.1.7) — the emission
+    # overlay (NVVM.CONVERGENT_OVERLAY_PREFIXES) must put `convergent
+    # nomerge` on the declaration anyway.
+    mma_t2 = Operation{:mma, (:sync, :aligned, :m16n8k16, :row, :col,
+                              :f32, :bf16, :bf16, :f32)}()
+    ci, rt = first(Base.code_typed(mma_t2,
+        (NTuple{4, UInt32}, NTuple{2, UInt32}, NTuple{4, Float32})))
+    @test rt === NTuple{4, Float32}
+    s = unescape(string(ci))
+    @test occursin("convergent nomerge", s)
+
     # Contrast: a pure chain-default form (cvt) must stay unattributed and
     # side-effect-free — CSE/DCE of pure conversions is intended.
     spec = build_call(:cvt, (:rn, :f16, :f32), (Float32,))

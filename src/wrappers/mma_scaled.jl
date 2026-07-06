@@ -101,6 +101,14 @@ function _mma_scaled_register_asm(mods, kind, scale_vec, shape, layA, layB,
                             ["r", "h", "h", "r", "h", "h"], ["~{memory}"]), ",")
     flat = vcat(fill(:UInt32, n_a + n_b), fill(cd_J, n_cd),
                 [:UInt32, :UInt16, :UInt16, :UInt32, :UInt16, :UInt16])
+    # mma.sync is warp-collective — emitted via convergent_asm_ir like the
+    # dense fallbacks so the call carries `convergent nomerge` (aeff3ee
+    # converted wgmma + dense mma but missed this file; @asmcall cannot
+    # attach call-site attributes).
+    cdT = c_ty === :f32 ? Float32 : UInt32
+    flat_types = vcat(fill(UInt32, n_a + n_b), fill(cdT, n_cd),
+                      [UInt32, UInt16, UInt16, UInt32, UInt16, UInt16])
+    ir = convergent_asm_ir(asm, constraints, NTuple{n_cd, cdT}, flat_types)
     a_args = [:(a[$i]) for i in 1:n_a]
     b_args = [:(b[$i]) for i in 1:n_b]
     c_args = [:(c[$i]) for i in 1:n_cd]
@@ -110,10 +118,10 @@ function _mma_scaled_register_asm(mods, kind, scale_vec, shape, layA, layB,
             sa::UInt32, bida::UInt16, tida::UInt16,
             sb::UInt32, bidb::UInt16, tidb::UInt16)
         Base.@inline
-        @asmcall($asm, $constraints, true, NTuple{$n_cd, $cd_J},
-                 Tuple{$(flat...)},
-                 $(a_args...), $(b_args...), $(c_args...),
-                 sa, bida, tida, sb, bidb, tidb)
+        Base.llvmcall(($ir, "entry"),
+                      NTuple{$n_cd, $cd_J}, Tuple{$(flat...)},
+                      $(a_args...), $(b_args...), $(c_args...),
+                      sa, bida, tida, sb, bidb, tidb)
     end
     nothing
 end

@@ -168,8 +168,37 @@ known-uncompiled token, logged (not silently skipped). Net: this closes the
 
 ### Convergence on the asm tier
 
-**Status: curated collective forms covered 2026-07-02; chain default stays
-exposed by design until the blessing flip.**
+**Status: curated collective forms covered 2026-07-02; chain default
+retired 2026-07-06 (blessing flip); two B4 finds fixed 2026-07-06 (below).**
+
+**B4 finds (2026-07-06), both of the exact class this section predicts:**
+
+- **The 2026-07-02 conversion missed `mma_scaled.jl`.** Its commit message
+  names "mxf4nvf4 ue8m0" among the converted fallbacks, but the commit
+  never touched the file — the scaled asm residue still emitted plain
+  `@asmcall` (sideeffect, no convergent). Found because B4 set out to pin
+  attributes per family rather than per representative. Fixed: the scaled
+  fallback now emits through `convergent_asm_ir` like the dense ones, and
+  host/wrappers.jl pins it specifically. Lesson recorded: a tripwire that
+  checks "every converted wrapper" only guards the wrappers someone
+  remembered to convert — the B4 pins enumerate the *surface*, not the
+  conversions.
+- **Upstream props gap: the entire mma.sync surface (all 94 dense +
+  block-scale names) is IntrNoMem but NOT IntrConvergent at 22.1.7** —
+  so tier-2 mma declarations derived from raw props were duplicable
+  across divergent branches, reintroducing on the intrinsic tier the
+  hazard the asm tier had just closed. `mma.sync.aligned` is
+  warp-collective by ISA contract; this is an upstream .td bug worth a
+  patch. Fixed by an emission-side overlay
+  (`NVVM.CONVERGENT_OVERLAY_PREFIXES`, currently `llvm.nvvm.mma.` only):
+  fnattrs forces `convergent nomerge` for matching names; `nomem` stays
+  (pure and unmovable-across-divergence is coherent — block-local CSE
+  remains legal). The conformance overlay testset asserts BOTH that
+  upstream still lacks the flag and that emission carries it — when a
+  regenerated table gains IntrConvergent, the first leg turns red as the
+  signal to delete the overlay rather than double-source the flag.
+  Deliberately narrow: `tcgen05.mma` is a single-thread async op and must
+  NOT be covered (pinned in ATTR_ANCHORS).
 
 The asm tier's effect model is where silent-miscompile risk concentrates,
 because its properties are *hand-asserted and checked by nothing in the
@@ -192,10 +221,11 @@ distinct defenses:
   mechanism validated by `spikes/raw_asm_attrs.jl`. Emission is byte-
   identical (goldens unchanged): convergent only *restricts* the optimizer.
   Tripwires: test/host/wrappers.jl pins the attribute in every wrapper's
-  emitted IR; test/ptxas/hopper.jl checks the spike shape (identical calls
-  in both arms of a divergent branch) on the *optimized* module — attribute
-  present, both call sites intact. Teeth verified: stripping `convergent`
-  from the helper flips exactly those testsets red.
+  emitted IR (since B4: including the scaled fallback and a tier-2 mma
+  representative); test/ptxas/hopper.jl checks the spike shape (identical
+  calls in both arms of a divergent branch) on the *optimized* module —
+  attribute present, both call sites intact. Teeth verified: stripping
+  `convergent` from the helper flips exactly those testsets red.
 - **The chain default is permissive by default — RETIRED 2026-07-06 by the
   blessing flip.** Historical posture: an opcode not listed in
   `NONPURE_OPCODES` got no flags at all (CSE/DCE/hoist legal), so the
