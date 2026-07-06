@@ -213,7 +213,10 @@ at kernel-compile time. Single-major pinning makes that PR a serialization
 point for every dependent when CUDA.jl moves to a new backend major, so the
 regen must stay a rehearsed, sub-day, mechanical operation — periodically
 dry-run the regeneration against the *current* JLL (expected result: empty
-diff) to prove the pipeline is still turnkey before a real bump demands it. Note the failure modes are benign either way: a
+diff) to prove the pipeline is still turnkey before a real bump demands it.
+First rehearsal 2026-07-06: both halves (tag → tblgen → JSON; JSON → table)
+byte-identical, ~2 minutes end to end; only friction found was an
+uninstantiated gen/ environment on a fresh machine. Note the failure modes are benign either way: a
 renamed intrinsic either gets AutoUpgraded by `llc` or fails instruction
 selection with a clear error — never a silent miscompile.
 
