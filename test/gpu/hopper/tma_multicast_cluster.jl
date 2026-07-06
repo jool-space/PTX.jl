@@ -23,7 +23,8 @@
 #     must equal the input — failure on either half indicates the multicast
 #     fan-out is broken.
 
-using CUDACore: cluster_arrive, cluster_wait
+# barrier.cluster via PTX tier-2 wrappers (CUDACore's cluster_arrive/wait
+# ccall-by-name silently traps on Julia ≤ 1.11 — see wrappers/barrier_cluster.jl)
 
 function _tma_multicast_cluster_kernel!(out::CuDeviceVector{UInt16, 1},
                                         tma_src::PTX.TMADescriptorPtr)
@@ -41,8 +42,8 @@ function _tma_multicast_cluster_kernel!(out::CuDeviceVector{UInt16, 1},
     end
     ptx"bar.sync"(Val(0))
 
-    cluster_arrive()
-    cluster_wait()
+    ptx"barrier.cluster.arrive"()
+    ptx"barrier.cluster.wait"()
 
     if tid == UInt32(0)
         ptx"mbarrier.arrive.expect_tx.shared.b64"(mb_ptr, UInt32(128))

@@ -60,6 +60,18 @@ if filter_tests!(testsuite, args)
         # setup.jl is loaded into every worker via init_code; don't run it
         # as a standalone test.
         test == "setup" && return false
+        if test == "ptxas/golden" && Base.JLOptions().check_bounds == 1
+            # Golden comparison is byte-exact, and forced bounds checks
+            # (Pkg.test's default) inject branches into the golden kernels —
+            # the tests cannot meaningfully run in this mode, so skip them
+            # rather than fail. CI enforces goldens with check_bounds: 'auto'.
+            # Naming the test explicitly bypasses this filter and hits the
+            # loud refusal in setup.jl instead.
+            @info """skipping ptxas/golden: --check-bounds=yes (Pkg.test's default) injects \
+                     bounds branches into the golden kernels. To include goldens, run \
+                     `Pkg.test("PTX"; julia_args=["--check-bounds=auto"])`."""
+            return false
+        end
         if startswith(test, "gpu/")
             cuda_functional || return false
             req = read_cap_req(joinpath(@__DIR__, test * ".jl"))

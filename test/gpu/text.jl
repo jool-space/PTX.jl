@@ -370,7 +370,7 @@ end
     @test occursin("shfl.sync.bfly.b32", asm)
 end
 
-# --- fence + bar.warp.sync (handled by L0 chain default) -------------------
+# --- fence (tier-1 core IR) + bar.warp.sync (L0 chain default) -------------
 
 function _kernel_fences(out)
     ptx"fence.sc.gpu"()

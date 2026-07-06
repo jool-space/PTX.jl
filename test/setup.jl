@@ -92,3 +92,88 @@ function bf16_gemm_ref(A::Array{Float32, 2}, B::Array{Float32, 2})
     end
     return D
 end
+
+# --- Golden-PTX harness ------------------------------------------------------
+#
+# Locks emitted PTX for migration review (DESIGN.md, "Approach"): comparison
+# is structural — parsed with the package's own parser, canonicalized modulo
+# register/label/name numbering (IR.canonicalize) — so allocator churn never
+# trips it, while any change to the instruction sequence does. Golden files
+# live in test/golden/ and are committed; a deliberate lowering change
+# regenerates them with PTX_UPDATE_GOLDEN=1 and the *git diff of the golden
+# file* is the review artifact.
+
+const GOLDEN_DIR = joinpath(@__DIR__, "golden")
+
+# Pkg.test's default --check-bounds=yes overrides @inbounds in device code,
+# injecting bounds branches the committed baselines don't have. Comparing in
+# that state produces environmental mismatches; REGENERATING in that state
+# would commit polluted goldens that then fail CI. Refuse both, loudly.
+_forced_bounds_checks() = Base.JLOptions().check_bounds == 1
+
+# A golden must be fully structural: a body RawLine keeps its original
+# register numbers (escaping the modulo-renaming guarantee), and a top-level
+# RawLine is dropped by normalize (escaping comparison entirely). Either way
+# the harness silently weakens — a RawLine here means the parser needs
+# extending, and that should be a red test, not a quiet degradation.
+function _assert_structural(m::PTX.IR.Module, name::String)
+    raws = String[]
+    for d in m.directives
+        d isa PTX.IR.RawLine && push!(raws, d.text)
+        d isa PTX.IR.Function || continue
+        for s in d.body
+            s isa PTX.IR.RawLine && push!(raws, s.text)
+        end
+    end
+    isempty(raws) && return nothing
+    error("golden $name: emitted PTX contains $(length(raws)) line(s) the " *
+          "parser could not parse structurally; raw lines bypass canonical " *
+          "renaming. Extend the parser to cover them. First: " *
+          repr(first(raws)))
+end
+
+canonical_ptx(f, tt::Type{<:Tuple}; cap::VersionNumber,
+              feature_set::Symbol = :baseline) =
+    PTX.IR.format(PTX.IR.canonicalize(PTX.Parser.parse(
+        emit_ptx(f, tt; cap, feature_set))))
+
+function golden_test(name::String, f, tt::Type{<:Tuple}; cap::VersionNumber,
+                     feature_set::Symbol = :baseline)
+    if _forced_bounds_checks()
+        @error """golden_test($name): running under --check-bounds=yes (Pkg.test's default), \
+                  which injects bounds branches into the golden kernels. Refusing to compare \
+                  or regenerate — run `Pkg.test("PTX"; julia_args=["--check-bounds=auto"])` instead \
+                  (CI sets check_bounds: 'auto'). Default runs skip goldens in this mode; \
+                  you selected this test explicitly."""
+        return false
+    end
+    parsed = PTX.Parser.parse(emit_ptx(f, tt; cap, feature_set))
+    _assert_structural(parsed, name)
+    got = PTX.IR.format(PTX.IR.canonicalize(parsed))
+    path = joinpath(GOLDEN_DIR, name * ".ptx")
+    if get(ENV, "PTX_UPDATE_GOLDEN", "") == "1"
+        mkpath(GOLDEN_DIR)
+        write(path, got)
+        @info "golden written — review the git diff" name path
+        return true
+    end
+    if !isfile(path)
+        # Goldens are committed review artifacts. A missing baseline must be
+        # a failure — regenerate-on-absence would let a deleted golden pass
+        # green and let a first golden land with zero review.
+        @error "golden baseline missing — create it deliberately with PTX_UPDATE_GOLDEN=1 and review the git diff" name path
+        return false
+    end
+    want = read(path, String)
+    want == got && return true
+    println("=== golden mismatch: $name ===")
+    println("    (if this lowering change is INTENDED, regenerate with PTX_UPDATE_GOLDEN=1")
+    println("     and review the git diff of the golden file)")
+    wl, gl = split(want, "\n"), split(got, "\n")
+    for i in 1:max(length(wl), length(gl))
+        a = i <= length(wl) ? wl[i] : "<missing>"
+        b = i <= length(gl) ? gl[i] : "<missing>"
+        a == b || println("  golden: ", a, "\n  got:    ", b)
+    end
+    return false
+end

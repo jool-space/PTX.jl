@@ -60,14 +60,62 @@ end
         "mov.u32 \$0, %tid.x;"
 end
 
-@testset "bar.sync" begin
-    # Integer-Val bakes immediate `0` / `15` into the asm.
+@testset "bar/barrier wrapper (tier-2 intrinsic lowering)" begin
+    # Migrated family (the fence recipe): bar.{sync,arrive}, bar.warp.sync
+    # and the barrier.{sync,arrive}{.aligned} spellings lower through
+    # llvm.nvvm.barrier.cta.* / llvm.nvvm.bar.warp.sync for Val and
+    # UInt32/Int32 operands (golden: test/golden/barrier@sm75.ptx).
+    # bar.* rides the .aligned intrinsics — PTX §9.7.12.1 defines
+    # bar ≡ barrier.aligned.
+    cases = [
+        (:bar, (:sync,), (Val{0},),
+            "llvm.nvvm.barrier.cta.sync.aligned.all"),
+        (:bar, (:sync,), (UInt32,),
+            "llvm.nvvm.barrier.cta.sync.aligned.all"),
+        (:bar, (:sync,), (Val{1}, Val{128}),
+            "llvm.nvvm.barrier.cta.sync.aligned.count"),
+        (:bar, (:sync,), (UInt32, UInt32),
+            "llvm.nvvm.barrier.cta.sync.aligned.count"),
+        (:bar, (:warp, :sync), (UInt32,),
+            "llvm.nvvm.bar.warp.sync"),
+        (:bar, (:arrive,), (Val{2}, Val{128}),
+            "llvm.nvvm.barrier.cta.arrive.aligned.count"),
+        (:barrier, (:sync,), (Val{3},),
+            "llvm.nvvm.barrier.cta.sync.all"),
+        (:barrier, (:sync,), (Val{4}, Val{128}),
+            "llvm.nvvm.barrier.cta.sync.count"),
+        (:barrier, (:sync, :aligned), (Val{5},),
+            "llvm.nvvm.barrier.cta.sync.aligned.all"),
+        (:barrier, (:sync, :aligned), (Val{6}, Val{128}),
+            "llvm.nvvm.barrier.cta.sync.aligned.count"),
+        (:barrier, (:arrive,), (Val{7}, Val{128}),
+            "llvm.nvvm.barrier.cta.arrive.count"),
+        (:barrier, (:arrive, :aligned), (Val{8}, Val{128}),
+            "llvm.nvvm.barrier.cta.arrive.aligned.count"),
+    ]
+    for (opsym, mods, argts, intr) in cases
+        # the intrinsic is registered and convergent
+        @test PTX.NVVM.isintrinsic(intr)
+        @test :convergent in PTX.NVVM.intrinsic(intr).props
+        # the method dispatches and routes to that intrinsic
+        op = Operation{opsym, mods}()
+        @test which(op, argts).module == PTX
+        ci, rt = first(Base.code_typed(op, argts))
+        @test rt === Nothing
+        @test occursin(intr, string(ci))
+    end
+
+    # Wider integers stay on the asm-tier chain fallback unchanged — the
+    # frozen transpiler emits `ptx"bar.sync"(0)` with Int literals, and
+    # that path keeps its rendering and its convergent nomerge asm.
+    ci, _ = first(Base.code_typed(Operation{:bar, (:sync,)}(), (Int64,)))
+    s = string(ci)
+    @test occursin("bar.sync", s)
+    @test occursin("convergent nomerge", s)
+
+    # Renderer + registry contract for the fallback path, unchanged:
     @test format_call(ptx"bar.sync", Tuple{Val{0}})  == "bar.sync 0;"
     @test format_call(ptx"bar.sync", Tuple{Val{15}}) == "bar.sync 15;"
-    # Register form.
-    @test format_call(ptx"bar.sync", Tuple{UInt32})  == "bar.sync \$0;"
-
-    # Sync-group opcode → side_effects=true + memory clobber.
     spec = build_call(:bar, (:sync,), (Val{0},))
     @test spec.side_effects == true
     @test occursin("~{memory}", spec.constraints)
@@ -234,145 +282,141 @@ end
     @test spec.side_effects == true
 end
 
-@testset "stmatrix.sync.aligned hand-written wrapper" begin
-    # m8n8.x4.shared.b16 — canonical 4-fragment store (Ada+).
-    spec = PTX.stmatrix_spec(:m8n8, :x4, false, :shared, :b16)
-    @test spec.n_in == 4
-    @test spec.asm ==
-        "stmatrix.sync.aligned.m8n8.x4.shared.b16 " *
-        "[\$0], {\$1, \$2, \$3, \$4};"
-    @test spec.constraints == "r,r,r,r,r,~{memory}"
-
-    # x1 — scalar-input form (no NTuple wrapper).
-    spec1 = PTX.stmatrix_spec(:m8n8, :x1, false, :shared, :b16)
-    @test spec1.n_in == 1
-    @test spec1.asm ==
-        "stmatrix.sync.aligned.m8n8.x1.shared.b16 [\$0], {\$1};"
-    @test spec1.constraints == "r,r,~{memory}"
-
-    # x2 with .trans and .shared::cta state-space.
-    spec2 = PTX.stmatrix_spec(:m8n8, :x2, true, :shared_cta, :b16)
-    @test spec2.asm ==
-        "stmatrix.sync.aligned.m8n8.x2.trans.shared::cta.b16 " *
-        "[\$0], {\$1, \$2};"
-
-    # Hopper m16n8.b8 — declared but unreachable on Ada.
-    spec_h = PTX.stmatrix_spec(:m16n8, :x4, false, :shared, :b8)
-    @test occursin("m16n8.x4.shared.b8", spec_h.asm)
-
-    # Methods registered for representative variants.
-    @test which(Operation{:stmatrix, (:sync, :aligned, :m8n8, :x4, :shared, :b16)}(),
-                (Core.LLVMPtr{UInt16, PTX.AS.Shared}, NTuple{4, UInt32})).module == PTX
-    @test which(Operation{:stmatrix, (:sync, :aligned, :m8n8, :x1, :shared, :b16)}(),
-                (Core.LLVMPtr{UInt16, PTX.AS.Shared}, UInt32)).module == PTX
-end
-
-@testset "mbarrier hand-written wrapper" begin
-    # Nothing-return — init takes (addr, count).
-    spec = PTX.mbarrier_spec(:init, :addr_count)
-    @test spec.asm == "mbarrier.init.shared.b64 [\$0], \$1;"
-    @test spec.constraints == "r,r,~{memory}"
-    @test spec.rettype === Nothing
-
-    # Nothing-return — inval takes only (addr).
-    spec = PTX.mbarrier_spec(:inval, :addr_only)
-    @test spec.asm == "mbarrier.inval.shared.b64 [\$0];"
-    @test spec.constraints == "r,~{memory}"
-    @test spec.rettype === Nothing
-
-    # State-token return — arrive returns UInt64.
-    spec = PTX.mbarrier_spec(:arrive, :state_addr)
-    @test spec.asm == "mbarrier.arrive.shared.b64 \$0, [\$1];"
-    @test spec.constraints == "=l,r,~{memory}"
-    @test spec.rettype === UInt64
-
-    # State-token return with extra input — arrive.noComplete.
-    spec = PTX.mbarrier_spec(Symbol("arrive.noComplete"), :state_addr_n)
-    @test spec.asm == "mbarrier.arrive.noComplete.shared.b64 \$0, [\$1], \$2;"
-    @test spec.constraints == "=l,r,r,~{memory}"
-    @test spec.rettype === UInt64
-
-    # Hopper-only fused arrive+expect_tx.
-    spec = PTX.mbarrier_spec(Symbol("arrive.expect_tx"), :state_addr_n)
-    @test spec.asm == "mbarrier.arrive.expect_tx.shared.b64 \$0, [\$1], \$2;"
-
-    # Hopper-only standalone expect_tx — Nothing return.
-    spec = PTX.mbarrier_spec(:expect_tx, :addr_count)
-    @test spec.asm == "mbarrier.expect_tx.shared.b64 [\$0], \$1;"
-    @test spec.rettype === Nothing
-
-    # Pred-return token form — test_wait p, [mbar], state.
-    spec = PTX.mbarrier_spec(:test_wait, :pred_addr_state)
-    @test spec.asm == "mbarrier.test_wait.shared.b64 \$0, [\$1], \$2;"
-    @test spec.constraints == "=b,r,l,~{memory}"
-    @test spec.rettype === Bool
-
-    # Pred-return phase form — test_wait.parity p, [mbar], phase.
-    spec = PTX.mbarrier_spec(Symbol("test_wait.parity"), :pred_addr_phase)
-    @test spec.asm == "mbarrier.test_wait.parity.shared.b64 \$0, [\$1], \$2;"
-    @test spec.constraints == "=b,r,r,~{memory}"
-    @test spec.rettype === Bool
-
-    # Hopper-only try_wait variants share the test_wait shape.
-    spec = PTX.mbarrier_spec(:try_wait, :pred_addr_state)
-    @test spec.asm == "mbarrier.try_wait.shared.b64 \$0, [\$1], \$2;"
-    spec = PTX.mbarrier_spec(Symbol("try_wait.parity"), :pred_addr_phase)
-    @test spec.asm == "mbarrier.try_wait.parity.shared.b64 \$0, [\$1], \$2;"
-
-    # Unknown layout — caller error with informative message.
-    @test_throws ErrorException PTX.mbarrier_spec(:init, :bogus_layout)
-
-    # Methods registered on the chain singletons for representative variants.
-    @test which(Operation{:mbarrier, (:init, :shared, :b64)}(),
-                (Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt32)).module == PTX
-    @test which(Operation{:mbarrier, (:arrive, :shared, :b64)}(),
-                (Core.LLVMPtr{UInt64, PTX.AS.Shared},)).module == PTX
-    @test which(Operation{:mbarrier, (:test_wait, :parity, :shared, :b64)}(),
-                (Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt32)).module == PTX
-    @test which(Operation{:mbarrier, (:try_wait, :shared, :b64)}(),
-                (Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt64)).module == PTX
-end
-
-@testset "mbarrier @generated body expansion" begin
-    # Each `Operation{:mbarrier, ...}` is `@generated` — its body computes the
-    # spec and builds an `@asmcall(...)` quote at type-inference time. We can
-    # trigger expansion via `Base.code_typed` without ever executing
-    # `@asmcall` (which would emit inline asm — GPU-only). The lowered IR
-    # embeds the asm string and constraint string as the llvmcall payload;
-    # we match the opcode prefix + constraint pair, which together pin down
-    # the (asm shape, register-class output) the @generated body produced.
-    pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
-
+@testset "ldmatrix/stmatrix wrapper (tier-2 intrinsic lowering)" begin
+    # Migrated family (DESIGN.md, "Lowering tiers"): the plain-`.shared`
+    # and b8 forms
+    # lower through llvm.nvvm.{ld,st}matrix.* (state space carried by the
+    # pointer's address space); the explicit `shared::cta` spellings ride
+    # convergent_asm_ir. Goldens: test/golden/{ldmatrix@sm75,stmatrix@sm90,
+    # ldst_matrix_b8@sm100a}.ptx.
+    pSh  = Core.LLVMPtr{UInt16, PTX.AS.Shared}
+    pSh8 = Core.LLVMPtr{UInt8, PTX.AS.Shared}
+    T2 = NTuple{2, UInt32}; T4 = NTuple{4, UInt32}
     cases = [
-        ((:init, :shared, :b64),                  (pS, UInt32),
-            "mbarrier.init.shared.b64",                  "r,r,~{memory}"),
-        ((:inval, :shared, :b64),                 (pS,),
-            "mbarrier.inval.shared.b64",                 "r,~{memory}"),
-        ((:arrive, :shared, :b64),                (pS,),
-            "mbarrier.arrive.shared.b64",                "=l,r,~{memory}"),
-        ((:arrive, :noComplete, :shared, :b64),   (pS, UInt32),
-            "mbarrier.arrive.noComplete.shared.b64",     "=l,r,r,~{memory}"),
-        ((:arrive, :expect_tx, :shared, :b64),    (pS, UInt32),
-            "mbarrier.arrive.expect_tx.shared.b64",      "=l,r,r,~{memory}"),
-        ((:expect_tx, :shared, :b64),             (pS, UInt32),
-            "mbarrier.expect_tx.shared.b64",             "r,r,~{memory}"),
-        ((:test_wait, :shared, :b64),             (pS, UInt64),
-            "mbarrier.test_wait.shared.b64",             "=b,r,l,~{memory}"),
-        ((:test_wait, :parity, :shared, :b64),    (pS, UInt32),
-            "mbarrier.test_wait.parity.shared.b64",      "=b,r,r,~{memory}"),
-        ((:try_wait, :shared, :b64),              (pS, UInt64),
-            "mbarrier.try_wait.shared.b64",              "=b,r,l,~{memory}"),
-        ((:try_wait, :parity, :shared, :b64),     (pS, UInt32),
-            "mbarrier.try_wait.parity.shared.b64",       "=b,r,r,~{memory}"),
+        (:ldmatrix, (:sync, :aligned, :m8n8, :x1, :shared, :b16),
+            (pSh,), UInt32, "llvm.nvvm.ldmatrix.sync.aligned.m8n8.x1.b16"),
+        (:ldmatrix, (:sync, :aligned, :m8n8, :x2, :trans, :shared, :b16),
+            (pSh,), T2, "llvm.nvvm.ldmatrix.sync.aligned.m8n8.x2.trans.b16"),
+        (:ldmatrix, (:sync, :aligned, :m8n8, :x4, :shared, :b16),
+            (pSh,), T4, "llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16"),
+        # b8: TWO regs per count step — the arity the old asm generator got
+        # wrong (it assumed 1; ptxas rejected every b8 form it emitted).
+        (:ldmatrix, (:sync, :aligned, :m16n16, :x1, :trans, :shared, :b8),
+            (pSh8,), T2, "llvm.nvvm.ldmatrix.sync.aligned.m16n16.x1.trans.b8"),
+        (:ldmatrix, (:sync, :aligned, :m16n16, :x2, :trans, :shared, :b8),
+            (pSh8,), T4, "llvm.nvvm.ldmatrix.sync.aligned.m16n16.x2.trans.b8"),
+        (:stmatrix, (:sync, :aligned, :m8n8, :x1, :shared, :b16),
+            (pSh, UInt32), Nothing, "llvm.nvvm.stmatrix.sync.aligned.m8n8.x1.b16"),
+        (:stmatrix, (:sync, :aligned, :m8n8, :x2, :trans, :shared, :b16),
+            (pSh, T2), Nothing, "llvm.nvvm.stmatrix.sync.aligned.m8n8.x2.trans.b16"),
+        (:stmatrix, (:sync, :aligned, :m8n8, :x4, :shared, :b16),
+            (pSh, T4), Nothing, "llvm.nvvm.stmatrix.sync.aligned.m8n8.x4.b16"),
+        (:stmatrix, (:sync, :aligned, :m16n8, :x4, :trans, :shared, :b8),
+            (pSh8, T4), Nothing, "llvm.nvvm.stmatrix.sync.aligned.m16n8.x4.trans.b8"),
     ]
-    for (mods, argts, expected_op, expected_cons) in cases
-        op = Operation{:mbarrier, mods}()
-        ci, _ = first(Base.code_typed(op, argts))
+    for (opsym, mods, argts, rettype, intr) in cases
+        # the intrinsic is registered and convergent
+        @test PTX.NVVM.isintrinsic(intr)
+        @test :convergent in PTX.NVVM.intrinsic(intr).props
+        # the method dispatches and routes to that intrinsic
+        op = Operation{opsym, mods}()
+        @test which(op, argts).module == PTX
+        ci, rt = first(Base.code_typed(op, argts))
+        @test rt === rettype
+        @test occursin(intr, string(ci))
+    end
+
+    # `shared::cta` spellings stay asm-tier, with convergent nomerge on the
+    # call (the IR-level tripwire — llc ignores the attribute and goldens
+    # can't observe its loss).
+    for (opsym, mods, argts, asm) in [
+        (:ldmatrix, (:sync, :aligned, :m8n8, :x1, Symbol("shared::cta"), :b16),
+            (pSh,), "ldmatrix.sync.aligned.m8n8.x1.shared::cta.b16"),
+        (:ldmatrix, (:sync, :aligned, :m8n8, :x4, :trans, Symbol("shared::cta"), :b16),
+            (pSh,), "ldmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16"),
+        (:stmatrix, (:sync, :aligned, :m8n8, :x1, Symbol("shared::cta"), :b16),
+            (pSh, UInt32), "stmatrix.sync.aligned.m8n8.x1.shared::cta.b16"),
+        (:stmatrix, (:sync, :aligned, :m8n8, :x4, :trans, Symbol("shared::cta"), :b16),
+            (pSh, T4), "stmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16"),
+    ]
+        ci, _ = first(Base.code_typed(Operation{opsym, mods}(), argts))
         s = string(ci)
-        @test occursin(expected_op,   s)
-        @test occursin(expected_cons, s)
+        @test occursin(asm, s)
+        @test occursin("convergent nomerge", s)
+    end
+
+    # The ptxas-invalid b8 forms (non-trans, m16n16 x4) no longer have
+    # dedicated methods — they fall through to the chain default like any
+    # unregistered form.
+    for (opsym, mods, argts) in [
+        (:ldmatrix, (:sync, :aligned, :m16n16, :x1, :shared, :b8), (pSh8,)),
+        (:ldmatrix, (:sync, :aligned, :m16n16, :x4, :trans, :shared, :b8), (pSh8,)),
+        (:stmatrix, (:sync, :aligned, :m16n8, :x1, :shared, :b8), (pSh8, UInt32)),
+    ]
+        m = which(Operation{opsym, mods}(), argts)
+        @test !occursin("m16n16", string(m.sig)) && !occursin("m16n8", string(m.sig))
     end
 end
+
+@testset "mbarrier wrapper (tier-2 intrinsic lowering)" begin
+    # Second migrated family (DESIGN.md): the ten ::cta forms lower through
+    # llvm.nvvm.mbarrier.* — legacy *.shared intrinsics where the form is
+    # sm_80 (the scoped count-form arrive can't ISel below sm_90), scoped
+    # *.scope.cta.space.cta for parity waits (no legacy exists) and the
+    # sm_90 forms. Goldens: test/golden/mbarrier@sm{80,90}.ptx. The
+    # cluster-space sink forms stay asm-tier pending AS-7 modeling.
+    pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
+    cases = [
+        ((:init, :shared, :b64),                (pS, UInt32), Nothing,
+            "llvm.nvvm.mbarrier.init.shared"),
+        ((:inval, :shared, :b64),               (pS,),        Nothing,
+            "llvm.nvvm.mbarrier.inval.shared"),
+        ((:arrive, :shared, :b64),              (pS,),        UInt64,
+            "llvm.nvvm.mbarrier.arrive.shared"),
+        ((:arrive, :noComplete, :shared, :b64), (pS, UInt32), UInt64,
+            "llvm.nvvm.mbarrier.arrive.noComplete.shared"),
+        ((:arrive, :expect_tx, :shared, :b64),  (pS, UInt32), UInt64,
+            "llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta"),
+        ((:expect_tx, :shared, :b64),           (pS, UInt32), Nothing,
+            "llvm.nvvm.mbarrier.expect.tx.scope.cta.space.cta"),
+        ((:test_wait, :shared, :b64),           (pS, UInt64), Bool,
+            "llvm.nvvm.mbarrier.test.wait.shared"),
+        ((:test_wait, :parity, :shared, :b64),  (pS, UInt32), Bool,
+            "llvm.nvvm.mbarrier.test.wait.parity.scope.cta.space.cta"),
+        ((:try_wait, :shared, :b64),            (pS, UInt64), Bool,
+            "llvm.nvvm.mbarrier.try.wait.scope.cta.space.cta"),
+        ((:try_wait, :parity, :shared, :b64),   (pS, UInt32), Bool,
+            "llvm.nvvm.mbarrier.try.wait.parity.scope.cta.space.cta"),
+    ]
+    for (mods, argts, rettype, intr) in cases
+        # the intrinsic is registered and convergent
+        @test PTX.NVVM.isintrinsic(intr)
+        @test :convergent in PTX.NVVM.intrinsic(intr).props
+        # the method dispatches and routes to that intrinsic
+        op = Operation{:mbarrier, mods}()
+        @test which(op, argts).module == PTX
+        ci, rt = first(Base.code_typed(op, argts))
+        @test rt === rettype
+        @test occursin(intr, string(ci))
+    end
+
+    # integer-flexible signatures still convert (count::Integer etc.)
+    ci, rt = first(Base.code_typed(Operation{:mbarrier, (:init, :shared, :b64)}(),
+                                   (pS, Int)))
+    @test rt === Nothing
+
+    # cluster-space sink forms remain on the asm tier
+    for (mods, argts, asm) in [
+        ((:arrive, Symbol("shared::cluster"), :b64), (pS,),
+            "mbarrier.arrive.shared::cluster.b64 _, ["),
+        ((:arrive, :expect_tx, Symbol("shared::cluster"), :b64), (pS, UInt32),
+            "mbarrier.arrive.expect_tx.shared::cluster.b64 _, ["),
+    ]
+        ci, _ = first(Base.code_typed(Operation{:mbarrier, mods}(), argts))
+        @test occursin(asm, string(ci))
+    end
+end
+
 
 @testset "wgmma sync ops" begin
     # wgmma.fence/commit_group/wait_group flow through the chain default.
@@ -381,7 +425,7 @@ end
     @test format_call(ptx"wgmma.wait_group.sync.aligned",   Tuple{Val{0}}) == "wgmma.wait_group.sync.aligned 0;"
     @test format_call(ptx"wgmma.wait_group.sync.aligned",   Tuple{Val{2}}) == "wgmma.wait_group.sync.aligned 2;"
 
-    # `:wgmma` is in NONPURE_OPCODES → memory clobber + side_effects.
+    # `:wgmma` is registered nonpure (src/forms.jl) → memory clobber + side_effects.
     spec = build_call(:wgmma, (:fence, :sync, :aligned), ())
     @test spec.side_effects == true
     @test occursin("~{memory}", spec.constraints)
@@ -445,6 +489,75 @@ end
 
     @test which(Operation{:wgmma, (:mma_async, :sync, :aligned, :m64n16k32, :f32, :e4m3, :e4m3)}(),
                 (NTuple{8, Float32}, UInt64, UInt64, Bool)).module == PTX
+end
+
+@testset "collective asm forms carry `convergent`" begin
+    # wgmma.mma_async and the mma.sync asm fallbacks are warp(group)-
+    # collective: `sideeffect` alone permits jump-threading duplication of
+    # the call site across a divergent branch — the active_mask miscompile
+    # class. The wrappers emit llvmcall IR with a `convergent` call-site
+    # attribute group (inst.jl, convergent_asm_ir). This attribute binds in
+    # the *in-process* middle end only — llc ignores it — so no ptxas/golden
+    # test can catch its loss; this IR-level pin is the tripwire.
+    # (The optimizer-shape counterpart lives in test/ptxas/hopper.jl.)
+    unescape(s) = replace(s, "\\\"" => "\"")
+
+    # wgmma: all three scale_d variants of a representative form.
+    wg = Operation{:wgmma, (:mma_async, :sync, :aligned,
+                            :m64n8k16, :f32, :bf16, :bf16)}()
+    for argts in ((NTuple{4, Float32}, UInt64, UInt64, Bool),
+                  (NTuple{4, Float32}, UInt64, UInt64, Val{true}),
+                  (NTuple{4, Float32}, UInt64, UInt64, Val{false}))
+        ci, rt = first(Base.code_typed(wg, argts))
+        @test rt === NTuple{4, Float32}
+        s = unescape(string(ci))
+        @test occursin("asm sideeffect", s)
+        @test occursin("convergent", s)
+    end
+
+    # mma asm fallback: kind::f8f6f4 at m16n8k16 (no intrinsic at 22.1.7).
+    mma_fb = Operation{:mma, (:sync, :aligned, Symbol("kind::f8f6f4"),
+                              :m16n8k16, :row, :col,
+                              :f32, :e4m3, :e4m3, :f32)}()
+    ci, rt = first(Base.code_typed(mma_fb,
+        (NTuple{2, UInt32}, NTuple{1, UInt32}, NTuple{4, Float32})))
+    @test rt === NTuple{4, Float32}
+    s = unescape(string(ci))
+    @test occursin("asm sideeffect", s)
+    @test occursin("convergent", s)
+
+    # mma_scaled asm fallback: mxf4nvf4 scale_vec::4X ue8m0 (no intrinsic
+    # at 22.1.7). aeff3ee converted wgmma + dense mma but missed this file
+    # — found and fixed during B4; this pin keeps it fixed.
+    mma_sc_fb = Operation{:mma, (:sync, :aligned, Symbol("kind::mxf4nvf4"),
+                                 :block_scale, Symbol("scale_vec::4X"),
+                                 :m16n8k64, :row, :col,
+                                 :f32, :e2m1, :e2m1, :f32, :ue8m0)}()
+    ci, rt = first(Base.code_typed(mma_sc_fb,
+        (NTuple{4, UInt32}, NTuple{2, UInt32}, NTuple{4, Float32},
+         UInt32, UInt16, UInt16, UInt32, UInt16, UInt16)))
+    @test rt === NTuple{4, Float32}
+    s = unescape(string(ci))
+    @test occursin("asm sideeffect", s)
+    @test occursin("convergent nomerge", s)
+
+    # Tier-2 mma (dense + scaled): upstream props lack IntrConvergent (the
+    # whole 94-name surface is IntrNoMem only at 22.1.7) — the emission
+    # overlay (NVVM.CONVERGENT_OVERLAY_PREFIXES) must put `convergent
+    # nomerge` on the declaration anyway.
+    mma_t2 = Operation{:mma, (:sync, :aligned, :m16n8k16, :row, :col,
+                              :f32, :bf16, :bf16, :f32)}()
+    ci, rt = first(Base.code_typed(mma_t2,
+        (NTuple{4, UInt32}, NTuple{2, UInt32}, NTuple{4, Float32})))
+    @test rt === NTuple{4, Float32}
+    s = unescape(string(ci))
+    @test occursin("convergent nomerge", s)
+
+    # Contrast: a pure chain-default form (cvt) must stay unattributed and
+    # side-effect-free — CSE/DCE of pure conversions is intended.
+    spec = build_call(:cvt, (:rn, :f16, :f32), (Float32,))
+    @test spec.side_effects == false
+    @test !occursin("~{memory}", spec.constraints)
 end
 
 @testset "wgmma.mma_async — full _WGMMA_VARIANTS coverage" begin
@@ -731,72 +844,208 @@ end
     @test BlackwellLayout.B32          == 6
 end
 
-@testset "tma (cp.async.bulk.tensor) hand-written wrapper" begin
-    # Load form: $0 = dst_smem (r), $1 = tmap (l), $2.. = coords (r), last = mbar (r).
-    spec = PTX.tma_spec(2, :load, Symbol("shared::cluster"))
-    @test spec.asm == "cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [\$0], [\$1, {\$2, \$3}], [\$4];"
-    @test spec.constraints == "r,l,r,r,r,~{memory}"
+@testset "tma (cp.async.bulk.tensor) wrapper (tier-2 intrinsic lowering)" begin
+    # Third migrated family. Cluster-destination loads lower through
+    # llvm.nvvm.cp.async.bulk.tensor.g2s.tile.<N>d — multicast and
+    # cta_group are immarg-selected qualifiers on the same intrinsic;
+    # shared::cta loads through g2s.cta.tile.<N>d (PTX 8.6 ISel floor);
+    # stores through s2g.tile.<N>d. The wrapper retypes dst → addrspace(7)
+    # and tmap → generic raw (reinterpret_addrspace — never addrspacecast,
+    # see address_space.jl). Goldens: test/golden/tma@sm{90,100a}.ptx.
+    # shared::cta × cta_group::2 stays asm-tier (no intrinsic carries both).
 
-    spec = PTX.tma_spec(1, :load, Symbol("shared::cta"))
-    @test spec.asm == "cp.async.bulk.tensor.1d.shared::cta.global.tile.mbarrier::complete_tx::bytes [\$0], [\$1, {\$2}], [\$3];"
-    @test spec.constraints == "r,l,r,r,~{memory}"
+    pSh = Core.LLVMPtr{Float32, PTX.AS.Shared}
+    pTm = Core.LLVMPtr{UInt8, PTX.AS.Const}
+    pMb = Core.LLVMPtr{UInt64, PTX.AS.Shared}
+    cluster = Symbol("shared::cluster")
+    cta     = Symbol("shared::cta")
+    cg2     = Symbol("cta_group::2")
+    mc      = Symbol("multicast::cluster")
+    cmpl    = Symbol("mbarrier::complete_tx::bytes")
 
-    spec = PTX.tma_spec(5, :load, Symbol("shared::cluster"))
-    @test spec.asm == "cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [\$0], [\$1, {\$2, \$3, \$4, \$5, \$6}], [\$7];"
-    @test spec.constraints == "r,l,r,r,r,r,r,r,~{memory}"
+    for n in 1:5
+        nd = Symbol("$(n)d")
+        coords = ntuple(_ -> Int32, n)
 
-    # Store form: $0 = tmap (l), $1.. = coords (r), last = src_smem (r). No mbar; bulk_group.
-    spec = PTX.tma_spec(2, :store, :_)
-    @test spec.asm == "cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group [\$0, {\$1, \$2}], [\$3];"
-    @test spec.constraints == "l,r,r,r,~{memory}"
+        # the intrinsics the wrappers stand on: registered and convergent
+        for name in ("llvm.nvvm.cp.async.bulk.tensor.g2s.tile.$(n)d",
+                     "llvm.nvvm.cp.async.bulk.tensor.g2s.cta.tile.$(n)d",
+                     "llvm.nvvm.cp.async.bulk.tensor.s2g.tile.$(n)d")
+            @test PTX.NVVM.isintrinsic(name)
+            @test :convergent in PTX.NVVM.intrinsic(name).props
+        end
 
-    spec = PTX.tma_spec(3, :store, :_)
-    @test spec.asm == "cp.async.bulk.tensor.3d.global.shared::cta.tile.bulk_group [\$0, {\$1, \$2, \$3}], [\$4];"
-    @test spec.constraints == "l,r,r,r,r,~{memory}"
+        # cluster loads (plain / multicast / cta_group::2 / both) all route
+        # to g2s.tile.<N>d, differing only in immargs and the mask operand
+        for (mods, argtypes) in (
+                ((:async, :bulk, :tensor, nd, cluster, :global, :tile, cmpl),
+                 (pSh, pTm, coords..., pMb)),
+                ((:async, :bulk, :tensor, nd, cluster, :global, :tile, cmpl, mc),
+                 (pSh, pTm, coords..., pMb, UInt16)),
+                ((:async, :bulk, :tensor, nd, cg2, cluster, :global, :tile, cmpl),
+                 (pSh, pTm, coords..., pMb)),
+                ((:async, :bulk, :tensor, nd, cg2, cluster, :global, :tile, cmpl, mc),
+                 (pSh, pTm, coords..., pMb, UInt16)))
+            @test which(Operation{:cp, mods}(), argtypes).module == PTX
+            ci, rt = first(Base.code_typed(Operation{:cp, mods}(), argtypes))
+            @test rt === Nothing
+            @test occursin("g2s.tile.$(n)d", string(ci))
+        end
 
-    # Argument validation — caller errors on out-of-range ndim or bogus dst_ss.
-    @test_throws ErrorException PTX.tma_spec(0, :load, Symbol("shared::cta"))
-    @test_throws ErrorException PTX.tma_spec(6, :load, Symbol("shared::cta"))
-    @test_throws ErrorException PTX.tma_spec(2, :load, :global)
-    @test_throws ErrorException PTX.tma_spec(2, :wat, :_)
+        # shared::cta load → g2s.cta.tile.<N>d
+        mods = (:async, :bulk, :tensor, nd, cta, :global, :tile, cmpl)
+        @test which(Operation{:cp, mods}(),
+                    (pSh, pTm, coords..., pMb)).module == PTX
+        ci, rt = first(Base.code_typed(Operation{:cp, mods}(),
+                                       (pSh, pTm, coords..., pMb)))
+        @test rt === Nothing
+        @test occursin("g2s.cta.tile.$(n)d", string(ci))
 
-    # Methods registered on chain singletons — load (both shared destinations) + store.
-    load_cluster_2d = (:async, :bulk, :tensor, Symbol("2d"), Symbol("shared::cluster"),
-                       :global, :tile, Symbol("mbarrier::complete_tx::bytes"))
-    @test which(Operation{:cp, load_cluster_2d}(),
-                (Core.LLVMPtr{Float32, PTX.AS.Shared},
-                 Core.LLVMPtr{Nothing, PTX.AS.Const},
-                 Int32, Int32,
-                 Core.LLVMPtr{UInt64, PTX.AS.Shared})).module == PTX
+        # store → s2g.tile.<N>d
+        mods = (:async, :bulk, :tensor, nd, :global, cta, :tile, :bulk_group)
+        @test which(Operation{:cp, mods}(),
+                    (pTm, coords..., pSh)).module == PTX
+        ci, rt = first(Base.code_typed(Operation{:cp, mods}(),
+                                       (pTm, coords..., pSh)))
+        @test rt === Nothing
+        @test occursin("s2g.tile.$(n)d", string(ci))
 
-    load_cta_3d = (:async, :bulk, :tensor, Symbol("3d"), Symbol("shared::cta"),
-                   :global, :tile, Symbol("mbarrier::complete_tx::bytes"))
-    @test which(Operation{:cp, load_cta_3d}(),
-                (Core.LLVMPtr{Float32, PTX.AS.Shared},
-                 Core.LLVMPtr{Nothing, PTX.AS.Const},
-                 Int32, Int32, Int32,
-                 Core.LLVMPtr{UInt64, PTX.AS.Shared})).module == PTX
+        # residue: shared::cta × cta_group::2 stays asm-tier (match
+        # truncated before the operand brackets — CodeInfo escapes `$`)
+        mods = (:async, :bulk, :tensor, nd, cg2, cta, :global, :tile, cmpl)
+        ci, _ = first(Base.code_typed(Operation{:cp, mods}(),
+                                      (pSh, pTm, coords..., pMb)))
+        @test occursin("cp.async.bulk.tensor.$(n)d.cta_group::2.shared::cta" *
+                       ".global.tile.mbarrier::complete_tx::bytes [", string(ci))
+    end
+end
 
-    store_2d = (:async, :bulk, :tensor, Symbol("2d"), :global, Symbol("shared::cta"),
-                :tile, :bulk_group)
-    @test which(Operation{:cp, store_2d}(),
-                (Core.LLVMPtr{Nothing, PTX.AS.Const},
-                 Int32, Int32,
-                 Core.LLVMPtr{Float32, PTX.AS.Shared})).module == PTX
+@testset "proxy/init fences (tier-2 intrinsic lowering)" begin
+    # The three proxy/init fences route to llvm.nvvm.fence.* intrinsics
+    # (a core-IR `fence` can't express a proxy fence). Generic memory
+    # fences are tier-1 core IR — see the next testset.
+    for (mods, intr) in (
+            ((:proxy, :async), "llvm.nvvm.fence.proxy.async"),
+            ((:proxy, :async, Symbol("shared::cta")),
+             "llvm.nvvm.fence.proxy.async.shared_cta"),
+            ((:mbarrier_init, :release, :cluster),
+             "llvm.nvvm.fence.mbarrier_init.release.cluster"))
+        @test PTX.NVVM.isintrinsic(intr)
+        @test which(Operation{:fence, mods}(), ()).module == PTX
+        ci, rt = first(Base.code_typed(Operation{:fence, mods}(), ()))
+        @test rt === Nothing
+        @test occursin(intr, string(ci))
+    end
+end
+
+@testset "generic memory fences (tier-1 core IR)" begin
+    # fence.{sc,acq_rel}.{cta,cluster,gpu,sys} lower to a core-IR
+    # `fence <ordering> syncscope(...)` — the PTX↔LLVM mapping is pinned
+    # in wrappers/fence.jl (sc↔seq_cst, acq_rel↔acq_rel; cta↔"block",
+    # cluster↔"cluster", gpu↔"device", sys↔system default). Each body must
+    # be the fence instruction, not asm.
+    for (sem, ordering) in ((:sc, "seq_cst"), (:acq_rel, "acq_rel"))
+        for (scope, syncscope) in ((:cta,     "syncscope(\"block\") "),
+                                   (:cluster, "syncscope(\"cluster\") "),
+                                   (:gpu,     "syncscope(\"device\") "),
+                                   (:sys,     ""))
+            mods = (sem, scope)
+            @test which(Operation{:fence, mods}(), ()).module == PTX
+            ci, rt = first(Base.code_typed(Operation{:fence, mods}(), ()))
+            @test rt === Nothing
+            # CodeInfo printing escapes the quotes inside the llvmcall IR
+            # string; unescape before matching the syncscope clause.
+            s = replace(string(ci), "\\\"" => "\"")
+            @test occursin("fence $syncscope$ordering", s)
+            @test !occursin("asm", s)   # tier 1: real ordering op, no asm
+        end
+    end
+end
+
+@testset "tcgen05 wrapper (tier-2 intrinsic lowering)" begin
+    # Fourth migrated family — see wrappers/tcgen05.jl for the mapping.
+    # The notation surface keeps raw UInt32 taddr/SMEM-offset operands;
+    # bodies must route to the intrinsic literals. mx mma kinds stay
+    # asm-tier (block-scale operands are not in the notation surface).
+    cg1 = Symbol("cta_group::1")
+    cg2 = Symbol("cta_group::2")
+
+    for (mods, argts, intr) in (
+            ((:shift, cg1, :down), (UInt32,), "tcgen05.shift.down.cg1"),
+            ((:dealloc, cg2, :sync, :aligned, :b32), (UInt32, UInt32),
+             "tcgen05.dealloc.cg2"),
+            ((:cp, cg1, Symbol("128x128b")), (UInt32, UInt64),
+             "tcgen05.cp.128x128b.cg1"),
+            ((:alloc, cg1, :sync, :aligned, Symbol("shared::cta"), :b32),
+             (UInt32, UInt32), "tcgen05.alloc.shared.cg1"),
+            ((:relinquish_alloc_permit, cg1, :sync, :aligned), (),
+             "tcgen05.relinq.alloc.permit.cg1"),
+            ((Symbol("wait::ld"), :sync, :aligned), (), "tcgen05.wait.ld"),
+            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
+              Symbol("shared::cta"), :b64), (UInt32,),
+             "tcgen05.commit.shared.cg1"),
+            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
+              Symbol("multicast::cluster"), Symbol("shared::cluster"), :b64),
+             (UInt32, UInt16), "tcgen05.commit.mc.shared.cg1"))
+        @test which(Operation{:tcgen05, mods}(), argts).module == PTX
+        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), argts))
+        @test rt === Nothing
+        @test occursin(intr, string(ci))
+    end
+
+    # ld/st: the full Table-49 grid — arity, inferred return, intrinsic
+    for (shape, base) in (("16x64b", 1), ("32x32b", 1),
+                          ("16x128b", 2), ("16x256b", 4)),
+        c in (1, 2, 4, 8, 16, 32, 64, 128)
+
+        n = base * c
+        n > 128 && continue
+        sh = Symbol(shape)
+        cnt = Symbol("x$c")
+        ld = Operation{:tcgen05, (:ld, :sync, :aligned, sh, cnt, :b32)}()
+        ci, rt = first(Base.code_typed(ld, (UInt32,)))
+        @test rt === (n == 1 ? UInt32 : NTuple{n, UInt32})
+        @test occursin("tcgen05.ld.$shape.x$c", string(ci))
+        st = Operation{:tcgen05, (:st, :sync, :aligned, sh, cnt, :b32)}()
+        ci2, rt2 = first(Base.code_typed(st, (UInt32, NTuple{n, UInt32})))
+        @test rt2 === Nothing
+        @test occursin("tcgen05.st.$shape.x$c", string(ci2))
+    end
+
+    # dense mma kinds route to mma.shared (immarg-selected kind/cta_group)
+    for kind in ("f16", "tf32", "f8f6f4", "i8"), cg in (cg1, cg2)
+        mods = (:mma, cg, Symbol("kind::$kind"))
+        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(),
+                                       (UInt32, UInt64, UInt64, UInt32, Bool)))
+        @test rt === Nothing
+        @test occursin("tcgen05.mma.shared", string(ci))
+    end
+
+    # residue: mx kinds stay asm-tier (match truncated at the bracket)
+    for kind in ("mxf8f6f4", "mxf4", "mxf4nvf4")
+        mods = (:mma, cg1, Symbol("kind::$kind"))
+        ci, _ = first(Base.code_typed(Operation{:tcgen05, mods}(),
+                                      (UInt32, UInt64, UInt64, UInt32, Bool)))
+        @test occursin("tcgen05.mma.cta_group::1.kind::$kind [", string(ci))
+    end
 end
 
 @testset "tuple args → braced operand groups" begin
     # Homogeneous tuple types render as `{$N, $N+1, ...}` and contribute one
-    # LLVM input slot per lane. Used by ldmatrix / mma / .rs cvt forms where
-    # PTX requires a register-vector operand. Hand-written wrappers like
-    # `wrappers/stmatrix.jl` build this manually; the chain default now does
-    # too via `render_arg(::Type{<:Tuple})`.
+    # LLVM input slot per lane. Used by .rs cvt forms and any chain-default
+    # op where PTX requires a register-vector operand (ldmatrix / stmatrix /
+    # mma once built this by hand on the asm tier; all three are tier-2
+    # now). The chain default does it via `render_arg(::Type{<:Tuple})`.
+    # :fakeop is deliberately unregistered — rendering is exercised with an
+    # explicit permissive contract (the registry gate itself is tested in
+    # host/inst.jl).
+    fake = PTX.FormContract(pure = true)
 
     # Hypothetical fma form taking a 4-lane tuple of f32s as the first
     # operand. Not a real PTX op — we just want to exercise the braced
     # rendering. Real ops with this shape (mma.sync, ldmatrix, etc.) have
     # hand-written wrappers; this confirms the chain default also works.
-    spec = build_call(:fakeop, (:f32,), (NTuple{4, Float32},))
+    spec = build_call(:fakeop, (:f32,), (NTuple{4, Float32},); contract = fake)
     @test spec.asm == "fakeop.f32 \$0, {\$1, \$2, \$3, \$4};"
     @test spec.rettype === Float32
     @test spec.constraints == "=f,f,f,f,f"
@@ -804,7 +1053,7 @@ end
     @test spec.passthrough_indices === ((1, 1), (1, 2), (1, 3), (1, 4))
 
     # Mix scalar and tuple args — slot numbering interleaves correctly.
-    spec = build_call(:fakeop, (:f32,), (Float32, NTuple{2, UInt32}, Float32))
+    spec = build_call(:fakeop, (:f32,), (Float32, NTuple{2, UInt32}, Float32); contract = fake)
     @test spec.asm == "fakeop.f32 \$0, \$1, {\$2, \$3}, \$4;"
     @test spec.constraints == "=f,f,r,r,f"
     @test spec.passthrough_indices ===
@@ -813,7 +1062,7 @@ end
     # NTuple{1, T} is still tuple-shaped — emits `{$N}` (single-element
     # brace group). Real PTX accepts this; e.g. `stmatrix.x1` uses
     # `{$1}` not `$1` per the spec.
-    spec = build_call(:fakeop, (), (NTuple{1, UInt32},))
+    spec = build_call(:fakeop, (), (NTuple{1, UInt32},); contract = fake)
     @test spec.asm == "fakeop {\$0};"
     @test spec.constraints == "r"
     @test spec.passthrough_indices === ((1, 1),)
@@ -821,10 +1070,10 @@ end
     # Heterogeneous tuple is rejected — there's no single constraint
     # letter that works.
     @test_throws ErrorException build_call(:fakeop, (),
-                                            (Tuple{Float32, Int32},))
+                                            (Tuple{Float32, Int32},); contract = fake)
 
     # Empty tuple is rejected — no operand mapping.
-    @test_throws ErrorException build_call(:fakeop, (), (Tuple{},))
+    @test_throws ErrorException build_call(:fakeop, (), (Tuple{},); contract = fake)
 end
 
 @testset "setp dual-pred hand-written wrapper" begin
@@ -936,78 +1185,84 @@ end
     end
 end
 
-@testset "shfl.sync hand-written wrapper" begin
+@testset "shfl.sync wrapper (tier-2 intrinsic lowering)" begin
     # shfl.sync.<mode>.b32 d, a, b, c, mask;        — UInt32 output
     # shfl.sync.<mode>.b32 d|p, a, b, c, mask;      — (UInt32, Bool) output
-    # All four modes share the same operand layout; the `:pred` modifier
-    # flips the output form.
+    # First migrated family (DESIGN.md): the notation surface is unchanged
+    # but lowering goes through llvm.nvvm.shfl.sync.<mode>.i32[p] — the
+    # registry supplies convergent, the .i32p aggregate replaces the
+    # pipe-operand asm, and the wrapper reorders (a, b, c, mask) to the
+    # intrinsic's mask-first convention. Golden: test/golden/shfl@sm75.ptx.
 
-    spec = PTX.shfl_spec(:idx)
-    @test spec.asm == "shfl.sync.idx.b32 \$0, \$1, \$2, \$3, \$4;"
-    @test spec.constraints == "=r,r,r,r,r,~{memory}"
-    @test spec.rettype === UInt32
-
-    spec = PTX.shfl_spec(:up)
-    @test spec.asm == "shfl.sync.up.b32 \$0, \$1, \$2, \$3, \$4;"
-    spec = PTX.shfl_spec(:down)
-    @test spec.asm == "shfl.sync.down.b32 \$0, \$1, \$2, \$3, \$4;"
-    spec = PTX.shfl_spec(:bfly)
-    @test spec.asm == "shfl.sync.bfly.b32 \$0, \$1, \$2, \$3, \$4;"
-
-    # Pred-output form: `=r,=b` heads the constraints, asm uses pipe operand.
-    spec = PTX.shfl_spec(:idx; pred = true)
-    @test spec.asm == "shfl.sync.idx.b32 \$0|\$1, \$2, \$3, \$4, \$5;"
-    @test spec.constraints == "=r,=b,r,r,r,r,~{memory}"
-    @test spec.rettype === Tuple{UInt32, Bool}
-
-    spec = PTX.shfl_spec(:bfly; pred = true)
-    @test spec.asm == "shfl.sync.bfly.b32 \$0|\$1, \$2, \$3, \$4, \$5;"
-
-    # Unknown mode.
-    @test_throws ErrorException PTX.shfl_spec(:bogus)
-
-    # Methods registered for all four modes, both forms.
     for mode in (:up, :down, :bfly, :idx)
-        @test which(Operation{:shfl, (:sync, mode, :b32)}(),
-                    (UInt32, UInt32, UInt32, UInt32)).module == PTX
-        @test which(Operation{:shfl, (:sync, mode, :b32, :pred)}(),
-                    (UInt32, UInt32, UInt32, UInt32)).module == PTX
+        # the intrinsics the wrapper stands on are in the backend table,
+        # marked convergent
+        for name in ("llvm.nvvm.shfl.sync.$mode.i32",
+                     "llvm.nvvm.shfl.sync.$mode.i32p")
+            @test PTX.NVVM.isintrinsic(name)
+            @test :convergent in PTX.NVVM.intrinsic(name).props
+        end
+
+        # methods registered for both forms; bodies route to the intrinsic
+        # callable rather than @asmcall
+        m = which(Operation{:shfl, (:sync, mode, :b32)}(),
+                  (UInt32, UInt32, UInt32, UInt32))
+        @test m.module == PTX
+        ci, rt = first(Base.code_typed(Operation{:shfl, (:sync, mode, :b32)}(),
+                                       (UInt32, UInt32, UInt32, UInt32)))
+        @test rt === UInt32
+        @test occursin("shfl.sync.$mode.i32", string(ci))
+
+        mp = which(Operation{:shfl, (:sync, mode, :b32, :pred)}(),
+                   (UInt32, UInt32, UInt32, UInt32))
+        @test mp.module == PTX
+        ci, rt = first(Base.code_typed(Operation{:shfl, (:sync, mode, :b32, :pred)}(),
+                                       (UInt32, UInt32, UInt32, UInt32)))
+        @test rt === Tuple{UInt32, Bool}
+        @test occursin("shfl.sync.$mode.i32p", string(ci))
     end
 end
 
-@testset "vec ld/st.global hand-written wrapper" begin
-    # ld.global.v{2,4}.{f32,b32,b16} / st.global.v{2,4}.{f32,b32,b16}.
-    # Brace operand groups are emitted directly — the chain default's
-    # per-arg renderer can't group args into a single brace.
+@testset "vec ld/st.global tier-1 wrapper" begin
+    # ld.global.v{2,4}.{f32,b32,b16} / st.global.v{2,4}.{f32,b32,b16} lower to
+    # core LLVM IR (`load`/`store <N x T>`), not asm — no `~{memory}` barrier,
+    # so the backend can fold offsets / reorder / CSE them. The surface is
+    # `NTuple{N, T}`, so the body repacks between the LLVM vector type
+    # `<N x T>` (what load/store want) and the array type `[N x T]` (how Julia
+    # represents the homogeneous tuple).
 
-    # v4.f32 load: 4 outputs in braces, 1 input pointer slot.
-    spec = PTX.vec_ld_spec(4, :f32, "f")
-    @test spec.asm == "ld.global.v4.f32 {\$0, \$1, \$2, \$3}, [\$4];"
-    @test spec.constraints == "=f,=f,=f,=f,l,~{memory}"
+    # v4.f32 load: bitcast the i8 ABI pointer to pointer-to-vector (typed
+    # spelling — Julia ≤ 1.11 device context parses typed only; the ≥ 1.12
+    # opaque upgrade folds the cast away), load <4 x float>, unpack into
+    # the [4 x float] tuple.
+    ir = PTX.vec_ld_ir(4, :f32, 16)
+    @test occursin("bitcast i8 addrspace(1)* %0 to <4 x float> addrspace(1)*", ir)
+    @test occursin("load <4 x float>, <4 x float> addrspace(1)* %vp, align 16", ir)
+    @test occursin("extractelement <4 x float> %v, i32 3", ir)
+    @test occursin("insertvalue [4 x float]", ir)
+    @test occursin("ret [4 x float]", ir)
+    @test !occursin("~{memory}", ir)   # no optimization barrier
 
-    # v2.f32 load.
-    spec = PTX.vec_ld_spec(2, :f32, "f")
-    @test spec.asm == "ld.global.v2.f32 {\$0, \$1}, [\$2];"
-    @test spec.constraints == "=f,=f,l,~{memory}"
+    # v2.b32 → i32 elements, align 8.
+    ir = PTX.vec_ld_ir(2, :b32, 8)
+    @test occursin("load <2 x i32>, <2 x i32> addrspace(1)* %vp, align 8", ir)
 
-    # v4.b32 load → `r` constraint.
-    spec = PTX.vec_ld_spec(4, :b32, "r")
-    @test spec.asm == "ld.global.v4.b32 {\$0, \$1, \$2, \$3}, [\$4];"
-    @test spec.constraints == "=r,=r,=r,=r,l,~{memory}"
+    # v4.b16 → i16 elements, align 8.
+    ir = PTX.vec_ld_ir(4, :b16, 8)
+    @test occursin("load <4 x i16>, <4 x i16> addrspace(1)* %vp, align 8", ir)
 
-    # v2.b16 load → `h` constraint.
-    spec = PTX.vec_ld_spec(2, :b16, "h")
-    @test spec.constraints == "=h,=h,l,~{memory}"
+    # v4.f32 store: unpack the [4 x float] arg (%1), build <4 x float>, store
+    # to the pointer arg (%0, bitcast to pointer-to-vector).
+    ir = PTX.vec_st_ir(4, :f32, 16)
+    @test occursin("extractvalue [4 x float] %1, 3", ir)
+    @test occursin("insertelement <4 x float>", ir)
+    @test occursin("bitcast i8 addrspace(1)* %0 to <4 x float> addrspace(1)*", ir)
+    @test occursin("store <4 x float> %v3, <4 x float> addrspace(1)* %sp, align 16", ir)
+    @test occursin("ret void", ir)
 
-    # v4.f32 store: pointer slot first ($0), then 4 register inputs in braces.
-    spec = PTX.vec_st_spec(4, :f32, "f")
-    @test spec.asm == "st.global.v4.f32 [\$0], {\$1, \$2, \$3, \$4};"
-    @test spec.constraints == "l,f,f,f,f,~{memory}"
-
-    # v2.b16 store.
-    spec = PTX.vec_st_spec(2, :b16, "h")
-    @test spec.asm == "st.global.v2.b16 [\$0], {\$1, \$2};"
-    @test spec.constraints == "l,h,h,~{memory}"
+    # v2.b16 store, align 4.
+    ir = PTX.vec_st_ir(2, :b16, 4)
+    @test occursin("store <2 x i16> %v1, <2 x i16> addrspace(1)* %sp, align 4", ir)
 
     # Methods registered for representative variants.
     @test which(Operation{:ld, (:global, :v4, :f32)}(),
@@ -1021,16 +1276,15 @@ end
                 (Core.LLVMPtr{Float32, PTX.AS.Global},
                  NTuple{4, Float32})).module == PTX
 
-    # vec ld is `@eval @generated function ...`, so `code_typed` triggers
-    # body expansion at host. (vec st is plain @eval; its body only runs
-    # when invoked from a kernel.)
-    for (n, dt, T, letter) in PTX._VEC_LDST_VARIANTS
+    # vec ld is `@eval @generated function ...`, so `code_typed` triggers body
+    # expansion at host. Every variant bakes its alignment as N*sizeof(T).
+    for (n, dt, T) in PTX._VEC_LDST_VARIANTS
         op = Operation{:ld, (:global, Symbol("v", n), dt)}()
         ci, _ = first(Base.code_typed(op,
             (Core.LLVMPtr{T, PTX.AS.Global},)))
         s = string(ci)
-        @test occursin("ld.global.v$n.$dt", s)
-        @test occursin(join(fill("=$letter", n), ","),  s)
+        @test occursin("load <$n x", s)
+        @test occursin("align $(n * sizeof(T))", s)
     end
 end
 
@@ -1218,15 +1472,15 @@ end
     # an existing method.
     silent(f) = redirect_stderr(devnull) do; f(); end
 
-    # ---- _mma_register ----
+    # ---- _mma_register (migrated to tier-2; now 5-arg, row.col only) ----
     silent() do
-        PTX._mma_register(:m16n8k16, :row, :col, :f32, :bf16, :bf16, :f32)
-        PTX._mma_register(:m16n8k16, :row, :col, :f16, :f16, :f16, :f16)
-        PTX._mma_register(:m16n8k32, :row, :col, :f32, :e4m3, :e4m3, :f32;
-                          kind = :f8f6f4)
+        PTX._mma_register(:m16n8k16, :f32, :bf16, :bf16, :f32)
+        PTX._mma_register(:m16n8k16, :f16, :f16, :f16, :f16)
+        PTX._mma_register(:m16n8k32, :f32, :e4m3, :e4m3, :f32; kind = :f8f6f4)
+        # Asm-tier fallback path: kind::f8f6f4 has no intrinsic at m16n8k16.
+        PTX._mma_register(:m16n8k16, :f32, :e4m3, :e4m3, :f32; kind = :f8f6f4)
         # Early-return path: shape/dtype not in MMA_SYNC_FRAGS.
-        @test PTX._mma_register(:m99n99k99, :row, :col,
-                                 :f32, :bf16, :bf16, :f32) === nothing
+        @test PTX._mma_register(:m99n99k99, :f32, :bf16, :bf16, :f32) === nothing
     end
     @test which(Operation{:mma,
             (:sync, :aligned, :m16n8k16, :row, :col, :f32, :bf16, :bf16, :f32)}(),
@@ -1245,39 +1499,19 @@ end
             :m99n99k99, :row, :col, :f32, :e2m1, :e2m1, :f32, :ue8m0) === nothing
     end
 
-    # ---- _ldmatrix_register ----
-    silent() do
-        PTX._ldmatrix_register(:m8n8, :x4, false, :shared, :b16)
-        PTX._ldmatrix_register(:m8n8, :x1, true,  :shared_cta, :b16)
-        PTX._ldmatrix_register(:m16n16, :x1, false, :shared, :b8)
-    end
-    @test which(Operation{:ldmatrix,
-            (:sync, :aligned, :m8n8, :x4, :shared, :b16)}(),
-        (Core.LLVMPtr{UInt16, PTX.AS.Shared},)).module == PTX
+    # (ldmatrix/stmatrix migrated to tier-2 literal methods; the ::cta asm
+    # forms are built by include-time loops — no register helper left.
+    # Dispatch sanity lives in the tier-2 wrapper testset above.)
 
-    # ---- _stmatrix_register (also coverage for n_in==1 vs n_in>1 branches) ----
-    silent() do
-        PTX._stmatrix_register(:m8n8, :x1, false, :shared, :b16)       # n_in=1 path
-        PTX._stmatrix_register(:m8n8, :x4, true,  :shared_cta, :b16)   # n_in>1 + trans
-    end
-    @test which(Operation{:stmatrix,
-            (:sync, :aligned, :m8n8, :x1, :shared, :b16)}(),
-        (Core.LLVMPtr{UInt16, PTX.AS.Shared}, UInt32)).module == PTX
+    # (tma migrated to tier-2 literal methods — no register helper left;
+    # dispatch is asserted in its own testset above)
 
-    # ---- _tma_load_register / _tma_store_register ----
+    # ---- _vec_ld_register / _vec_st_register (tier-1; 3-arg) ----
     silent() do
-        PTX._tma_load_register(2, Symbol("shared::cluster"))
-        PTX._tma_load_register(5, Symbol("shared::cta"))
-        PTX._tma_store_register(2)
-        PTX._tma_store_register(3)
-    end
-
-    # ---- _vec_ld_register / _vec_st_register ----
-    silent() do
-        PTX._vec_ld_register(2, :f32, Float32, "f")
-        PTX._vec_ld_register(4, :b32, UInt32,  "r")
-        PTX._vec_st_register(4, :f32, Float32, "f")
-        PTX._vec_st_register(2, :b16, UInt16,  "h")
+        PTX._vec_ld_register(2, :f32, Float32)
+        PTX._vec_ld_register(4, :b32, UInt32)
+        PTX._vec_st_register(4, :f32, Float32)
+        PTX._vec_st_register(2, :b16, UInt16)
     end
 
     # ---- _wgmma_mma_async_register ----
@@ -1287,33 +1521,8 @@ end
         PTX._wgmma_mma_async_register(:s32, :s8,   :s8,   8,  32, false)
     end
 
-    # ---- _tcgen05_ld_register / _tcgen05_st_register ----
-    silent() do
-        PTX._tcgen05_ld_register(Symbol("16x128b"), :x1, 2)
-        PTX._tcgen05_st_register(Symbol("16x128b"), :x1, 2)
-        # Early-return: per-lane reg count > 128 is "NA" per Table 49.
-        @test PTX._tcgen05_ld_register(Symbol("16x256b"), :x128, 4) === nothing
-        @test PTX._tcgen05_st_register(Symbol("16x256b"), :x128, 4) === nothing
-    end
-
-    # ---- _tcgen05_shift_register / _dealloc / _cp ----
-    silent() do
-        PTX._tcgen05_shift_register(1)
-        PTX._tcgen05_shift_register(2)
-        PTX._tcgen05_dealloc_register(1)
-        PTX._tcgen05_dealloc_register(2)
-        PTX._tcgen05_cp_register(1, Symbol("128x256b"))
-        PTX._tcgen05_cp_register(2, Symbol("4x256b"))
-    end
-    @test which(Operation{:tcgen05,
-            (:shift, Symbol("cta_group::1"), :down)}(),
-        (UInt32,)).module == PTX
-    @test which(Operation{:tcgen05,
-            (:dealloc, Symbol("cta_group::1"), :sync, :aligned, :b32)}(),
-        (UInt32, UInt32)).module == PTX
-    @test which(Operation{:tcgen05,
-            (:cp, Symbol("cta_group::1"), Symbol("128x256b"))}(),
-        (UInt32, UInt64)).module == PTX
+    # (tcgen05 migrated to tier-2 literal methods — no register helpers
+    # left; dispatch is asserted in its own testset above)
 
     # ---- _setp_dual_register ----
     silent() do
@@ -1324,12 +1533,8 @@ end
     @test which(Operation{:setp, (:dual, :eq, :s32)}(),
                 (Int32, Int32)).module == PTX
 
-    # ---- _shfl_register (registers both data-only + pred forms) ----
-    silent() do
-        for mode in (:up, :down, :bfly, :idx)
-            PTX._shfl_register(mode)
-        end
-    end
+    # ---- shfl: no _register helper since the tier-2 migration (methods
+    # come from a top-level loop in wrappers/shfl.jl); dispatch sanity only
     @test which(Operation{:shfl, (:sync, :idx, :b32)}(),
                 (UInt32, UInt32, UInt32, UInt32)).module == PTX
     @test which(Operation{:shfl, (:sync, :bfly, :b32, :pred)}(),

@@ -340,7 +340,8 @@ end
     @test occursin("ex2.approx.f32", ptx)
     @test occursin("rcp.approx.f32", ptx)
     @test occursin("st.shared.b32", ptx)
-    @test occursin("st.global.v2.f32", ptx)
+    # tier-1 vec ld/st canonicalizes float stores to the `.b32` bit spelling
+    @test occursin("st.global.v2.b32", ptx)
     @test occursin("cvt.rn.bf16.f32", ptx)
 end
 

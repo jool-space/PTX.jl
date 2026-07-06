@@ -234,21 +234,23 @@ function _baseline_vec_ldst!(out_f::CuDeviceVector{Float32, 1},
     p_u32 = pointer(out_u32)
     p_u16 = pointer(out_u16)
 
-    # Loads: v2.f32 / v4.f32 / v2.b32 / v4.b32 / v2.b16 / v4.b16
-    f2 = ptx"ld.global.v2.f32"(p_f)
-    f4 = ptx"ld.global.v4.f32"(p_f)
-    u32_2 = ptx"ld.global.v2.b32"(p_u32)
-    u32_4 = ptx"ld.global.v4.b32"(p_u32)
-    u16_2 = ptx"ld.global.v2.b16"(p_u16)
-    u16_4 = ptx"ld.global.v4.b16"(p_u16)
+    # Tier-1 loads/stores are real (no `~{memory}` barrier), so a same-address
+    # round-trip would be dead-store-eliminated to nothing. Store back at a
+    # distinct offset to keep the access live, and touch each b16 lane so the
+    # backend keeps the narrow `v{2,4}.b16` form (an opaque b16 passthrough
+    # legally coalesces into a wider `.b32` access).
+    ptx"st.global.v2.f32"(p_f + 32, ptx"ld.global.v2.f32"(p_f))
+    ptx"st.global.v4.f32"(p_f + 64, ptx"ld.global.v4.f32"(p_f + 16))
+    ptx"st.global.v2.b32"(p_u32 + 32, ptx"ld.global.v2.b32"(p_u32))
+    ptx"st.global.v4.b32"(p_u32 + 64, ptx"ld.global.v4.b32"(p_u32 + 16))
 
-    # Stores — round-trip the loaded tuples.
-    ptx"st.global.v2.f32"(p_f, f2)
-    ptx"st.global.v4.f32"(p_f, f4)
-    ptx"st.global.v2.b32"(p_u32, u32_2)
-    ptx"st.global.v4.b32"(p_u32, u32_4)
-    ptx"st.global.v2.b16"(p_u16, u16_2)
-    ptx"st.global.v4.b16"(p_u16, u16_4)
+    u16_2 = ptx"ld.global.v2.b16"(p_u16)
+    ptx"st.global.v2.b16"(p_u16 + 16,
+        (ptx"add.s16"(u16_2[1], UInt16(1)), ptx"add.s16"(u16_2[2], UInt16(1))))
+    u16_4 = ptx"ld.global.v4.b16"(p_u16 + 8)
+    ptx"st.global.v4.b16"(p_u16 + 32,
+        (ptx"add.s16"(u16_4[1], UInt16(1)), ptx"add.s16"(u16_4[2], UInt16(1)),
+         ptx"add.s16"(u16_4[3], UInt16(1)), ptx"add.s16"(u16_4[4], UInt16(1))))
     return nothing
 end
 
@@ -258,14 +260,14 @@ end
                   CuDeviceVector{UInt16, 1}}
     @test ptxas_compiles(_baseline_vec_ldst!, types; cap = v"7.5")
     ptx = emit_ptx(_baseline_vec_ldst!, types; cap = v"7.5")
-    @test occursin("ld.global.v2.f32", ptx)
-    @test occursin("ld.global.v4.f32", ptx)
+    # NVPTX canonicalizes float vector ld/st to the `.b32` bit spelling
+    # (registers are typeless), so the f32 forms appear as `.b32`.
     @test occursin("ld.global.v2.b32", ptx)
     @test occursin("ld.global.v4.b32", ptx)
+    @test occursin("st.global.v2.b32", ptx)
+    @test occursin("st.global.v4.b32", ptx)
     @test occursin("ld.global.v2.b16", ptx)
     @test occursin("ld.global.v4.b16", ptx)
-    @test occursin("st.global.v2.f32", ptx)
-    @test occursin("st.global.v4.f32", ptx)
     @test occursin("st.global.v2.b16", ptx)
     @test occursin("st.global.v4.b16", ptx)
 end
@@ -321,6 +323,44 @@ end
     # cg is L2-only; size 16 is the only legal form.
     @test occursin(r"cp\.async\.cg\.shared\.global \[%r\d+\], \[%rd?\d+\], 16;",
                    ptx16)
+end
+
+
+# --- generic memory fences at sm_75 (tier-1 core IR) ------------------------
+#
+# fence.{sc,acq_rel}.{cta,gpu,sys} through the full pipeline including
+# ptxas. Cluster scope is sm_90+ (ISel-enforced) and rides in
+# ptxas/hopper.jl. Stores between the fences keep each one's position
+# observable (a core-IR fence pins memory ops, not other fences).
+
+function _baseline_fences_generic!(out)
+    @inbounds begin
+        out[1] = UInt32(1)
+        ptx"fence.sc.cta"()
+        out[2] = UInt32(2)
+        ptx"fence.sc.gpu"()
+        out[3] = UInt32(3)
+        ptx"fence.sc.sys"()
+        out[4] = UInt32(4)
+        ptx"fence.acq_rel.cta"()
+        out[5] = UInt32(5)
+        ptx"fence.acq_rel.gpu"()
+        out[6] = UInt32(6)
+        ptx"fence.acq_rel.sys"()
+        out[7] = UInt32(7)
+    end
+    return nothing
+end
+
+@testset "generic memory fences at sm_75" begin
+    types = Tuple{CuDeviceVector{UInt32, 1}}
+    @test ptxas_compiles(_baseline_fences_generic!, types; cap = v"7.5")
+    ptx = emit_ptx(_baseline_fences_generic!, types; cap = v"7.5")
+    for form in ("fence.sc.cta", "fence.sc.gpu", "fence.sc.sys",
+                 "fence.acq_rel.cta", "fence.acq_rel.gpu",
+                 "fence.acq_rel.sys")
+        @test occursin(form * ";", ptx)
+    end
 end
 
 

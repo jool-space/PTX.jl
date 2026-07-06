@@ -1,0 +1,21 @@
+.version 9.3
+.target sm_100a
+.address_size 64
+.visible .entry entry0(.param .align 8 .b8 param0[16], .param .u64 .ptr .const .align 1 param1, .param .u32 param2)
+{
+.shared .align 32 .b8 var0[128];
+.shared .align 32 .b8 var1[8];
+ld.param.b64 %rd0, [param1];
+ld.param.b32 %r0, [param2];
+mov.b64 %rd1, 0;
+mov.b16 %rs0, 0;
+cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.cta_group::2 [var0], [%rd0, {%r0, %r0}], [var1];
+mov.b64 %rd2, var1;
+mov.b64 %rd3, var0;
+mov.b16 %rs1, 3;
+cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster.cta_group::2 [var0], [%rd0, {%r0, %r0}], [var1], %rs1;
+cvt.u32.u64 %r1, %rd3;
+cvt.u32.u64 %r2, %rd2;
+cp.async.bulk.tensor.2d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes [%r1], [%rd0, {%r0, %r0}], [%r2];
+ret;
+}

@@ -39,13 +39,18 @@ struct VectorOperand <: Operand
     elements::Tuple{Vararg{Operand}}
 end
 
-# `[base+offset]` — `base` is a register or symbol name; `offset` is the raw
-# text of an offset register/literal, or `nothing`.
+# `[base+offset]` or `[base, {c1, c2, ...}]` — `base` is a register or
+# symbol name; `offset` is the raw text of an offset register/literal, or
+# `nothing`; `coords` is the parsed tensor-coordinate vector of the TMA
+# bracket form (cp.async.bulk.tensor, tensormap ops), or `nothing`. Coords
+# are structured operands so canonical renaming descends into them.
 struct AddressOperand <: Operand
     base::String
     offset::Union{String, Nothing}
+    coords::Union{Tuple{Vararg{Operand}}, Nothing}
 end
-AddressOperand(base) = AddressOperand(base, nothing)
+AddressOperand(base) = AddressOperand(base, nothing, nothing)
+AddressOperand(base, offset) = AddressOperand(base, offset, nothing)
 
 # `(op1, op2, ...)` — used in call instruction return / argument lists.
 struct ParenthesizedOperand <: Operand
@@ -207,5 +212,6 @@ end
 
 include("format.jl")
 include("normalize.jl")
+include("canonical.jl")
 
 end # module IR

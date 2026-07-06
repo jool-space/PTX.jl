@@ -37,7 +37,8 @@ using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
 using PTX.MBarriers: BarrierArray, barrier_init, barrier_arrive,
                      barrier_arrive_expect_tx, barrier_try_wait
 using CUDACore
-using CUDACore: cluster_arrive, cluster_wait
+# barrier.cluster via PTX tier-2 wrappers (CUDACore's cluster_arrive/wait
+# ccall-by-name silently traps on Julia ≤ 1.11 — see wrappers/barrier_cluster.jl)
 using Random
 
 const GHB_BM      = 128

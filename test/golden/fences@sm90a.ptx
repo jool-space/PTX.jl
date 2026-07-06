@@ -1,0 +1,10 @@
+.version 9.3
+.target sm_90a
+.address_size 64
+.visible .entry entry0(.param .align 8 .b8 param0[16])
+{
+fence.proxy.async;
+fence.proxy.async.shared::cta;
+fence.mbarrier_init.release.cluster;
+ret;
+}

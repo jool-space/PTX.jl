@@ -16,7 +16,8 @@
 # No `# REQUIRES CC` banner: ptxas testset is host-only. Runtime testset
 # is gated to clusters-capable arch (Hopper + datacenter Blackwell).
 
-using CUDACore: cluster_arrive, cluster_wait
+# barrier.cluster via PTX tier-2 wrappers (CUDACore's cluster_arrive/wait
+# ccall-by-name silently traps on Julia ≤ 1.11 — see wrappers/barrier_cluster.jl)
 
 function _cluster_arrive_mapa_kernel!(out::CuDeviceVector{UInt32, 1})
     mbar = CuStaticSharedArray(UInt64, 1)
@@ -33,8 +34,8 @@ function _cluster_arrive_mapa_kernel!(out::CuDeviceVector{UInt32, 1})
     end
     # Cluster-wide barrier so the init becomes visible cluster-wide before
     # any CTA tries to arrive on a remote mbarrier.
-    cluster_arrive()
-    cluster_wait()
+    ptx"barrier.cluster.arrive"()
+    ptx"barrier.cluster.wait"()
 
     if tid == UInt32(0)
         # Map our local mbarrier address into CTA-0's view. When cta_rank=0

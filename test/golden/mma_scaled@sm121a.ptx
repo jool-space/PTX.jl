@@ -1,0 +1,28 @@
+.version 9.3
+.target sm_121a
+.address_size 64
+.visible .entry entry0(.param .align 8 .b8 param0[16], .param .align 8 .b8 param1[32], .param .u32 param2, .param .u32 param3, .param .u32 param4, .param .u32 param5, .param .u32 param6, .param .u32 param7, .param .u32 param8, .param .u32 param9, .param .u16 param10, .param .u16 param11)
+{
+ld.param.b64 %rd0, [param1];
+ld.param.b32 %r0, [param2];
+ld.param.b32 %r1, [param3];
+ld.param.b32 %r2, [param4];
+ld.param.b32 %r3, [param5];
+ld.param.b32 %r4, [param6];
+ld.param.b32 %r5, [param7];
+ld.param.b32 %r6, [param8];
+ld.param.b32 %r7, [param9];
+ld.param.b16 %rs0, [param10];
+ld.param.b16 %rs1, [param11];
+mov.b32 %r8, 0f00000000;
+mma.sync.aligned.m16n8k32.row.col.kind::mxf8f6f4.block_scale.scale_vec::1X.f32.e4m3.e4m3.f32.ue8m0 {%r9, %r10, %r11, %r12}, {%r0, %r1, %r2, %r3}, {%r4, %r5}, {%r8, %r8, %r8, %r8}, %r6, {%rs0, %rs1}, %r7, {%rs0, %rs1};
+st.global.b32 [%rd0], %r9;
+mma.sync.aligned.m16n8k64.row.col.kind::mxf4.block_scale.scale_vec::2X.f32.e2m1.e2m1.f32.ue8m0 {%r13, %r14, %r15, %r16}, {%r0, %r1, %r2, %r3}, {%r4, %r5}, {%r8, %r8, %r8, %r8}, %r6, {%rs0, %rs1}, %r7, {%rs0, %rs1};
+st.global.b32 [%rd0+4], %r13;
+mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue4m3 {%r17, %r18, %r19, %r20}, {%r0, %r1, %r2, %r3}, {%r4, %r5}, {%r8, %r8, %r8, %r8}, %r6, {%rs0, %rs1}, %r7, {%rs0, %rs1};
+st.global.b32 [%rd0+8], %r17;
+mov.b32 %r21, 0;
+mma.sync.aligned.kind::mxf4nvf4.block_scale.scale_vec::4X.m16n8k64.row.col.f32.e2m1.e2m1.f32.ue8m0 {%r22, %r23, %r24, %r25}, {%r0, %r1, %r2, %r3}, {%r4, %r5}, {%r21, %r21, %r21, %r21}, %r6, {%rs0, %rs1}, %r7, {%rs0, %rs1};
+st.global.b32 [%rd0+12], %r22;
+ret;
+}

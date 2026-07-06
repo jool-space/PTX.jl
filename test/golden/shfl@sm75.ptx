@@ -1,0 +1,35 @@
+.version 9.3
+.target sm_75
+.address_size 64
+.visible .entry entry0(.param .align 8 .b8 param0[16], .param .align 8 .b8 param1[32])
+{
+ld.param.b64 %rd0, [param1];
+mov.u32 %r0, %tid.x;
+shfl.sync.idx.b32 %r1, %r0, %r0, 31, -1;
+mul.wide.u32 %rd1, %r0, 4;
+add.s64 %rd2, %rd0, %rd1;
+st.global.b32 [%rd2], %r1;
+shfl.sync.up.b32 %r2, %r0, 1, 0, -1;
+st.global.b32 [%rd2+128], %r2;
+shfl.sync.down.b32 %r3, %r0, 1, 31, -1;
+st.global.b32 [%rd2+256], %r3;
+shfl.sync.bfly.b32 %r4, %r0, 1, 31, -1;
+st.global.b32 [%rd2+384], %r4;
+shfl.sync.idx.b32 %r5|%p0, %r0, %r0, 31, -1;
+selp.b32 %r6, 1, 0, %p0;
+add.s32 %r7, %r5, %r6;
+st.global.b32 [%rd2+512], %r7;
+shfl.sync.up.b32 %r8|%p1, %r0, 1, 0, -1;
+selp.b32 %r9, 1, 0, %p1;
+add.s32 %r10, %r8, %r9;
+st.global.b32 [%rd2+640], %r10;
+shfl.sync.down.b32 %r11|%p2, %r0, 1, 31, -1;
+selp.b32 %r12, 1, 0, %p2;
+add.s32 %r13, %r11, %r12;
+st.global.b32 [%rd2+768], %r13;
+shfl.sync.bfly.b32 %r14|%p3, %r0, 1, 31, -1;
+selp.b32 %r15, 1, 0, %p3;
+add.s32 %r16, %r14, %r15;
+st.global.b32 [%rd2+896], %r16;
+ret;
+}

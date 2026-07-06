@@ -205,7 +205,8 @@ end
     @test occursin("cp.async.ca.shared.global",                       ptx)
     @test occursin("cp.async.commit_group",                           ptx)
     @test occursin("cp.async.wait_all",                               ptx)
-    @test occursin("bar.sync 0",                                      ptx)
+    # tier-2 barrier: ISel formats with a tab where inline asm had a space
+    @test occursin(r"bar\.sync \s*0",                                 ptx)
     @test occursin("fence.proxy.async",                               ptx)
     @test occursin("wgmma.fence.sync.aligned",                        ptx)
     @test occursin("wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16", ptx)
@@ -220,7 +221,10 @@ end
 # --- stmatrix --------------------------------------------------------------
 #
 # stmatrix was added in PTX 8.0 / sm_90 (Hopper). ptxas rejects it on Ada
-# and lower. Validates the asm string + tied-input constraint set.
+# and lower. Validates instruction text + operand shape through real ptxas.
+# Since the tier-2 migration the address may be a 64-bit register (%rd, the
+# intrinsic takes the pointer directly) instead of the asm tier's forced
+# 32-bit %r — ptxas accepts both for .shared instructions.
 
 function _stmatrix_compile_x1!(addr::Core.LLVMPtr{UInt16, PTX.AS.Shared},
                                 v::UInt32)
@@ -248,7 +252,7 @@ end
                       cap = v"9.0", feature_set = :arch)
     @test occursin("stmatrix.sync.aligned.m8n8.x1.shared.b16", ptx_x1)
     # Operand order: address first, then 1-element brace.
-    @test occursin(r"stmatrix\.sync\.aligned\.m8n8\.x1\.shared\.b16\s+\[%r\d+\]\s*,\s*\{%r\d+\}", ptx_x1)
+    @test occursin(r"stmatrix\.sync\.aligned\.m8n8\.x1\.shared\.b16\s+\[%rd?\d+\]\s*,\s*\{%r\d+\}", ptx_x1)
 
     types_x4 = Tuple{Core.LLVMPtr{UInt16, PTX.AS.Shared}, UInt32, UInt32, UInt32, UInt32}
     @test ptxas_compiles(_stmatrix_compile_x4!, types_x4;
@@ -257,7 +261,7 @@ end
                       cap = v"9.0", feature_set = :arch)
     @test occursin("stmatrix.sync.aligned.m8n8.x4.shared.b16", ptx_x4)
     # 4-element brace input.
-    @test occursin(r"\[%r\d+\]\s*,\s*\{%r\d+(?:, %r\d+){3}\}", ptx_x4)
+    @test occursin(r"\[%rd?\d+\]\s*,\s*\{%r\d+(?:, %r\d+){3}\}", ptx_x4)
 
     @test ptxas_compiles(_stmatrix_compile_x4_trans!, types_x4;
                          cap = v"9.0", feature_set = :arch)
@@ -305,7 +309,10 @@ end
                          cap = v"9.0", feature_set = :arch)
     ptx = emit_ptx(_mbarrier_compile_expect_tx!, types_etx;
                    cap = v"9.0", feature_set = :arch)
-    @test occursin("mbarrier.expect_tx.shared.b64", ptx)
+    # since the tier-2 migration the backend spells the defaults out:
+    # .relaxed is expect_tx's only legal sem, .cta the default scope —
+    # the same operation in explicit form
+    @test occursin("mbarrier.expect_tx.relaxed.cta.shared.b64", ptx)
 
     types_aetx = Tuple{CuDeviceVector{UInt64, 1},
                         Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt32}
@@ -408,13 +415,82 @@ end
 end
 
 
+# --- wgmma convergence through the optimizer ---------------------------------
+# The spike shape (spikes/raw_asm_attrs.jl): identical collective calls
+# leading both arms of a divergent branch, checked on the OPTIMIZED module.
+# Guards two things the straight-line goldens cannot see:
+#   - the `convergent` attribute group survives to the optimized module and
+#     is bound to the asm call site (its loss is invisible to llc/ptxas —
+#     the attribute only ever binds in the in-process middle end);
+#   - both call sites are still distinct calls (not merged/hoisted/sunk into
+#     one, not duplicated further).
+
+function _hopper_wgmma_divergent!(out::CuDeviceVector{Float32, 1},
+                                  a_desc::UInt64, b_desc::UInt64)
+    tid = ptx"mov.u32"(sreg"tid.x")
+    zero4 = (0f0, 0f0, 0f0, 0f0)
+    d = if tid < UInt32(64)
+        ptx"wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16"(
+            zero4, a_desc, b_desc, Val(true))
+    else
+        ptx"wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16"(
+            zero4, a_desc, b_desc, Val(true))
+    end
+    @inbounds out[tid + 1] = d[1]
+    return nothing
+end
+
+@testset "wgmma convergent attribute survives optimization" begin
+    types = Tuple{CuDeviceVector{Float32, 1}, UInt64, UInt64}
+    llvm = sprint() do io
+        CUDATools.code_llvm(io, _hopper_wgmma_divergent!, types;
+                            arch = SMVersion(9, 0, :arch), kernel = true,
+                            dump_module = true)
+    end
+    # two distinct call sites, each carrying an attribute group
+    sites = collect(eachmatch(r"call [^\n]*asm sideeffect \"wgmma\.mma_async[^\n]*", llvm))
+    @test length(sites) == 2
+    @test all(m -> occursin(r"#\d+", m.match), sites)
+    # and the group they reference includes `convergent`
+    @test occursin(r"attributes #\d+ = \{[^}]*convergent", llvm)
+end
+
+
+# --- cluster-scope generic fences (tier-1 core IR, sm_90+ ISel floor) --------
+# fence.{sc,acq_rel}.cluster lower to `fence syncscope("cluster") ...`; ISel
+# rejects them below sm_90 with a loud error, so their pipeline validation
+# lives here rather than in ptxas/baseline.jl. Stores between the fences
+# keep each one's position observable.
+
+function _hopper_cluster_fences!(out)
+    @inbounds begin
+        out[1] = UInt32(1)
+        ptx"fence.sc.cluster"()
+        out[2] = UInt32(2)
+        ptx"fence.acq_rel.cluster"()
+        out[3] = UInt32(3)
+    end
+    return nothing
+end
+
+@testset "cluster-scope generic fences at sm_90" begin
+    types = Tuple{CuDeviceVector{UInt32, 1}}
+    @test ptxas_compiles(_hopper_cluster_fences!, types;
+                         cap = v"9.0", feature_set = :arch)
+    ptx = emit_ptx(_hopper_cluster_fences!, types;
+                   cap = v"9.0", feature_set = :arch)
+    @test occursin("fence.sc.cluster;",      ptx)
+    @test occursin("fence.acq_rel.cluster;", ptx)
+end
+
+
 # --- tensormap descriptor mutation (host-side TMA descriptor build) ------
 #
 # Triton's matmul_tma_sm120a kernel patches a shared-memory copy of the TMA
 # descriptor with `tensormap.replace.tile.<field>.shared::cta.b1024.<wty>`
 # before publishing it via `tensormap.cp_fenceproxy.*`. PTX 9.2 §9.7.9.10.
 # All chain-default — first arg is the [shared-mem descriptor pointer] (the
-# `tensormap`-in-BRACKET_PTR_OPCODES treatment in src/inst.jl), then a mix
+# `tensormap` brackets=true contract in src/forms.jl), then a mix
 # of immediate field indices and value registers. Each field has a fixed
 # write width (b32 for most, b64 for global_address / global_stride).
 

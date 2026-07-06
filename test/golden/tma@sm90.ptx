@@ -1,0 +1,22 @@
+.version 9.3
+.target sm_90
+.address_size 64
+.visible .entry entry0(.param .align 8 .b8 param0[16], .param .u64 .ptr .const .align 1 param1, .param .u32 param2)
+{
+.shared .align 32 .b8 var0[128];
+.shared .align 32 .b8 var1[8];
+ld.param.b64 %rd0, [param1];
+ld.param.b32 %r0, [param2];
+mov.b64 %rd1, 0;
+mov.b16 %rs0, 0;
+cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [var0], [%rd0, {%r0}], [var1];
+cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [var0], [%rd0, {%r0, %r0}], [var1];
+cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes [var0], [%rd0, {%r0, %r0, %r0, %r0, %r0}], [var1];
+mov.b16 %rs1, 3;
+cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster [var0], [%rd0, {%r0, %r0}], [var1], %rs1;
+cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes [var0], [%rd0, {%r0, %r0}], [var1];
+cp.async.bulk.tensor.1d.global.shared::cta.tile.bulk_group [%rd0, {%r0}], [var0];
+cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group [%rd0, {%r0, %r0}], [var0];
+cp.async.bulk.tensor.5d.global.shared::cta.tile.bulk_group [%rd0, {%r0, %r0, %r0, %r0, %r0}], [var0];
+ret;
+}

@@ -75,6 +75,22 @@ macro ptx_str(s::String)
     return _ptx_build_interp(s)
 end
 
+# `ptx"..."raw` — RawOperation escape hatch for unregistered chains (static
+# chains only: the raw tier is a deliberate, spelled-out act; interpolation
+# belongs to the registered surface).
+macro ptx_str(s::String, flag::String)
+    flag == "raw" ||
+        error("ptx\"...\"$flag: unknown flag (only `raw` is supported)")
+    isempty(s) && error("ptx\"\"raw: empty modifier chain")
+    occursin('$', s) &&
+        error("ptx\"...\"raw: interpolation is not supported on the raw tier")
+    raw = split(s, '.')
+    any(isempty, raw) && error("ptx\"" * s * "\"raw: empty modifier between '.'")
+    op = Symbol(raw[1])
+    mods = Tuple(Symbol(p) for p in @view raw[2:end])
+    :( $RawOperation{$(QuoteNode(op)), $mods}() )
+end
+
 """
     mod"mod1.mod2..."
 
@@ -271,35 +287,9 @@ macro sreg_str(s::String)
     :( $SpecialReg{$(QuoteNode(sym))}() )
 end
 
-const NONPURE_OPCODES = Set{Symbol}((
-    :bar, :mbarrier, :fence, :wgmma, :tcgen05, :cluster, :cp,
-    :setmaxnreg, :elect, :prefetch, :tensormap,
-    :ld, :st, :atom, :red, :ldmatrix, :stmatrix,
-    # Warp-collective ops: each lane's result depends on every other lane's
-    # input. Without `~{memory}` LLVM hoists/constant-folds them as if pure
-    # and silently loses the cross-lane semantics.
-    :vote, :shfl, :match, :redux, :activemask, :membar,
-    # `barrier.cluster.{arrive,wait}` + the broader `barrier.sync`/`.arrive`/`.red`
-    # named-barrier family — all observable side effects. Without `~{memory}`
-    # LLVM is free to reorder `barrier.cluster.arrive` / `wait` past surrounding
-    # mbarrier / TMA ops, which silently breaks cluster-wide init visibility
-    # and hangs cluster kernels at the first cross-CTA mbarrier wait.
-    :barrier,
-    # sm_90 cluster intrinsics: observable cross-CTA visibility.
-    :mapa, :getctarank,
-    # Inter-launch / kernel-control.
-    :griddepcontrol, :clusterlaunchcontrol, :exit,
-))
-
-# Memory-op opcodes whose pointer args render as `[%addr]`; cvta/mov etc. don't.
-const BRACKET_PTR_OPCODES = Set{Symbol}((
-    :ld, :st, :atom, :red, :cp, :mbarrier, :ldmatrix, :stmatrix,
-    :prefetch, :tcgen05, :tensormap, :fence,
-))
-
-is_nonpure_opcode(op::Symbol) = op in NONPURE_OPCODES
-
-bracket_pointers(op::Symbol) = op in BRACKET_PTR_OPCODES
+# Purity / clobber / convergence / bracket classification lives in the form
+# registry (src/forms.jl) — one central table, opcode defaults with
+# mods-prefix overrides. `build_call` consumes it as a FormContract.
 
 # Reading a special register is observable.
 function has_special_reg(argtypes)
@@ -349,11 +339,20 @@ build_head(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     isempty(mods) ? string(op) : string(op) * "." * join(string.(mods), ".")
 
 # Pure: no LLVM, no GPU, no @asmcall. Used by both the runtime call site and
-# host-side golden tests.
-function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argtypes))
-    rettype = infer_rettype(op, mods)
-    nonpure = is_nonpure_opcode(op) || has_special_reg(argtypes)
-    bracket = bracket_pointers(op)
+# host-side golden tests. `contract` defaults to the registry lookup; pass
+# one explicitly to build a spec for an unregistered form (the raw tier,
+# host-side rendering tests).
+function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argtypes);
+                    contract::Union{FormContract, Nothing} = form_contract(op, mods))
+    contract === nothing && error(
+        "ptx\"$(build_head(op, mods))\": opcode :$op is not in the form registry " *
+        "(src/forms.jl). The chain default makes optimizer promises (purity, " *
+        "memory, convergence) that must be reviewed per form — add a registry " *
+        "entry, or use ptx\"...\"raw for the maximally-conservative contract " *
+        "(sideeffect + memory clobber + convergent; pointer operands bracketed).")
+    rettype = contract.returns ? infer_rettype(op, mods) : Nothing
+    nonpure = !contract.pure || has_special_reg(argtypes)
+    bracket = contract.brackets
     head = build_head(op, mods)
 
     operand_strs   = String[]
@@ -381,29 +380,239 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     nonpure && push!(cparts, "~{memory}")
     constraints = join(cparts, ",")
 
-    return (; asm, constraints, side_effects = nonpure, rettype,
+    return (; asm, constraints, side_effects = nonpure,
+              convergent = contract.convergent, rettype,
               passthrough_argtypes = Tuple(passthrough),
               passthrough_indices  = Tuple(passthrough_ix))
 end
 
-@generated function (::Operation{op, mods})(args::Vararg{Any,N}) where {op, mods, N}
-    spec = build_call(op, mods, args)
+# Shared emission body for Operation (registry contract) and RawOperation
+# (RAW_CONTRACT). Convergent forms route through convergent_asm_ir so the
+# call site carries `convergent nomerge` — @asmcall cannot attach call-site
+# attributes, and `sideeffect` alone permits duplicating a collective op
+# across a divergent branch (the activemask miscompile class).
+function _chain_call_expr(spec)
     arg_exprs = (
         lane === nothing ? :(args[$i]) : :(args[$i][$lane])
         for (i, lane) in spec.passthrough_indices
     )
-    quote
-        Base.@inline $(LLVM.Interop).@asmcall(
-            $(spec.asm), $(spec.constraints), $(spec.side_effects),
-            $(spec.rettype),
-            Tuple{$(spec.passthrough_argtypes...)},
-            $(arg_exprs...))
+    if spec.convergent
+        ir = convergent_asm_ir(spec.asm, spec.constraints, spec.rettype,
+                               spec.passthrough_argtypes)
+        quote
+            Base.@inline
+            Base.llvmcall(($ir, "entry"), $(spec.rettype),
+                          Tuple{$(spec.passthrough_argtypes...)},
+                          $(arg_exprs...))
+        end
+    else
+        quote
+            Base.@inline $(LLVM.Interop).@asmcall(
+                $(spec.asm), $(spec.constraints), $(spec.side_effects),
+                $(spec.rettype),
+                Tuple{$(spec.passthrough_argtypes...)},
+                $(arg_exprs...))
+        end
     end
 end
+
+@generated function (::Operation{op, mods})(args::Vararg{Any,N}) where {op, mods, N}
+    _chain_call_expr(build_call(op, mods, args))
+end
+
+# --- The raw tier -------------------------------------------------------------
+#
+# `ptx"..."raw` — the explicit opt-in for chains the form registry doesn't
+# know (DESIGN.md, "A blessing boundary"). Same rendering machinery as the
+# registered chain, but under RAW_CONTRACT: sideeffect + memory clobber +
+# convergent, pointer operands bracketed, trailing-dtype return inference
+# (wrong guesses die loudly in ptxas, never silently in the optimizer).
+# Composition mirrors Operation so a raw chain can be extended with `*`.
+
+struct RawOperation{op, mods} end
+
+Base.:*(::RawOperation{op, M1}, ::Chain{M2}) where {op, M1, M2} =
+    RawOperation{op, (M1..., M2...)}()
+Base.:*(::RawOperation{op, M},  s::Symbol) where {op, M} =
+    RawOperation{op, (M..., s)}()
+
+@generated function (::RawOperation{op, mods})(args::Vararg{Any,N}) where {op, mods, N}
+    _chain_call_expr(build_call(op, mods, args; contract = RAW_CONTRACT))
+end
+
+# --- Property notation: composition + completion ------------------------------
+#
+# `ptx"cvt".rn.f32.f16` ≡ ptx"cvt.rn.f32.f16" — property access composes in
+# the type domain exactly like `*`, so a literal dot chain folds to the same
+# singleton (device-safe). Segments that aren't valid identifiers spell as
+# `var"..."`: `ptx"st".var"shared::cta".b32`, `ptx"cp".async.bulk.tensor.var"3d"`.
+#
+# `propertynames` makes the notation explorable: REPL tab completion on a
+# chain value lists known continuations, drawn from the form registry's
+# override prefixes plus the NVVM intrinsic name table (best-effort — the
+# intrinsic spelling tracks the PTX chain for most families; absence of a
+# suggestion never blocks composition).
+@inline Base.getproperty(o::Operation, s::Symbol)    = o * s
+@inline Base.getproperty(o::RawOperation, s::Symbol) = o * s
+@inline Base.getproperty(c::Chain, s::Symbol)        = c * s
+
+# The wrapped surface is enumerable from the method table: every wrapper
+# form is a `(::Operation{op, mods})(...)` method whose mods tuple is
+# spelled in ISA vocabulary by construction (that's what dispatches). This
+# is the ONLY sound completion source besides the registry — NVVM intrinsic
+# names are NOT one: their grammar diverges from the ISA chain exactly
+# where a family is irregular (llvm.nvvm.mma.* drops `.sync.aligned` and
+# leads with the shape, so name-derived suggestions offered segments that
+# are invalid at that chain position while omitting `sync`, the only
+# valid one).
+function _visit_operation_methods(f)
+    opname = Base.unwrap_unionall(Operation).name
+    mt = @static if isdefined(Core, :methodtable)
+        Core.methodtable   # 1.12+: unified global method table
+    else
+        opname.mt          # ≤ 1.11: per-type method table
+    end
+    Base.visit(mt) do m
+        sig = try Base.unwrap_unionall(m.sig) catch; return end
+        sig isa DataType || return
+        isempty(sig.parameters) && return
+        p1 = sig.parameters[1]
+        p1 isa DataType || return
+        p1.name === opname || return
+        length(p1.parameters) == 2 || return
+        op, mods = p1.parameters
+        (op isa Symbol && mods isa Tuple &&
+         all(s -> s isa Symbol, mods)) || return
+        f(m, op, mods)
+    end
+end
+
+_visit_operation_mods(f) = _visit_operation_methods((m, op, mods) -> f(op, mods))
+
+function _next_segments(op::Symbol, mods::Tuple{Vararg{Symbol}})
+    segs = Set{Symbol}()
+    fam = get(FORMS, op, nothing)
+    if fam !== nothing
+        for (prefix, _) in fam.overrides
+            length(prefix) > length(mods) || continue
+            all(i -> prefix[i] === mods[i], eachindex(mods)) || continue
+            push!(segs, prefix[length(mods) + 1])
+        end
+    end
+    _visit_operation_mods() do mop, mmods
+        mop === op || return
+        length(mmods) > length(mods) || return
+        all(i -> mmods[i] === mods[i], eachindex(mods)) || return
+        push!(segs, mmods[length(mods) + 1])
+    end
+    sort!(collect(segs))
+end
+
+Base.propertynames(::Operation{op, mods}, ::Bool = false) where {op, mods} =
+    Tuple(_next_segments(op, mods))
+Base.propertynames(::RawOperation{op, mods}, ::Bool = false) where {op, mods} =
+    Tuple(_next_segments(op, mods))
+
+# Objects print as the literal that reconstructs them — the notation is the
+# canonical spelling, not the type parameters (`ptx"mma.sync.aligned"`, not
+# `Operation{:mma, (:sync, :aligned)}()`).
+_chain_str(op::Symbol, mods::Tuple) = join((string(op), string.(mods)...), ".")
+Base.show(io::IO, ::Operation{op, mods}) where {op, mods} =
+    print(io, "ptx\"", _chain_str(op, mods), '"')
+Base.show(io::IO, ::RawOperation{op, mods}) where {op, mods} =
+    print(io, "ptx\"", _chain_str(op, mods), "\"raw")
+Base.show(io::IO, ::Chain{mods}) where {mods} =
+    print(io, "mod\"", join(string.(mods), "."), '"')
 
 # Drives byte-exact golden tests.
 function format_call(::Operation{op, mods}, @nospecialize(argtypes::Type{<:Tuple})) where {op, mods}
     build_call(op, mods, Tuple(argtypes.parameters)).asm
+end
+
+# --- convergent inline asm (warp-collective asm-tier forms) ------------------
+#
+# `@asmcall` cannot attach call-site attributes, and `sideeffect` alone does
+# NOT forbid duplicating a call site across a divergent branch (jump
+# threading, tail duplication) — only `convergent` does. For warp-/warpgroup-
+# collective instructions (wgmma.mma_async, the mma.sync asm fallbacks) a
+# split call site means different lanes execute different copies of a
+# collective op: the `active_mask` class of miscompile the convergence spike
+# reproduced on hardware. The attribute binds in the in-process middle end
+# only — llc neither checks nor needs it — so it is asserted by tests on the
+# emitted llvmcall IR, not by ptxas acceptance (see CONCERNS.md, "Convergence
+# on the asm tier").
+#
+# Mechanism validated by spikes/raw_asm_attrs.jl: a `convergent` attribute
+# group on an inline-asm call site parses through Base.llvmcall and survives
+# the optimized module. This helper builds the same shape `@asmcall` would —
+# asm callee returns a scalar or literal struct, entry returns Julia's
+# homogeneous-tuple `[N x T]` via extract/insertvalue, Bool passes as i8 —
+# plus `#0 = { convergent nounwind }` on the call.
+
+_asm_lltype(T::Type) =
+    T === Float32 ? "float" :
+    T === UInt32  ? "i32"   :
+    T === Int32   ? "i32"   :
+    T === UInt64  ? "i64"   :
+    T === Int64   ? "i64"   :
+    T === Float64 ? "double" :
+    T === Float16 ? "half"  :
+    T === UInt16  ? "i16"   :
+    T === Int16   ? "i16"   :
+    T === UInt8   ? "i8"    :
+    T === Int8    ? "i8"    :
+    T === Bool    ? "i8"    :
+    # Pointers pass straight into the asm operand (what @asmcall does via
+    # the builder API); `i8` pointee to match Julia's LLVMPtr lowering,
+    # typed spelling for the Julia ≤ 1.11 device context (NVVM.llvmtype).
+    T <: Core.LLVMPtr ? (T.parameters[2] == 0 ? "i8*" :
+                         "i8 addrspace($(T.parameters[2]))*") :
+    error("convergent_asm_ir: no LLVM mapping for $T")
+
+function convergent_asm_ir(asm::String, constraints::String,
+                           rettype::Type, argtypes)::String
+    params = ["$(_asm_lltype(T)) %a$(k - 1)" for (k, T) in enumerate(argtypes)]
+    callargs = join(("$(_asm_lltype(T)) %a$(k - 1)"
+                     for (k, T) in enumerate(argtypes)), ", ")
+    asmcall(ret) = "call $ret asm sideeffect \"$asm\", \"$constraints\"($callargs) #0"
+    # `nomerge` alongside `convergent`: LLVM ≤ 16 (Julia ≤ 1.11) hoists
+    # identical convergent calls from both arms of a divergent branch into
+    # one site — the collective-op miscompile. See NVVM.fnattrs.
+
+    body = String[]
+    if rettype === Nothing
+        entryret = "void"
+        push!(body, "  " * asmcall("void"))
+        push!(body, "  ret void")
+    elseif rettype <: Tuple
+        comps = _asm_lltype.(collect(rettype.parameters))
+        # asm returns a scalar (1 output) or a literal struct (N>=2 outputs);
+        # Julia represents the homogeneous NTuple as [N x T].
+        callret = length(comps) == 1 ? comps[1] : "{ " * join(comps, ", ") * " }"
+        entryret = "[$(length(comps)) x $(comps[1])]"
+        push!(body, "  %r = " * asmcall(callret))
+        prev = "undef"
+        for k in 1:length(comps)
+            v = length(comps) == 1 ? "%r" : "%e$k"
+            length(comps) == 1 ||
+                push!(body, "  %e$k = extractvalue $callret %r, $(k - 1)")
+            push!(body, "  %t$k = insertvalue $entryret $prev, $(comps[k]) $v, $(k - 1)")
+            prev = "%t$k"
+        end
+        push!(body, "  ret $entryret $prev")
+    else
+        entryret = _asm_lltype(rettype)
+        push!(body, "  %r = " * asmcall(entryret))
+        push!(body, "  ret $entryret %r")
+    end
+
+    """
+    define $entryret @entry($(join(params, ", "))) #1 {
+    $(join(body, "\n"))
+    }
+    attributes #0 = { convergent nomerge nounwind }
+    attributes #1 = { alwaysinline }
+    """
 end
 
 # NVVM-backed shortcut for `mov.u32 %reg, %sreg`. Routing through
@@ -412,8 +621,12 @@ end
 # invariant-per-thread sregs are listed; volatile ones (clock, clock64,
 # globaltimer, activemask, pm0..7, smid, warpid, nsmid, gridid) deliberately
 # fall through to the asm path so LLVM doesn't collapse repeated reads.
-# Whitelist matches the set LLVM 15 (Julia 1.10's bundled LLVM) exposes,
-# cross-checked against CUDA.jl's CUDACore/src/device/intrinsics/indexing.jl.
+# Names must exist in the backend registry (asserted in test/host/inst.jl);
+# the IN-PROCESS LLVM need not know them — emission goes through the tier-2
+# IntrinsicCall (declare+call), not `ccall(name, llvmcall, ...)`, precisely
+# because ccall resolves against the in-process intrinsic table and demotes
+# unknown names (the cluster sregs on LLVM ≤ 16 / Julia ≤ 1.11) to a
+# runtime trap.
 const NVVM_SREG_U32 = Dict{Symbol, String}(
     Symbol("%tid.x")    => "tid.x",    Symbol("%tid.y")    => "tid.y",    Symbol("%tid.z")    => "tid.z",
     Symbol("%ntid.x")   => "ntid.x",   Symbol("%ntid.y")   => "ntid.y",   Symbol("%ntid.z")   => "ntid.z",
@@ -443,7 +656,7 @@ const NVVM_SREG_U32 = Dict{Symbol, String}(
     suffix = get(NVVM_SREG_U32, S, nothing)
     if suffix !== nothing
         intr = "llvm.nvvm.read.ptx.sreg." * suffix
-        return :( ccall($intr, llvmcall, UInt32, ()) )
+        return :( $(NVVM.IntrinsicCall{Symbol(intr)}())() )
     end
     spec = build_call(:mov, (:u32,), (SpecialReg{S},))
     quote

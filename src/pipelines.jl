@@ -58,8 +58,10 @@ struct Pipeline{N_STAGES} end
 # Caller responsibility:
 #   - Invoke from a single thread (typically thread 0).
 #   - Follow with `bar.sync(0)` to publish init within the CTA.
-#   - If `CLUSTER=true`, follow with `cluster_arrive(); cluster_wait()`
-#     (use the CUDACore intrinsics — see commit e5d6d0e).
+#   - If `CLUSTER=true`, follow with `ptx"barrier.cluster.arrive"();
+#     ptx"barrier.cluster.wait"()` (PTX tier-2 wrappers — convergent by
+#     registry, and unlike CUDACore's cluster_arrive/cluster_wait they
+#     don't trap on Julia ≤ 1.11; see wrappers/barrier_cluster.jl).
 #
 # Body is fully unrolled across stages and pre-arrives via @generated;
 # the emitted PTX matches the hand-rolled version byte-for-byte.

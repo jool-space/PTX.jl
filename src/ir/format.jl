@@ -16,6 +16,9 @@ format_operand(op::ParenthesizedOperand) =
 format_operand(op::PipeOperand) =
     format_operand(op.left) * "|" * format_operand(op.right)
 function format_operand(op::AddressOperand)
+    op.coords !== nothing &&
+        return "[" * op.base * ", {" *
+               join(format_operand.(op.coords), ", ") * "}]"
     op.offset === nothing && return "[" * op.base * "]"
     "[" * op.base * "+" * op.offset * "]"
 end

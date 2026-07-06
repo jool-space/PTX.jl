@@ -3,284 +3,365 @@
 # Copyright 2026 Patrick Toulmé. Licensed under the Apache License, Version 2.0
 # (http://www.apache.org/licenses/LICENSE-2.0). Translated to Julia and adapted.
 
-# `tcgen05.*` wrappers for Blackwell ops whose `taddr` operand is a 32-bit
-# TMEM address (returned by `tcgen05.alloc`), NOT a memory pointer. Chain
-# default brackets `LLVMPtr` args but treats `UInt32` as a plain `r`-constraint
-# scalar — wrong for shift / cp / ld / st where taddr renders as `[%rN]`.
-# `dealloc` takes the same UInt32 taddr unbracketed.
+# `tcgen05.*` — fourth family migrated to tier-2 intrinsic lowering
+# (DESIGN.md). The notation surface is unchanged: taddr operands stay raw
+# `UInt32` TMEM addresses (returned by `tcgen05.alloc`) and SMEM operands
+# stay 32-bit offsets from `smem_addr_u32`; the wrappers retype them into
+# the address spaces the intrinsics want (`reinterpret_addrspace` — TMEM
+# is addrspace(6), 32-bit in the backend datalayout, so taddr operands
+# stay 32-bit registers in the emitted PTX).
 #
-# Operand discipline (per pyptx + PTX 9.2 §9.7.16):
-#   alloc   — chain default (LLVMPtr destination + ncols)
-#   dealloc — taddr (u32, unbracketed), ncols (u32)
-#   shift   — [taddr]
-#   cp      — [taddr], s_desc::u64
-#   ld      — multi-output NTuple{N, UInt32}, [taddr]
-#   st      — [taddr], NTuple{N, UInt32}
-#   mma     — deferred (8 operands incl. mask tuple + predicate)
+# Intrinsic mapping (probed against llc 22.1.7, sm_100a):
+#   - alloc → alloc.shared.cgN (p3 dst): identical spelling.
+#   - dealloc/shift/cp/wait/relinquish → 1:1, identical spellings.
+#   - ld/st → ld.<shape>.<count> / st.<shape>.<count>: identical
+#     spellings. The data moves as an LLVM vector (v<N>i32), so the
+#     wrappers repack to/from the notation surface's plain NTuple{N,
+#     UInt32}; the i1 immarg is the .pack::16b/.unpack::16b flag (not in
+#     the notation surface — always Val(false)).
+#   - commit → commit.shared.cgN / commit.mc.shared.cgN. ISel emits the
+#     `.shared::cluster` spelling for BOTH state-space notations (a
+#     shared::cta address is valid in the cluster window — same
+#     explicit-widening as mbarrier's expect_tx default), and renders
+#     `.shared::cluster.multicast::cluster` where pyptx put multicast
+#     first. ptxas accepts both spellings.
+#   - dense mma (kinds f16/tf32/f8f6f4/i8) → mma.shared with immargs
+#     kind (0=f16, 1=tf32, 2=f8f6f4, 3=i8), cta_group, collector_usage
+#     (0 = discard = the ISA default; emitted explicitly). The intrinsic
+#     is the MASKLESS dense form — the asm tier passed an all-zero
+#     disable-output-lane mask, which is semantically identical; the
+#     4/8-word zero-mask materialization disappears. Requires PTX 8.8.
+#   - mx kinds (mxf8f6f4/mxf4/mxf4nvf4) stay on the asm tier: their
+#     intrinsics are `.block_scale` forms taking TMEM scale_a/scale_b
+#     pointers the notation surface does not carry (the asm spelling
+#     without .block_scale is what pyptx emitted; revisit when the
+#     block-scale surface is designed).
 #
 # ld/st per-lane register count = `base * count` where
 #   base = 1 for shape ∈ {16x64b, 32x32b}; 2 for 16x128b; 4 for 16x256b
-# (PTX 9.2 §9.7.16.8.3 Table 49). count ∈ {x1..x128} with limit per_lane ≤ 128.
+# (PTX 9.2 §9.7.16.8.3 Table 49). count ∈ {x1..x128} with per_lane ≤ 128.
 # Shape `.16x32bx2` excluded — needs an extra `immHalfSplitoff` immediate.
-
-function _tcgen05_shift_register(cta::Int)
-    cta_part = Symbol("cta_group::", cta)
-    mods = (:shift, cta_part, :down)
-    asm = "tcgen05.shift.cta_group::$cta.down [\$0];"
-    @eval function (::Operation{:tcgen05, $mods})(taddr::UInt32)
-        Base.@inline
-        @asmcall($asm, "r,~{memory}", true, Nothing, Tuple{UInt32}, taddr)
-        nothing
-    end
-    nothing
-end
-
-for cta in (1, 2)
-    _tcgen05_shift_register(cta)
-end
-
-# Unbracketed taddr per pyptx.
-function _tcgen05_dealloc_register(cta::Int)
-    cta_part = Symbol("cta_group::", cta)
-    mods = (:dealloc, cta_part, :sync, :aligned, :b32)
-    asm = "tcgen05.dealloc.cta_group::$cta.sync.aligned.b32 \$0, \$1;"
-    @eval function (::Operation{:tcgen05, $mods})(taddr::UInt32, ncols::UInt32)
-        Base.@inline
-        @asmcall($asm, "r,r,~{memory}", true, Nothing,
-                 Tuple{UInt32, UInt32}, taddr, ncols)
-        nothing
-    end
-    nothing
-end
-
-for cta in (1, 2)
-    _tcgen05_dealloc_register(cta)
-end
-
-# Common single-warp shapes (no multicast). 64x128b / 32x128b need multicast
-# qualifiers — separate wrapper wave.
-function _tcgen05_cp_register(cta::Int, shape::Symbol)
-    mods = (:cp, Symbol("cta_group::", cta), shape)
-    asm = "tcgen05.cp.cta_group::$cta.$shape [\$0], \$1;"
-    @eval function (::Operation{:tcgen05, $mods})(taddr::UInt32, s_desc::UInt64)
-        Base.@inline
-        @asmcall($asm, "r,l,~{memory}", true, Nothing,
-                 Tuple{UInt32, UInt64}, taddr, s_desc)
-        nothing
-    end
-    nothing
-end
-
-for cta in (1, 2), shape in (Symbol("128x256b"), Symbol("4x256b"), Symbol("128x128b"))
-    _tcgen05_cp_register(cta, shape)
-end
-
-const _TCGEN05_LDST_SHAPES = ((Symbol("16x64b"), 1), (Symbol("32x32b"), 1),
-                              (Symbol("16x128b"), 2), (Symbol("16x256b"), 4))
-const _TCGEN05_LDST_COUNTS = (:x1, :x2, :x4, :x8, :x16, :x32, :x64, :x128)
-const _TCGEN05_COUNT_VALUE = Dict(:x1 => 1, :x2 => 2, :x4 => 4, :x8 => 8,
-                                  :x16 => 16, :x32 => 32, :x64 => 64, :x128 => 128)
-
-function _tcgen05_ld_register(shape::Symbol, count::Symbol, base::Int)
-    n = base * _TCGEN05_COUNT_VALUE[count]
-    n > 128 && return nothing   # NA per Table 49
-
-    mods = (:ld, :sync, :aligned, shape, count, :b32)
-    out_slots = "{" * join(("\$$i" for i in 0:n-1), ", ") * "}"
-    asm = "tcgen05.ld.sync.aligned.$shape.$count.b32 $out_slots, [\$$n];"
-    constraints = join(vcat(fill("=r", n), ["r", "~{memory}"]), ",")
-
-    if n == 1
-        @eval function (::Operation{:tcgen05, $mods})(taddr::UInt32)
-            Base.@inline
-            @asmcall($asm, $constraints, true, UInt32, Tuple{UInt32}, taddr)
-        end
-    else
-        @eval function (::Operation{:tcgen05, $mods})(taddr::UInt32)
-            Base.@inline
-            @asmcall($asm, $constraints, true, NTuple{$n, UInt32},
-                     Tuple{UInt32}, taddr)
-        end
-    end
-    nothing
-end
-
-function _tcgen05_st_register(shape::Symbol, count::Symbol, base::Int)
-    n = base * _TCGEN05_COUNT_VALUE[count]
-    n > 128 && return nothing
-
-    mods = (:st, :sync, :aligned, shape, count, :b32)
-    src_slots = "{" * join(("\$$i" for i in 1:n), ", ") * "}"
-    asm = "tcgen05.st.sync.aligned.$shape.$count.b32 [\$0], $src_slots;"
-    constraints = join(vcat(["r"], fill("r", n), ["~{memory}"]), ",")
-
-    src_args = [:(src[$i]) for i in 1:n]
-    flat = fill(:UInt32, n)
-
-    @eval function (::Operation{:tcgen05, $mods})(taddr::UInt32, src::NTuple{$n, UInt32})
-        Base.@inline
-        @asmcall($asm, $constraints, true, Nothing,
-                 Tuple{UInt32, $(flat...)}, taddr, $(src_args...))
-        nothing
-    end
-    nothing
-end
-
-for (shape, base) in _TCGEN05_LDST_SHAPES, count in _TCGEN05_LDST_COUNTS
-    _tcgen05_ld_register(shape, count, base)
-    _tcgen05_st_register(shape, count, base)
-end
-
-# --- alloc / relinquish / wait / commit / mma (blackwell-1) ----------------
-# Added for the tcgen05 smoke + roundtrip ports (ROADMAP item 10, first wave).
-# All addresses are 32-bit (TMEM taddr or .shared::cta SMEM offset) and render
-# as `[$N]` with the `r` constraint — same discipline as shift/cp above, NOT
-# the chain default (which would bracket an LLVMPtr with the 64-bit `l`
-# constraint). Callers pass `smem_addr_u32(pointer(slot))`.
-
-# `tcgen05.alloc` writes the allocated TMEM base into a `.shared::cta` slot.
-function _tcgen05_alloc_register(cta::Int)
-    mods = (:alloc, Symbol("cta_group::", cta), :sync, :aligned,
-            Symbol("shared::cta"), :b32)
-    asm = "tcgen05.alloc.cta_group::$cta.sync.aligned.shared::cta.b32 [\$0], \$1;"
-    @eval function (::Operation{:tcgen05, $mods})(dst::UInt32, ncols::UInt32)
-        Base.@inline
-        @asmcall($asm, "r,r,~{memory}", true, Nothing,
-                 Tuple{UInt32, UInt32}, dst, ncols)
-        nothing
-    end
-    nothing
-end
-
-for cta in (1, 2)
-    _tcgen05_alloc_register(cta)
-end
-
-# `tcgen05.relinquish_alloc_permit` — no operands.
-function _tcgen05_relinquish_register(cta::Int)
-    mods = (:relinquish_alloc_permit, Symbol("cta_group::", cta), :sync, :aligned)
-    asm = "tcgen05.relinquish_alloc_permit.cta_group::$cta.sync.aligned;"
-    @eval function (::Operation{:tcgen05, $mods})()
-        Base.@inline
-        @asmcall($asm, "~{memory}", true, Nothing, Tuple{})
-        nothing
-    end
-    nothing
-end
-
-for cta in (1, 2)
-    _tcgen05_relinquish_register(cta)
-end
-
-# `tcgen05.wait::ld` / `tcgen05.wait::st` — drain prior tcgen05.ld / .st
-# before the registers / TMEM are reused. No operands.
-function _tcgen05_wait_register(which::Symbol)
-    w = Symbol("wait::", which)
-    mods = (w, :sync, :aligned)
-    asm = "tcgen05.wait::$which.sync.aligned;"
-    @eval function (::Operation{:tcgen05, $mods})()
-        Base.@inline
-        @asmcall($asm, "~{memory}", true, Nothing, Tuple{})
-        nothing
-    end
-    nothing
-end
-
-for which in (:ld, :st)
-    _tcgen05_wait_register(which)
-end
-
-# `tcgen05.commit` — arrive-on-one of an mbarrier after the MMA group
-# retires. Single 32-bit shared mbarrier address.
-function _tcgen05_commit_register(cta::Int, space::Symbol)
-    mods = (:commit, Symbol("cta_group::", cta),
-            Symbol("mbarrier::arrive::one"), Symbol("shared::", space), :b64)
-    asm = "tcgen05.commit.cta_group::$cta.mbarrier::arrive::one." *
-          "shared::$space.b64 [\$0];"
-    @eval function (::Operation{:tcgen05, $mods})(mbar::UInt32)
-        Base.@inline
-        @asmcall($asm, "r,~{memory}", true, Nothing, Tuple{UInt32}, mbar)
-        nothing
-    end
-    nothing
-end
-
-for cta in (1, 2), space in (:cta, :cluster)
-    _tcgen05_commit_register(cta, space)
-end
-
-# Multicast variant (cta_group::2 datacenter cluster GEMM, e.g. pyptx
-# gemm_highperf_blackwell 2-SM path): the MMA-retire arrive fires on the
-# local mbarrier of every CTA whose bit is set in the u16 `mask`, so both
-# cluster CTAs' consumer barriers transition together. pyptx
-# `_Tcgen05.commit(multicast=True)` mod order:
-#   .commit.cta_group::N.mbarrier::arrive::one.multicast::cluster
-#       .shared::cluster.b64 [mbar], mask;
-# `.multicast::cluster` is **cluster-state-space only** — ptxas rejects
-# `.shared::cta` here ("State space incorrect for instruction
-# 'tcgen05.commit'"), so only `shared::cluster` is registered (pyptx's
-# builder accepts `space='cta'` syntactically but it never assembles).
-function _tcgen05_commit_multicast_register(cta::Int)
-    mods = (:commit, Symbol("cta_group::", cta),
-            Symbol("mbarrier::arrive::one"), Symbol("multicast::cluster"),
-            Symbol("shared::cluster"), :b64)
-    asm = "tcgen05.commit.cta_group::$cta.mbarrier::arrive::one." *
-          "multicast::cluster.shared::cluster.b64 [\$0], \$1;"
-    @eval function (::Operation{:tcgen05, $mods})(mbar::UInt32, mask::Integer)
-        Base.@inline
-        @asmcall($asm, "r,h,~{memory}", true, Nothing,
-                 Tuple{UInt32, UInt16}, mbar, UInt16(mask))
-        nothing
-    end
-    nothing
-end
-
-for cta in (1, 2)
-    _tcgen05_commit_multicast_register(cta)
-end
-
-# `tcgen05.mma` — dense F16/BF16/TF32/FP8 path (ROADMAP item 10, first
-# wave). Form (PTX 9.2 §9.7.16.4, dense, ptx_version >= 8.8):
 #
-#   tcgen05.mma.cta_group::N.kind::K [d], a_desc, b_desc, idesc,
-#                                    {m0..m_{W-1}}, p;
-#
-# `d` is a 32-bit TMEM accumulator address; `a_desc`/`b_desc` are 64-bit
-# SMEM descriptors (`tcgen05_descriptor`); `idesc` is the 32-bit UMMA
-# instruction descriptor (`tcgen05_instr_desc_f16bf16_f32`). The brace
-# vector is the disable-output-lane mask — W = 4 words for cta_group::1
-# (≤128 lanes), 8 for cta_group::2 (256 lanes); all-zero disables nothing,
-# which is the dense CUTLASS/CuTe form. `p` is the enable-input-D /
-# accumulate predicate. Deferred to a later wave: the trailing SCALE_C
-# immediate, `.sp` (sparse) + `[metadata]`, `.ashift`, `.collector::a::*`,
-# and the A-operand-in-TMEM variant.
-function _tcgen05_mma_register(cta::Int, kind::Symbol)
-    nmask = cta == 2 ? 8 : 4
-    mask_slots = join(("\$$(4 + i)" for i in 0:nmask-1), ", ")
-    pslot = 4 + nmask
-    mods = (:mma, Symbol("cta_group::", cta), Symbol("kind::", kind))
-    asm = "tcgen05.mma.cta_group::$cta.kind::$kind " *
-          "[\$0], \$1, \$2, \$3, {$mask_slots}, \$$pslot;"
-    # d(r, bracketed) a(l) b(l) idesc(r) nmask×mask(r) p(b)
-    constraints = join(vcat(["r", "l", "l", "r"],
-                            fill("r", nmask), ["b", "~{memory}"]), ",")
-    masks = fill(:(UInt32(0)), nmask)
-    flat  = vcat([:UInt32, :UInt64, :UInt64, :UInt32],
-                 fill(:UInt32, nmask), [:Bool])
-    @eval function (::Operation{:tcgen05, $mods})(
-            d::UInt32, a_desc::UInt64, b_desc::UInt64,
-            idesc::UInt32, enable_input_d::Bool)
-        Base.@inline
-        @asmcall($asm, $constraints, true, Nothing,
-                 Tuple{$(flat...)},
-                 d, a_desc, b_desc, idesc, $(masks...), enable_input_d)
-        nothing
-    end
+# Methods are written out literally (no name-building loop) so every
+# intrinsic this file stands on is greppable — test/host/conformance.jl
+# scans for `nvvm"..."` literals and requires a probe for each. The ld/st
+# blocks are mechanical expansions of Table 49; edit with care.
+
+# taddr/SMEM-offset retypes (see address_space.jl).
+@inline _tmem(taddr::UInt32) = reinterpret_addrspace(Val(AS.Tmem), taddr)
+@inline _tc_smem(addr::UInt32) = reinterpret_addrspace(Val(AS.Shared), addr)
+
+# tcgen05.ld returns / tcgen05.st takes LLVM vectors; the notation surface
+# uses plain tuples (scalar for the single-register forms).
+@inline _tc_unvec(x::UInt32) = x
+@inline _tc_unvec(v::NTuple{N, VecElement{UInt32}}) where {N} =
+    ntuple(i -> v[i].value, Val(N))
+@inline _tc_vec(t::NTuple{N, UInt32}) where {N} =
+    ntuple(i -> VecElement(t[i]), Val(N))
+
+# --- shift / dealloc / cp -----------------------------------------------------
+
+@inline (::Operation{:tcgen05, (:shift, Symbol("cta_group::1"), :down)})(taddr::UInt32) =
+    nvvm"tcgen05.shift.down.cg1"(_tmem(taddr))
+@inline (::Operation{:tcgen05, (:shift, Symbol("cta_group::2"), :down)})(taddr::UInt32) =
+    nvvm"tcgen05.shift.down.cg2"(_tmem(taddr))
+
+@inline (::Operation{:tcgen05, (:dealloc, Symbol("cta_group::1"), :sync, :aligned, :b32)})(
+        taddr::UInt32, ncols::UInt32) =
+    nvvm"tcgen05.dealloc.cg1"(_tmem(taddr), ncols)
+@inline (::Operation{:tcgen05, (:dealloc, Symbol("cta_group::2"), :sync, :aligned, :b32)})(
+        taddr::UInt32, ncols::UInt32) =
+    nvvm"tcgen05.dealloc.cg2"(_tmem(taddr), ncols)
+
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("128x256b"))})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.128x256b.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x256b"))})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.128x256b.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("4x256b"))})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.4x256b.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("4x256b"))})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.4x256b.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("128x128b"))})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.128x128b.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x128b"))})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.128x128b.cg2"(_tmem(taddr), s_desc)
+
+# --- ld / st (Table 49 expansion) ---------------------------------------------
+
+# 16x64b (base 1)
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x1, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x1"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x1, :b32)})(taddr::UInt32, src::NTuple{1, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x1"(_tmem(taddr), src[1], Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x2, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x2"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x2, :b32)})(taddr::UInt32, src::NTuple{2, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x2"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x4, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x4"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x4, :b32)})(taddr::UInt32, src::NTuple{4, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x4"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x8, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x8"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x8, :b32)})(taddr::UInt32, src::NTuple{8, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x8"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x16, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x16"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x16, :b32)})(taddr::UInt32, src::NTuple{16, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x16"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x32, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x32"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x32, :b32)})(taddr::UInt32, src::NTuple{32, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x32"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x64, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x64"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x64, :b32)})(taddr::UInt32, src::NTuple{64, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x64"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x128, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x128"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x128, :b32)})(taddr::UInt32, src::NTuple{128, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x128"(_tmem(taddr), _tc_vec(src), Val(false))
+
+# 32x32b (base 1)
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x1, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x1"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x1, :b32)})(taddr::UInt32, src::NTuple{1, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x1"(_tmem(taddr), src[1], Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x2, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x2"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x2, :b32)})(taddr::UInt32, src::NTuple{2, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x2"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x4, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x4"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x4, :b32)})(taddr::UInt32, src::NTuple{4, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x4"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x8, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x8"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x8, :b32)})(taddr::UInt32, src::NTuple{8, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x8"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x16, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x16"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x16, :b32)})(taddr::UInt32, src::NTuple{16, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x16"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x32, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x32"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x32, :b32)})(taddr::UInt32, src::NTuple{32, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x32"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x64, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x64"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x64, :b32)})(taddr::UInt32, src::NTuple{64, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x64"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x128, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x128"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x128, :b32)})(taddr::UInt32, src::NTuple{128, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x128"(_tmem(taddr), _tc_vec(src), Val(false))
+
+# 16x128b (base 2)
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x1, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x1"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x1, :b32)})(taddr::UInt32, src::NTuple{2, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x1"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x2, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x2"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x2, :b32)})(taddr::UInt32, src::NTuple{4, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x2"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x4, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x4"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x4, :b32)})(taddr::UInt32, src::NTuple{8, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x4"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x8, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x8"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x8, :b32)})(taddr::UInt32, src::NTuple{16, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x8"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x16, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x16"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x16, :b32)})(taddr::UInt32, src::NTuple{32, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x16"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x32, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x32"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x32, :b32)})(taddr::UInt32, src::NTuple{64, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x32"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x64, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x64"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x64, :b32)})(taddr::UInt32, src::NTuple{128, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x64"(_tmem(taddr), _tc_vec(src), Val(false))
+
+# 16x256b (base 4)
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x256b"), :x1, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x256b.x1"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x1, :b32)})(taddr::UInt32, src::NTuple{4, UInt32}) =
+    nvvm"tcgen05.st.16x256b.x1"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x256b"), :x2, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x256b.x2"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x2, :b32)})(taddr::UInt32, src::NTuple{8, UInt32}) =
+    nvvm"tcgen05.st.16x256b.x2"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x256b"), :x4, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x256b.x4"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x4, :b32)})(taddr::UInt32, src::NTuple{16, UInt32}) =
+    nvvm"tcgen05.st.16x256b.x4"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x256b"), :x8, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x256b.x8"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x8, :b32)})(taddr::UInt32, src::NTuple{32, UInt32}) =
+    nvvm"tcgen05.st.16x256b.x8"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x256b"), :x16, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x256b.x16"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x16, :b32)})(taddr::UInt32, src::NTuple{64, UInt32}) =
+    nvvm"tcgen05.st.16x256b.x16"(_tmem(taddr), _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x256b"), :x32, :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x256b.x32"(_tmem(taddr), Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x32, :b32)})(taddr::UInt32, src::NTuple{128, UInt32}) =
+    nvvm"tcgen05.st.16x256b.x32"(_tmem(taddr), _tc_vec(src), Val(false))
+
+# --- alloc / relinquish / wait / commit ----------------------------------------
+
+@inline (::Operation{:tcgen05, (:alloc, Symbol("cta_group::1"), :sync, :aligned,
+        Symbol("shared::cta"), :b32)})(dst::UInt32, ncols::UInt32) =
+    nvvm"tcgen05.alloc.shared.cg1"(_tc_smem(dst), ncols)
+@inline (::Operation{:tcgen05, (:alloc, Symbol("cta_group::2"), :sync, :aligned,
+        Symbol("shared::cta"), :b32)})(dst::UInt32, ncols::UInt32) =
+    nvvm"tcgen05.alloc.shared.cg2"(_tc_smem(dst), ncols)
+
+@inline (::Operation{:tcgen05, (:relinquish_alloc_permit, Symbol("cta_group::1"),
+        :sync, :aligned)})() =
+    nvvm"tcgen05.relinq.alloc.permit.cg1"()
+@inline (::Operation{:tcgen05, (:relinquish_alloc_permit, Symbol("cta_group::2"),
+        :sync, :aligned)})() =
+    nvvm"tcgen05.relinq.alloc.permit.cg2"()
+
+@inline (::Operation{:tcgen05, (Symbol("wait::ld"), :sync, :aligned)})() =
+    nvvm"tcgen05.wait.ld"()
+@inline (::Operation{:tcgen05, (Symbol("wait::st"), :sync, :aligned)})() =
+    nvvm"tcgen05.wait.st"()
+
+# Both state-space notations lower to the same intrinsic and emit the
+# `.shared::cluster` spelling (see header).
+@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::1"),
+        Symbol("mbarrier::arrive::one"), Symbol("shared::cta"), :b64)})(mbar::UInt32) =
+    nvvm"tcgen05.commit.shared.cg1"(_tc_smem(mbar))
+@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::2"),
+        Symbol("mbarrier::arrive::one"), Symbol("shared::cta"), :b64)})(mbar::UInt32) =
+    nvvm"tcgen05.commit.shared.cg2"(_tc_smem(mbar))
+@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::1"),
+        Symbol("mbarrier::arrive::one"), Symbol("shared::cluster"), :b64)})(mbar::UInt32) =
+    nvvm"tcgen05.commit.shared.cg1"(_tc_smem(mbar))
+@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::2"),
+        Symbol("mbarrier::arrive::one"), Symbol("shared::cluster"), :b64)})(mbar::UInt32) =
+    nvvm"tcgen05.commit.shared.cg2"(_tc_smem(mbar))
+
+@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::1"),
+        Symbol("mbarrier::arrive::one"), Symbol("multicast::cluster"),
+        Symbol("shared::cluster"), :b64)})(mbar::UInt32, mask::Integer) =
+    nvvm"tcgen05.commit.mc.shared.cg1"(_tc_smem(mbar), UInt16(mask))
+@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::2"),
+        Symbol("mbarrier::arrive::one"), Symbol("multicast::cluster"),
+        Symbol("shared::cluster"), :b64)})(mbar::UInt32, mask::Integer) =
+    nvvm"tcgen05.commit.mc.shared.cg2"(_tc_smem(mbar), UInt16(mask))
+
+# --- dense mma (A from SMEM descriptor) ----------------------------------------
+# kind immarg: 0=f16, 1=tf32, 2=f8f6f4, 3=i8; collector_usage 0 = discard
+# (the ISA default, now spelled explicitly in the output).
+@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::f16"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool) =
+    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
+                             Val(0), Val(1), Val(0))
+@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::f16"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool) =
+    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
+                             Val(0), Val(2), Val(0))
+@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::tf32"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool) =
+    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
+                             Val(1), Val(1), Val(0))
+@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::tf32"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool) =
+    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
+                             Val(1), Val(2), Val(0))
+@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::f8f6f4"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool) =
+    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
+                             Val(2), Val(1), Val(0))
+@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::f8f6f4"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool) =
+    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
+                             Val(2), Val(2), Val(0))
+@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::i8"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool) =
+    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
+                             Val(3), Val(1), Val(0))
+@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::i8"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool) =
+    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
+                             Val(3), Val(2), Val(0))
+
+# --- residue: mx kinds (asm tier) ----------------------------------------------
+# The block-scale intrinsics take TMEM scale_a/scale_b pointers the
+# notation surface does not carry; these keep the pyptx spelling (no
+# .block_scale, all-zero disable-output-lane mask, predicate operand).
+@inline function (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::mxf8f6f4"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool)
+    @asmcall("tcgen05.mma.cta_group::1.kind::mxf8f6f4 [\$0], \$1, \$2, \$3, {\$4, \$5, \$6, \$7}, \$8;",
+             "r,l,l,r,r,r,r,r,b,~{memory}", true, Nothing,
+             Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32, Bool},
+             d, a_desc, b_desc, idesc, UInt32(0), UInt32(0), UInt32(0), UInt32(0), enable_input_d)
     nothing
 end
-
-# Kinds per PTX 9.2 §9.7.16.4 (pyptx `_TCGEN05_KINDS`).
-for cta in (1, 2),
-    kind in (:tf32, :f16, :i8, :f8f6f4, :mxf8f6f4, :mxf4, :mxf4nvf4)
-    _tcgen05_mma_register(cta, kind)
+@inline function (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::mxf8f6f4"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool)
+    @asmcall("tcgen05.mma.cta_group::2.kind::mxf8f6f4 [\$0], \$1, \$2, \$3, {\$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11}, \$12;",
+             "r,l,l,r,r,r,r,r,r,r,r,r,b,~{memory}", true, Nothing,
+             Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, Bool},
+             d, a_desc, b_desc, idesc, UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), enable_input_d)
+    nothing
+end
+@inline function (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::mxf4"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool)
+    @asmcall("tcgen05.mma.cta_group::1.kind::mxf4 [\$0], \$1, \$2, \$3, {\$4, \$5, \$6, \$7}, \$8;",
+             "r,l,l,r,r,r,r,r,b,~{memory}", true, Nothing,
+             Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32, Bool},
+             d, a_desc, b_desc, idesc, UInt32(0), UInt32(0), UInt32(0), UInt32(0), enable_input_d)
+    nothing
+end
+@inline function (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::mxf4"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool)
+    @asmcall("tcgen05.mma.cta_group::2.kind::mxf4 [\$0], \$1, \$2, \$3, {\$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11}, \$12;",
+             "r,l,l,r,r,r,r,r,r,r,r,r,b,~{memory}", true, Nothing,
+             Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, Bool},
+             d, a_desc, b_desc, idesc, UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), enable_input_d)
+    nothing
+end
+@inline function (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::mxf4nvf4"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool)
+    @asmcall("tcgen05.mma.cta_group::1.kind::mxf4nvf4 [\$0], \$1, \$2, \$3, {\$4, \$5, \$6, \$7}, \$8;",
+             "r,l,l,r,r,r,r,r,b,~{memory}", true, Nothing,
+             Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32, Bool},
+             d, a_desc, b_desc, idesc, UInt32(0), UInt32(0), UInt32(0), UInt32(0), enable_input_d)
+    nothing
+end
+@inline function (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::mxf4nvf4"))})(
+        d::UInt32, a_desc::UInt64, b_desc::UInt64,
+        idesc::UInt32, enable_input_d::Bool)
+    @asmcall("tcgen05.mma.cta_group::2.kind::mxf4nvf4 [\$0], \$1, \$2, \$3, {\$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11}, \$12;",
+             "r,l,l,r,r,r,r,r,r,r,r,r,b,~{memory}", true, Nothing,
+             Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, Bool},
+             d, a_desc, b_desc, idesc, UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), enable_input_d)
+    nothing
 end

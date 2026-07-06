@@ -12,12 +12,18 @@ include("codegen/Codegen.jl")
 using .Codegen: ptx_to_julia, ir_to_julia
 export ptx_to_julia, ir_to_julia
 
+include("nvvm/NVVM.jl")
+using .NVVM: NVVM, @nvvm_str
+
 include("address_space.jl")
+include("forms.jl")
 include("types.jl")
 
 include("inst.jl")
 export @ptx_str, @sreg_str
 
+include("wrappers/barrier.jl")
+include("wrappers/barrier_cluster.jl")
 include("wrappers/cp_async.jl")
 include("wrappers/cvt.jl")
 include("wrappers/fence.jl")
