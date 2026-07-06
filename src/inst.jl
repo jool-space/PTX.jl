@@ -465,7 +465,7 @@ end
 # leads with the shape, so name-derived suggestions offered segments that
 # are invalid at that chain position while omitting `sync`, the only
 # valid one).
-function _visit_operation_mods(f)
+function _visit_operation_methods(f)
     opname = Base.unwrap_unionall(Operation).name
     mt = @static if isdefined(Core, :methodtable)
         Core.methodtable   # 1.12+: unified global method table
@@ -483,9 +483,11 @@ function _visit_operation_mods(f)
         op, mods = p1.parameters
         (op isa Symbol && mods isa Tuple &&
          all(s -> s isa Symbol, mods)) || return
-        f(op, mods)
+        f(m, op, mods)
     end
 end
+
+_visit_operation_mods(f) = _visit_operation_methods((m, op, mods) -> f(op, mods))
 
 function _next_segments(op::Symbol, mods::Tuple{Vararg{Symbol}})
     segs = Set{Symbol}()
