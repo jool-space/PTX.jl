@@ -19,6 +19,7 @@ makedocs(;
         "Wrappers" => "wrappers.md",
         "Transpiler" => "transpiler.md",
         "Reference" => "reference.md",
+        "Internals" => "internals.md",
     ],
 )
 

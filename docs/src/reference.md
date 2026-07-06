@@ -15,6 +15,12 @@ The full public API. Everything else under `PTX`, `PTX.IR`,
 PTX.@mod_str
 ```
 
+## Pointers
+
+```@docs
+PTX.reinterpret_addrspace
+```
+
 ## Transpiler
 
 ```@docs
