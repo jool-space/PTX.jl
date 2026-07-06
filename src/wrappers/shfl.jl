@@ -1,5 +1,5 @@
 # Warp-level register shuffle (PTX 9.2 §9.7.4) — the first family migrated
-# to tier-2 intrinsic lowering (DESIGN.md, "Lowering tiers"): the backend
+# to tier-2 intrinsic lowering: the backend
 # selects the instruction from `llvm.nvvm.shfl.sync.<mode>.i32[p]`, with the
 # registry supplying `convergent` (shfl is the convergence guinea pig — see
 # spikes/convergence.jl for what its absence does).

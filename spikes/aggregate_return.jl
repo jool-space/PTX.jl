@@ -1,5 +1,6 @@
-# Aggregate-return spike — resolves the llvmcall-aggregates concern in
-# CONCERNS.md.
+# Aggregate-return spike — hardware validation (GB10, 2026-06-12) of struct
+# returns through Base.llvmcall; the suite inherited the oracle
+# (test/gpu/nvvm.jl).
 #
 # Question: can tier-2 emission return multi-result intrinsics (struct returns
 # unpacked to NTuple) through Base.llvmcall, surviving Julia codegen and the

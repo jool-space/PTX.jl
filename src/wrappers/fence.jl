@@ -1,6 +1,6 @@
 # Memory-ordering fences, two lowering tiers. PTX 9.2 §9.7.12.4.
 #
-# The three proxy/init fences are tier-2 intrinsics (DESIGN.md): they fence
+# The three proxy/init fences are tier-2 intrinsics: they fence
 # a specific memory *proxy* (async, mbarrier-init), which a core-IR `fence`
 # cannot express — so they ride `llvm.nvvm.fence.*` intrinsics. Literal
 # nvvm"..." spellings so the conformance scan finds them
@@ -10,8 +10,7 @@
 # core IR: `fence <ordering> syncscope(...)`. This is a *semantic*
 # translation of the PTX sem/scope pair, not a renaming — each mapping below
 # was verified by trial compilation through the artifact llc 22.1.7
-# (expected instruction asserted, not just acceptance; see the CONCERNS.md
-# ledger entry):
+# (expected instruction asserted, not just acceptance):
 #
 #   PTX sem    LLVM ordering      PTX scope   LLVM syncscope
 #   .sc        seq_cst            .cta        "block"

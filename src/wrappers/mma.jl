@@ -1,5 +1,5 @@
-# `mma.sync.aligned` — fifth family migrated to tier-2 intrinsic lowering
-# (DESIGN.md). Source of truth: PTX 9.2 §9.7.14.5.
+# `mma.sync.aligned` — fifth family migrated to tier-2 intrinsic lowering.
+# Source of truth: PTX 9.2 §9.7.14.5.
 #
 # This family was already a table-driven generator on the asm tier, and
 # stays one — but emitting `IntrinsicCall` instead of `@asmcall`. Unlike

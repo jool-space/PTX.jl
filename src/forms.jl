@@ -1,6 +1,6 @@
-# The form registry — the blessing boundary's data (DESIGN.md, "A blessing
-# boundary"; CONCERNS.md, "The chain default is permissive by default",
-# retired by this table).
+# The form registry — the blessing boundary's data. This table retired the
+# historically permissive chain default: an unregistered opcode now errors
+# instead of receiving optimistic optimizer promises.
 #
 # Every promise the chain default makes to LLVM about a PTX form lives
 # here, in one table, so the whole safety surface is auditable in one

@@ -1,4 +1,4 @@
-# Back half of the registry generator (see DESIGN.md, "The registry"):
+# Back half of the registry generator:
 # consume the JSON produced by extract_intrinsics.sh and emit the committed
 # Julia table at src/nvvm/table.jl. The output is checked in so a backend
 # bump becomes a reviewable diff of renames/removals.

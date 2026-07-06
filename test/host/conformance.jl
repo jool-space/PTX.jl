@@ -1,5 +1,4 @@
-# Registry <-> backend conformance (DESIGN.md, "The registry"; CONCERNS.md,
-# "Weakdep compat as the backend pin" / "Obtaining llvm-tblgen"). Three
+# Registry <-> backend conformance. Three
 # layers, each catching a different way the committed table can rot:
 #
 #   1. Version: the artifact the environment resolved is the version the
@@ -555,7 +554,7 @@ end
 #     (Julia's, which knows nothing of these names and is constrained solely by
 #     what we attach). A wrong-in-the-permissive-direction attribute — claiming
 #     `memory(none)`/`speculatable`, or dropping `convergent` — is exactly the
-#     miscompile the convergence spike reproduced (CONCERNS.md).
+#     miscompile the convergence spike reproduced (spikes/convergence.jl).
 #
 # The realistic rot vector is an extraction-map regression in gen/ (PROPS / the
 # jq filter) on a future JLL re-gen, silently changing a tuple while names stay
@@ -577,7 +576,7 @@ const ATTR_ANCHORS = Pair{String, Tuple{Vararg{Symbol}}}[
     "llvm.nvvm.add.rn.f"                        => (:nomem, :speculatable, :commutative),        # [td]
     "llvm.nvvm.atomic.add.gen.f.cta"           => (:argmemonly, :nocallback),                   # [td]
     # a fence proxy — deliberately NOT convergent (idempotent ordering op);
-    # pins the distinction the fence migration turned on (CONCERNS.md)
+    # pins the distinction the fence migration turned on
     "llvm.nvvm.fence.proxy.async"              => (:nocallback,),                               # [td]
     # collective memory ops — direction + argmemonly + convergent
     "llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16" => (:readmem, :argmemonly, :nocallback, :convergent),

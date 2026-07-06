@@ -432,7 +432,7 @@ end
 end
 
 @testset "ldmatrix/stmatrix wrapper (tier-2 intrinsic lowering)" begin
-    # Migrated family (DESIGN.md, "Lowering tiers"): the plain-`.shared`
+    # Migrated family: the plain-`.shared`
     # and b8 forms
     # lower through llvm.nvvm.{ld,st}matrix.* (state space carried by the
     # pointer's address space); the explicit `shared::cta` spellings ride
@@ -508,7 +508,7 @@ end
 end
 
 @testset "mbarrier wrapper (tier-2 intrinsic lowering)" begin
-    # Second migrated family (DESIGN.md): the ten ::cta forms lower through
+    # Second migrated family: the ten ::cta forms lower through
     # llvm.nvvm.mbarrier.* — legacy *.shared intrinsics where the form is
     # sm_80 (the scoped count-form arrive can't ISel below sm_90), scoped
     # *.scope.cta.space.cta for parity waits (no legacy exists) and the
@@ -1483,7 +1483,7 @@ end
 @testset "shfl.sync wrapper (tier-2 intrinsic lowering)" begin
     # shfl.sync.<mode>.b32 d, a, b, c, mask;        — UInt32 output
     # shfl.sync.<mode>.b32 d|p, a, b, c, mask;      — (UInt32, Bool) output
-    # First migrated family (DESIGN.md): the notation surface is unchanged
+    # First migrated family: the notation surface is unchanged
     # but lowering goes through llvm.nvvm.shfl.sync.<mode>.i32[p] — the
     # registry supplies convergent, the .i32p aggregate replaces the
     # pipe-operand asm, and the wrapper reorders (a, b, c, mask) to the

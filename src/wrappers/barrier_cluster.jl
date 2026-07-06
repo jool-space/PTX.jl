@@ -5,8 +5,8 @@
 # Two reasons this family doesn't ride the chain default (asm):
 #   - The intrinsics carry `convergent` from the registry; the chain's
 #     sideeffect + ~{memory} asm does not, and a merged/duplicated
-#     execution barrier is the worst instance of the CONCERNS.md
-#     "Convergence on the asm tier" hazard class.
+#     execution barrier is the worst instance of the collective-op
+#     convergence hazard class.
 #   - CUDACore's own cluster_arrive/cluster_wait use
 #     `ccall("llvm.nvvm.barrier.cluster.*", llvmcall, ...)`, which
 #     resolves the name against the IN-PROCESS LLVM's intrinsic table —

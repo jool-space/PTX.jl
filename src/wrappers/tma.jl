@@ -1,5 +1,5 @@
 # `cp.async.bulk.tensor.<N>d.*` — TMA tile copies (Hopper sm_90+), third
-# family migrated to tier-2 intrinsic lowering (DESIGN.md, "Lowering tiers").
+# family migrated to tier-2 intrinsic lowering.
 # The notation surface is unchanged; the `[base, {coords}]` operand encoding,
 # qualifier rendering, and per-arity constraint strings the asm tier built by
 # hand are now ISel's job.

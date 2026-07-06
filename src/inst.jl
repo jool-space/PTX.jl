@@ -423,7 +423,7 @@ end
 # --- The raw tier -------------------------------------------------------------
 #
 # `ptx"..."raw` — the explicit opt-in for chains the form registry doesn't
-# know (DESIGN.md, "A blessing boundary"). Same rendering machinery as the
+# know. Same rendering machinery as the
 # registered chain, but under RAW_CONTRACT: sideeffect + memory clobber +
 # convergent, pointer operands bracketed, trailing-dtype return inference
 # (wrong guesses die loudly in ptxas, never silently in the optimizer).
@@ -539,8 +539,7 @@ end
 # collective op: the `active_mask` class of miscompile the convergence spike
 # reproduced on hardware. The attribute binds in the in-process middle end
 # only — llc neither checks nor needs it — so it is asserted by tests on the
-# emitted llvmcall IR, not by ptxas acceptance (see CONCERNS.md, "Convergence
-# on the asm tier").
+# emitted llvmcall IR, not by ptxas acceptance.
 #
 # Mechanism validated by spikes/raw_asm_attrs.jl: a `convergent` attribute
 # group on an inline-asm call site parses through Base.llvmcall and survives

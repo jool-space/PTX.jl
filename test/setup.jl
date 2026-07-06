@@ -95,7 +95,7 @@ end
 
 # --- Golden-PTX harness ------------------------------------------------------
 #
-# Locks emitted PTX for migration review (DESIGN.md, "Approach"): comparison
+# Locks emitted PTX for migration review: comparison
 # is structural — parsed with the package's own parser, canonicalized modulo
 # register/label/name numbering (IR.canonicalize) — so allocator churn never
 # trips it, while any change to the instruction sequence does. Golden files
