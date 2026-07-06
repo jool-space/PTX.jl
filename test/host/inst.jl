@@ -347,3 +347,12 @@ end
     @test :satfinite in propertynames(ptx"cvt".rn)
     @test propertynames(ptx"add") == ()
 end
+
+@testset "show: objects print as their reconstructing literal" begin
+    @test repr(ptx"mma.sync.aligned") == "ptx\"mma.sync.aligned\""
+    @test repr(ptx"bar".sync) == "ptx\"bar.sync\""
+    @test repr(ptx"st".var"shared::cta".b32) == "ptx\"st.shared::cta.b32\""
+    @test repr(ptx"frobnicate.x2"raw) == "ptx\"frobnicate.x2\"raw"
+    @test repr(mod"row.col") == "mod\"row.col\""
+    @test repr(mod"") == "mod\"\""
+end

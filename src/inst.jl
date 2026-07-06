@@ -511,6 +511,17 @@ Base.propertynames(::Operation{op, mods}, ::Bool = false) where {op, mods} =
 Base.propertynames(::RawOperation{op, mods}, ::Bool = false) where {op, mods} =
     Tuple(_next_segments(op, mods))
 
+# Objects print as the literal that reconstructs them — the notation is the
+# canonical spelling, not the type parameters (`ptx"mma.sync.aligned"`, not
+# `Operation{:mma, (:sync, :aligned)}()`).
+_chain_str(op::Symbol, mods::Tuple) = join((string(op), string.(mods)...), ".")
+Base.show(io::IO, ::Operation{op, mods}) where {op, mods} =
+    print(io, "ptx\"", _chain_str(op, mods), '"')
+Base.show(io::IO, ::RawOperation{op, mods}) where {op, mods} =
+    print(io, "ptx\"", _chain_str(op, mods), "\"raw")
+Base.show(io::IO, ::Chain{mods}) where {mods} =
+    print(io, "mod\"", join(string.(mods), "."), '"')
+
 # Drives byte-exact golden tests.
 function format_call(::Operation{op, mods}, @nospecialize(argtypes::Type{<:Tuple})) where {op, mods}
     build_call(op, mods, Tuple(argtypes.parameters)).asm
