@@ -456,6 +456,37 @@ end
 @inline Base.getproperty(o::RawOperation, s::Symbol) = o * s
 @inline Base.getproperty(c::Chain, s::Symbol)        = c * s
 
+# The wrapped surface is enumerable from the method table: every wrapper
+# form is a `(::Operation{op, mods})(...)` method whose mods tuple is
+# spelled in ISA vocabulary by construction (that's what dispatches). This
+# is the ONLY sound completion source besides the registry — NVVM intrinsic
+# names are NOT one: their grammar diverges from the ISA chain exactly
+# where a family is irregular (llvm.nvvm.mma.* drops `.sync.aligned` and
+# leads with the shape, so name-derived suggestions offered segments that
+# are invalid at that chain position while omitting `sync`, the only
+# valid one).
+function _visit_operation_mods(f)
+    opname = Base.unwrap_unionall(Operation).name
+    mt = @static if isdefined(Core, :methodtable)
+        Core.methodtable   # 1.12+: unified global method table
+    else
+        opname.mt          # ≤ 1.11: per-type method table
+    end
+    Base.visit(mt) do m
+        sig = try Base.unwrap_unionall(m.sig) catch; return end
+        sig isa DataType || return
+        isempty(sig.parameters) && return
+        p1 = sig.parameters[1]
+        p1 isa DataType || return
+        p1.name === opname || return
+        length(p1.parameters) == 2 || return
+        op, mods = p1.parameters
+        (op isa Symbol && mods isa Tuple &&
+         all(s -> s isa Symbol, mods)) || return
+        f(op, mods)
+    end
+end
+
 function _next_segments(op::Symbol, mods::Tuple{Vararg{Symbol}})
     segs = Set{Symbol}()
     fam = get(FORMS, op, nothing)
@@ -466,10 +497,11 @@ function _next_segments(op::Symbol, mods::Tuple{Vararg{Symbol}})
             push!(segs, prefix[length(mods) + 1])
         end
     end
-    pre = "llvm.nvvm." * join((string(op), string.(mods)...), ".") * "."
-    for name in NVVM.matching(pre)
-        seg = first(eachsplit(SubString(name, length(pre) + 1), '.'))
-        isempty(seg) || push!(segs, Symbol(seg))
+    _visit_operation_mods() do mop, mmods
+        mop === op || return
+        length(mmods) > length(mods) || return
+        all(i -> mmods[i] === mods[i], eachindex(mods)) || return
+        push!(segs, mmods[length(mods) + 1])
     end
     sort!(collect(segs))
 end

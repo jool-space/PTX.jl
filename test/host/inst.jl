@@ -324,7 +324,26 @@ end
     # propertynames suggests continuations: registry override prefixes...
     @test :st in propertynames(ptx"multimem")
     @test :alloc in propertynames(ptx"tcgen05")
-    # ...and NVVM intrinsic-table segments (best effort).
+    # ...and the wrapped surface via the method table (mods tuples are
+    # ISA-spelled by construction — the only sound source besides the
+    # registry).
     @test :cluster in propertynames(ptx"barrier")
     @test :arrive in propertynames(ptx"barrier".cluster)
+    @test :sync in propertynames(ptx"bar")
+    @test propertynames(ptx"bar".warp) == (:sync,)
+    # mma is where NVVM naming diverges from the ISA chain (names drop
+    # `.sync.aligned` and lead with the shape) — the retired name-derived
+    # source suggested shape/kind segments invalid at this position and
+    # omitted `sync`. Pin the ISA-true continuation and the absence of
+    # the leaked NVVM vocabulary.
+    @test propertynames(ptx"mma") == (:sync,)
+    @test propertynames(ptx"mma".sync) == (:aligned,)
+    @test :m16n8k16 ∉ propertynames(ptx"mma")   # NVVM name segment, not ISA
+    @test :block    ∉ propertynames(ptx"mma")   # registry infix, not ISA
+    # cvt surfaces its wrapped family only (the fp8/satfinite conversions);
+    # unwrapped pure chains stay empty until the modifier-grammar registry
+    # milestone supplies the full ISA enumeration.
+    @test propertynames(ptx"cvt") == (:rn,)
+    @test :satfinite in propertynames(ptx"cvt".rn)
+    @test propertynames(ptx"add") == ()
 end

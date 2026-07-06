@@ -128,7 +128,16 @@ build artifact.
   error message carries the exact migration path. The registry also powers
   the property notation: `ptx"cvt".rn.f32.f16` composes in the type domain,
   and `propertynames` suggests valid continuations (REPL tab completion as
-  ISA explorer).
+  ISA explorer). Suggestion sources are ISA-spelled by construction:
+  registry override prefixes plus the wrapped surface enumerated from the
+  method table (every wrapper form is an `Operation{op, mods}` method whose
+  mods tuple is the ISA chain). NVVM intrinsic names were rejected as a
+  source (2026-07-06): their grammar diverges from the ISA chain exactly
+  where a family is irregular — `llvm.nvvm.mma.*` drops `.sync.aligned`
+  and leads with the shape, so name-derived completion suggested segments
+  invalid at that position while omitting the only valid one. Unwrapped
+  pure chains (`add`, plain-rounding `cvt`) suggest nothing until the
+  modifier-grammar enumeration lands in the registry.
 
 The method table is *not* the registry. Dispatch is already fully resolved by
 the `Operation{op, mods}` singleton; enumerating the product space as eager
