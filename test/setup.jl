@@ -142,8 +142,7 @@ function golden_test(name::String, f, tt::Type{<:Tuple}; cap::VersionNumber,
     if _forced_bounds_checks()
         @error """golden_test($name): running under --check-bounds=yes (Pkg.test's default), \
                   which injects bounds branches into the golden kernels. Refusing to compare \
-                  or regenerate — run `julia --project=test test/runtests.jl` or \
-                  `Pkg.test("PTX"; julia_args=["--check-bounds=auto"])` instead \
+                  or regenerate — run `Pkg.test("PTX"; julia_args=["--check-bounds=auto"])` instead \
                   (CI sets check_bounds: 'auto'). Default runs skip goldens in this mode; \
                   you selected this test explicitly."""
         return false

@@ -67,9 +67,8 @@ if filter_tests!(testsuite, args)
             # rather than fail. CI enforces goldens with check_bounds: 'auto'.
             # Naming the test explicitly bypasses this filter and hits the
             # loud refusal in setup.jl instead.
-            @warn """skipping ptxas/golden: --check-bounds=yes (Pkg.test's default) injects \
+            @info """skipping ptxas/golden: --check-bounds=yes (Pkg.test's default) injects \
                      bounds branches into the golden kernels. To include goldens, run \
-                     `julia --project=test test/runtests.jl` or \
                      `Pkg.test("PTX"; julia_args=["--check-bounds=auto"])`."""
             return false
         end
