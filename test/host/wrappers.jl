@@ -282,6 +282,155 @@ end
     @test spec.side_effects == true
 end
 
+@testset "clmad chain entry (PTX 9.3)" begin
+    # `clmad.{lo,hi}.u64 d, a, b, c;` — pure carryless multiply-add. No
+    # hand-written wrapper: last modifier `.u64` flows through DTYPE_RETTYPE,
+    # `:clmad` is registered _PURE in src/forms.jl (pure ALU, no memory).
+    # PTX 9.3 / sm_80+. The chain doesn't enforce arity — ptxas rejects
+    # wrong-arity calls.
+    @test format_call(ptx"clmad.lo.u64", Tuple{UInt64, UInt64, UInt64}) ==
+          "clmad.lo.u64 \$0, \$1, \$2, \$3;"
+    @test format_call(ptx"clmad.hi.u64", Tuple{UInt64, UInt64, UInt64}) ==
+          "clmad.hi.u64 \$0, \$1, \$2, \$3;"
+
+    spec = build_call(:clmad, (:lo, :u64), (UInt64, UInt64, UInt64))
+    @test spec.rettype == UInt64
+    @test spec.side_effects == false
+    @test !occursin("~{memory}", spec.constraints)
+    @test spec.constraints == "=l,l,l,l"
+end
+
+@testset "cp.async.bulk family chain entries (.sem/.scope, PTX 9.3)" begin
+    # PTX 9.3 added `.sem`/`.scope` to `cp.async.bulk`, `cp.reduce.async.bulk`,
+    # and `multimem.cp.{async,reduce}.bulk`. The new forms append a terminal
+    # `.type` (.b128 for cp.async.bulk; .b32/.b64/.f16/.u64/etc. for the reduce
+    # variants). DTYPE_RETTYPE has entries for most of those, so the chain
+    # default would misread the terminal as a return slot without the
+    # `(:async, :bulk)` / `(:reduce, :async, :bulk)` / `(:cp,)` _MEMSINK
+    # overrides in src/forms.jl.
+
+    # `cp.async.bulk` with .sem/.scope + .b128 (sm_100+ global→shared::cta).
+    asm = format_call(
+        ptx"cp.async.bulk.relaxed.gpu.shared::cta.global.mbarrier::complete_tx::bytes.b128",
+        Tuple{Core.LLVMPtr{UInt8, PTX.AS.Shared},
+              Core.LLVMPtr{UInt8, PTX.AS.Global},
+              UInt32,
+              Core.LLVMPtr{UInt64, PTX.AS.Shared}})
+    @test asm ==
+        "cp.async.bulk.relaxed.gpu.shared::cta.global.mbarrier::complete_tx::bytes.b128 " *
+        "[\$0], [\$1], \$2, [\$3];"
+
+    spec = build_call(:cp,
+        (:async, :bulk, :relaxed, :gpu, Symbol("shared::cta"), :global,
+         Symbol("mbarrier::complete_tx::bytes"), :b128),
+        (Core.LLVMPtr{UInt8, PTX.AS.Shared},
+         Core.LLVMPtr{UInt8, PTX.AS.Global},
+         UInt32,
+         Core.LLVMPtr{UInt64, PTX.AS.Shared}))
+    @test spec.rettype === Nothing
+    @test spec.side_effects == true
+    @test occursin("~{memory}", spec.constraints)
+
+    # `cp.reduce.async.bulk` with .sem/.scope + .add.u64 (sm_90+, .sem/.scope new in 9.3).
+    asm = format_call(
+        ptx"cp.reduce.async.bulk.relaxed.cluster.shared::cluster.shared::cta.mbarrier::complete_tx::bytes.add.u64",
+        Tuple{Core.LLVMPtr{UInt64, PTX.AS.Shared},
+              Core.LLVMPtr{UInt64, PTX.AS.Shared},
+              UInt32,
+              Core.LLVMPtr{UInt64, PTX.AS.Shared}})
+    @test asm ==
+        "cp.reduce.async.bulk.relaxed.cluster.shared::cluster.shared::cta.mbarrier::complete_tx::bytes.add.u64 " *
+        "[\$0], [\$1], \$2, [\$3];"
+
+    spec = build_call(:cp,
+        (:reduce, :async, :bulk, :relaxed, :cluster, Symbol("shared::cluster"),
+         Symbol("shared::cta"), Symbol("mbarrier::complete_tx::bytes"), :add, :u64),
+        (Core.LLVMPtr{UInt64, PTX.AS.Shared},
+         Core.LLVMPtr{UInt64, PTX.AS.Shared},
+         UInt32,
+         Core.LLVMPtr{UInt64, PTX.AS.Shared}))
+    @test spec.rettype === Nothing
+
+    # `multimem.cp.async.bulk` with .sem/.scope (9.3, sm_100+). Multicast version
+    # of cp.async.bulk; same operand shape, opcode is :multimem.
+    asm = format_call(
+        ptx"multimem.cp.async.bulk.relaxed.sys.shared::cluster.global.mbarrier::complete_tx::bytes.b128",
+        Tuple{Core.LLVMPtr{UInt8, PTX.AS.Shared},
+              Core.LLVMPtr{UInt8, PTX.AS.Global},
+              UInt32,
+              Core.LLVMPtr{UInt64, PTX.AS.Shared}})
+    @test asm ==
+        "multimem.cp.async.bulk.relaxed.sys.shared::cluster.global.mbarrier::complete_tx::bytes.b128 " *
+        "[\$0], [\$1], \$2, [\$3];"
+
+    spec = build_call(:multimem,
+        (:cp, :async, :bulk, :relaxed, :sys, Symbol("shared::cluster"), :global,
+         Symbol("mbarrier::complete_tx::bytes"), :b128),
+        (Core.LLVMPtr{UInt8, PTX.AS.Shared},
+         Core.LLVMPtr{UInt8, PTX.AS.Global},
+         UInt32,
+         Core.LLVMPtr{UInt64, PTX.AS.Shared}))
+    @test spec.rettype === Nothing
+
+    # The `(:cp,)` prefix must NOT shadow `(:st,)` / `(:red,)`. Spot-check
+    # that st/red still resolve correctly.
+    spec = build_call(:multimem, (:st, :async, :release, :gpu, :global, :u32),
+        (Core.LLVMPtr{UInt32, PTX.AS.Global}, UInt32))
+    @test spec.rettype === Nothing
+end
+
+@testset "multimem chain entries (PTX 9.3 async forms)" begin
+    # `multimem.st.async.<sem>.<scope>{.ss}.<type> [a], b;` — bracketed
+    # multimem address + register value, no return. Routes through the
+    # chain default: `:multimem` is _MEM in src/forms.jl with `(:st,)` /
+    # `(:red,)` _MEMSINK overrides so the terminal dtype isn't misread as
+    # a return slot.
+    @test format_call(ptx"multimem.st.async.release.gpu.global.u32",
+                      Tuple{Core.LLVMPtr{UInt32, PTX.AS.Global}, UInt32}) ==
+          "multimem.st.async.release.gpu.global.u32 [\$0], \$1;"
+    @test format_call(ptx"multimem.st.async.release.sys.f64",
+                      Tuple{Core.LLVMPtr{Float64, PTX.AS.Global}, Float64}) ==
+          "multimem.st.async.release.sys.f64 [\$0], \$1;"
+
+    # `multimem.red.async.<sem>.<scope>{.ss}.<op>.<type> [a], b;`
+    @test format_call(ptx"multimem.red.async.release.gpu.global.add.u32",
+                      Tuple{Core.LLVMPtr{UInt32, PTX.AS.Global}, UInt32}) ==
+          "multimem.red.async.release.gpu.global.add.u32 [\$0], \$1;"
+    @test format_call(ptx"multimem.red.async.release.gpu.global.add.u64",
+                      Tuple{Core.LLVMPtr{UInt64, PTX.AS.Global}, UInt64}) ==
+          "multimem.red.async.release.gpu.global.add.u64 [\$0], \$1;"
+
+    # Memory-group opcode → side_effects=true + memory clobber.
+    spec = build_call(:multimem, (:st, :async, :release, :gpu, :global, :u32),
+                      (Core.LLVMPtr{UInt32, PTX.AS.Global}, UInt32))
+    @test spec.rettype == Nothing
+    @test spec.side_effects == true
+    @test occursin("~{memory}", spec.constraints)
+
+    spec = build_call(:multimem, (:red, :async, :release, :gpu, :global, :add, :u32),
+                      (Core.LLVMPtr{UInt32, PTX.AS.Global}, UInt32))
+    @test spec.rettype == Nothing
+    @test spec.side_effects == true
+
+    # Pre-9.3 forms (sm_90+, PTX 8.1): `multimem.st` / `multimem.red` without
+    # `.async`. Same override coverage.
+    @test format_call(ptx"multimem.st.relaxed.sys.global.u32",
+                      Tuple{Core.LLVMPtr{UInt32, PTX.AS.Global}, UInt32}) ==
+          "multimem.st.relaxed.sys.global.u32 [\$0], \$1;"
+    @test format_call(ptx"multimem.red.relaxed.sys.global.add.u32",
+                      Tuple{Core.LLVMPtr{UInt32, PTX.AS.Global}, UInt32}) ==
+          "multimem.red.relaxed.sys.global.add.u32 [\$0], \$1;"
+
+    # `multimem.ld_reduce` (sm_90+) IS a load — terminal `.type` drives the
+    # rettype as usual; the sink overrides only catch st/red/cp.
+    @test format_call(ptx"multimem.ld_reduce.relaxed.sys.global.add.u32",
+                      Tuple{Core.LLVMPtr{UInt32, PTX.AS.Global}}) ==
+          "multimem.ld_reduce.relaxed.sys.global.add.u32 \$0, [\$1];"
+    spec = build_call(:multimem, (:ld_reduce, :relaxed, :sys, :global, :add, :u32),
+                      (Core.LLVMPtr{UInt32, PTX.AS.Global},))
+    @test spec.rettype == UInt32
+end
+
 @testset "ldmatrix/stmatrix wrapper (tier-2 intrinsic lowering)" begin
     # Migrated family (DESIGN.md, "Lowering tiers"): the plain-`.shared`
     # and b8 forms
@@ -415,6 +564,133 @@ end
         ci, _ = first(Base.code_typed(Operation{:mbarrier, mods}(), argts))
         @test occursin(asm, string(ci))
     end
+end
+
+@testset "mbarrier PTX 9.3 extensions (layout / phase_type / report)" begin
+    # Asm tier by necessity (no NVVM intrinsics at 22.1.7). Prefix-matching
+    # on the @generated body's asm head plus rettype pins; `:report` is the
+    # synthetic dual-output modifier (mirrors setp's `:dual`).
+    pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
+    cases = [
+        # mods, argts, rettype, asm head
+        ((:init, Symbol("layout::v0"), :shared, :b64), (pS, UInt32), Nothing,
+            "mbarrier.init.layout::v0.shared.b64 ["),
+        ((:init, Symbol("layout::v1"), :shared, :b64), (pS, Int), Nothing,
+            "mbarrier.init.layout::v1.shared.b64 ["),
+        ((:check_layout, Symbol("layout::v0"), :shared, :b64), (pS,), Bool,
+            "mbarrier.check_layout.layout::v0.shared.b64 "),
+        ((:check_layout, Symbol("layout::v1"), :shared, :b64), (pS,), Bool,
+            "mbarrier.check_layout.layout::v1.shared.b64 "),
+        # dual-output report forms: (reportPredicate, reportValue)
+        ((:test_wait, :report, Symbol("phase_type::primary"), :shared, :b64),
+            (pS, UInt64), Tuple{Bool, UInt64},
+            "mbarrier.test_wait.phase_type::primary.shared.b64 "),
+        ((:test_wait, :report, :parity, Symbol("phase_type::primary"), :shared, :b64),
+            (pS, UInt32), Tuple{Bool, UInt64},
+            "mbarrier.test_wait.parity.phase_type::primary.shared.b64 "),
+        ((:try_wait, :report, Symbol("phase_type::primary"), :shared, :b64),
+            (pS, UInt64), Tuple{Bool, UInt64},
+            "mbarrier.try_wait.phase_type::primary.shared.b64 "),
+        ((:try_wait, :report, :parity, Symbol("phase_type::primary"), :shared, :b64),
+            (pS, UInt32), Tuple{Bool, UInt64},
+            "mbarrier.try_wait.parity.phase_type::primary.shared.b64 "),
+        # conditional-phase parity waits (layout::v1 only; single output)
+        ((:test_wait, :parity, Symbol("phase_type::conditional"), :shared, :b64),
+            (pS, UInt32), Bool,
+            "mbarrier.test_wait.parity.phase_type::conditional.shared.b64 "),
+        ((:try_wait, :parity, Symbol("phase_type::conditional"), :shared, :b64),
+            (pS, UInt32), Bool,
+            "mbarrier.try_wait.parity.phase_type::conditional.shared.b64 "),
+    ]
+    for (mods, argts, rettype, asm) in cases
+        op = Operation{:mbarrier, mods}()
+        @test which(op, argts).module == PTX
+        ci, rt = first(Base.code_typed(op, argts))
+        @test rt === rettype
+        s = string(ci)
+        @test occursin(asm, s)
+        @test occursin("~{memory}", s)
+    end
+
+    # Dual-output constraint shape: two outputs (=b pred, =l value) before
+    # the inputs — the same multi-output asm shape as setp's `.dual`.
+    ci, _ = first(Base.code_typed(
+        Operation{:mbarrier, (:test_wait, :report, Symbol("phase_type::primary"),
+                              :shared, :b64)}(), (pS, UInt64)))
+    @test occursin("=b,=l,r,l", string(ci))
+end
+
+@testset "fabric.* hand-written wrappers (PTX 9.3, sm_100+)" begin
+    # Zero-arg lifecycle ops — typed wrappers in fabric.jl. Each check
+    # confirms the @generated body baked the verbatim asm string, and the
+    # constraints check pins the `~{memory}` clobber (these are observable
+    # cross-GPU ops, must not be reordered around mbarrier submit/wait).
+    #
+    # `:fabric` is deliberately NOT in the form registry: the CFT handle
+    # operand `[leId, off]` has no chain-default rendering, so unimplemented
+    # fabric forms must error at the blessing boundary, not render wrong asm.
+
+    pS  = Core.LLVMPtr{UInt64, PTX.AS.Shared}
+    pS8 = Core.LLVMPtr{UInt8,  PTX.AS.Shared}
+
+    # Match opcode + qualifier prefix only (operand `[$N]` chunks are escape-
+    # hostile inside the lowered LLVM IR string — mirrors the mbarrier
+    # @generated body-expansion testset's prefix-only style).
+    cases = [
+        # mods, argts, expected_asm_prefix, expected_constraints
+        ((:submit,), (), "fabric.submit;", "~{memory}"),
+        ((:submit, Symbol("op_restrict::fetching")), (),
+            "fabric.submit.op_restrict::fetching;", "~{memory}"),
+        ((:wait, Symbol("sync_restrict::reads")), (),
+            "fabric.wait.sync_restrict::reads;", "~{memory}"),
+
+        ((:try_get, :async, Symbol("shared::cta"),
+          Symbol("mbarrier::complete_tx::bytes"),
+          Symbol("mbarrier::report::fabric"),
+          :relaxed, :sys, :b128),
+            (pS8, UInt32, UInt64, UInt32, pS),
+            "fabric.try_get.async.shared::cta" *
+              ".mbarrier::complete_tx::bytes.mbarrier::report::fabric" *
+              ".relaxed.sys.b128",
+            "r,r,l,r,r,~{memory}"),
+
+        # try_put basic. `complete_tx::16B` is the put-side completion mechanism
+        # (count per 16-byte chunk), distinct from try_get's `complete_tx::bytes`
+        # (count = exact bytes).
+        ((:try_put, :async, Symbol("shared::cta"),
+          Symbol("mbarrier::complete_tx::16B"),
+          Symbol("mbarrier::report::fabric"),
+          :relaxed, :sys, :b128),
+            (UInt32, UInt64, pS8, UInt32, pS),
+            "fabric.try_put.async.shared::cta" *
+              ".mbarrier::complete_tx::16B.mbarrier::report::fabric" *
+              ".relaxed.sys.b128",
+            "r,l,r,r,r,~{memory}"),
+
+        # try_put .multimem: `.multimem` inserted after `.async`.
+        ((:try_put, :async, :multimem, Symbol("shared::cta"),
+          Symbol("mbarrier::complete_tx::16B"),
+          Symbol("mbarrier::report::fabric"),
+          :relaxed, :sys, :b128),
+            (UInt32, UInt64, pS8, UInt32, pS),
+            "fabric.try_put.async.multimem.shared::cta" *
+              ".mbarrier::complete_tx::16B.mbarrier::report::fabric" *
+              ".relaxed.sys.b128",
+            "r,l,r,r,r,~{memory}"),
+    ]
+    for (mods, argts, expected_asm, expected_cons) in cases
+        op = Operation{:fabric, mods}()
+        @test which(op, argts).module == PTX
+        ci, rt = first(Base.code_typed(op, argts))
+        @test rt === Nothing
+        s = string(ci)
+        @test occursin(expected_asm,  s)
+        @test occursin(expected_cons, s)
+    end
+
+    # Unimplemented fabric forms die at the blessing boundary (no registry
+    # entry), steering to the wrappers or the raw tier.
+    @test_throws ErrorException build_call(:fabric, (:try_red,), (pS8,))
 end
 
 
@@ -935,6 +1211,25 @@ end
         ci, rt = first(Base.code_typed(Operation{:fence, mods}(), ()))
         @test rt === Nothing
         @test occursin(intr, string(ci))
+    end
+end
+
+@testset "fabric proxy fences (PTX 9.3, asm tier)" begin
+    # `fence.proxy.<to::from>.alias.<sem>.sys;` — no NVVM intrinsics at
+    # 22.1.7, so unlike the proxy/init fences above these stay on the asm
+    # tier: sideeffect + `~{memory}`, not convergent.
+    for dir in (Symbol("generic::fabric"), Symbol("fabric::generic"),
+                Symbol("fabric::fabric")),
+        sem in (:acquire, :release)
+
+        mods = (:proxy, dir, :alias, sem, :sys)
+        op = Operation{:fence, mods}()
+        @test which(op, ()).module == PTX
+        ci, rt = first(Base.code_typed(op, ()))
+        @test rt === Nothing
+        s = string(ci)
+        @test occursin("fence.proxy.$dir.alias.$sem.sys;", s)
+        @test occursin("~{memory}", s)
     end
 end
 

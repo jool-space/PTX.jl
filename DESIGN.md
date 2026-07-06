@@ -297,7 +297,14 @@ is nearly empty once expressibility decides per form). The CTA barriers
 (`bar.*`, `barrier.*`) migrated 2026-07-06, closing the last family that
 had intrinsics available while sitting on asm — the asm tier is now
 residue-only. `wgmma` never
-migrates; it gets registered as asm-tier and stays there. Beyond that opening sequence, priority comes from
+migrates; it gets registered as asm-tier and stays there. The PTX 9.3
+surface (`fabric.*`, mbarrier layout/phase_type/report, fabric proxy
+fences; landed 2026-07-06) is the first day-0 instance of that residue:
+no NVVM intrinsics exist at 22.1.7, so it joins on asm and migrates
+whenever the pinned backend catches up. `:fabric` is deliberately outside
+the form registry — its CFT handle operand `[leId, off]` has no
+chain-default rendering, so unimplemented fabric forms error at the
+blessing boundary instead of rendering wrong asm. Beyond that opening sequence, priority comes from
 data, not completionism: parse a corpus of real kernels (own packages,
 CUTLASS dumps) and rank unregistered forms by frequency.
 

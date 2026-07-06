@@ -74,3 +74,28 @@ for (sem, ordering) in ((:sc, "seq_cst"), (:acq_rel, "acq_rel"))
         _generic_fence_register(sem, ordering, scope, syncscope)
     end
 end
+
+# --- Fabric proxy fences (PTX 9.3, sm_100+), asm tier -----------------------
+# `fence.proxy.<to::from>.alias.<sem>.sys;` — uni-directional proxy ordering
+# between the fabric proxy (used by `fabric.*` ops on the CFT/NVLink path)
+# and the generic proxy. All three handle directions × {acquire, release}
+# are enumerated. `.alias` and `.sys` are mandatory per the PTX 9.3 spec
+# (§9.7.14.4); no scope/sem variation beyond what's shown. No NVVM
+# intrinsics exist at 22.1.7, so these stay on the asm tier — like the
+# other fences, NOT convergent (duplicating an ordering fence is harmless),
+# but sideeffect + `~{memory}` so nothing moves across them.
+
+for dir in (Symbol("generic::fabric"), Symbol("fabric::generic"),
+            Symbol("fabric::fabric")),
+    sem in (:acquire, :release)
+
+    asm = "fence.proxy.$dir.alias.$sem.sys;"
+    @eval @generated function (::Operation{:fence, (:proxy, $(QuoteNode(dir)),
+                                                    :alias, $(QuoteNode(sem)), :sys)})()
+        quote
+            Base.@inline
+            @asmcall($$asm, "~{memory}", true, Nothing, Tuple{})
+            nothing
+        end
+    end
+end
