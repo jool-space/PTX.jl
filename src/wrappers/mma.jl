@@ -119,12 +119,15 @@ function _mma_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
     full = "llvm.nvvm." * name
     if !NVVM.isintrinsic(full)
         # No intrinsic at 22.1.7 (e.g. kind::f8f6f4 at m16n8k16) — asm tier.
-        push!(MMA_ASM_FORMS, (shape, a_ty, b_ty, c_ty,
-                              kind === nothing ? :none : kind))
+        # Bookkeeping is idempotent: re-invoking a register helper (the
+        # coverage testset does) must not grow the lists the conformance
+        # counts pin.
+        form = (shape, a_ty, b_ty, c_ty, kind === nothing ? :none : kind)
+        form in MMA_ASM_FORMS || push!(MMA_ASM_FORMS, form)
         return _mma_register_asm(mods, shape, a_ty, b_ty, c_ty, kind,
                                  n_a, n_b, n_cd, cd_J)
     end
-    push!(MMA_INTRINSIC_NAMES, full)
+    full in MMA_INTRINSIC_NAMES || push!(MMA_INTRINSIC_NAMES, full)
     call = NVVM.IntrinsicCall{Symbol(full)}()
 
     ab_vec = a_ty === :f16          # f16 inputs → <2 x half> A/B

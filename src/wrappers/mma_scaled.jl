@@ -57,12 +57,14 @@ function _mma_scaled_register(kind::Symbol, scale_vec::Symbol,
     full = "llvm.nvvm." * name
 
     if !NVVM.isintrinsic(full)
-        push!(MMA_SCALED_ASM_FORMS, (kind, scale_vec, shape, a_ty, b_ty, s_ty))
+        # Idempotent bookkeeping — see _mma_register.
+        form = (kind, scale_vec, shape, a_ty, b_ty, s_ty)
+        form in MMA_SCALED_ASM_FORMS || push!(MMA_SCALED_ASM_FORMS, form)
         return _mma_scaled_register_asm(mods, kind, scale_vec, shape,
                                         layA, layB, a_ty, b_ty, c_ty, s_ty,
                                         n_a, n_b, n_cd)
     end
-    push!(MMA_SCALED_INTRINSIC_NAMES, full)
+    full in MMA_SCALED_INTRINSIC_NAMES || push!(MMA_SCALED_INTRINSIC_NAMES, full)
     call = NVVM.IntrinsicCall{Symbol(full)}()
     cd_J = c_ty === :f32 ? :Float32 : :UInt32
 
