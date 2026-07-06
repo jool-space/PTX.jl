@@ -293,7 +293,9 @@ end
     # collectives got sideeffect but NOT convergent.
     for (op, argts) in [
         (ptx"vote.sync.ballot.b32", (Bool, UInt32)),
-        (ptx"bar.sync",             (Val{0},)),
+        # Int64 keeps bar.sync on the chain fallback — Val/UInt32/Int32
+        # dispatch to the tier-2 wrapper (tested in host/wrappers.jl).
+        (ptx"bar.sync",             (Int64,)),
         (ptx"redux.sync.add.s32",   (Int32, UInt32)),
         (ptx"activemask.b32",       ()),
     ]

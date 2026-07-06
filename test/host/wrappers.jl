@@ -60,14 +60,62 @@ end
         "mov.u32 \$0, %tid.x;"
 end
 
-@testset "bar.sync" begin
-    # Integer-Val bakes immediate `0` / `15` into the asm.
+@testset "bar/barrier wrapper (tier-2 intrinsic lowering)" begin
+    # Migrated family (the fence recipe): bar.{sync,arrive}, bar.warp.sync
+    # and the barrier.{sync,arrive}{.aligned} spellings lower through
+    # llvm.nvvm.barrier.cta.* / llvm.nvvm.bar.warp.sync for Val and
+    # UInt32/Int32 operands (golden: test/golden/barrier@sm75.ptx).
+    # bar.* rides the .aligned intrinsics — PTX §9.7.12.1 defines
+    # bar ≡ barrier.aligned.
+    cases = [
+        (:bar, (:sync,), (Val{0},),
+            "llvm.nvvm.barrier.cta.sync.aligned.all"),
+        (:bar, (:sync,), (UInt32,),
+            "llvm.nvvm.barrier.cta.sync.aligned.all"),
+        (:bar, (:sync,), (Val{1}, Val{128}),
+            "llvm.nvvm.barrier.cta.sync.aligned.count"),
+        (:bar, (:sync,), (UInt32, UInt32),
+            "llvm.nvvm.barrier.cta.sync.aligned.count"),
+        (:bar, (:warp, :sync), (UInt32,),
+            "llvm.nvvm.bar.warp.sync"),
+        (:bar, (:arrive,), (Val{2}, Val{128}),
+            "llvm.nvvm.barrier.cta.arrive.aligned.count"),
+        (:barrier, (:sync,), (Val{3},),
+            "llvm.nvvm.barrier.cta.sync.all"),
+        (:barrier, (:sync,), (Val{4}, Val{128}),
+            "llvm.nvvm.barrier.cta.sync.count"),
+        (:barrier, (:sync, :aligned), (Val{5},),
+            "llvm.nvvm.barrier.cta.sync.aligned.all"),
+        (:barrier, (:sync, :aligned), (Val{6}, Val{128}),
+            "llvm.nvvm.barrier.cta.sync.aligned.count"),
+        (:barrier, (:arrive,), (Val{7}, Val{128}),
+            "llvm.nvvm.barrier.cta.arrive.count"),
+        (:barrier, (:arrive, :aligned), (Val{8}, Val{128}),
+            "llvm.nvvm.barrier.cta.arrive.aligned.count"),
+    ]
+    for (opsym, mods, argts, intr) in cases
+        # the intrinsic is registered and convergent
+        @test PTX.NVVM.isintrinsic(intr)
+        @test :convergent in PTX.NVVM.intrinsic(intr).props
+        # the method dispatches and routes to that intrinsic
+        op = Operation{opsym, mods}()
+        @test which(op, argts).module == PTX
+        ci, rt = first(Base.code_typed(op, argts))
+        @test rt === Nothing
+        @test occursin(intr, string(ci))
+    end
+
+    # Wider integers stay on the asm-tier chain fallback unchanged — the
+    # frozen transpiler emits `ptx"bar.sync"(0)` with Int literals, and
+    # that path keeps its rendering and its convergent nomerge asm.
+    ci, _ = first(Base.code_typed(Operation{:bar, (:sync,)}(), (Int64,)))
+    s = string(ci)
+    @test occursin("bar.sync", s)
+    @test occursin("convergent nomerge", s)
+
+    # Renderer + registry contract for the fallback path, unchanged:
     @test format_call(ptx"bar.sync", Tuple{Val{0}})  == "bar.sync 0;"
     @test format_call(ptx"bar.sync", Tuple{Val{15}}) == "bar.sync 15;"
-    # Register form.
-    @test format_call(ptx"bar.sync", Tuple{UInt32})  == "bar.sync \$0;"
-
-    # Sync-group opcode → side_effects=true + memory clobber.
     spec = build_call(:bar, (:sync,), (Val{0},))
     @test spec.side_effects == true
     @test occursin("~{memory}", spec.constraints)

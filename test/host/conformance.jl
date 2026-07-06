@@ -79,6 +79,24 @@ const PROBES = Tuple{String, Tuple, String, String, Regex}[
     ("llvm.nvvm.barrier.cluster.wait.aligned",
         (), "sm_90", "+ptx78", r"barrier\.cluster\.wait\.aligned;"),
 
+    # CTA barriers (wrappers/barrier.jl) — ISel renders the classic
+    # spellings: the .aligned intrinsics select `bar.*` (PTX §9.7.12.1:
+    # bar ≡ barrier.aligned), the unaligned ones select `barrier.*`.
+    ("llvm.nvvm.barrier.cta.sync.aligned.all",
+        (UInt32,), "sm_70", "+ptx60", r"bar\.sync \s*%r\d+;"),
+    ("llvm.nvvm.barrier.cta.sync.aligned.count",
+        (UInt32, UInt32), "sm_70", "+ptx60", r"bar\.sync \s*%r\d+, %r\d+;"),
+    ("llvm.nvvm.barrier.cta.sync.all",
+        (UInt32,), "sm_70", "+ptx60", r"barrier\.sync \s*%r\d+;"),
+    ("llvm.nvvm.barrier.cta.sync.count",
+        (UInt32, UInt32), "sm_70", "+ptx60", r"barrier\.sync \s*%r\d+, %r\d+;"),
+    ("llvm.nvvm.barrier.cta.arrive.aligned.count",
+        (UInt32, UInt32), "sm_70", "+ptx60", r"bar\.arrive \s*%r\d+, %r\d+;"),
+    ("llvm.nvvm.barrier.cta.arrive.count",
+        (UInt32, UInt32), "sm_70", "+ptx60", r"barrier\.arrive \s*%r\d+, %r\d+;"),
+    ("llvm.nvvm.bar.warp.sync",
+        (UInt32,), "sm_70", "+ptx60", r"bar\.warp\.sync \s*%r\d+;"),
+
     # ldmatrix/stmatrix (wrappers/{ldmatrix,stmatrix}.jl) — b16 shapes at
     # their family floors, b8 shapes at sm_100a (family-specific). The
     # brace groups in the regexes pin destination/source arity — the b8
@@ -548,6 +566,7 @@ end
 const ATTR_ANCHORS = Pair{String, Tuple{Vararg{Symbol}}}[
     # convergent — the load-bearing one; absence = permission to duplicate
     "llvm.nvvm.bar.warp.sync"                  => (:convergent, :nocallback),                  # [td]
+    "llvm.nvvm.barrier.cta.sync.aligned.all"   => (:convergent, :nocallback),                  # [td]
     "llvm.nvvm.barrier.cluster.arrive"         => (:convergent, :nocallback),                  # [td]
     "llvm.nvvm.barrier.cluster.arrive.aligned" => (:convergent, :nocallback),                  # [td]
     "llvm.nvvm.shfl.sync.idx.i32"              => (:inaccessiblememonly, :convergent, :nocallback),

@@ -492,6 +492,31 @@ Per-family ledger:
   ptxas-valid surface; conformance probes pin the brace arity per name and
   the never-compilable forms now fall to the chain default (retired for
   good by the B3 blessing flip).
+- **bar / barrier CTA execution barriers** (2026-07-06,
+  `test/golden/barrier@sm75.ptx` diff): strict win, plus spelling
+  normalization. Immediate operands the asm tier's `r` constraints forced
+  through registers fold into the instruction (`mov.b32 %r,128; bar.sync
+  %r1,%r2` → `bar.sync %r1,128`; same for `bar.warp.sync -1`). ISel
+  renders the classic spellings — the `.aligned` intrinsics print `bar.*` —
+  so the explicit `barrier.{sync,arrive}.aligned` chain forms emit
+  `bar.{sync,arrive}`: the identical instruction (ISA §9.7.12.1 defines
+  `bar` ≡ `barrier.aligned`), notation non-WYSIWYG by design. Mapping:
+  `bar.*` → `llvm.nvvm.barrier.cta.*.aligned.*`, `barrier.*` → unaligned,
+  `all` vs `count` by arity; `bar.warp.sync` → its own name. Effect model:
+  props are table-derived (`convergent nocallback`, memory conservative —
+  correct for an op that IS a fence) instead of hand-asserted asm flags,
+  and the calls participate in any future convergence analysis, which
+  inline asm never can. Surface: `Val`/`UInt32`/`Int32` operands dispatch
+  tier-2; wider integers stay on the chain asm fallback byte-identically —
+  the frozen transpiler emits `ptx"bar.sync"(0)` with `Int` literals, and
+  that path is deliberately untouched (pinned in host/wrappers.jl). Text
+  detail: ISel formats `bar.sync \t0` where inline asm passed `bar.sync 0`
+  verbatim — the ptxas/gpu text assertions went whitespace-tolerant.
+  `bar.red`/`barrier.red` are NOT here: NVPTX inline asm has no `.pred`
+  constraint, so the asm tier never could express them — new surface for a
+  future decision, not migration. With this the last chain family that had
+  intrinsics available moves off asm: the asm tier is now residue-only
+  (wgmma, day-0 forms, no-intrinsic corners) plus explicit `ptx"..."raw`.
 
 ### In-process LLVM dialect compatibility (Julia 1.10/1.11)
 

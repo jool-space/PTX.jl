@@ -260,7 +260,11 @@ candidates migrate as their semantic mapping decisions get made, not
 before — vector ld/st traded a `~{memory}` barrier for an optimizable load,
 a behavior change to working code that was verified explicitly before
 landing (migrated 2026-06-13; see the CONCERNS.md ledger entry); `cvt`
-remains the open case. `wgmma` never
+resolved by dissolution 2026-07-06 (see Open questions — the collision set
+is nearly empty once expressibility decides per form). The CTA barriers
+(`bar.*`, `barrier.*`) migrated 2026-07-06, closing the last family that
+had intrinsics available while sitting on asm — the asm tier is now
+residue-only. `wgmma` never
 migrates; it gets registered as asm-tier and stays there. Beyond that opening sequence, priority comes from
 data, not completionism: parse a corpus of real kernels (own packages,
 CUTLASS dumps) and rank unregistered forms by frequency.

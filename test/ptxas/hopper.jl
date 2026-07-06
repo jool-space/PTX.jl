@@ -205,7 +205,8 @@ end
     @test occursin("cp.async.ca.shared.global",                       ptx)
     @test occursin("cp.async.commit_group",                           ptx)
     @test occursin("cp.async.wait_all",                               ptx)
-    @test occursin("bar.sync 0",                                      ptx)
+    # tier-2 barrier: ISel formats with a tab where inline asm had a space
+    @test occursin(r"bar\.sync \s*0",                                 ptx)
     @test occursin("fence.proxy.async",                               ptx)
     @test occursin("wgmma.fence.sync.aligned",                        ptx)
     @test occursin("wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16", ptx)

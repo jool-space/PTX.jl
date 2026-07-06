@@ -55,7 +55,8 @@ end
                       Val{1024}, Val{256}, Val{Float32(1f-6)}}
         ptx, julia = _roundtrip_emit_and_transpile(_rms_norm_v4_kernel!, types)
         @test occursin("shfl.sync.bfly.b32", ptx)
-        @test occursin("bar.sync 0", ptx)
+        # tier-2 barrier: ISel formats with a tab where inline asm had a space
+        @test occursin(r"bar\.sync \s*0", ptx)
         @test occursin("rsqrt.approx.f32", ptx)
         @test _parses_cleanly(julia)
         # bar.sync should NOT come through as `0 = ptx"bar.sync"()` — that
@@ -75,7 +76,7 @@ end
                       Val{1024}, Val{256}, Val{Float32(1f-5)}}
         ptx, julia = _roundtrip_emit_and_transpile(_layer_norm_v4_kernel!, types)
         @test occursin("shfl.sync.bfly.b32", ptx)
-        @test count("bar.sync 0", ptx) == 2     # one per pass-1/2 boundary
+        @test count(r"bar\.sync \s*0", ptx) == 2   # one per pass-1/2 boundary
         @test _parses_cleanly(julia)
         @test count("ptx\"bar.sync\"(0)", julia) == 2
     end

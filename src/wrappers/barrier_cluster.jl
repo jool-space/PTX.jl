@@ -1,5 +1,6 @@
 # `barrier.cluster.{arrive,wait}` (PTX 9.2 §9.7.12.3), sm_90+ — first
-# slice of the barrier-family tier-2 migration.
+# slice of the barrier-family tier-2 migration (the CTA-scope slice
+# followed 2026-07-06; see wrappers/barrier.jl).
 #
 # Two reasons this family doesn't ride the chain default (asm):
 #   - The intrinsics carry `convergent` from the registry; the chain's
