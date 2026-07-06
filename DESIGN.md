@@ -72,6 +72,11 @@ in the registry (below):
    `Base.llvmcall` IR with explicit attribute groups (`convergent`, memory
    effects) on the declaration, since the in-process LLVM doesn't know these
    intrinsics and would otherwise treat them as unattributed unknown calls.
+   The explicit attributes also buy uniformity, not just correctness: when a
+   given Julia version's in-process LLVM *does* know an intrinsic (1.12 knows
+   names 1.10 has never heard of), it supplies attributes from its own table —
+   registry-attached attributes make optimization behavior identical across
+   Julia versions instead of varying with each version's intrinsic knowledge.
    Aggregate returns unpack to tuples here, replacing long asm constraint
    strings.
 3. **Inline asm** for what's left: `wgmma.mma_async`, forms newer than the
@@ -175,7 +180,11 @@ instantiate are environments where the intrinsic names match. A backend bump
 is one PR (regenerate from the `.td` at the new tag, let the trial-compile
 harness report the churn, move the bound); until that lands, a CUDA.jl release
 requiring a newer backend conflicts loudly at resolve time rather than failing
-at kernel-compile time. Note the failure modes are benign either way: a
+at kernel-compile time. Single-major pinning makes that PR a serialization
+point for every dependent when CUDA.jl moves to a new backend major, so the
+regen must stay a rehearsed, sub-day, mechanical operation — periodically
+dry-run the regeneration against the *current* JLL (expected result: empty
+diff) to prove the pipeline is still turnkey before a real bump demands it. Note the failure modes are benign either way: a
 renamed intrinsic either gets AutoUpgraded by `llc` or fails instruction
 selection with a clear error — never a silent miscompile.
 
@@ -301,13 +310,22 @@ byte-identical.
   the GB10 and validated it (explicit attribute groups survive the pipeline
   and bind; the unattributed variant miscompiles exactly as predicted). See
   `CONCERNS.md`, "Convergence attributes through the middle end."
-- Whether `cvt`-style ops that have both core-IR and intrinsic lowerings should
-  prefer optimizability (core IR) or exactness of form (intrinsic) — probably
-  per-op, decided in the registry, but the default is undecided. Three
-  concrete data points so far: proxy fences took the intrinsic (exactness —
-  a proxy fence has no core-IR form), while vector ld/st (2026-06-13) and
-  the generic memory fences (2026-07-02) took core IR (optimizability — in
-  both cases the behavior change was verified explicitly before landing;
-  see the CONCERNS.md ledger entries). `cvt` is the remaining undecided
-  case, and the only one where both lowerings genuinely exist for the same
-  form — the first true test of the default.
+- ~~Whether `cvt`-style ops that have both core-IR and intrinsic lowerings
+  should prefer optimizability (core IR) or exactness of form (intrinsic).~~
+  Resolved (2026-07-06), largely by dissolution: decide per-form by
+  *expressibility*, and the set where both lowerings genuinely exist is
+  nearly empty. The cvt forms where PTX.jl adds value — satfinite, packed,
+  fp8/fp6/fp4 narrow types — have no core-IR spelling at all (there is no
+  `fptrunc` to fp8), so they are tier-2 by the same rule that decided proxy
+  fences. Non-default rounding modes (`.rz`/`.rm`/`.rp`) also lack a plain
+  core-IR spelling (`fptrunc` is round-to-nearest-even only), leaving only
+  the default-rounding standard-type forms as a true collision set — and
+  those are conversions Julia already emits natively without PTX.jl in the
+  loop, so registering them is completeness, not value. Prior data points
+  that established the rule: proxy fences took the intrinsic (no core-IR
+  form), vector ld/st (2026-06-13) and generic memory fences (2026-07-02)
+  took core IR (verified before landing; see the CONCERNS.md ledger
+  entries). Standing caution for any cvt form that does take core IR:
+  value-semantic identity must be pinned from the consumer side
+  (double-rounding through widening chains, FTZ) — an exhaustive-sweep
+  parity harness in the consumer package is the right instrument.
