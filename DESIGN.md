@@ -143,8 +143,8 @@ build artifact.
   registry, closed validation at chain build, full-ISA tab completion —
   was piloted on cvt with ptxas as the grammar oracle (enumerate a
   candidate superset, trial-compile each across an arch ladder, commit
-  the accepted set as generated source; gen/sweep_cvt_grammar.jl, kept as
-  a research tool). The pilot's first run killed the idea honestly: the
+  the accepted set as generated source). The pilot's first run killed the
+  idea honestly: the
   oracle only answers correctly if the per-form operand synthesis
   (register classes, arity, sub-word carriers) is right, and THAT
   knowledge is hand-written and rot-prone — the oracle doesn't eliminate
