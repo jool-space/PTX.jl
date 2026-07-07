@@ -18,6 +18,15 @@ auditable table in `src/forms.jl`.
 PTX.form_contract
 ```
 
+## Lowering reflection
+
+Ask any operation what it will actually become — which lowering tier a
+call binds to, and to which intrinsics — without compiling for a device.
+
+```@docs
+PTX.lowering
+```
+
 ## NVVM intrinsic registry
 
 Generated from the backend LLVM's `IntrinsicsNVVM.td` (see `gen/`) and
