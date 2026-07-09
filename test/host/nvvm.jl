@@ -3,7 +3,7 @@ using PTX.NVVM: Intrinsic, intrinsic, isintrinsic, matching, overloaded,
                 llvmtype, ptr, slot, anyptr, anyint, anyfloat, TABLE,
                 synthesize, IntrinsicCall, @nvvm_str
 
-# The registry's contract (DESIGN.md, "The registry"): the committed table
+# The registry's contract: the committed table
 # is the backend's intrinsic surface, queryable, with no silent gaps. The
 # extraction itself is conformance-checked against the llc binary's name
 # table at generation time (gen/extract_intrinsics.sh); these tests pin the
@@ -13,7 +13,7 @@ using PTX.NVVM: Intrinsic, intrinsic, isintrinsic, matching, overloaded,
 @testset "table shape" begin
     # exact agreement with the 22.1.7 llc name table, established at
     # extraction; a regenerated table that drifts in count means tblgen
-    # skew (see CONCERNS.md, "Obtaining llvm-tblgen")
+    # skew (gen/ must run tblgen at the backend's exact version)
     @test length(TABLE) == 2569
     @test NVVM.BACKEND_LLVM_VERSION == v"22.1.7"
     @test all(k == i.name for (k, i) in TABLE)
@@ -160,7 +160,7 @@ end
 @testset "synthesize: two-slot mangle in canonical order (atomic)" begin
     psuf = Base.libllvm_version < v"17" ? "i8" : ""
     # ret slot (f32) precedes the pointer slot (p1) — the order llc's
-    # remangler normalizes to (CONCERNS.md, mangling)
+    # remangler normalizes to
     s = synthesize("llvm.nvvm.atomic.add.gen.f.cta",
                    (Core.LLVMPtr{Float32,1}, Float32))
     @test occursin("@\"llvm.nvvm.atomic.add.gen.f.cta.f32.p1$psuf\"", s.ir)

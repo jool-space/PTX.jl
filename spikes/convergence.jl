@@ -1,4 +1,6 @@
-# Convergence spike — resolves the gating concerns in CONCERNS.md.
+# Convergence spike — hardware validation (GB10, 2026-06-12) of the tier-2
+# attribute strategy; the suite inherited the shape (test/gpu/nvvm.jl,
+# test/ptxas/nvvm.jl).
 #
 # Question: do hand-written attribute groups on unknown-intrinsic declarations
 # (the tier-2 emission strategy) survive Julia's llvmcall splicing and

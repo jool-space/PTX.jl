@@ -423,7 +423,7 @@ end
 # --- The raw tier -------------------------------------------------------------
 #
 # `ptx"..."raw` — the explicit opt-in for chains the form registry doesn't
-# know (DESIGN.md, "A blessing boundary"). Same rendering machinery as the
+# know. Same rendering machinery as the
 # registered chain, but under RAW_CONTRACT: sideeffect + memory clobber +
 # convergent, pointer operands bracketed, trailing-dtype return inference
 # (wrong guesses die loudly in ptxas, never silently in the optimizer).
@@ -539,8 +539,7 @@ end
 # collective op: the `active_mask` class of miscompile the convergence spike
 # reproduced on hardware. The attribute binds in the in-process middle end
 # only — llc neither checks nor needs it — so it is asserted by tests on the
-# emitted llvmcall IR, not by ptxas acceptance (see CONCERNS.md, "Convergence
-# on the asm tier").
+# emitted llvmcall IR, not by ptxas acceptance.
 #
 # Mechanism validated by spikes/raw_asm_attrs.jl: a `convergent` attribute
 # group on an inline-asm call site parses through Base.llvmcall and survives
@@ -665,4 +664,98 @@ const NVVM_SREG_U32 = Dict{Symbol, String}(
             $(spec.rettype),
             Tuple{$(spec.passthrough_argtypes...)})
     end
+end
+
+# --- Lowering reflection ------------------------------------------------------
+#
+# `lowering(op, argtypes)` answers "what will this call actually become?"
+# without compiling for a device. Chain-vs-wrapper is a dispatch question
+# (`which`); wrapper tier is a typed-IR question: tier-2 wrappers reference
+# an `NVVM.IntrinsicCall{name}` singleton whose name is a *type parameter*,
+# recoverable structurally, and the remaining wrappers split on whether the
+# body's llvmcall IR contains an inline-`asm` call (asm tier) or plain
+# target-independent instructions (tier-1 core IR).
+
+# The two chain-default methods, captured for identity comparison. `add.f32`
+# never gets a wrapper, so `which` resolves both at load time.
+const _CHAIN_METHOD     = which(Operation{:add, (:f32,)}(),    (Float32, Float32))
+const _RAW_CHAIN_METHOD = which(RawOperation{:add, (:f32,)}(), (Float32, Float32))
+
+function _walk_intrinsics!(names::Vector{String}, @nospecialize(x))
+    if x isa NVVM.IntrinsicCall
+        push!(names, String(typeof(x).parameters[1]))
+    elseif x isa QuoteNode
+        _walk_intrinsics!(names, x.value)
+    elseif x isa GlobalRef
+        if isdefined(x.mod, x.name)
+            v = getglobal(x.mod, x.name)
+            v isa NVVM.IntrinsicCall &&
+                push!(names, String(typeof(v).parameters[1]))
+        end
+    elseif x isa Expr
+        for a in x.args
+            _walk_intrinsics!(names, a)
+        end
+    end
+    return nothing
+end
+
+"""
+    lowering(op::Operation, argtypes) -> NamedTuple
+
+Reflect on how calling `op` with arguments of the given types will lower,
+without a device. `argtypes` is a tuple of types or a `Tuple{...}` type.
+Returns `(; tier, method, rettype, intrinsics, asm)`:
+
+- `tier = :intrinsic` — a wrapper routes to `llvm.nvvm.*` intrinsics (tier 2);
+  their names are in `intrinsics`, and `NVVM.intrinsic(name)` has each record.
+- `tier = :core` — a wrapper emits target-independent LLVM IR (tier 1):
+  a real `fence`, `load`/`store`, etc. No intrinsic, no asm.
+- `tier = :asm` — a hand-written wrapper embeds inline PTX asm (no intrinsic
+  or core-IR spelling exists at the pinned backend).
+- `tier = :chain_asm` — no wrapper: the chain default renders inline asm
+  from the mods and argument types under the form registry's contract
+  (`RAW_CONTRACT` for a `RawOperation`); the text is in `asm`.
+- `tier = :unregistered` — no wrapper and the opcode is not in the form
+  registry: the call errors at the blessing boundary.
+
+Binding is not selectability: an `:intrinsic` form can still fail ISel below
+its capability floor — that gate lives in the backend, not the registry.
+"""
+function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
+    argts = argtypes isa Type ? Tuple(argtypes.parameters) : Tuple(argtypes)
+    op, mods = typeof(o).parameters
+    m = which(o, Tuple{argts...})
+    if m === _CHAIN_METHOD || m === _RAW_CHAIN_METHOD
+        raw = m === _RAW_CHAIN_METHOD
+        contract = raw ? RAW_CONTRACT : form_contract(op, mods)
+        contract === nothing &&
+            return (; tier = :unregistered, method = m, rettype = nothing,
+                      intrinsics = String[], asm = nothing)
+        spec = build_call(op, mods, argts; contract)
+        return (; tier = :chain_asm, method = m, rettype = spec.rettype,
+                  intrinsics = String[], asm = spec.asm)
+    end
+    # Structural pass: tier-2 wrappers reference IntrinsicCall singletons in
+    # their unoptimized body — the intrinsic name is a type parameter.
+    ci, rettype = only(Base.code_typed(o, argts; optimize = false))
+    names = String[]
+    for st in ci.code
+        _walk_intrinsics!(names, st)
+    end
+    # Optimized pass: inlining exposes the llvmcall IR text — catches
+    # intrinsics declared in literal IR (belt and braces) and, for the
+    # remaining wrappers, splits asm tier from tier-1 core IR. (`@asmcall`
+    # bodies only surface their asm string after inlining.)
+    s = string(first(only(Base.code_typed(o, argts))))
+    for match in eachmatch(r"llvm\.nvvm\.[A-Za-z0-9_.]+", s)
+        push!(names, match.match)
+    end
+    unique!(names)
+    isempty(names) ||
+        return (; tier = :intrinsic, method = m, rettype,
+                  intrinsics = names, asm = nothing)
+    # `call <ty> asm ...` is the LLVM inline-asm spelling inside llvmcall IR.
+    tier = occursin(" asm ", s) ? :asm : :core
+    return (; tier, method = m, rettype, intrinsics = names, asm = nothing)
 end

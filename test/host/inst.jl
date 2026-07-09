@@ -119,8 +119,7 @@ end
 
 @testset "build_call: side-effecting opcodes must never classify pure" begin
     # The chain default's failure mode for a forgotten NONPURE entry is a
-    # miscompile, not slowness (CONCERNS.md, "the chain default is
-    # permissive by default"). These are the gaps found 2026-07-04 — each
+    # miscompile, not slowness. These are the gaps found 2026-07-04 — each
     # was pure + clobber-free before.
 
     # multimem.st writes memory: nonpure, void (the dtype suffix is the
@@ -355,4 +354,54 @@ end
     @test repr(ptx"frobnicate.x2"raw) == "ptx\"frobnicate.x2\"raw"
     @test repr(mod"row.col") == "mod\"row.col\""
     @test repr(mod"") == "mod\"\""
+end
+
+@testset "PTX.lowering reflection" begin
+    # One case per tier; the classification is (dispatch, typed IR) only —
+    # no device, no ptxas.
+    pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
+    L = PTX.lowering
+
+    # chain default: asm rendered from the chain under the registry contract
+    r = L(ptx"add.f32", (Float32, Float32))
+    @test r.tier === :chain_asm
+    @test r.asm == "add.f32 \$0, \$1, \$2;"
+    @test r.rettype == Float32
+    @test isempty(r.intrinsics)
+
+    # Tuple-type argtypes form is accepted too
+    @test L(ptx"add.f32", Tuple{Float32, Float32}).tier === :chain_asm
+
+    # unregistered opcode: dies at the blessing boundary
+    r = L(ptx"frobnicate.x2", (UInt32,))
+    @test r.tier === :unregistered
+
+    # ...unless raw: chain asm under RAW_CONTRACT
+    r = L(ptx"frobnicate.x2"raw, (UInt32,))
+    @test r.tier === :chain_asm
+
+    # tier 2: wrapper binds to an intrinsic, name recovered structurally
+    r = L(ptx"mbarrier.init.shared.b64", (pS, UInt32))
+    @test r.tier === :intrinsic
+    @test r.intrinsics == ["llvm.nvvm.mbarrier.init.shared"]
+    @test PTX.NVVM.isintrinsic(only(r.intrinsics))
+
+    # tier 1: core IR, no intrinsic, no asm
+    @test L(ptx"fence.sc.cta", ()).tier === :core
+    @test L(ptx"st.global.v4.f32",
+            (Core.LLVMPtr{Float32, PTX.AS.Global}, NTuple{4, Float32})).tier === :core
+
+    # asm tier: hand-written wrapper, both @asmcall and convergent_asm_ir shapes
+    @test L(ptx"fabric.submit", ()).tier === :asm
+    @test L(ptx"mbarrier.arrive.shared::cluster.b64", (pS,)).tier === :asm
+    @test L(ptx"fence.proxy.generic::fabric.alias.acquire.sys", ()).tier === :asm
+
+    # argtype-dependent split: the barrier family is tier-2 for the
+    # registered operand types, chain-asm fallback for wider integers
+    @test L(ptx"bar.sync", (UInt32,)).tier === :intrinsic
+    @test L(ptx"bar.sync", (Int64,)).tier === :chain_asm
+
+    # binding metadata: which method won dispatch
+    @test L(ptx"fabric.submit", ()).method.module == PTX
+    @test endswith(String(L(ptx"add.f32", (Float32, Float32)).method.file), "inst.jl")
 end

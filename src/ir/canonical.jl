@@ -1,4 +1,4 @@
-# Canonical renaming for structural PTX comparison (DESIGN.md, "Approach"):
+# Canonical renaming for structural PTX comparison:
 # the golden harness compares instruction sequences *modulo naming*, because
 # the backend renumbers virtual registers the moment lowering changes — a
 # byte-exact golden dies on every harmless diff. Built on `normalize`, then:
@@ -178,7 +178,7 @@ registers, labels, parameters, declared variables, and function names
 renamed to position-stable canonical names, and `.reg` declarations
 dropped. Two modules whose `canonicalize` outputs `format` identically
 contain the same instruction sequences modulo naming — the golden-harness
-equivalence (see DESIGN.md).
+equivalence.
 """
 function canonicalize(m::Module)
     m = normalize(m)

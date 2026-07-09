@@ -1,11 +1,11 @@
-# Tier-2 emission: registry-checked `Base.llvmcall` synthesis (DESIGN.md,
-# "Lowering tiers"). Everything the spikes validated lands here: explicit
+# Tier-2 emission: registry-checked `Base.llvmcall` synthesis. Everything
+# the spikes validated lands here: explicit
 # attribute groups on the declaration (the in-process LLVM knows nothing
 # about these intrinsics, so an absent attribute is an absent constraint —
 # spikes/convergence.jl), aggregate returns unpacked to tuples
 # (spikes/aggregate_return.jl), and canonical mangled names for overloaded
 # intrinsics (llc accepts and silently remangles wrong spellings, so
-# acceptance testing would never catch a mangling bug — CONCERNS.md).
+# acceptance testing would never catch a mangling bug).
 
 export @nvvm_str
 
@@ -426,7 +426,7 @@ expansion. Calling it emits attribute-correct `Base.llvmcall` IR:
 - Integer returns are unsigned (`UInt32`, ...); multi-result intrinsics
   return tuples; `i1` maps to `Bool`.
 
-This is tier-2 plumbing (see DESIGN.md): names and signatures are stable
+This is tier-2 plumbing: names and signatures are stable
 only within a backend JLL major, surfaced as-is from the LLVM table. The
 PTX-vocabulary `ptx"..."` notation is the stable surface above this.
 """

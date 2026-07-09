@@ -4,7 +4,7 @@
 # fold the shared symbol straight into the address operand), and carry
 # `convergent` from the registry — the asm tier's sideeffect-only calls
 # were duplicable across divergent branches, the collective-op miscompile
-# class (CONCERNS.md, "Convergence on the asm tier").
+# class.
 #
 # Surface:
 #   - m8n8[.trans].b16 × x1/x2/x4 — tier 2.

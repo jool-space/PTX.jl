@@ -1,5 +1,5 @@
 # mbarrier (PTX 9.2 §9.7.12.15) — second family migrated to tier-2
-# intrinsic lowering (DESIGN.md). The notation surface is unchanged; the
+# intrinsic lowering. The notation surface is unchanged; the
 # three return shapes (Nothing / UInt64 state / Bool pred) that needed
 # hand-written asm constraints now fall out of the intrinsic signatures.
 #

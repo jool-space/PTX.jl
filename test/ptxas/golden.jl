@@ -1,4 +1,4 @@
-# Golden-PTX locks, per family (DESIGN.md, "Approach"): each kernel pins a
+# Golden-PTX locks, per family: each kernel pins a
 # family's emitted instruction sequence (structural, modulo naming — see
 # IR.canonicalize) so a lowering migration shows up as a reviewable git diff
 # of the golden file instead of an act of faith. Regenerate deliberately:
@@ -387,7 +387,7 @@ end
 # --- generic memory fences: {sc, acq_rel} × {cta, gpu, sys} (+cluster) ------
 # Tier-1 core IR: `fence <ordering> syncscope(...)` is a *semantic*
 # translation of the PTX sem/scope pair, not a renaming (mapping pinned in
-# wrappers/fence.jl and CONCERNS.md). Stores between the fences keep each
+# wrappers/fence.jl). Stores between the fences keep each
 # fence's program position observable, so the golden pins the ordering of
 # the whole sequence — a real core-IR fence pins memory ops, and nothing
 # pins two adjacent fences except the accesses between them.

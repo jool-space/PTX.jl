@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Extract the llvm.nvvm.* intrinsic table from llvm-project at a given tag.
 #
-# This is the dev-time front half of the registry generator (see DESIGN.md):
+# This is the dev-time front half of the registry generator:
 # sparse-clone the .td tree, evaluate it with llvm-tblgen, filter to NVVM
 # records. The back half (generate_registry.jl, emitting Julia registry
 # source) consumes the JSON this produces.

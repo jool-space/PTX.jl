@@ -2,7 +2,7 @@
     NVVM
 
 The registry of `llvm.nvvm.*` intrinsics understood by the pinned external
-NVPTX backend (see DESIGN.md, "The registry"). This module holds the
+NVPTX backend. This module holds the
 hand-written half: the record type, the type-token vocabulary, and the query
 API. The data itself lives in `table.jl`, machine-generated from
 `IntrinsicsNVVM.td` by `gen/generate_registry.jl` — never edited by hand.
@@ -90,8 +90,7 @@ One intrinsic record, as extracted from the backend's `IntrinsicsNVVM.td`.
   `:inaccessiblememonly`, `:inaccessiblemem_or_argmemonly`, `:speculatable`,
   `:sideeffects`, `:noreturn`, `:nocallback`, `:nofree`, `:willreturn`,
   `:nocreateundefpoison`, `:commutative`). These drive the attribute groups
-  the emission layer attaches; `:convergent` is the load-bearing one (see
-  CONCERNS.md).
+  the emission layer attaches; `:convergent` is the load-bearing one.
 - `immargs`: parameter positions (1-based) that must be immediate constants
   in the emitted IR, not SSA values.
 - `ranges`: `(pos, lo, hi)` triples — value is in `[lo, hi)`; position 0 is

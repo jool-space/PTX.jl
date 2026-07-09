@@ -3,10 +3,9 @@
 # attribute spellings must parse there) → bitcode → external llc 22 (which
 # selects them) → ptxas. Compile-only; semantics run in test/gpu/nvvm.jl.
 #
-# This is the seed of the registry conformance harness (DESIGN.md): each
+# This is the seed of the registry conformance harness: each
 # case asserts the *expected instruction*, not mere acceptance — llc happily
-# remangles or upgrades sloppy callsites, so acceptance proves little
-# (CONCERNS.md, mangling).
+# remangles or upgrades sloppy callsites, so acceptance proves little.
 
 using PTX.NVVM
 

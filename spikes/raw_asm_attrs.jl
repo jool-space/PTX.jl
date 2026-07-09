@@ -1,5 +1,6 @@
-# Raw-asm attribute spike — resolves the raw-asm callsite-attributes concern
-# in CONCERNS.md.
+# Raw-asm attribute spike — hardware validation (GB10, 2026-06-12) that a
+# convergent attribute on an inline-asm call site binds; the suite inherited
+# the shape (test/ptxas/hopper.jl).
 #
 # `ptx"..."raw` promises sideeffect + convergent defaults. `@asmcall` can't
 # attach callsite attributes, so raw emission must go through llvmcall IR like

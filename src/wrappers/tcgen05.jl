@@ -3,8 +3,8 @@
 # Copyright 2026 Patrick Toulmé. Licensed under the Apache License, Version 2.0
 # (http://www.apache.org/licenses/LICENSE-2.0). Translated to Julia and adapted.
 
-# `tcgen05.*` — fourth family migrated to tier-2 intrinsic lowering
-# (DESIGN.md). The notation surface is unchanged: taddr operands stay raw
+# `tcgen05.*` — fourth family migrated to tier-2 intrinsic lowering.
+# The notation surface is unchanged: taddr operands stay raw
 # `UInt32` TMEM addresses (returned by `tcgen05.alloc`) and SMEM operands
 # stay 32-bit offsets from `smem_addr_u32`; the wrappers retype them into
 # the address spaces the intrinsics want (`reinterpret_addrspace` — TMEM
