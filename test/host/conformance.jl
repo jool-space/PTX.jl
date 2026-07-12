@@ -247,6 +247,11 @@ const PROBES = Tuple{String, Tuple, String, String, Regex}[
     ("llvm.nvvm.cp.async.bulk.tensor.s2g.tile.5d",
         (pS8, p0, Int32, Int32, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
         r"cp\.async\.bulk\.tensor\.5d\.global\.shared::cta\.tile\.bulk_group \["),
+    # L2 tensor prefetch (no destination — fire-and-forget L2 warming;
+    # the weight-prefetch brick from cutlass examples/63)
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.2d",
+        (p0, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.2d\.L2\.global\.tile \["),
 ]
 
 # tcgen05 (wrappers/tcgen05.jl) — datacenter Blackwell only (consumer
