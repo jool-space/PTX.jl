@@ -397,6 +397,19 @@ end
         Int32(c5), UInt64(0), Val(false))
 end
 
+# --- Prefetch: global → L2 through a tensor map -------------------------------
+# No destination operand and no completion mechanism — fire-and-forget L2
+# warming. This is the instruction CUTLASS's weight-prefetch mainloop
+# (examples/63) stands on: a dedicated warp walks the weight tensor's
+# K-tiles ahead of the TMA loads that will actually consume them.
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("2d"), :L2, :global, :tile)})(
+        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer) where {S}
+    nvvm"cp.async.bulk.tensor.prefetch.tile.2d"(
+        _tma_tmap(tmap), Int32(c1), Int32(c2), UInt64(0), Val(false))
+end
+
 # --- Residue: shared::cta × cta_group::2 (asm tier) ---------------------------
 # No NVVM intrinsic carries both qualifiers at 22.1.7: `g2s.cta` has no
 # cta_group operand and `g2s` renders `shared::cluster`. Asm strings keep
