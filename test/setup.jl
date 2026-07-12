@@ -99,19 +99,25 @@ test_runtime_supported(file::AbstractString) =
 # Since CUDACore 6.2 the feature set is part of the target (`SMVersion`),
 # not a separate compiler kwarg; the helpers keep the (cap, feature_set)
 # signature so the ~100 call sites stay as they are.
+# Extra kwargs forward to the compiler config (e.g. `minthreads = 512` →
+# `.reqntid` — required for ptxas to honor `setmaxnreg` region budgets;
+# without a determinable entry register count it emits C7508 and
+# allocates the flat worst case).
 function _explicit_target_job(f, tt::Type{<:Tuple};
                               cap::VersionNumber,
-                              feature_set::Symbol = :baseline)
+                              feature_set::Symbol = :baseline,
+                              kwargs...)
     source = methodinstance(typeof(f), Base.to_tuple_type(tt))
     arch = SMVersion(cap.major, cap.minor, feature_set)
-    config = CUDACore.compiler_config(nothing; kernel = true, arch)
+    config = CUDACore.compiler_config(nothing; kernel = true, arch, kwargs...)
     CompilerJob(source, config)
 end
 
 function emit_ptx(f, tt::Type{<:Tuple};
-                  cap::VersionNumber, feature_set::Symbol = :baseline)
+                  cap::VersionNumber, feature_set::Symbol = :baseline,
+                  kwargs...)
     io = IOBuffer()
-    job = _explicit_target_job(f, tt; cap, feature_set)
+    job = _explicit_target_job(f, tt; cap, feature_set, kwargs...)
     CUDACore.invoke_frozen(CUDACore.GPUCompiler.code_native, io, job)
     String(take!(io))
 end
@@ -120,9 +126,10 @@ end
 # device-free explicit target as PTX emission. `dump_module=true` keeps
 # call-site attribute groups visible to the test oracle.
 function emit_llvm(f, tt::Type{<:Tuple};
-                   cap::VersionNumber, feature_set::Symbol = :baseline)
+                   cap::VersionNumber, feature_set::Symbol = :baseline,
+                   kwargs...)
     io = IOBuffer()
-    job = _explicit_target_job(f, tt; cap, feature_set)
+    job = _explicit_target_job(f, tt; cap, feature_set, kwargs...)
     CUDACore.invoke_frozen(CUDACore.GPUCompiler.code_llvm, io, job;
                            optimize = true, dump_module = true)
     String(take!(io))
@@ -131,8 +138,9 @@ end
 # Full LLVM → PTX → ptxas → cubin path; no `link`, so no device load.
 # Throws on ptxas rejection (stderr is in the error message).
 function ptxas_compiles(f, tt::Type{<:Tuple};
-                        cap::VersionNumber, feature_set::Symbol = :baseline)
-    job = _explicit_target_job(f, tt; cap, feature_set)
+                        cap::VersionNumber, feature_set::Symbol = :baseline,
+                        kwargs...)
+    job = _explicit_target_job(f, tt; cap, feature_set, kwargs...)
     CUDACore.invoke_frozen(CUDACore.compile, job)
     true
 end

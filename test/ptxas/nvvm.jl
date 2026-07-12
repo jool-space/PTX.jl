@@ -116,3 +116,30 @@ end
                    cap = v"10.0", feature_set = :arch)
     @test occursin("tcgen05.mma.cta_group::1.kind::f8f6f4", ptx)
 end
+
+# --- sreg !range metadata reaches the optimizer ------------------------------
+# The registry's position-0 `ranges` entries render as call-site `!range`
+# metadata (emit.jl). Behavioral proof, not text-matching: tid.x ∈ [0,1024)
+# makes `tid & 1023` an identity — the AND must fold out of the PTX. The
+# control masks with 511, which the range does NOT subsume — that AND must
+# survive (guards against the op vanishing for an unrelated reason).
+
+function _nvvm_sreg_range_fold!(out::Core.LLVMPtr{UInt32, 1})
+    tid = ptx"mov.u32"(sreg"tid.x")
+    ptx"st.global.b32"(out, tid & UInt32(1023))
+    return nothing
+end
+
+function _nvvm_sreg_range_ctrl!(out::Core.LLVMPtr{UInt32, 1})
+    tid = ptx"mov.u32"(sreg"tid.x")
+    ptx"st.global.b32"(out, tid & UInt32(511))
+    return nothing
+end
+
+@testset "sreg !range folds subsumed masks" begin
+    types = Tuple{Core.LLVMPtr{UInt32, 1}}
+    ptx = emit_ptx(_nvvm_sreg_range_fold!, types; cap = v"7.5")
+    @test !occursin("and.b32", ptx)
+    ptx = emit_ptx(_nvvm_sreg_range_ctrl!, types; cap = v"7.5")
+    @test occursin("and.b32", ptx)
+end
