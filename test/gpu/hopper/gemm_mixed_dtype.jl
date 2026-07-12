@@ -40,6 +40,20 @@
 # new brick — the in-mainloop upconversion — isolated; the pipelined
 # producer/consumer brick is gemm_pc_pipeline.jl's).
 #
+# TWO kernels live in this file:
+#
+#   1. _md_gemm_kernel!    — SMEM-round-trip dequant (convert → hand-
+#      swizzled st.shared → wgmma SS descriptor). Kept because it
+#      documents the B32 swizzle semantics the hard way.
+#   2. _md_rf_gemm_kernel! — CUTLASS 55's ACTUAL mainloop design: the
+#      narrow operand is dequantized straight into the wgmma A-fragment
+#      REGISTERS and fed to the RF form (`d, a, b-desc, ...`) — no second
+#      SMEM tile, no hand swizzle, convert-then-MMA entirely through the
+#      register file. Only operand A has an RF form in PTX, so (like
+#      CUTLASS) the operands are swapped: the int8 weights are matrix A
+#      (M = output channels), the bf16 activations are matrix B via the
+#      usual SMEM descriptor.
+#
 # Proxy choreography per K-tile (the subtle part):
 #   TMA write (async proxy) → mbarrier wait → generic-proxy LOADS of raw
 #   B are ordered by the mbarrier itself; the conversion's generic-proxy
@@ -47,7 +61,8 @@
 #   (async proxy) may read them — same generic→async direction every
 #   hand-written-SMEM + wgmma kernel in this directory fences.
 
-using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d
+using PTX: layout_for_a, wgmma_descriptor, smem_addr_u32, tensor_map_tile_2d,
+           bf16x2_pack
 using CUDACore
 using Random
 
@@ -249,6 +264,205 @@ if v"9.0" <= DEV_CAP < v"10.0"
             for k in 1:K_test
                 a = bf16_to_f32(bf16_bits(A_f32[m, k]))
                 b = bf16_to_f32(bf16_bits(Float32(B_i8[k, n]) * sB[n]))
+                acc += a * b
+            end
+            D_ref[m, n] = acc
+        end
+        @test isapprox(D_got, D_ref; rtol = 1e-3, atol = 1e-3)
+    end
+end
+
+# ═════════════════════════ RF-form kernel ══════════════════════════════
+#
+# The faithful CUTLASS-55 mainloop: TMA moves raw int8 bytes, threads
+# dequantize them straight into the wgmma A-FRAGMENT registers, and the
+# RF form (`d, a, b-desc, ...`) consumes them — the narrow operand never
+# takes a converted-SMEM round trip and no hand swizzle exists.
+#
+# A-fragment ownership (PTX 9.3 §9.7.16.5.1 Figure 148, m64nNk16
+# f16/bf16, lane l of warp w):
+#   row = 16w + (l >> 2),  col = 2(l & 3)          (col axis = K)
+#   reg1 {a0,a1} = (row,   col), (row,   col+1)
+#   reg2 {a2,a3} = (row+8, col), (row+8, col+1)
+#   reg3 {a4,a5} = (row,   col+8), (row,   col+9)
+#   reg4 {a6,a7} = (row+8, col+8), (row+8, col+9)
+# Each .f16x2 register holds its even element in the LOW half —
+# bf16x2_pack(lo = a_even, hi = a_odd).
+
+const MD_ARAW_BYTES   = MD_BM * MD_BK            # raw s8 A tile (1024)
+const MD_BACT_BYTES   = MD_BK * MD_BN * 2        # bf16 B tile   (256)
+const MD_RF_LOAD_BYTES = MD_ARAW_BYTES + MD_BACT_BYTES
+
+function _md_rf_gemm_kernel!(
+        D::CuDeviceVector{Float32, 1},
+        scale_A::CuDeviceVector{Float32, 1},     # one dequant scale per A row
+        tma_Araw::PTX.TMADescriptorPtr,
+        tma_B::PTX.TMADescriptorPtr,
+        K::Int32)
+
+    smem_Araw = CuStaticSharedArray(UInt8,  MD_BM * MD_BK)
+    smem_B    = CuStaticSharedArray(UInt16, MD_BK * MD_BN)
+    mbar      = CuStaticSharedArray(UInt64, 1)
+
+    araw_ptr = pointer(smem_Araw)
+    b_ptr    = pointer(smem_B)
+    mb_ptr   = pointer(mbar)
+    b_addr   = smem_addr_u32(b_ptr)
+
+    tid = ptx"mov.u32"(sreg"tid.x")
+
+    if tid == UInt32(0)
+        ptx"mbarrier.init.shared.b64"(mb_ptr, UInt32(1))
+        ptx"fence.proxy.async.shared::cta"()
+    end
+    ptx"bar.sync"(Val(0))
+
+    # Figure-148 fragment coordinates for this lane, plus the two per-row
+    # dequant scales (row and row+8), hoisted out of the K-loop.
+    wid  = tid >> UInt32(5)
+    lane = tid & UInt32(31)
+    row  = Int((wid << UInt32(4)) + (lane >> UInt32(2)))
+    col  = Int((lane & UInt32(3)) << UInt32(1))
+    s_lo = @inbounds scale_A[row + 1]
+    s_hi = @inbounds scale_A[row + 8 + 1]
+
+    lb = layout_for_a(dtype = :bf16, m = MD_BN, k = MD_BK)
+    b_desc = wgmma_descriptor(b_addr;
+        leading_byte_offset = lb.leading_byte_offset,
+        stride_byte_offset  = lb.stride_byte_offset,
+        swizzle             = lb.layout_type)
+
+    d = ntuple(_ -> 0f0, Val(4))
+    num_k_tiles = K >> Int32(4)
+
+    @inbounds for k_iter in Int32(0):(num_k_tiles - Int32(1))
+        if tid == UInt32(0)
+            ptx"fence.proxy.async.shared::cta"()
+            ptx"mbarrier.arrive.expect_tx.shared.b64"(mb_ptr, UInt32(MD_RF_LOAD_BYTES))
+            k_off = k_iter * Int32(MD_BK)    # bytes for :u8 A; elements for B
+            ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
+                araw_ptr, tma_Araw, k_off, Int32(0), mb_ptr)
+            ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
+                b_ptr, tma_B, k_off, Int32(0), mb_ptr)
+        end
+        while !ptx"mbarrier.test_wait.parity.shared.b64"(mb_ptr, UInt32(k_iter) & UInt32(1))
+        end
+
+        # ── Dequant into the A-fragment registers ───────────────────────
+        # Raw tile is K-fast, 16-B rows, unswizzled: byte (m, k) at m·16+k.
+        # (These generic-proxy loads are ordered by the mbarrier wait.)
+        # (@inbounds inside the closure body — the loop-level @inbounds does
+        # not propagate into closures, and the resulting bounds branches
+        # would sit right before a warpgroup-convergent wgmma.)
+        @inline cvt(m, k, s) = Float32(
+            reinterpret(Int8, @inbounds smem_Araw[m * MD_BK + k + 1])) * s
+        a = (bf16x2_pack(cvt(row,     col, s_lo), cvt(row,     col + 1, s_lo)),
+             bf16x2_pack(cvt(row + 8, col, s_hi), cvt(row + 8, col + 1, s_hi)),
+             bf16x2_pack(cvt(row,     col + 8, s_lo), cvt(row,     col + 9, s_lo)),
+             bf16x2_pack(cvt(row + 8, col + 8, s_hi), cvt(row + 8, col + 9, s_hi)))
+
+        # wgmma.fence orders the freshly written `a` registers (and the B
+        # tile) for the async op; wait_group(0) below both drains the B-tile
+        # reads before lane 0 re-arms TMA over it AND retires the RF
+        # operand — the `a` registers must not be rewritten (next iter's
+        # dequant!) while a wgmma still holds them in flight.
+        ptx"fence.proxy.async.shared::cta"()
+        ptx"wgmma.fence.sync.aligned"()
+        d = ptx"wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16"(
+            d, a, b_desc, true)
+        ptx"wgmma.commit_group.sync.aligned"()
+        ptx"wgmma.wait_group.sync.aligned"(Val(0))
+
+        # All lanes past their raw-A reads before the next TMA overwrite.
+        ptx"bar.sync"(Val(0))
+    end
+
+    # Standard m64n8 f32 frag epilogue.
+    frag_row = (wid << UInt32(4)) + (lane >> UInt32(2))
+    frag_col = (lane & UInt32(3)) << UInt32(1)
+    pd       = pointer(D)
+    off_a    = (frag_row * UInt32(MD_BN) + frag_col) * UInt32(4)
+    off_b    = ((frag_row + UInt32(8)) * UInt32(MD_BN) + frag_col) * UInt32(4)
+    ptx"st.global.v2.f32"(pd + Int(off_a), (d[1], d[2]))
+    ptx"st.global.v2.f32"(pd + Int(off_b), (d[3], d[4]))
+    return nothing
+end
+
+# ── Cross-arch ptxas validation (RF form) ──────────────────────────────
+
+@testset "mixed-dtype RF-form GEMM compiles at sm_90a" begin
+    types = Tuple{CuDeviceVector{Float32, 1}, CuDeviceVector{Float32, 1},
+                  PTX.TMADescriptorPtr, PTX.TMADescriptorPtr, Int32}
+    @test ptxas_compiles(_md_rf_gemm_kernel!, types;
+                         cap = v"9.0", feature_set = :arch)
+
+    ptx = emit_ptx(_md_rf_gemm_kernel!, types; cap = v"9.0", feature_set = :arch)
+    # The RF spelling: a `{...}` register vector where the SS form has a
+    # single 64-bit descriptor register, and the 3-immediate tail
+    # (scale-a, scale-b, trans-b — no trans-a for a register operand).
+    @test occursin(
+        r"wgmma\.mma_async\.sync\.aligned\.m64n8k16\.f32\.bf16\.bf16 \{[^}]+\}, \{[^}]+\}, %rd\d+, %p\d+, 1, 1, 0;",
+        ptx)
+    @test occursin("cvt.rn.bf16x2.f32", ptx)     # dequant pack
+    # NVPTX loads the s8 into a 16-bit register (ld.shared.s8 sign-extends)
+    # and converts from there — there is no cvt.rn.f32.s8 in the output.
+    @test occursin("ld.shared.s8", ptx)
+    @test occursin("cvt.rn.f32.s16", ptx)
+end
+
+# ── Runtime (RF form) — Hopper hardware ────────────────────────────────
+
+if v"9.0" <= DEV_CAP < v"10.0"
+    @testset "mixed-dtype RF GEMM (int8 A in registers × bf16 B, K=64)" begin
+        rng = MersenneTwister(0x55f)
+        K_test = 64                              # 4 K-iters
+        # int8 weights are matrix A (the operand swap: only A has an RF
+        # form) with one dequant scale per output row.
+        W_i8  = rand(rng, Int8(-8):Int8(8), MD_BM, K_test)
+        sA = Float32[0.125f0 * (1.0f0 + 0.5f0 * rand(rng, Float32)) * m
+                     for m in 1:MD_BM]
+        B_f32 = randn(rng, Float32, K_test, MD_BN) .* 0.1f0
+
+        W_packed = Array{UInt8}(undef, K_test, MD_BM)
+        for m in 1:MD_BM, k in 1:K_test
+            W_packed[k, m] = reinterpret(UInt8, W_i8[m, k])
+        end
+        B_packed = Array{UInt16}(undef, K_test, MD_BN)
+        for k in 1:K_test, n in 1:MD_BN
+            B_packed[k, n] = bf16_bits(B_f32[k, n])
+        end
+        W_d  = CuArray(W_packed)
+        B_d  = CuArray(B_packed)
+        sA_d = CuArray(sA)
+
+        # Raw A: K-fast s8, 16-B box rows → swizzle :NONE (threads read it,
+        # wgmma never does). B: the usual B32 bf16 tile.
+        tmap_W = tensor_map_tile_2d(:u8, pointer(W_d),
+            MD_BM, K_test, MD_BM, MD_BK; swizzle = :NONE)
+        tmap_B = tensor_map_tile_2d(:bf16, pointer(B_d),
+            MD_BN, K_test, MD_BN, MD_BK; swizzle = :B32)
+        W = upload_tma_descriptor(tmap_W)
+        B = upload_tma_descriptor(tmap_B)
+
+        D_dev = CUDACore.zeros(Float32, MD_BM * MD_BN)
+        @cuda threads = MD_THREADS _md_rf_gemm_kernel!(
+            D_dev, sA_d, W.ptr, B.ptr, Int32(K_test))
+        CUDACore.synchronize()
+
+        D_packed = reshape(Array(D_dev), MD_BN, MD_BM)
+        D_got    = Array{Float32}(undef, MD_BM, MD_BN)
+        for m in 1:MD_BM, n in 1:MD_BN
+            D_got[m, n] = D_packed[n, m]
+        end
+
+        # Reference: dequant in f32, round to bf16 (what bf16x2_pack does),
+        # f32 accumulate against bf16-rounded B.
+        D_ref = zeros(Float32, MD_BM, MD_BN)
+        for m in 1:MD_BM, n in 1:MD_BN
+            acc = 0f0
+            for k in 1:K_test
+                a = bf16_to_f32(bf16_bits(Float32(W_i8[m, k]) * sA[m]))
+                b = bf16_to_f32(bf16_bits(B_f32[k, n]))
                 acc += a * b
             end
             D_ref[m, n] = acc
