@@ -236,8 +236,11 @@ if v"9.0" <= DEV_CAP < v"10.0"
             D_got[m, n] = D_packed[n, m]
         end
 
-        # Reference: f32 gemm over the dequantized e4m3 values. e4m3
-        # products are exact in f32; only summation order differs.
+        # Reference: f32 gemm over the dequantized e4m3 values. Individual
+        # e4m3 products are exact in f32, but PTX ISA §9.7.16.5 only
+        # guarantees fp8 wgmma accumulation at "higher than half but lower
+        # than single precision" — the 1e-3 tolerance covers both the
+        # reduced-precision accumulate and summation-order differences.
         D_ref = scale_ab .* (A_deq * B_deq)
         @test isapprox(D_got, D_ref; rtol = 1e-3, atol = 1e-3)
 
