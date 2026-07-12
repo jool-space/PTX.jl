@@ -396,11 +396,12 @@ function _fab_kernel!(
         n_tiles::UInt32, total_work::UInt32,
         qk_scale::Float32)
 
-    # @inbounds: CuDynamicSharedArray's @boundscheck emits a
-    # gpu_report_exception call in the entry region, and any CALL in a
-    # region makes ptxas give up on setmaxnreg region-aware allocation —
-    # the kernel then records the worst-case 168 registers and cannot
-    # launch at 512 threads.
+    # @inbounds: CuDynamicSharedArray's @boundscheck plants
+    # gpu_report_exception cold paths (and their register save/restore) in
+    # the entry region. Not launch-critical — the 2026-07-12 B200 run
+    # passed under Pkg.test's --check-bounds=yes, i.e. with these calls
+    # present, so `.reqntid` alone is what makes ptxas honor setmaxnreg —
+    # but the checks are dead weight in a hand-verified SMEM layout.
     smem_q    = @inbounds CuDynamicSharedArray(UInt16, FAB_Q_BYTES ÷ 2, FAB_SMEM_Q)
     smem_kv   = @inbounds CuDynamicSharedArray(UInt16, FAB_KV_SLOTS * FAB_TILE_BYTES ÷ 2,
                                                FAB_SMEM_KV)
@@ -810,7 +811,7 @@ if v"10.0" <= DEV_CAP < v"11.0"
         out
     end
 
-    function _run_fab(B, H, S; atol = 5e-2)
+    function _run_fab(B, H, S; input_scale = 0.5f0, atol = 5e-2)
         @assert S % (FAB_QSTAGE * FAB_BM) == 0
         n_tiles = S ÷ FAB_BN
         @assert n_tiles % 2 == 0 && n_tiles >= 2
@@ -830,8 +831,8 @@ if v"10.0" <= DEV_CAP < v"11.0"
         sm_scale = 1.0f0 / sqrt(Float32(FAB_HD))
 
         rng = MersenneTwister(B * 7919 + H * 131 + S)
-        Q = Float32.(randn(rng, total_rows, FAB_HD)) .* 0.5f0
-        K = Float32.(randn(rng, total_rows, FAB_HD)) .* 0.5f0
+        Q = Float32.(randn(rng, total_rows, FAB_HD)) .* input_scale
+        K = Float32.(randn(rng, total_rows, FAB_HD)) .* input_scale
         V = Float32.(randn(rng, total_rows, FAB_HD))
 
         Q_d = CuArray(_fab_pack(Q))
@@ -875,5 +876,18 @@ if v"10.0" <= DEV_CAP < v"11.0"
             (2, 4, 1024),    # 32 work items — persistent multi-item per CTA
         ]
         @test _run_fab(B, H, S)
+    end
+
+    # At input_scale 0.5 the running row max NEVER drifts past
+    # 2^RESCALE_THRESHOLD — CPU simulation of the stale-basis state machine
+    # shows 0 rescale events across all shapes above, i.e. the correction
+    # warps' TMEM rescale branch is dead code there. At 2.0 (same seed)
+    # every row rescales at least once (1055 events) while only 58 of 96
+    # warp-bands fire per tile — softmax skip-arrivals and correction
+    # rescale-arrivals MIX within the same O_RESC phase, stressing the
+    # exact-arrival-count invariant. Max per-tile row sum ~3e7: ample f32
+    # headroom (scale 3 would push 4e16 — gratuitous).
+    @testset "FA forward rescale path B=1 H=2 S=512 scale=2" begin
+        @test _run_fab(1, 2, 512; input_scale = 2.0f0)
     end
 end
