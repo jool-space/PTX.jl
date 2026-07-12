@@ -6,13 +6,23 @@
 # chain — `:wgmma` is registered nonpure + convergent in the form
 # registry (src/forms.jl). Source: PTX 9.2 §9.7.14.5.
 #
-# Three variants per shape:
+# Four variants per shape:
 #   1. `scale_d::Bool`        — runtime SREG (b constraint, $nd+2 slot).
 #   2. `scale_d::Val{true}`   — bakes "1" immediate, keeps tied d input.
 #   3. `scale_d::Val{false}`  — bakes "0" immediate AND drops the tied d
 #      input. The HW ignores the accumulator when scale_d=0, so LLVM can
 #      DCE upstream zero initialization. Use this for the first wgmma of
 #      a tile to skip the per-tile zero ntuple.
+#   4. RF form — A from registers instead of an SMEM descriptor:
+#      `(d, a::NTuple{4, UInt32}, b_desc, scale_d::Bool)`. Every ab-dtype
+#      takes exactly four .b32 A registers per lane (two f16/bf16, four
+#      tf32-bits, or four 8-bit elements each — PTX 9.3 §9.7.16.5.1).
+#      A-in-registers has no `imm-trans-a` (there is no descriptor to
+#      transpose), so the f16/bf16 imm tail shrinks to
+#      `scale-a, scale-b, trans-b`. Only the runtime-Bool scale_d variant
+#      is generated for RF — the Val forms exist for the SS descriptor
+#      path's zero-init DCE, which RF mainloops (upconvert-in-registers,
+#      CUTLASS mixed-dtype style) don't hit in practice.
 
 # Valid N values for wgmma — step by 8 from 8 to 256.
 const _WGMMA_NS = (8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112,
@@ -92,6 +102,34 @@ function wgmma_mma_async_spec(dtype_d::Symbol, dtype_a::Symbol, dtype_b::Symbol,
     (; nd, asm, constraints, d_let)
 end
 
+# RF form: A comes from four per-lane .b32 registers instead of an SMEM
+# descriptor (PTX 9.3 §9.7.16.5 `d, a, b-desc, ...`). No `imm-trans-a` —
+# a register operand has no descriptor to transpose — so the f16/bf16 imm
+# tail is `scale-a, scale-b, trans-b`. Runtime scale_d only (see file top).
+function wgmma_mma_async_rf_spec(dtype_d::Symbol, dtype_a::Symbol,
+                                 dtype_b::Symbol, n::Int, k::Int,
+                                 has_trans::Bool)
+    nd, _, d_let = _wgmma_dvec_kind(dtype_d, n)
+    head = "wgmma.mma_async.sync.aligned.m64n$(n)k$(k).$dtype_d.$dtype_a.$dtype_b"
+    d_slots = "{" * join(("\$$i" for i in 0:nd-1), ", ") * "}"
+    a_slots = "{" * join(("\$$(nd + i)" for i in 0:3), ", ") * "}"
+    imms_tail = if dtype_d === :s32
+        ""
+    elseif has_trans
+        ", 1, 1, 0"                               # scale-a, scale-b, trans-b
+    else
+        ", 1, 1"                                  # scale-a, scale-b
+    end
+    asm = "$head $d_slots, $a_slots, \$$(nd+4), \$$(nd+5)$imms_tail;"
+    constraints = join(vcat(
+        fill("=$d_let", nd),
+        ["r", "r", "r", "r", "l", "b"],
+        [string(i) for i in 0:nd-1],              # tied to outputs 0..nd-1
+        ["~{memory}"],
+    ), ",")
+    (; nd, asm, constraints, d_let)
+end
+
 function _wgmma_mma_async_register(
         dtype_d::Symbol, dtype_a::Symbol, dtype_b::Symbol,
         n::Int, k::Int, has_trans::Bool)
@@ -163,6 +201,29 @@ function _wgmma_mma_async_register(
                           NTuple{$nd, $d_J},
                           Tuple{UInt64, UInt64},
                           a_desc, b_desc)
+        end
+    end
+
+    # Variant 4: RF form — A from four per-lane .b32 registers. Dispatches
+    # on the second argument's type (NTuple{4, UInt32} vs UInt64 desc)
+    # under the same Operation mods.
+    let spec = wgmma_mma_async_rf_spec(dtype_d, dtype_a, dtype_b, n, k,
+                                       has_trans)
+        nd, asm, constraints = spec.nd, spec.asm, spec.constraints
+        flat_argtypes = vcat(fill(UInt32, 4), [UInt64, Bool], fill(d_J, nd))
+        ir = convergent_asm_ir(asm, constraints, NTuple{nd, d_J}, flat_argtypes)
+        d_args = [:(d[$i]) for i in 1:nd]
+        @eval function (::Operation{:wgmma, $mods})(
+                d::NTuple{$nd, $d_J},
+                a::NTuple{4, UInt32},
+                b_desc::UInt64,
+                scale_d::Bool)
+            Base.@inline
+            Base.llvmcall(($ir, "entry"),
+                          NTuple{$nd, $d_J},
+                          Tuple{$(flat_argtypes...)},
+                          a[1], a[2], a[3], a[4], b_desc, scale_d,
+                          $(d_args...))
         end
     end
 
