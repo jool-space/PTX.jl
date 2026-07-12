@@ -307,6 +307,30 @@ end
                       cap = v"9.0", feature_set = :arch)
 end
 
+# The two remaining operand conventions: f64 (Float64 fragments end to end,
+# DMMA) and sparse mma.sp (compressed-A UInt32 fragments + .b32 metadata +
+# selector immediate). One golden pins both.
+function _golden_mma_f64_sp!(out::CuDeviceVector{Float64, 1}, x::Float64,
+        a1::UInt32, a2::UInt32, a3::UInt32, a4::UInt32, e::UInt32)
+    # f64 dense, m8n8k4 — one f64 A/B reg, two f64 accumulators
+    d = ptx"mma.sync.aligned.m8n8k4.row.col.f64.f64.f64.f64"(
+        (x,), (x,), (0.0, 0.0))
+    @inbounds out[1] = d[1]
+    # bf16 sparse, m16n8k32 — metadata reg + Val selector immarg
+    a4t = (a1, a2, a3, a4); c = (0f0, 0f0, 0f0, 0f0)
+    s = ptx"mma.sp.sync.aligned.m16n8k32.row.col.f32.bf16.bf16.f32"(
+        a4t, a4t, c, e, Val(0))
+    @inbounds out[2] = Float64(s[1])
+    return nothing
+end
+
+@testset "golden: mma f64 + sparse conventions at sm_90a" begin
+    @test golden_test("mma_f64_sp@sm90a", _golden_mma_f64_sp!,
+                      Tuple{CuDeviceVector{Float64, 1}, Float64,
+                            UInt32, UInt32, UInt32, UInt32, UInt32};
+                      cap = v"9.0", feature_set = :arch)
+end
+
 # fp8 (e4m3/e5m2) and kind::f8f6f4 — consumer-Blackwell sub-byte FP.
 function _golden_mma_fp8!(out::CuDeviceVector{Float32, 1},
         a1::UInt32, a2::UInt32, a3::UInt32, a4::UInt32, b1::UInt32, b2::UInt32,

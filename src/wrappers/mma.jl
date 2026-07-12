@@ -62,6 +62,10 @@ const MMA_SYNC_FRAGS = Dict{Tuple{Symbol, Symbol, Symbol}, NTuple{3, Int}}(
     (:m16n8k8,  :f16,  :f16) => (2, 1, 2),
     (:m16n8k8,  :tf32, :f32) => (4, 2, 4),
     (:m16n8k4,  :tf32, :f32) => (2, 1, 4),
+    (:m8n8k4,   :f64,  :f64) => (1, 1, 2),
+    (:m16n8k4,  :f64,  :f64) => (2, 1, 4),
+    (:m16n8k8,  :f64,  :f64) => (4, 2, 4),
+    (:m16n8k16, :f64,  :f64) => (8, 4, 4),
     (:m16n8k16, :e4m3, :f32) => (2, 1, 4),
     (:m16n8k16, :e5m2, :f32) => (2, 1, 4),
     (:m16n8k16, :e3m2, :f32) => (2, 1, 4),
@@ -93,6 +97,7 @@ function _mma_intrinsic_name(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
     kind !== nothing && return "$base.kind.$kind.$c_ty.$a_ty.$b_ty.$c_ty"
     a_ty === :bf16 && return "$base.bf16"
     a_ty === :tf32 && return "$base.tf32"
+    a_ty === :f64  && return "$base.f64"
     a_ty === :f16  && return c_ty === :f16 ? "$base.f16.f16" : "$base.f32.f32"
     return "$base.$c_ty.$a_ty.$b_ty.$c_ty"   # fp8 (e4m3/e5m2)
 end
@@ -113,7 +118,8 @@ function _mma_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
     mods_kind = kind === nothing ? () : (Symbol("kind::", kind),)
     mods = (:sync, :aligned, mods_kind...,
             shape, :row, :col, d_ty, a_ty, b_ty, c_ty)
-    cd_J = c_ty === :f32 ? :Float32 : :UInt32
+    cd_J = c_ty === :f32 ? :Float32 : c_ty === :f64 ? :Float64 : :UInt32
+    ab_J = a_ty === :f64 ? :Float64 : :UInt32     # f64 A/B are one f64/reg
 
     name = _mma_intrinsic_name(shape, a_ty, b_ty, c_ty, kind)
     full = "llvm.nvvm." * name
@@ -139,8 +145,8 @@ function _mma_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
     repack = cd_vec ? :(ntuple(i -> _mma_v2h_u32(d[i]), Val($n_cd))) : :d
 
     @eval function (::Operation{:mma, $mods})(
-            a::NTuple{$n_a, UInt32},
-            b::NTuple{$n_b, UInt32},
+            a::NTuple{$n_a, $ab_J},
+            b::NTuple{$n_b, $ab_J},
             c::NTuple{$n_cd, $cd_J})
         Base.@inline
         d = $call($(a_in...), $(b_in...), $(c_in...))
@@ -154,25 +160,28 @@ end
 function _mma_register_asm(mods, shape, a_ty, b_ty, c_ty, kind,
                            n_a, n_b, n_cd, cd_J)
     asm_kind = kind === nothing ? "" : "kind::$kind."
-    cd_let = c_ty === :f32 ? "f" : "r"
+    cd_let = c_ty === :f32 ? "f" : c_ty === :f64 ? "d" : "r"
+    ab_let = a_ty === :f64 ? "d" : "r"
+    ab_J   = a_ty === :f64 ? :Float64 : :UInt32
     slots(off, n) = "{" * join(("\$$i" for i in off:off+n-1), ", ") * "}"
     asm = "mma.sync.aligned.$asm_kind$shape.row.col.$c_ty.$a_ty.$b_ty.$c_ty " *
           "$(slots(0, n_cd)), $(slots(n_cd, n_a)), " *
           "$(slots(n_cd + n_a, n_b)), $(slots(n_cd + n_a + n_b, n_cd));"
-    constraints = join(vcat(fill("=$cd_let", n_cd), fill("r", n_a + n_b),
+    constraints = join(vcat(fill("=$cd_let", n_cd), fill(ab_let, n_a + n_b),
                             fill(cd_let, n_cd), ["~{memory}"]), ",")
-    flat = vcat(fill(:UInt32, n_a + n_b), fill(cd_J, n_cd))
+    flat = vcat(fill(ab_J, n_a + n_b), fill(cd_J, n_cd))
     # mma.sync is warp-collective — emitted with a `convergent` call-site
     # attribute, same reasoning as wgmma (see inst.jl, "convergent inline
     # asm"). @asmcall can't attach it.
-    cdT = c_ty === :f32 ? Float32 : UInt32
-    flat_types = vcat(fill(UInt32, n_a + n_b), fill(cdT, n_cd))
+    cdT = c_ty === :f32 ? Float32 : c_ty === :f64 ? Float64 : UInt32
+    abT = a_ty === :f64 ? Float64 : UInt32
+    flat_types = vcat(fill(abT, n_a + n_b), fill(cdT, n_cd))
     ir = convergent_asm_ir(asm, constraints, NTuple{n_cd, cdT}, flat_types)
     a_args = [:(a[$i]) for i in 1:n_a]
     b_args = [:(b[$i]) for i in 1:n_b]
     c_args = [:(c[$i]) for i in 1:n_cd]
     @eval function (::Operation{:mma, $mods})(
-            a::NTuple{$n_a, UInt32}, b::NTuple{$n_b, UInt32},
+            a::NTuple{$n_a, $ab_J}, b::NTuple{$n_b, $ab_J},
             c::NTuple{$n_cd, $cd_J})
         Base.@inline
         Base.llvmcall(($ir, "entry"),
@@ -193,6 +202,12 @@ end
 for shape in (:m16n8k8, :m16n8k4)
     _mma_register(shape, :f32, :tf32, :tf32, :f32)
 end
+# FP64 (DMMA, sm_80+) — m8n8k4 (PTX 7.0), m16n8k{4,8,16} (PTX 7.8). One f64
+# per A/B register; f64 accumulators. Full-rate only on datacenter silicon
+# (GA100/GH100/GB100 class); consumer parts execute it at a token rate.
+for shape in (:m8n8k4, :m16n8k4, :m16n8k8, :m16n8k16)
+    _mma_register(shape, :f64, :f64, :f64, :f64)
+end
 # FP8 (Ada+) — m16n8k32 (PTX 8.0+) and m16n8k16 (PTX 8.7+).
 for shape in (:m16n8k16, :m16n8k32), ab_ty in (:e4m3, :e5m2), c_ty in (:f32, :f16)
     _mma_register(shape, c_ty, ab_ty, ab_ty, c_ty)
@@ -204,4 +219,110 @@ let f8f6f4 = (:e4m3, :e5m2, :e3m2, :e2m3, :e2m1)
         c_ty in (:f32, :f16)
         _mma_register(shape, c_ty, a_ty, b_ty, c_ty; kind = :f8f6f4)
     end
+end
+
+# --- mma.sp — 2:4 structured-sparse mma (sm_80+, PTX 7.1+) -------------------
+#
+#   mma.sp.sync.aligned.<shape>.row.col.<d>.<a>.<b>.<c>  d, a, b, c, e, #sel
+#
+# A is stored compressed (PTX 9.3 §9.7.15.6 "Sparse matrix storage"): each
+# 4-wide chunk of a row keeps its two non-zeros (tf32: 1:2, each 2-wide
+# chunk keeps one), and the .b32 metadata operand `e` holds the 2-bit
+# in-chunk position of every kept element. The sparsity selector — an
+# immediate, passed as `Val(sel)` — names which thread (or thread pair) of
+# each group of four contributes metadata; its legal range is shape/dtype
+# specific and enforced by the intrinsic's immarg range at compile time
+# (k16 16-bit & k8 tf32: one thread, 0..3; k32 16-bit & k16 tf32: a pair,
+# 0..1; k64 fp8: all threads, must be 0).
+#
+# Surface (fragments per lane in MMA_SP_FRAGS):
+#
+#   ptx"mma.sp.sync.aligned.m16n8k32.row.col.f32.bf16.bf16.f32"(
+#       a::NTuple{4, UInt32}, b::NTuple{4, UInt32}, c::NTuple{4, Float32},
+#       e::UInt32, Val(0))
+#
+# Same intrinsic-name irregularity as dense: bf16/tf32 carry the input
+# dtype, pure-f16 forms are named by accumulator, fp8 carries the quad.
+# All registered forms have tier-2 intrinsics at the pinned backend; a
+# form that loses its intrinsic on a backend bump lands in
+# MMA_SP_MISSING_INTRINSICS and fails the conformance count instead of
+# silently vanishing. `sp::ordered_metadata` (PTX 8.5+, faster decode on
+# sm_90+) is deliberately not registered yet — add it alongside when a
+# Hopper+ sparse kernel needs it.
+
+# (shape, ab_dtype, cd_dtype) → (n_a_regs, n_b_regs, n_cd_regs) per lane.
+const MMA_SP_FRAGS = Dict{Tuple{Symbol, Symbol, Symbol}, NTuple{3, Int}}(
+    (:m16n8k16, :f16,  :f16) => (2, 2, 2),
+    (:m16n8k16, :f16,  :f32) => (2, 2, 4),
+    (:m16n8k16, :bf16, :f32) => (2, 2, 4),
+    (:m16n8k32, :f16,  :f16) => (4, 4, 2),
+    (:m16n8k32, :f16,  :f32) => (4, 4, 4),
+    (:m16n8k32, :bf16, :f32) => (4, 4, 4),
+    (:m16n8k8,  :tf32, :f32) => (2, 2, 4),
+    (:m16n8k16, :tf32, :f32) => (4, 4, 4),
+    (:m16n8k64, :e4m3, :f32) => (4, 4, 4),
+    (:m16n8k64, :e5m2, :f32) => (4, 4, 4),
+)
+
+function _mma_sp_intrinsic_name(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
+                                c_ty::Symbol)
+    base = "mma.sp.$shape.row.col"
+    a_ty === :bf16 && return "$base.bf16"
+    a_ty === :tf32 && return "$base.tf32"
+    a_ty === :f16  && return c_ty === :f16 ? "$base.f16.f16" : "$base.f32.f32"
+    return "$base.$c_ty.$a_ty.$b_ty.$c_ty"   # fp8 (e4m3/e5m2, mixed legal)
+end
+
+const MMA_SP_INTRINSIC_NAMES = String[]
+const MMA_SP_MISSING_INTRINSICS = String[]
+
+function _mma_sp_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
+                          b_ty::Symbol, c_ty::Symbol)
+    haskey(MMA_SP_FRAGS, (shape, a_ty, c_ty)) || return nothing
+    n_a, n_b, n_cd = MMA_SP_FRAGS[(shape, a_ty, c_ty)]
+
+    mods = (:sp, :sync, :aligned, shape, :row, :col, d_ty, a_ty, b_ty, c_ty)
+    cd_J = c_ty === :f32 ? :Float32 : :UInt32
+
+    full = "llvm.nvvm." * _mma_sp_intrinsic_name(shape, a_ty, b_ty, c_ty)
+    if !NVVM.isintrinsic(full)
+        # No asm fallback here (every registered form has an intrinsic at
+        # the pinned backend) — record and let conformance fail loudly.
+        full in MMA_SP_MISSING_INTRINSICS || push!(MMA_SP_MISSING_INTRINSICS, full)
+        return nothing
+    end
+    full in MMA_SP_INTRINSIC_NAMES || push!(MMA_SP_INTRINSIC_NAMES, full)
+    call = NVVM.IntrinsicCall{Symbol(full)}()
+
+    ab_vec = a_ty === :f16
+    cd_vec = c_ty === :f16
+
+    a_in = [ab_vec ? :(_mma_u32_v2h(a[$i])) : :(a[$i]) for i in 1:n_a]
+    b_in = [ab_vec ? :(_mma_u32_v2h(b[$i])) : :(b[$i]) for i in 1:n_b]
+    c_in = [cd_vec ? :(_mma_u32_v2h(c[$i])) : :(c[$i]) for i in 1:n_cd]
+    repack = cd_vec ? :(ntuple(i -> _mma_v2h_u32(d[i]), Val($n_cd))) : :d
+
+    @eval function (::Operation{:mma, $mods})(
+            a::NTuple{$n_a, UInt32},
+            b::NTuple{$n_b, UInt32},
+            c::NTuple{$n_cd, $cd_J},
+            e::UInt32, sel::Val)
+        Base.@inline
+        d = $call($(a_in...), $(b_in...), $(c_in...), e, sel)
+        $repack
+    end
+    nothing
+end
+
+for shape in (:m16n8k16, :m16n8k32)
+    _mma_sp_register(shape, :f32, :f16, :f16, :f32)
+    _mma_sp_register(shape, :f16, :f16, :f16, :f16)
+    _mma_sp_register(shape, :f32, :bf16, :bf16, :f32)
+end
+for shape in (:m16n8k8, :m16n8k16)
+    _mma_sp_register(shape, :f32, :tf32, :tf32, :f32)
+end
+# Sparse FP8 (PTX 8.4+) — mixed e4m3/e5m2 A/B is legal.
+for a_ty in (:e4m3, :e5m2), b_ty in (:e4m3, :e5m2)
+    _mma_sp_register(:m16n8k64, :f32, a_ty, b_ty, :f32)
 end

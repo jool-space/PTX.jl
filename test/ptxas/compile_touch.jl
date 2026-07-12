@@ -65,6 +65,10 @@ function _touch_argtypes(m::Method)
         elseif T === Integer
             # duck-typed coordinate/count/mask operands — any Integer works
             push!(out, Int32)
+        elseif T === Val
+            # unconstrained immediate (mma.sp sparsity selector) — 0 is
+            # inside every form's immarg range
+            push!(out, Val{0})
         elseif T isa DataType || T isa Core.TypeofBottom
             isconcretetype(T) || return nothing
             push!(out, T)

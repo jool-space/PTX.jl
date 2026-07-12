@@ -1784,6 +1784,21 @@ end
             (:sync, :aligned, Symbol("kind::f8f6f4"),
              :m16n8k32, :row, :col, :f32, :e4m3, :e4m3, :f32)}(),
         (NTuple{4, UInt32}, NTuple{2, UInt32}, NTuple{4, Float32})).module == PTX
+    # f64 convention: Float64 A/B/C/D fragments.
+    @test which(Operation{:mma,
+            (:sync, :aligned, :m8n8k4, :row, :col, :f64, :f64, :f64, :f64)}(),
+        (NTuple{1, Float64}, NTuple{1, Float64}, NTuple{2, Float64})).module == PTX
+
+    # ---- _mma_sp_register ----
+    silent() do
+        # Re-register (idempotent bookkeeping) + early-return path.
+        PTX._mma_sp_register(:m16n8k32, :f32, :bf16, :bf16, :f32)
+        @test PTX._mma_sp_register(:m99n99k99, :f32, :bf16, :bf16, :f32) === nothing
+    end
+    @test which(Operation{:mma,
+            (:sp, :sync, :aligned, :m16n8k32, :row, :col, :f32, :bf16, :bf16, :f32)}(),
+        (NTuple{4, UInt32}, NTuple{4, UInt32}, NTuple{4, Float32},
+         UInt32, Val{0})).module == PTX
 
     # ---- _mma_scaled_register ----
     silent() do
