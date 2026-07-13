@@ -252,12 +252,19 @@
     nvvm"tcgen05.wait.st"()
 
 # Specialized thread-synchronization fences are side-effecting, no-argument
-# intrinsics. Exact methods prevent an accidental operand from becoming a
-# literal extra PTX operand through the generic chain.
+# code-motion barriers (PTX 9.3 §9.7.17.11.1). Keep them as inline PTX with
+# a memory clobber: LLVM 15 does not recognize the tcgen05 NVVM intrinsics and
+# trusts their generated
+# `readnone` declaration, which lets it delete the void calls. `sideeffect`
+# retains each fence and `~{memory}` prevents tcgen05 and execution-ordering
+# operations from moving across it. Exact methods still prevent an accidental
+# operand from becoming a literal extra PTX operand through the generic chain.
 @inline (::Operation{:tcgen05, (Symbol("fence::before_thread_sync"),)})() =
-    nvvm"tcgen05.fence.before.thread.sync"()
+    @asmcall("tcgen05.fence::before_thread_sync;", "~{memory}", true,
+             Nothing, Tuple{})
 @inline (::Operation{:tcgen05, (Symbol("fence::after_thread_sync"),)})() =
-    nvvm"tcgen05.fence.after.thread.sync"()
+    @asmcall("tcgen05.fence::after_thread_sync;", "~{memory}", true,
+             Nothing, Tuple{})
 
 # Both state-space notations lower to the same intrinsic and emit the
 # `.shared::cluster` spelling (see header).

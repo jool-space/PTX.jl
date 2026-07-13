@@ -1,4 +1,11 @@
 using PTX: Operation, RawOperation, build_call, format_call
+using InteractiveUtils: code_llvm
+
+@noinline function _tcgen05_thread_fence_optimizer_probe()
+    ptx"tcgen05.fence::before_thread_sync"()
+    ptx"tcgen05.fence::after_thread_sync"()
+    return nothing
+end
 
 # Independent closed-world oracle. Do not derive this from
 # TYPED_WRAPPER_ONLY_RULES: adding or broadening a production rule must force a
@@ -169,7 +176,7 @@ end
 @testset "typed-wrapper-only boundary: exact tcgen05 lifecycle surfaces" begin
     # Independent manifest of the six formerly-generic calls used by the
     # Blackwell ptxas tier. Do not derive this from wrapper methods: every
-    # opcode spelling, carrier schema, and intrinsic mapping is reviewed here.
+    # opcode spelling, carrier schema, and lowering tier is reviewed here.
     cg1 = Symbol("cta_group::1")
     cg2 = Symbol("cta_group::2")
     pS32 = Core.LLVMPtr{UInt32, PTX.AS.Shared}
@@ -179,37 +186,41 @@ end
 
     surfaces = (
         ((:alloc, cg1, :sync, :aligned, :b32), (pS32, UInt32),
-         "llvm.nvvm.tcgen05.alloc.shared.cg1",
+         :intrinsic, "llvm.nvvm.tcgen05.alloc.shared.cg1",
          ((UInt32, UInt32), (pG32, UInt32), (pS64, UInt32),
           (pS32, Int32), (pS32,), (pS32, UInt32, UInt32))),
         ((:alloc, cg2, :sync, :aligned, :b32), (pS32, UInt32),
-         "llvm.nvvm.tcgen05.alloc.shared.cg2",
+         :intrinsic, "llvm.nvvm.tcgen05.alloc.shared.cg2",
          ((UInt32, UInt32), (pG32, UInt32), (pS64, UInt32),
           (pS32, Int32), (pS32,), (pS32, UInt32, UInt32))),
         ((:commit, cg1, Symbol("mbarrier::arrive::one"),
           Symbol("shared::cluster"), :b64), (pS64,),
-         "llvm.nvvm.tcgen05.commit.shared.cg1",
+         :intrinsic, "llvm.nvvm.tcgen05.commit.shared.cg1",
          ((UInt64,), (pG64,), (pS32,), (), (pS64, UInt32))),
         ((:commit, cg2, Symbol("mbarrier::arrive::one"),
           Symbol("shared::cluster"), :b64), (pS64,),
-         "llvm.nvvm.tcgen05.commit.shared.cg2",
+         :intrinsic, "llvm.nvvm.tcgen05.commit.shared.cg2",
          ((UInt64,), (pG64,), (pS32,), (), (pS64, UInt32))),
         ((Symbol("fence::before_thread_sync"),), (),
-         "llvm.nvvm.tcgen05.fence.before.thread.sync",
+         :asm, "tcgen05.fence::before_thread_sync;",
          ((UInt32,), (pS32,), (UInt32, UInt32))),
         ((Symbol("fence::after_thread_sync"),), (),
-         "llvm.nvvm.tcgen05.fence.after.thread.sync",
+         :asm, "tcgen05.fence::after_thread_sync;",
          ((UInt32,), (pS32,), (UInt32, UInt32))),
     )
 
     @test length(surfaces) == 6
-    for (mods, good_argts, intrinsic, bad_argtypes) in surfaces
+    for (mods, good_argts, expected_tier, evidence, bad_argtypes) in surfaces
         op = Operation{:tcgen05, mods}()
         @test which(op, good_argts).module === PTX
         info = PTX.lowering(op, good_argts)
-        @test info.tier === :intrinsic
+        @test info.tier === expected_tier
         @test info.rettype === Nothing
-        @test info.intrinsics == [intrinsic]
+        if expected_tier === :intrinsic
+            @test info.intrinsics == [evidence]
+        else
+            @test isempty(info.intrinsics)
+        end
 
         for argts in bad_argtypes
             @test endswith(String(which(op, argts).file), "inst.jl")
@@ -221,6 +232,20 @@ end
             @test_throws ArgumentError format_call(op, Tuple{argts...})
         end
     end
+end
+
+@testset "typed-wrapper-only boundary: tcgen05 fences survive optimization" begin
+    llvm = sprint() do io
+        code_llvm(io, _tcgen05_thread_fence_optimizer_probe, Tuple{};
+                  optimize = true, raw = true, debuginfo = :none,
+                  dump_module = true)
+    end
+    for spelling in ("tcgen05.fence::before_thread_sync;",
+                     "tcgen05.fence::after_thread_sync;")
+        @test length(findall(spelling, llvm)) == 1
+    end
+    @test length(collect(eachmatch(r"asm sideeffect", llvm))) == 2
+    @test length(findall("~{memory}", llvm)) == 2
 end
 
 @testset "typed-wrapper-only boundary: raw is an explicit structural escape" begin

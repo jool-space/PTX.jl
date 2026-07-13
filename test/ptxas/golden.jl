@@ -292,18 +292,22 @@ function _golden_mma_classic!(out::CuDeviceVector{Float32, 1},
     ch = (h1, h2)
     e = ptx"mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16"(a4t, b2t, ch)
     @inbounds out[3] = reinterpret(Float32, e[1])
-    # tf32 inputs, f32 acc, k8 — i32 A/B
-    a2t = (a1, a2); b1t = (b1,)
-    d = ptx"mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32"(a2t, b1t, c)
+    # tf32 inputs, f32 acc, k8 — four A and two B .b32 registers per lane
+    d = ptx"mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32"(a4t, b2t, c)
     @inbounds out[4] = d[1]
     return nothing
 end
 
 @testset "golden: mma dense (classic conventions) at sm_90a" begin
-    @test golden_test("mma@sm90a", _golden_mma_classic!,
-                      Tuple{CuDeviceVector{Float32, 1},
-                            UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
-                            UInt32, UInt32, UInt32};
+    types = Tuple{CuDeviceVector{Float32, 1},
+                  UInt32, UInt32, UInt32, UInt32, UInt32, UInt32,
+                  UInt32, UInt32, UInt32}
+    # The old 2-A/1-B call missed the typed wrapper and produced a structurally
+    # invalid scalar fallback. Assembly makes the corrected 4-A/2-B/4-C/D
+    # fragment contract an independent acceptance boundary.
+    @test ptxas_compiles(_golden_mma_classic!, types;
+                         cap = v"9.0", feature_set = :arch)
+    @test golden_test("mma@sm90a", _golden_mma_classic!, types;
                       cap = v"9.0", feature_set = :arch)
 end
 

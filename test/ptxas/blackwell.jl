@@ -285,7 +285,9 @@ end
     @test occursin("tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned", ptx)
 end
 
-# tcgen05 fences and waits — exact no-arg wrappers.
+# tcgen05 fences and waits — exact no-arg wrappers. The fences intentionally
+# use side-effecting inline PTX with a memory clobber so LLVM versions that do
+# not recognize their NVVM intrinsics cannot delete or move them.
 function _bw_tcgen05_sync!()
     ptx"tcgen05.fence::before_thread_sync"()
     ptx"tcgen05.fence::after_thread_sync"()
@@ -299,10 +301,20 @@ end
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tcgen05_sync!, Tuple{};
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("tcgen05.fence::before_thread_sync", ptx)
-    @test occursin("tcgen05.fence::after_thread_sync",  ptx)
-    @test occursin("tcgen05.wait::ld.sync.aligned",     ptx)
-    @test occursin("tcgen05.wait::st.sync.aligned",     ptx)
+    spellings = (
+        "tcgen05.fence::before_thread_sync",
+        "tcgen05.fence::after_thread_sync",
+        "tcgen05.wait::ld.sync.aligned",
+        "tcgen05.wait::st.sync.aligned",
+    )
+    positions = map(spellings) do spelling
+        @test length(findall(spelling, ptx)) == 1
+        findfirst(spelling, ptx)
+    end
+    @test all(!isnothing, positions)
+    if all(!isnothing, positions)
+        @test issorted(first.(positions))
+    end
 end
 
 
