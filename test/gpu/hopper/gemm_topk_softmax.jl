@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Hopper GEMM with fused top-K + softmax epilogue — ported from
 # cutlass/examples/61_hopper_gemm_with_topk_and_softmax (NVIDIA CUTLASS,
 # BSD-3-Clause).
@@ -189,7 +190,7 @@ function _tks_ref(X::Matrix{Float32})
     Y
 end
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "GEMM + top-2 softmax (random bf16, all 64 rows)" begin
         rng = MersenneTwister(0x707c)
         A_f32 = Float32.(randn(rng, TKS_BM, TKS_BK)) .* 0.5f0

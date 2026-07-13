@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=ptxas
 # TMA epilogue — the trailing half of a Hopper GEMM. Threads cooperatively
 # write a per-CTA SMEM tile, then thread 0 issues a single
 # `cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group` to land it in

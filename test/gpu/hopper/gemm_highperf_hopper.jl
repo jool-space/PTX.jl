@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Full warp-specialized Hopper GEMM. Port of
 # pyptx/examples/hopper/gemm_highperf_hopper.py. Composes every Hopper
 # brick validated in this directory + adds the three remaining pieces:
@@ -425,7 +426,7 @@ end
 
 # ── Runtime — Hopper only (wgmma is sm_90a; Blackwell uses tcgen05) ─────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     function _run_ghh_case(rng, M_total, N_total, K_test, num_clusters)
         @assert M_total % GHH_BM_CLUSTER == 0
         @assert N_total % GHH_BN         == 0

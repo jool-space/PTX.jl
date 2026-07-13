@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10|cc==11
 # Blackwell tcgen05 single-MMA numeric probe. Ported from pyptx
 # examples/blackwell/tcgen05_mma_probe.py.
 #
@@ -17,8 +18,8 @@
 # still declare 32B swizzle, so the MMA reads the tiles correctly).
 #
 # A|B|bar|slot = 12320 B < 48 KiB → static SMEM, no dynamic opt-in.
-# Always ptxas-validates cross-arch at sm_100a; runtime gated on
-# datacenter Blackwell [10.0, 11.0) — B300 (sm_103a) is the cloud target.
+# Always ptxas-validates cross-target at sm_100a; the concrete base forms
+# used here are runtime-eligible on CC 10.x/11.x.
 
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
            BlackwellLayout, tmem_lane_addr
@@ -117,8 +118,8 @@ end
     @test occursin("tcgen05.wait::ld.sync.aligned", ptx)
 end
 
-# Datacenter-Blackwell only [10.0, 11.0); see tcgen05_smoke.jl rationale.
-if v"10.0" <= DEV_CAP < v"11.0"
+# Family-safe tcgen05 forms on CC 10.x/11.x; see tcgen05_smoke.jl rationale.
+if test_runtime_supported(@__FILE__)
     @testset "tcgen05 single-MMA probe (B300 runtime, A·B = 16)" begin
         O = CUDACore.zeros(Float32, 32 * 64)
         @cuda blocks=1 threads=128 _tcgen05_mma_probe_kernel!(O)

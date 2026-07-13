@@ -13,6 +13,10 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
   test-gpu:
+    # `blackwell` is the GB10 runner: CC 12.1 / sm_121a. It is consumer
+    # Blackwell, not a tcgen05-capable sm_100a or sm_103a device. The test
+    # target manifest therefore shows tcgen05 ptxas evidence executing while
+    # its runtime subsections are skipped for an exact target mismatch.
     name: Julia ${{ matrix.version }} - ${{ matrix.arch }} - ${{ matrix.runner }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -55,13 +59,13 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
   test-host:
-    # Host + conformance tiers only: runtests.jl drops gpu/ and ptxas/ when
-    # CUDACore isn't functional, and the conformance probes go through the
-    # NVPTX_LLVM_Backend_jll llc artifact — no GPU or driver needed. This
-    # lane keeps the hosted x86_64 half of the matrix alive independently
-    # of the self-hosted GB10 runner, and is the only CI coverage of the
-    # x86_64 code paths at all.
-    name: Julia ${{ matrix.version }} - x86_64 - ubuntu (host-only)
+    # Host + offline compiler tiers: explicit-target PTX and ptxas evidence
+    # use compiler_config(nothing; arch=...) and therefore run from the CUDA
+    # compiler artifacts without a visible GPU. Runtime evidence remains
+    # skipped. This lane keeps the hosted x86_64 half of the matrix alive
+    # independently of the self-hosted GB10 runner, and is the only CI
+    # coverage of the x86_64 code paths at all.
+    name: Julia ${{ matrix.version }} - x86_64 - ubuntu (host + offline PTX)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

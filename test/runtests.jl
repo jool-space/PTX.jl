@@ -1,95 +1,85 @@
 import PTX, CUDACore, CUDATools
 using ParallelTestRunner
 
+include(joinpath(@__DIR__, "target_requirements.jl"))
+using .TestTargets
+
 const init_code = quote
     using PTX, CUDACore, Test
     include($(joinpath(@__DIR__, "setup.jl")))
 end
 
-# Tests under `gpu/` may declare a compute-capability requirement via a
-# `# REQUIRES CC [op]<major>.<minor>` banner near the top of the file:
+# `gpu/` files carry a strict `# TEST_TARGET:` banner with resource, evidence,
+# and direct live-device compute-capability predicates. Runtime policy never
+# embeds PTX target spellings: `cc>=X.Y` is a floor, `cc==X.Y` is exact, and
+# integer `cc==X` selects one hardware family. PTX `sm_*`, `f`, and `a` targets
+# remain local to explicit compilation calls where their ISA meaning applies.
 #
-#   # REQUIRES CC 8.9        →  cap >= 8.9   (default operator)
-#   # REQUIRES CC >=8.9      →  cap >= 8.9   (explicit)
-#   # REQUIRES CC ==9.0      →  cap == 9.0   (exact — for arch-specific PTX
-#                                             like wgmma on CC 9.0 / sm_90a,
-#                                             tcgen05 on CC 10.0 / sm_100a)
-const DEFAULT_GPU_MIN_CAP = v"7.0"
-const REQUIRES_CC_RE = r"^\s*#\s*REQUIRES\s+CC\s+(>=|==)?\s*(\d+)\.(\d+)\b"i
-
-struct CapReq
-    cap::VersionNumber
-    exact::Bool
-end
-Base.show(io::IO, r::CapReq) =
-    print(io, "CC ", r.exact ? "==" : ">=", r.cap.major, ".", r.cap.minor)
-
-const DEFAULT_CAP_REQ = CapReq(DEFAULT_GPU_MIN_CAP, false)
-
-satisfies(r::CapReq, dev::VersionNumber) =
-    r.exact ? dev == r.cap : dev >= r.cap
-
-function read_cap_req(file::AbstractString)::CapReq
-    isfile(file) || return DEFAULT_CAP_REQ
-    open(file) do io
-        for _ in 1:20
-            eof(io) && break
-            line = readline(io)
-            m = match(REQUIRES_CC_RE, line)
-            m === nothing && continue
-            op, major, minor = m.captures
-            return CapReq(VersionNumber(parse(Int, major), parse(Int, minor)),
-                          op == "==")
-        end
-        return DEFAULT_CAP_REQ
-    end
-end
+# `ptxas/` is intentionally different: it compiles to a cubin without linking
+# it onto the device. Explicit-target PTX and ptxas evidence use
+# `compiler_config(nothing; arch=...)`, so a live GPU never gates them.
 
 testsuite = find_tests(@__DIR__)
 
 args = parse_args(ARGS)
-if filter_tests!(testsuite, args)
-    cuda_functional = CUDACore.functional()
-    cap = cuda_functional ? CUDACore.capability(CUDACore.device()) : v"0.0"
-    if cuda_functional
-        @info "Running GPU tests" device=CUDACore.name(CUDACore.device()) capability=cap
-    else
-        @warn "CUDACore not functional — skipping GPU tests"
+apply_default_routing = filter_tests!(testsuite, args)
+if args.list === nothing
+    requirements = Dict(test => requirement_for_test(test, @__DIR__)
+                        for test in keys(testsuite))
+
+    check_toolchain = any(requires_toolchain, values(requirements))
+    toolchain_available = check_toolchain &&
+                          CUDACore.CUDA_Compiler.is_available()
+    toolchain_version = toolchain_available ? CUDACore.compiler_version() : nothing
+
+    check_gpu = any(requires_gpu, values(requirements))
+    gpu_functional = check_gpu && CUDACore.functional()
+    cap = gpu_functional ? CUDACore.capability(CUDACore.device()) : v"0.0"
+    device_name = gpu_functional ? String(CUDACore.name(CUDACore.device())) : ""
+    environment = TestEnvironment(check_toolchain, toolchain_available,
+                                  toolchain_version, check_gpu, gpu_functional,
+                                  cap, device_name)
+    if check_toolchain && !toolchain_available
+        @warn "Offline CUDA compiler/ptxas unavailable — skipping compile evidence"
     end
+    if check_gpu && gpu_functional
+        @info "Running GPU tests" device=CUDACore.name(CUDACore.device()) capability=cap
+    elseif check_gpu
+        @warn "Functional GPU unavailable — runtime evidence will be skipped"
+    end
+    manifest = PlanEntry[]
     filter!(testsuite) do (test, _)
-        # setup.jl is loaded into every worker via init_code; don't run it
-        # as a standalone test.
-        test == "setup" && return false
-        if test == "ptxas/golden" && Base.JLOptions().check_bounds == 1
+        # These support files are loaded into every worker via init_code; don't
+        # run them as standalone tests during default routing.
+        if test in ("setup", "target_requirements") && apply_default_routing
+            req = requirements[test]
+            push!(manifest, PlanEntry(test, :skip, req,
+                                      "test support file loaded by each worker"))
+            return false
+        end
+        if test == "ptxas/golden" && Base.JLOptions().check_bounds == 1 &&
+           apply_default_routing
             # Golden comparison is byte-exact, and forced bounds checks
             # (Pkg.test's default) inject branches into the golden kernels —
             # the tests cannot meaningfully run in this mode, so skip them
             # rather than fail. CI enforces goldens with check_bounds: 'auto'.
             # Naming the test explicitly bypasses this filter and hits the
             # loud refusal in setup.jl instead.
-            @info """skipping ptxas/golden: --check-bounds=yes (Pkg.test's default) injects \
-                     bounds branches into the golden kernels. To include goldens, run \
-                     `Pkg.test("PTX"; julia_args=["--check-bounds=auto"])`."""
+            req = requirements[test]
+            push!(manifest, PlanEntry(test, :skip, req,
+                                      "--check-bounds=yes invalidates golden emission"))
             return false
         end
-        if startswith(test, "gpu/")
-            cuda_functional || return false
-            req = read_cap_req(joinpath(@__DIR__, test * ".jl"))
-            if !satisfies(req, cap)
-                @info "skipping GPU test (compute capability mismatch)" test required=req got=cap
-                return false
-            end
-            return true
-        elseif startswith(test, "ptxas/")
-            # ptxas/ tests compile through CUDACore.compile(job), which runs
-            # ptxas but never links the cubin onto the device. They validate
-            # wrappers cross-arch (sm_50..sm_100a) and only require a
-            # functional CUDA install — no cap match needed.
-            cuda_functional || return false
-            return true
-        end
-        return true
+        req = requirements[test]
+        entry = plan_entry(test, req, environment;
+                           forced = !apply_default_routing)
+        push!(manifest, entry)
+        entry.action === :execute
     end
+    # CI keeps the complete audit trail. Local runs show the environment,
+    # summary, and skips without printing the entire test catalog.
+    println(format_manifest(manifest, environment;
+                            verbose = get(ENV, "CI", "") == "true"))
 end
 
 runtests(PTX, ARGS; init_code, testsuite)

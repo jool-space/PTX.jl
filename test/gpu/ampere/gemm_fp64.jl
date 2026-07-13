@@ -1,4 +1,4 @@
-# REQUIRES CC 8.0
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.0
 #
 # Ported from cutlass/examples/18_ampere_fp64_tensorop_affine2_gemm
 # (NVIDIA CUTLASS, BSD-3-Clause). The original demonstrates two things:

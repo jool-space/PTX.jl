@@ -1,4 +1,4 @@
-# REQUIRES CC 8.0
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.0
 #
 # Ported from cutlass/examples/14_ampere_tf32_tensorop_gemm
 # (NVIDIA CUTLASS, BSD-3-Clause). The original is a CUTLASS device-API

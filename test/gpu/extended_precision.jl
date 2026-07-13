@@ -1,4 +1,4 @@
-# REQUIRES CC >=7.0
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=7.0
 
 using Random
 

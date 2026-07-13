@@ -1,4 +1,4 @@
-# REQUIRES CC ==12.1
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc==12.1
 #
 # Hardware smoke test for the consumer-Blackwell sub-byte FP tensor core.
 # Mirrors `_exec_mma_bf16_smoke!` at test/gpu/exec.jl:158 — A=B=0, identity C,
@@ -6,7 +6,7 @@
 # `mma.sync.aligned.kind::f8f6f4` op compiles, launches, and that the I/O
 # register layout matches NVPTX's expectations on real silicon.
 #
-# Exact-match cap gate (`==12.1`): the `kind::f8f6f4` mma is arch-specific
+# Exact target gate (`sm_121a`): the `kind::f8f6f4` mma is arch-specific
 # (locked to one CC), so this file deliberately does not try to run on
 # sm_100a / sm_103a / sm_120a. Phase 2 will introduce per-arch test files
 # as those targets come online.

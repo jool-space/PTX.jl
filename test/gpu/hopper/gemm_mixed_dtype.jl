@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Mixed-dtype Hopper GEMM (int8 weights → bf16 in-mainloop upconvert) —
 # ported from cutlass/examples/55_hopper_mixed_dtype_gemm (NVIDIA CUTLASS,
 # BSD-3-Clause).
@@ -215,7 +216,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "mixed-dtype GEMM (bf16 A × int8 B, per-column scales, K=64)" begin
         rng = MersenneTwister(0x55d7)
         K_test = 64                          # 4 K-iters through one SMEM tile
@@ -412,7 +413,7 @@ end
 
 # ── Runtime (RF form) — Hopper hardware ────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "mixed-dtype RF GEMM (int8 A in registers × bf16 B, K=64)" begin
         rng = MersenneTwister(0x55f)
         K_test = 64                              # 4 K-iters

@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Hopper GEMM with fused activation epilogue — ported from
 # cutlass/examples/113_hopper_gemm_activation_fusion (NVIDIA CUTLASS,
 # BSD-3-Clause), the `113_hopper_gemm_fused_act.cu` variant.
@@ -144,7 +145,7 @@ end
 
 _act_silu_ref(x::Float32) = x / (1f0 + exp(-x))
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "GEMM + SiLU fusion (random bf16, alpha/beta/scale)" begin
         rng = MersenneTwister(0xac71)
         A_f32 = Float32.(randn(rng, ACT_BM, ACT_BK)) .* 0.5f0

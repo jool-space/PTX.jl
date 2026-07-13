@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # TMA shared-memory swizzle placement probe — documents and regression-
 # guards what the hardware actually does with `:B32` / `:B64` / `:B128`
 # tensor-map swizzle modes.
@@ -154,7 +155,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "TMA swizzle placement = Swizzle<B,4,3> ($(mode))" for
             (mode, row_bytes, tile_bytes, B) in SWP_MODES
         dump, addr = swp_run_probe(mode, row_bytes, tile_bytes)

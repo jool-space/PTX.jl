@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Int8 GEMM with SMEM-staged vectorized epilogue — ported from
 # cutlass/examples/50_hopper_gemm_with_epilogue_swizzle (NVIDIA CUTLASS,
 # BSD-3-Clause).
@@ -176,7 +177,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "epilogue-swizzle int8 GEMM (exact integer, K=128)" begin
         rng = MersenneTwister(0x50)
         K_test = 128                            # 4 K-iters
