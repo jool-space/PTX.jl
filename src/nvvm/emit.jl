@@ -162,27 +162,29 @@ const CONVERGENT_OVERLAY_PREFIXES = ("llvm.nvvm.mma.", "llvm.nvvm.wmma.")
 is_convergent(i::Intrinsic) = :convergent in i.props ||
     any(p -> startswith(i.name, p), CONVERGENT_OVERLAY_PREFIXES)
 
+# LLVM ≤ 16 (Julia ≤ 1.11) does not derive merge protection from
+# `convergent`: SimplifyCFG can hoist identical convergent calls from both
+# arms of a divergent branch into one pre-branch site. `nomerge` closes that
+# compatibility gap, so this pair must remain one shared policy for both
+# declaration and call-site rendering.
+const CONVERGENCE_ATTRS = ("convergent", "nomerge")
+
+convergence_attrs(i::Intrinsic) =
+    is_convergent(i) ? CONVERGENCE_ATTRS : ()
+
 # These are intentionally the only declaration properties copied to a call
 # site. In particular, declaration attributes such as `speculatable` are not
 # universally legal or appropriate there. A dedicated group also survives
 # LLVM's canonicalization of recognized legacy NVVM declarations.
 callsiteattrs(i::Intrinsic)::String =
-    is_convergent(i) ? "convergent nomerge" : ""
+    join(convergence_attrs(i), " ")
+
+entryattrs(i::Intrinsic)::String =
+    is_convergent(i) ? "alwaysinline convergent" : "alwaysinline"
 
 function fnattrs(i::Intrinsic)::String
     attrs = String[]
-    if is_convergent(i)
-        push!(attrs, "convergent")
-        # LLVM ≤ 16 (Julia ≤ 1.11) does not derive merge-protection from
-        # `convergent`: SimplifyCFG hoists identical convergent calls from
-        # both arms of a divergent branch into one pre-branch site — the
-        # activemask miscompile, reproduced on 1.11 (LLVM ≥ 17 blocks the
-        # hoist on `convergent` alone; verified both ways 2026-07-05).
-        # `nomerge` forbids exactly that call-site merging, on every
-        # version — emitted unconditionally so all versions run one code
-        # path, harmless where `convergent` already suffices.
-        push!(attrs, "nomerge")
-    end
+    append!(attrs, convergence_attrs(i))
     push!(attrs, "nounwind")  # LLVM intrinsics cannot unwind, categorically
     for (p, a) in ((:nocallback, "nocallback"), (:nofree, "nofree"),
                    (:willreturn, "willreturn"), (:speculatable, "speculatable"),
@@ -193,6 +195,8 @@ function fnattrs(i::Intrinsic)::String
     mem === nothing || push!(attrs, mem)
     # :sideeffects, :commutative, :nocreateundefpoison have no IR-attribute
     # spelling (the first is conveyed by NOT claiming memory(none))
+    # Convergence remains orthogonal to memory effects: pure matrix operations
+    # keep `memory(none)` and ordinary same-block CSE remains legal.
     return join(attrs, " ")
 end
 
@@ -353,6 +357,9 @@ function synthesize(name::String, argtypes)
     callret = isempty(irts) ? "void" :
               length(irts) == 1 ? irts[1] : "{ " * join(irts, ", ") * " }"
 
+    # Attribute-group layout is fixed within synthesized modules:
+    #   #0 intrinsic declaration; #1 always-inlined @entry; #2 call site.
+    # Group #2 exists only for convergent calls.
     callattrs = callsiteattrs(i)
     callattrref = isempty(callattrs) ? "" : " #2"
     intrinsic_call = "call $callret @\"$mangled\"($(join(callargs, ", ")))" *
@@ -404,7 +411,7 @@ function synthesize(name::String, argtypes)
         $(join(body, "\n"))
         }
         attributes #0 = { $(fnattrs(i)) }
-        attributes #1 = { alwaysinline }
+        attributes #1 = { $(entryattrs(i)) }
         $callattrdef
         """
 

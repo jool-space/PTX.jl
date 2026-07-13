@@ -146,7 +146,7 @@ end
     @test occursin("declare i64 @\"llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta\"(i8 addrspace(3)*, i32) #0", s.ir)
     @test occursin(r"call i64 @\"llvm\.nvvm\.mbarrier\.arrive\.expect\.tx\.scope\.cta\.space\.cta\"\([^\n]+\) #2", s.ir)
     @test occursin("attributes #0 = { convergent nomerge nounwind nocallback }", s.ir)
-    @test occursin("attributes #1 = { alwaysinline }", s.ir)
+    @test occursin("attributes #1 = { alwaysinline convergent }", s.ir)
     @test occursin("attributes #2 = { convergent nomerge }", s.ir)
     @test s.rettype == UInt64
     @test s.tupletype == Tuple{Core.LLVMPtr{Int64,3}, UInt32}
@@ -177,6 +177,7 @@ end
         end
         @test NVVM.callsiteattrs(i) == "convergent nomerge"
         @test occursin("attributes #0 = { $(NVVM.fnattrs(i)) }", s.ir)
+        @test occursin("attributes #1 = { alwaysinline convergent }", s.ir)
         @test occursin("attributes #2 = { convergent nomerge }", s.ir)
     end
 
@@ -185,6 +186,7 @@ end
     tcgen = synthesize("llvm.nvvm.tcgen05.mma.shared",
         (Core.LLVMPtr{UInt32,6}, UInt64, UInt64, UInt32, Bool,
          Val{2}, Val{1}, Val{0}))
+    @test occursin("attributes #1 = { alwaysinline }", tcgen.ir)
     @test !occursin("attributes #2", tcgen.ir)
 end
 
