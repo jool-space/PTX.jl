@@ -68,6 +68,18 @@ function emit_ptx(f, tt::Type{<:Tuple};
     String(take!(io))
 end
 
+# Optimized LLVM for attribute/code-motion assertions, using the same
+# device-free explicit target as PTX emission. `dump_module=true` keeps
+# call-site attribute groups visible to the test oracle.
+function emit_llvm(f, tt::Type{<:Tuple};
+                   cap::VersionNumber, feature_set::Symbol = :baseline)
+    io = IOBuffer()
+    job = _explicit_target_job(f, tt; cap, feature_set)
+    CUDACore.invoke_frozen(CUDACore.GPUCompiler.code_llvm, io, job;
+                           dump_module = true)
+    String(take!(io))
+end
+
 # Full LLVM → PTX → ptxas → cubin path; no `link`, so no device load.
 # Throws on ptxas rejection (stderr is in the error message).
 function ptxas_compiles(f, tt::Type{<:Tuple};
