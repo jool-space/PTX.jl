@@ -1,0 +1,7 @@
+id = "ADDRESS-001"
+status = "confirmed"
+severity = "high"
+category = "correctness"
+summary = "Transpilation loses address-operand grouping when an address becomes an integer carrier, emitting a bare register instead of brackets."
+source_handoffs = ["wave4-data-movement.md", "wave6-frontend-tests.md", "targeted-probes.md"]
+validation_tier = "host roundtrip; ptxas pending"

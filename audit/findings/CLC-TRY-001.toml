@@ -1,0 +1,7 @@
+id = "CLC-TRY-001"
+status = "confirmed"
+severity = "high"
+category = "correctness"
+summary = "clusterlaunchcontrol.try_cancel emits both mandatory address operands without bracket grouping."
+source_handoffs = ["wave1-lowering.md"]
+validation_tier = "host assembly shape; ptxas pending"

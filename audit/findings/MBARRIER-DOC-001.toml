@@ -1,0 +1,7 @@
+id = "MBARRIER-DOC-001"
+status = "confirmed"
+severity = "medium"
+category = "documentation"
+summary = "Synchronization comments conflate pending arrivals with transaction count and misdescribe fused/noinc accounting."
+source_handoffs = ["wave3-memory.md"]
+validation_tier = "ISA semantics and source audit"

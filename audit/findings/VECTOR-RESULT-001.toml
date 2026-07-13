@@ -1,0 +1,7 @@
+id = "VECTOR-RESULT-001"
+status = "confirmed"
+severity = "high"
+category = "correctness"
+summary = "Vector load, vector atomic, and vector multimem load-reduce forms outside narrow wrappers reserve scalar destinations."
+source_handoffs = ["wave4-data-movement.md"]
+validation_tier = "host result and assembly shape; ptxas pending"

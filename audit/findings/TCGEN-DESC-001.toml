@@ -1,0 +1,7 @@
+id = "TCGEN-DESC-001"
+status = "confirmed"
+severity = "high"
+category = "validation"
+summary = "Public tcgen05 descriptor builders expose fixed or reserved fields as caller-controlled version and saturation options."
+source_handoffs = ["wave2-matrix.md"]
+validation_tier = "host bitfield reproduction"

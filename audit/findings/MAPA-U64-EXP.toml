@@ -1,0 +1,7 @@
+id = "MAPA-U64-EXP"
+status = "needs_experiment"
+severity = "medium"
+category = "lowering"
+summary = "The shared-cluster u64 mapa pointer carrier may not select a legal 64-bit operand, but no compile failure is established."
+source_handoffs = ["wave3-memory.md"]
+validation_tier = "sm90 emitted PTX, ptxas, and H100 runtime needed"

@@ -1,0 +1,7 @@
+id = "FABRIC-EXP"
+status = "needs_experiment"
+severity = "medium"
+category = "validation_gap"
+summary = "Fabric wrappers have only host reflection evidence; spelling needs sm100 ptxas and semantics need configured CFT endpoints."
+source_handoffs = ["wave3-memory.md"]
+validation_tier = "ptxas and configured-endpoint runtime needed"

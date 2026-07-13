@@ -1,0 +1,7 @@
+id = "STRUCTURED-RESULT-001"
+status = "confirmed"
+severity = "high"
+category = "correctness"
+summary = "Packed-half setp, elect.sync, and BoolOp lop3 require grouped destinations the scalar builder cannot render; scalar-f16 dual setp is invalid."
+source_handoffs = ["wave4-data-movement.md", "wave5-remaining-isa.md"]
+validation_tier = "host assembly shape; ptxas pending"

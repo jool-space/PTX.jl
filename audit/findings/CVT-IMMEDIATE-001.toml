@@ -1,0 +1,7 @@
+id = "CVT-IMMEDIATE-001"
+status = "confirmed"
+severity = "high"
+category = "correctness"
+summary = "The transpiler disables ordinary cvt source-type hints, so immediate operands can receive the wrong Julia register carrier."
+source_handoffs = ["wave4-data-movement.md", "wave6-frontend-tests.md"]
+validation_tier = "host transpilation; ptxas pending"

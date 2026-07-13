@@ -1,0 +1,7 @@
+id = "WGMMA-SHAPE-001"
+status = "confirmed"
+severity = "high"
+category = "validation"
+summary = "Integer WGMMA methods reuse the floating N grid and expose definitely illegal holes such as N=40."
+source_handoffs = ["wave2-matrix.md"]
+validation_tier = "ISA matrix and host method audit; sm90a ptxas pending"
