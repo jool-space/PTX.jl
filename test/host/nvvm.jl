@@ -19,6 +19,34 @@ using InteractiveUtils: code_llvm
     end
 end
 
+const SIDE_EFFECTING_NOMEM_EXPECTED = (
+    "llvm.nvvm.griddepcontrol.launch.dependents",
+    "llvm.nvvm.griddepcontrol.wait",
+    "llvm.nvvm.nanosleep",
+    "llvm.nvvm.pm.event.mask",
+    "llvm.nvvm.setmaxnreg.dec.sync.aligned.u32",
+    "llvm.nvvm.setmaxnreg.inc.sync.aligned.u32",
+    "llvm.nvvm.tcgen05.fence.after.thread.sync",
+    "llvm.nvvm.tcgen05.fence.before.thread.sync",
+)
+
+# The eight IntrNoMem + IntrHasSideEffects records all return void. Keep one
+# direct tier-2 call to every record in a single host-only optimizer probe:
+# these calls are inspected as LLVM and never executed. On an in-process LLVM
+# that does not recognize a newer NVVM intrinsic, the declaration emitted by
+# PTX.jl is its only semantic contract.
+@noinline function _nomem_sideeffects_optimizer_probe(delay::UInt32)
+    nvvm"griddepcontrol.launch.dependents"()
+    nvvm"griddepcontrol.wait"()
+    nvvm"nanosleep"(delay)
+    nvvm"pm.event.mask"(Val(1))
+    nvvm"setmaxnreg.dec.sync.aligned.u32"(Val(24))
+    nvvm"setmaxnreg.inc.sync.aligned.u32"(Val(32))
+    nvvm"tcgen05.fence.after.thread.sync"()
+    nvvm"tcgen05.fence.before.thread.sync"()
+    return nothing
+end
+
 # The registry's contract: the committed table
 # is the backend's intrinsic surface, queryable, with no silent gaps. The
 # extraction itself is conformance-checked against the llc binary's name
@@ -33,6 +61,33 @@ end
     @test length(TABLE) == 2569
     @test NVVM.BACKEND_LLVM_VERSION == v"22.1.7"
     @test all(k == i.name for (k, i) in TABLE)
+end
+
+@testset "side-effecting no-memory inventory is closed" begin
+    # Independent reviewed inventory of every IntrinsicsNVVM.td record whose
+    # properties combine IntrNoMem with IntrHasSideEffects. Do not derive the
+    # expected names from an emitter constant: a registry regeneration must
+    # force a semantic review before this optimizer boundary can broaden.
+    expected = Set(SIDE_EFFECTING_NOMEM_EXPECTED)
+    actual = Set(i.name for i in values(TABLE)
+                 if :nomem in i.props && :sideeffects in i.props)
+
+    @test actual == expected
+    @test length(actual) == 8
+    @test all(isempty(intrinsic(name).ret) for name in expected)
+
+    for name in expected
+        i = intrinsic(name)
+        @test NVVM.memory_attr(i.props) === nothing
+        attrs = NVVM.fnattrs(i)
+        @test !occursin(r"\breadnone\b", attrs)
+        @test !occursin("memory(none)", attrs)
+    end
+
+    # Control: ordinary pure no-memory arithmetic keeps the precise attribute.
+    pure = intrinsic("llvm.nvvm.add.rn.f")
+    expected_nomem = Base.libllvm_version < v"16" ? "readnone" : "memory(none)"
+    @test NVVM.memory_attr(pure.props) == expected_nomem
 end
 
 @testset "hand-verified signatures" begin
@@ -216,6 +271,21 @@ end
         attrs = get(groups, m.captures[1], "")
         @test occursin(r"\bconvergent\b", attrs)
         @test occursin(r"\bnomerge\b", attrs)
+    end
+end
+
+@testset "side-effecting no-memory calls survive optimization" begin
+    llvm = sprint() do io
+        code_llvm(io, _nomem_sideeffects_optimizer_probe, Tuple{UInt32};
+                  optimize=true, raw=true, debuginfo=:none, dump_module=true)
+    end
+    # Exactly one call to each closed-world member must remain. Looking only
+    # for declarations would reproduce the old false-positive: the optimizer
+    # retained declarations after deleting the observable void calls.
+    for name in SIDE_EFFECTING_NOMEM_EXPECTED
+        calls = [line for line in eachline(IOBuffer(llvm))
+                 if occursin(" call ", line) && occursin("@$name", line)]
+        @test length(calls) == 1
     end
 end
 
