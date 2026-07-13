@@ -10,9 +10,7 @@ include("parser/Parser.jl")
 
 include("implicit_state.jl")
 
-include("codegen/Codegen.jl")
-using .Codegen: ptx_to_julia, ir_to_julia
-export ptx_to_julia, ir_to_julia
+include("scalar_results.jl")
 
 include("nvvm/NVVM.jl")
 using .NVVM: NVVM, @nvvm_str
@@ -20,6 +18,12 @@ using .NVVM: NVVM, @nvvm_str
 include("address_space.jl")
 include("forms.jl")
 include("types.jl")
+
+# The transpiler shares the audited scalar/cvt result-ABI validators above,
+# so load it only after their definitions are available.
+include("codegen/Codegen.jl")
+using .Codegen: ptx_to_julia, ir_to_julia
+export ptx_to_julia, ir_to_julia
 
 include("inst.jl")
 export @ptx_str, @sreg_str

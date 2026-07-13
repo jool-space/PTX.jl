@@ -23,6 +23,22 @@ function _gather_external_ptx(dir)
 end
 const EXTERNAL_FILES = _gather_external_ptx(EXTERNAL_DIR)
 
+# Valid PTX, but not yet structurally representable by the scalar transpiler:
+# mov.b128 constructs an opaque CLC handle from two b64 registers. The old
+# terminal rule silently emitted a destination-less call; the pure-result ABI
+# guard now rejects it until B128-COVERAGE-001 adds a grouped/typed carrier.
+const EXTERNAL_B128_REJECTION_RELPATHS = Set((
+    "llvm/clusterlaunchcontrol__nvvm_clusterlaunchcontrol_query_cancel_get_first_ctaid_x.ptx",
+    "llvm/clusterlaunchcontrol__nvvm_clusterlaunchcontrol_query_cancel_get_first_ctaid_y.ptx",
+    "llvm/clusterlaunchcontrol__nvvm_clusterlaunchcontrol_query_cancel_get_first_ctaid_z.ptx",
+    "llvm/clusterlaunchcontrol__nvvm_clusterlaunchcontrol_query_cancel_is_canceled.ptx",
+))
+const EXTERNAL_B128_REJECTION_FILES = Set(
+    normpath(joinpath(EXTERNAL_DIR, split(rel, '/')...))
+    for rel in EXTERNAL_B128_REJECTION_RELPATHS)
+const EXTERNAL_TRANSPILABLE_FILES = filter(
+    path -> !(normpath(path) in EXTERNAL_B128_REJECTION_FILES), EXTERNAL_FILES)
+
 # --- name-mangling unit tests ----------------------------------------------
 
 @testset "julia_var" begin
@@ -250,13 +266,37 @@ end
 
 # Same sweep over the external corpus (real-world compiler output). Wider
 # operand patterns, mangled names, edge cases the curated 10 don't cover.
-@testset "ptx_to_julia: external/$(relpath(path, EXTERNAL_DIR))" for path in EXTERNAL_FILES
+@testset "ptx_to_julia: external/$(relpath(path, EXTERNAL_DIR))" for path in EXTERNAL_TRANSPILABLE_FILES
     src = read(path, String)
     local out::String
     @test (out = ptx_to_julia(src); true)
     expr = Meta.parseall(out)
     @test expr isa Expr && expr.head == :toplevel
     @test !any(a -> a isa Expr && a.head == :error, expr.args)
+end
+
+
+@testset "ptx_to_julia: closed mov.b128 rejection manifest" begin
+    # Derive the corpus inventory independently so a fifth opaque-handle file
+    # cannot silently bypass either the acceptance sweep or this rejection tier.
+    corpus_b128 = Set(relpath(path, EXTERNAL_DIR) for path in EXTERNAL_FILES
+                      if occursin(r"\bmov\.b128\b", read(path, String)))
+    @test corpus_b128 == EXTERNAL_B128_REJECTION_RELPATHS
+    @test EXTERNAL_B128_REJECTION_FILES ⊆ Set(normpath.(EXTERNAL_FILES))
+
+    for path in sort!(collect(EXTERNAL_B128_REJECTION_FILES))
+        err = try
+            ptx_to_julia(read(path, String))
+            nothing
+        catch ex
+            ex
+        end
+        @test err isa ArgumentError
+        message = sprint(showerror, err)
+        @test occursin("mov.b128", message)
+        @test occursin("reviewed pure-form registry", message)
+        @test occursin("known scalar result ABI", message)
+    end
 end
 
 # --- golden files ----------------------------------------------------------

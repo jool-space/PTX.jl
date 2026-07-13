@@ -13,7 +13,7 @@
 #                warp-/warpgroup-collective (emitted via convergent_asm_ir
 #                so the call carries `convergent nomerge`; implies !pure)
 #   brackets   — pointer operands render as `[%addr]` (memory-op syntax)
-#   returns    — the trailing-dtype rule may reserve a `$0` output register
+#   returns    — scalar result inference may reserve a `$0` output register
 #                (false for sink forms whose dtype tail names an *operand*)
 #
 # A FALSE promise in the permissive direction is a miscompile (a deleted
@@ -122,10 +122,11 @@ requires_typed_wrapper(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
 const FORMS = Dict{Symbol, FormFamily}(
     # ── Pure per-lane compute ────────────────────────────────────────────
     # Value ops with no memory access and no cross-lane semantics; the
-    # trailing-dtype rule names their result correctly (cvt's dst-at-end-1
-    # special case lives in infer_rettype; setp's Bool in PRED_RESULT).
+    # Their result is either covered by the generic dtype convention or by the
+    # closed scalar-result ledger (scalar_results.jl). `cvt`'s ordinary
+    # dst-at-end-1 rule and setp's Bool exception live in infer_rettype.
     # Deliberately curated, not the whole ISA: an op joins this list only
-    # after checking purity AND that its chain tail names the result (e.g.
+    # after checking purity AND that its result ABI is generic or audited (e.g.
     # `set.CmpOp.dtype.stype` and `testp` do NOT qualify — their tails name
     # the source type — so they stay unregistered until given entries that
     # handle their grammar).

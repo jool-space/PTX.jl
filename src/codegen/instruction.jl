@@ -51,6 +51,37 @@ _is_no_dest(inst::Instruction) =
     (!isempty(inst.modifiers) &&
      (inst.opcode, inst.modifiers[1]) in NO_DEST_OPCODE_MODIFIERS)
 
+_schema_modifiers(modifiers::Tuple{Vararg{String}}) =
+    Tuple(Symbol(lstrip(modifier, '.')) for modifier in modifiers)
+
+function _instruction_scalar_result_schema(inst::Instruction)
+    op = Symbol(inst.opcode)
+    mods = _schema_modifiers(inst.modifiers)
+    schema = scalar_result_schema(op, mods)
+    schema === nothing && requires_scalar_result_schema(op, mods) &&
+        throw(scalar_result_schema_miss(op, mods))
+    if schema === nothing
+        # Keep the parser/transpiler on the same result-ABI boundary as direct
+        # calls. This catches noncanonical cvt and any reviewed pure form that
+        # would otherwise infer void before pointer-alias absorption can erase
+        # a malformed mov/add/sub definition.
+        infer_rettype(op, mods)
+        return nothing
+    end
+    expected = length(schema.operands) + 1 # explicit destination + sources
+    length(inst.operands) == expected || throw(ArgumentError(
+        "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) is an audited " *
+        "scalar form with $(length(schema.operands)) source operands, got " *
+        "$(max(length(inst.operands) - 1, 0)); see $(schema.section)"))
+    schema
+end
+
+_schema_operand_hint(kind::Symbol) = kind === :bf16 ? :b16 : kind
+
+function _render_schema_source(op::Operand, cg::CodeGenState, kind::Symbol)
+    render_operand(op, cg; type_hint = _schema_operand_hint(kind))
+end
+
 function emit_instruction!(cg::CodeGenState, inst::Instruction)
     # Drop debug directives.
     (inst.opcode == ".loc" || inst.opcode == ".file") && return
@@ -65,6 +96,12 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
         "implicit CC.CF flag; instruction-at-a-time lowering cannot preserve " *
         "that dependency. Use PTX.add_with_carry, PTX.sub_with_borrow, or " *
         "PTX.mul_wide in Julia source."))
+
+    # Close fixed-result grammar islands before any instruction can be erased
+    # by pointer-alias absorption. The schema also provides a distinct type
+    # hint for every source operand; one terminal hint is wrong for mixed
+    # precision, mixed-sign dot products, widened arithmetic, and cvt.pack.
+    scalar_schema = _instruction_scalar_result_schema(inst)
 
     if inst.opcode == "ret" && isempty(inst.operands)
         if inst.predicate === nothing
@@ -105,7 +142,8 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     # register from a translated shared symbol or an existing alias, record
     # the alias and emit nothing. Use sites of the dst register are
     # substituted via `pointer_aliases` in `render_operand`.
-    inst.predicate === nothing && _try_alias_def!(cg, inst) && return
+    scalar_schema === nothing && inst.predicate === nothing &&
+        _try_alias_def!(cg, inst) && return
 
     # PipeOperand destination needs an extra modifier — `.dual` for setp,
     # `.pred` for shfl — so the wrapped multi-output method dispatches.
@@ -146,7 +184,12 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     end
 
     dst_expr, dst_names = render_dst(inst.operands[1], cg)
-    src_strs = [render_operand(op, cg; type_hint) for op in inst.operands[2:end]]
+    src_strs = if scalar_schema === nothing
+        [render_operand(op, cg; type_hint) for op in inst.operands[2:end]]
+    else
+        [_render_schema_source(op, cg, kind)
+         for (op, kind) in zip(inst.operands[2:end], scalar_schema.operands)]
+    end
     args = join(src_strs, ", ")
     line = dst_expr * " = " * chain * "(" * args * ")"
     emit_with_predicate!(cg, line, inst.predicate, dst_names)
