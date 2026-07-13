@@ -842,8 +842,8 @@ end
     @test !occursin("~{memory}", spec.constraints)
 end
 
-@testset "wgmma.mma_async — full _WGMMA_VARIANTS coverage" begin
-    # Per-variant goldens for every entry of `_WGMMA_VARIANTS` in
+@testset "wgmma.mma_async — floating/integer variant coverage" begin
+    # Per-variant goldens for every entry of the separate dtype inventories in
     # src/wrappers/wgmma.jl. The encoder is cross-checked against pyptx's
     # `_Wgmma.mma_async()` (pyptx/pyptx/ptx.py:817-910) — same modifier
     # ordering, same imm tail (`scaleD, scaleA[, transA, transB]`), same
@@ -852,7 +852,7 @@ end
     # wgmma_gemm_tile.ptx (m64n128k16.f32.bf16.bf16).
     #
     # The five "popular" combos are spot-checked above; this set fills the
-    # remaining 7 of 12 variants × representative N at each end of the grid.
+    # remaining variants at representative N values.
 
     # FP8 e5m2 with f32 acc — k=32, no transpose imms. N=8 → 4 d-regs.
     spec = PTX.wgmma_mma_async_spec(:f32, :e5m2, :e5m2, 8, 32, false)
@@ -879,7 +879,7 @@ end
         "{\$0, \$1, \$2, \$3}, \$4, \$5, \$6, 1, 1;"
 
     # Integer accumulator: s32 with all four (s8/u8) × (s8/u8) ab-pairs.
-    # PTX 9.2 §9.7.14.5.7: integer wgmma has only `scale-d` (no scale-a/b
+    # PTX 9.3 §9.7.16.5.2: integer wgmma has only `scale-d` (no scale-a/b
     # or trans imms) — asm tail is just `, $scale_d;` with no trailing
     # `1, 1`. nd = N/2, constraint letter `r` (Int32 d-regs).
     for (dt_a, dt_b) in ((:s8, :s8), (:u8, :u8), (:s8, :u8), (:u8, :s8))
@@ -892,13 +892,14 @@ end
         @test spec.constraints == "=r,=r,=r,=r,l,l,b,0,1,2,3,~{memory}"
     end
 
-    # Largest s32 shape (m64n256k32) — 128 d-regs, locks the brace-count loop.
-    spec = PTX.wgmma_mma_async_spec(:s32, :s8, :s8, 256, 32, false)
-    @test spec.nd == 128
-    @test occursin("m64n256k32.s32.s8.s8", spec.asm)
-    @test occursin(", \$126, \$127}", spec.asm)
-    @test endswith(spec.asm, ", \$128, \$129, \$130;")
-    @test endswith(spec.constraints, ",126,127,~{memory}")
+    # Largest legal dense s32 shape (m64n224k32) — 112 d-regs.  Integer
+    # WGMMA has a narrower N grid than floating-point WGMMA.
+    spec = PTX.wgmma_mma_async_spec(:s32, :s8, :s8, 224, 32, false)
+    @test spec.nd == 112
+    @test occursin("m64n224k32.s32.s8.s8", spec.asm)
+    @test occursin(", \$110, \$111}", spec.asm)
+    @test endswith(spec.asm, ", \$112, \$113, \$114;")
+    @test endswith(spec.constraints, ",110,111,~{memory}")
 
     # Methods registered for the new variants — locks dispatch.
     @test which(Operation{:wgmma,
@@ -919,7 +920,7 @@ end
     # (pyptx/pyptx/ptx.py:1022-1144) implements the same 14-bit field layout
     # (start_addr / leading_offset / stride_offset / base_offset / swizzle).
     # The two encoders are independent; tests below validate the bit layout
-    # directly against PTX 9.2 §9.7.14.5.
+    # directly against PTX 9.3 §9.7.16.5.
 
     # Empty descriptor: all zeros.
     @test wgmma_descriptor(UInt32(0); leading_byte_offset = 0,
@@ -1322,13 +1323,17 @@ end
         @test occursin("tcgen05.mma.shared", string(ci))
     end
 
-    # residue: mx kinds stay asm-tier (match truncated at the bracket)
-    for kind in ("mxf8f6f4", "mxf4", "mxf4nvf4")
-        mods = (:mma, cg1, Symbol("kind::$kind"))
-        ci, _ = first(Base.code_typed(Operation{:tcgen05, mods}(),
-                                      (UInt32, UInt64, UInt64, UInt32, Bool)))
-        @test occursin("tcgen05.mma.cta_group::1.kind::$kind [", string(ci))
-    end
+    # MX kinds use the distinct seven-operand block-scale schema.  A complete
+    # closed-world inventory lives in host/matrix_api_safety.jl; this keeps a
+    # representative asm-tier inference pin beside the dense intrinsic pins.
+    mxmods = (:mma, cg1, Symbol("kind::mxf8f6f4"), :block_scale,
+              Symbol("scale_vec::1X"))
+    ci, rt = first(Base.code_typed(Operation{:tcgen05, mxmods}(),
+        (UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, Bool)))
+    @test rt === Nothing
+    @test occursin(
+        "tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale.scale_vec::1X",
+        string(ci))
 end
 
 @testset "tuple args → braced operand groups" begin
@@ -1590,8 +1595,8 @@ end
 end
 
 @testset "wgmma.mma_async dispatch surface (registered vs unregistered)" begin
-    # The wgmma generator registers methods only for the cross-product
-    # `_WGMMA_VARIANTS × _WGMMA_NS` (PTX 9.2 §9.7.14.5). For unsupported
+    # The wgmma generator registers floating and integer variants against
+    # separate N grids (PTX 9.3 §9.7.16.5.2). For unsupported
     # combinations — e.g. bf16/bf16 with k=8 (only valid for tf32), N=7, or
     # N=264 — no specific method exists on `Operation{parts}`. Dispatch still
     # reaches the shared `Vararg` method in `inst.jl`, but its typed-wrapper
@@ -1599,8 +1604,7 @@ end
     # rettype and operand count). Tests here lock in the registered surface so
     # a dropped (n,k,dtype) combo fails at host time with an actionable error.
 
-    # Registered set: for each valid (dtype_d, dtype_a, dtype_b, k) from
-    # `_WGMMA_VARIANTS`, a method exists for every N in `_WGMMA_NS`.
+    # Registered set: spot-check each valid dtype tuple across its own grid.
     registered_variants = (
         # f32 acc → NTuple{N/2, Float32}
         (:f32, :bf16, :bf16, 16),
@@ -1620,7 +1624,8 @@ end
     )
 
     for (dt_d, dt_a, dt_b, k) in registered_variants
-        for n in (8, 64, 128, 256)               # spot-check across the N grid
+        ns = dt_d === :s32 ? (8, 64, 128, 224) : (8, 64, 128, 256)
+        for n in ns
             shape = Symbol("m64n", n, "k", k)
             mods = (:mma_async, :sync, :aligned, shape, dt_d, dt_a, dt_b)
             d_J = dt_d === :f32 ? Float32 : (dt_d === :f16 ? UInt32 : Int32)
@@ -1650,6 +1655,15 @@ end
                    "inst.jl")
     @test PTX.lowering(Operation{:wgmma, mods_bad_n}(),
                        (NTuple{4, Float32}, UInt64, UInt64, Bool)).tier === :forbidden
+
+    # N=40 belongs to the floating grid but is not a dense integer shape.
+    mods_bad_int_n = (:mma_async, :sync, :aligned,
+                      :m64n40k32, :s32, :s8, :s8)
+    @test endswith(string(which(Operation{:wgmma, mods_bad_int_n}(),
+                                 (NTuple{20, Int32}, UInt64, UInt64, Bool)).file),
+                   "inst.jl")
+    @test PTX.lowering(Operation{:wgmma, mods_bad_int_n}(),
+                       (NTuple{20, Int32}, UInt64, UInt64, Bool)).tier === :forbidden
 end
 
 @testset "cvt convention (chain-driven)" begin

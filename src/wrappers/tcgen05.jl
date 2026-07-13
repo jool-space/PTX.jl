@@ -32,11 +32,10 @@
 #     is the MASKLESS dense form — the asm tier passed an all-zero
 #     disable-output-lane mask, which is semantically identical; the
 #     4/8-word zero-mask materialization disappears. Requires PTX 8.8.
-#   - mx kinds (mxf8f6f4/mxf4/mxf4nvf4) stay on the asm tier: their
-#     intrinsics are `.block_scale` forms taking TMEM scale_a/scale_b
-#     pointers the notation surface does not carry (the asm spelling
-#     without .block_scale is what pyptx emitted; revisit when the
-#     block-scale surface is designed).
+#   - mx kinds (mxf8f6f4/mxf4/mxf4nvf4) stay on the asm tier with the ISA's
+#     complete block-scale operand schema.  Scale-A and scale-B are explicit
+#     TMEM addresses, and the modifier inventory distinguishes architecture-
+#     specific `.scale_vec::*` forms from family-compatible `.block*` aliases.
 #
 # ld/st per-lane register count = `base * count` where
 #   base = 1 for shape ∈ {16x64b, 32x32b}; 2 for 16x128b; 4 for 16x256b
@@ -343,61 +342,71 @@
     nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
                              Val(3), Val(2), Val(0))
 
-# --- residue: mx kinds (asm tier) ----------------------------------------------
-# The block-scale intrinsics take TMEM scale_a/scale_b pointers the
-# notation surface does not carry; these keep the pyptx spelling (no
-# .block_scale, all-zero disable-output-lane mask, predicate operand).
-@inline function (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::mxf8f6f4"))})(
-        d::UInt32, a_desc::UInt64, b_desc::UInt64,
-        idesc::UInt32, enable_input_d::Bool)
-    @asmcall("tcgen05.mma.cta_group::1.kind::mxf8f6f4 [\$0], \$1, \$2, \$3, {\$4, \$5, \$6, \$7}, \$8;",
-             "r,l,l,r,r,r,r,r,b,~{memory}", true, Nothing,
-             Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32, Bool},
-             d, a_desc, b_desc, idesc, UInt32(0), UInt32(0), UInt32(0), UInt32(0), enable_input_d)
+# --- mx block-scaled mma (asm tier) ------------------------------------------
+#
+# PTX 9.3 §9.7.17.10.9.1 gives MX forms a different grammar from dense
+# tcgen05.mma: there is no disable-output-lane vector.  Instead, both scale
+# matrices are mandatory TMEM address operands:
+#
+#   [d], a-desc/[a], b-desc, idesc, [scale-A], [scale-B], enable-input-d
+#
+# Require an explicit scale-vector/block qualifier even where the ISA defines
+# a default.  Besides making the semantic choice visible at the call site,
+# this keeps the target contract visible: `.scale_vec::*` is the sm_100a /
+# sm_110a spelling, while `.block16`/`.block32` is the family-target spelling.
+# A call using the old five-argument shape or a kind without `.block_scale`
+# therefore misses these methods and stops at the typed-wrapper-only boundary.
+#
+# This table is the exact Table 60 cross-product after removing aliases:
+# (kind, explicit scale-vector spelling, equivalent block-size spelling).
+const _TCGEN05_MX_SCALE_VARIANTS = (
+    (:mxf8f6f4, Symbol("scale_vec::1X"), :block32),
+    (:mxf4,     Symbol("scale_vec::2X"), :block32),
+    (:mxf4nvf4, Symbol("scale_vec::2X"), :block32),
+    (:mxf4nvf4, Symbol("scale_vec::4X"), :block16),
+)
+
+function _tcgen05_mx_register(kind::Symbol, scale::Symbol, cta_group::Int)
+    cta_group in (1, 2) || throw(ArgumentError("invalid tcgen05 cta_group: $cta_group"))
+    cg = Symbol("cta_group::", cta_group)
+    kmod = Symbol("kind::", kind)
+    mods = (:mma, cg, kmod, :block_scale, scale)
+    head = "tcgen05.mma.$cg.$kmod.block_scale.$scale"
+
+    # Shared-memory A descriptor form.
+    let asm = "$head [\$0], \$1, \$2, \$3, [\$4], [\$5], \$6;",
+            constraints = "r,l,l,r,r,r,b,~{memory}"
+        @eval @inline function (::Operation{:tcgen05, $mods})(
+                d::UInt32, a_desc::UInt64, b_desc::UInt64, idesc::UInt32,
+                scale_a::UInt32, scale_b::UInt32, enable_input_d::Bool)
+            @asmcall($asm, $constraints, true, Nothing,
+                     Tuple{UInt32, UInt64, UInt64, UInt32,
+                           UInt32, UInt32, Bool},
+                     d, a_desc, b_desc, idesc,
+                     scale_a, scale_b, enable_input_d)
+            nothing
+        end
+    end
+
+    # Tensor-memory A address form.  UInt32 versus UInt64 on operand two makes
+    # the two ISA alternatives unambiguous at Julia dispatch.
+    let asm = "$head [\$0], [\$1], \$2, \$3, [\$4], [\$5], \$6;",
+            constraints = "r,r,l,r,r,r,b,~{memory}"
+        @eval @inline function (::Operation{:tcgen05, $mods})(
+                d::UInt32, a_tmem::UInt32, b_desc::UInt64, idesc::UInt32,
+                scale_a::UInt32, scale_b::UInt32, enable_input_d::Bool)
+            @asmcall($asm, $constraints, true, Nothing,
+                     Tuple{UInt32, UInt32, UInt64, UInt32,
+                           UInt32, UInt32, Bool},
+                     d, a_tmem, b_desc, idesc,
+                     scale_a, scale_b, enable_input_d)
+            nothing
+        end
+    end
     nothing
 end
-@inline function (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::mxf8f6f4"))})(
-        d::UInt32, a_desc::UInt64, b_desc::UInt64,
-        idesc::UInt32, enable_input_d::Bool)
-    @asmcall("tcgen05.mma.cta_group::2.kind::mxf8f6f4 [\$0], \$1, \$2, \$3, {\$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11}, \$12;",
-             "r,l,l,r,r,r,r,r,r,r,r,r,b,~{memory}", true, Nothing,
-             Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, Bool},
-             d, a_desc, b_desc, idesc, UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), enable_input_d)
-    nothing
-end
-@inline function (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::mxf4"))})(
-        d::UInt32, a_desc::UInt64, b_desc::UInt64,
-        idesc::UInt32, enable_input_d::Bool)
-    @asmcall("tcgen05.mma.cta_group::1.kind::mxf4 [\$0], \$1, \$2, \$3, {\$4, \$5, \$6, \$7}, \$8;",
-             "r,l,l,r,r,r,r,r,b,~{memory}", true, Nothing,
-             Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32, Bool},
-             d, a_desc, b_desc, idesc, UInt32(0), UInt32(0), UInt32(0), UInt32(0), enable_input_d)
-    nothing
-end
-@inline function (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::mxf4"))})(
-        d::UInt32, a_desc::UInt64, b_desc::UInt64,
-        idesc::UInt32, enable_input_d::Bool)
-    @asmcall("tcgen05.mma.cta_group::2.kind::mxf4 [\$0], \$1, \$2, \$3, {\$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11}, \$12;",
-             "r,l,l,r,r,r,r,r,r,r,r,r,b,~{memory}", true, Nothing,
-             Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, Bool},
-             d, a_desc, b_desc, idesc, UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), enable_input_d)
-    nothing
-end
-@inline function (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::mxf4nvf4"))})(
-        d::UInt32, a_desc::UInt64, b_desc::UInt64,
-        idesc::UInt32, enable_input_d::Bool)
-    @asmcall("tcgen05.mma.cta_group::1.kind::mxf4nvf4 [\$0], \$1, \$2, \$3, {\$4, \$5, \$6, \$7}, \$8;",
-             "r,l,l,r,r,r,r,r,b,~{memory}", true, Nothing,
-             Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32, Bool},
-             d, a_desc, b_desc, idesc, UInt32(0), UInt32(0), UInt32(0), UInt32(0), enable_input_d)
-    nothing
-end
-@inline function (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::mxf4nvf4"))})(
-        d::UInt32, a_desc::UInt64, b_desc::UInt64,
-        idesc::UInt32, enable_input_d::Bool)
-    @asmcall("tcgen05.mma.cta_group::2.kind::mxf4nvf4 [\$0], \$1, \$2, \$3, {\$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11}, \$12;",
-             "r,l,l,r,r,r,r,r,r,r,r,r,b,~{memory}", true, Nothing,
-             Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, UInt32, Bool},
-             d, a_desc, b_desc, idesc, UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), UInt32(0), enable_input_d)
-    nothing
+
+for (kind, scale_vec, block) in _TCGEN05_MX_SCALE_VARIANTS,
+        scale in (scale_vec, block), cta_group in (1, 2)
+    _tcgen05_mx_register(kind, scale, cta_group)
 end

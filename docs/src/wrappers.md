@@ -49,8 +49,8 @@ line in the loop.
 | `shfl.sync` | `wrappers/shfl.jl` | `up` / `down` / `bfly` / `idx` × `b32` × {data-only, data+pred} |
 | `stmatrix` | `wrappers/stmatrix.jl` | mirror of `ldmatrix` — `m8n8.b16` (sm_70+) and `m16n8.b8` (Hopper) |
 | `vec_ldst` | `wrappers/vec_ldst.jl` | `ld.global.v{2,4}.{f32,b32,b16}` / `st.global.v{2,4}.{f32,b32,b16}` — braced register-vector I/O for HBM-saturating bandwidth |
-| `wgmma.mma_async` (Hopper sm_90a) | `wrappers/wgmma.jl` | `wgmma.mma_async.sync.aligned.m64nNk{8,16,32}.<d>.<a>.<b>` — accumulator passed by value (tied operands), N stepped by 8 from 8 to 256, 12 dtype tuples × 32 N-values = 384 methods |
-| `tcgen05` (Blackwell sm_100a/sm_110a) | `wrappers/tcgen05.jl` | Exact lifecycle, fence/wait, TMEM address, load/store, and dense-MMA forms. `shift` / `dealloc` / `cp` / `ld` / `st` take a 32-bit TMEM address returned by `tcgen05.alloc`, while alloc/commit use reviewed shared-memory carriers. |
+| `wgmma.mma_async` (Hopper sm_90a) | `wrappers/wgmma.jl` | `wgmma.mma_async.sync.aligned.m64nNk{8,16,32}.<d>.<a>.<b>` — accumulator passed by value (tied operands). Floating forms use all 32 N values stepped by 8 through 256; integer forms use the ISA's 16-value grid `8,16,24,32,48:16:224`. The closed surface is 256 floating + 64 integer shape/type forms, each with SS runtime/constant `scale_d` and RF-A runtime variants. |
+| `tcgen05` (Blackwell sm_100a/sm_110a and family targets) | `wrappers/tcgen05.jl` | Exact lifecycle, fence/wait, TMEM address, load/store, dense-MMA, and MX block-scale forms. MX uses the complete seven-operand schema `(d, a_desc_or_tmem, b_desc, idesc, scale_a_tmem, scale_b_tmem, enable_input_d)` and all eight legal `kind × {scale_vec,block}` spellings; the former five-argument MX surface is rejected. `shift` / `dealloc` / `cp` / `ld` / `st` take a 32-bit TMEM address returned by `tcgen05.alloc`, while alloc/commit use reviewed shared-memory carriers. |
 
 The simple WGMMA synchronization ops (`wgmma.fence`,
 `wgmma.commit_group`, `wgmma.wait_group`) still flow through the reviewed
@@ -60,6 +60,17 @@ before/after thread-sync fences. An exact method is authoritative and a
 dispatch miss fails before generic asm rendering. This is necessary because
 the shared opcode spans address destinations, register vectors, sinks,
 descriptors, fences, and MMA operands with incompatible schemas.
+
+MX target evidence is deliberately split by PTX target class.  The explicit
+`.scale_vec::*` spellings are compiled offline through ptxas at `sm_100a` and
+`sm_110a`; the equivalent `.block16`/`.block32` aliases are compiled at
+`sm_100f` and `sm_110f`.  Those checks validate source schema, inline-asm
+constraints, target gating, and assembler acceptance without launching a
+kernel.  CUDACore 6.2.1 cannot emit an `sm_110*` module, so those cases emit
+the identical body at the matching `sm_100a`/`sm_100f` feature level, assert
+that only the `.target` directive changes, and invoke CUDA 13.3 ptxas directly
+on the `sm_110a`/`sm_110f` text.  No tcgen05 runtime claim is made for the
+available CC 12.1 GB10, which does not implement tcgen05.
 
 ## Extended-precision arithmetic
 

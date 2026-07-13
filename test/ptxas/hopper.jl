@@ -83,12 +83,12 @@ end
 end
 
 
-# --- WGMMA parametric sweep across _WGMMA_VARIANTS × {N=8, N=256} ---------
+# --- WGMMA parametric sweep on the exact floating/integer N grids -----------
 #
-# Mints one compile-only kernel per (dtype_d, dtype_a, dtype_b, k) variant
-# in `PTX._WGMMA_VARIANTS` at both ends of the N grid (8 and 256). Catches
-# brace-count, tied-operand, and dispatch regressions across the full
-# registered surface that the three hand-rolled testsets above don't reach.
+# Floating forms are compiled at n8/n256. Integer forms additionally pin the
+# n32→n48 grid transition and compile at their actual maximum, n224. This is
+# exact sm_90a ptxas evidence; the exhaustive closed-world method inventory is
+# host/matrix_api_safety.jl.
 #
 # Encoder cross-reference: pyptx's `_Wgmma.mma_async()`
 # (pyptx/pyptx/ptx.py:817-910). Verbatim corpus reference for
@@ -96,12 +96,19 @@ end
 # pyptx/tests/corpus/wgmma_simple.ptx:10. The Hopper full pipeline below
 # anchors the m64n8k16.f32.bf16.bf16 shape end-to-end.
 
-const _WGMMA_SWEEP_NS = (8, 256)
+const _WGMMA_PTXAS_CASES = Tuple{Symbol, Symbol, Symbol, Int, Bool, Int}[
+    (dt_d, dt_a, dt_b, k, has_trans, n)
+    for (dt_d, dt_a, dt_b, k, has_trans) in PTX._WGMMA_FLOAT_VARIANTS
+    for n in (8, 256)
+]
+append!(_WGMMA_PTXAS_CASES,
+    ((dt_d, dt_a, dt_b, k, has_trans, n)
+     for (dt_d, dt_a, dt_b, k, has_trans) in PTX._WGMMA_INT_VARIANTS
+     for n in (8, 32, 48, 224)))
 
 # Emit one kernel per variant × N. Function name encodes the combo so
 # ptxas error messages identify the failing variant.
-for (dt_d, dt_a, dt_b, k, _has_trans) in PTX._WGMMA_VARIANTS,
-        n in _WGMMA_SWEEP_NS
+for (dt_d, dt_a, dt_b, k, _has_trans, n) in _WGMMA_PTXAS_CASES
     nd    = dt_d === :f16 ? n >>> 2 : n >>> 1
     acc_J = dt_d === :f32 ? Float32 :
             dt_d === :f16 ? UInt32  : Int32
@@ -119,8 +126,7 @@ for (dt_d, dt_a, dt_b, k, _has_trans) in PTX._WGMMA_VARIANTS,
 end
 
 @testset "wgmma sweep $(dt_d).$(dt_a).$(dt_b) m64n$(n)k$(k)" for
-        (dt_d, dt_a, dt_b, k, _has_trans) in PTX._WGMMA_VARIANTS,
-        n in _WGMMA_SWEEP_NS
+        (dt_d, dt_a, dt_b, k, _has_trans, n) in _WGMMA_PTXAS_CASES
 
     acc_J = dt_d === :f32 ? Float32 :
             dt_d === :f16 ? UInt32  : Int32

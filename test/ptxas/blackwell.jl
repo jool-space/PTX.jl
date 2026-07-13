@@ -3,8 +3,8 @@
 # being launched, so an Ada (CC 8.9) box can validate sm_100a wrappers.
 #
 # Coverage: add.f32x2, sub-byte FP cvt (e2m1x2 / e2m3x2 / e3m2x2 /
-# ue8m0x2). tcgen05 wrappers are not in PTX.jl yet — once they are, add
-# tests here and validate at sm_100a.
+# ue8m0x2), and tcgen05 lifecycle/data-movement/MMA wrappers.  TCGEN MX
+# block-scale forms are validated on exact `a` and `f` target classes below.
 
 
 # --- add.f32x2 (SIMD32-pair add) -------------------------------------------
@@ -387,6 +387,123 @@ end
                    cap = v"10.0", feature_set = :arch)
     @test occursin("tcgen05.ld.sync.aligned.16x256b.x4.b32", ptx)
     @test occursin("tcgen05.st.sync.aligned.16x256b.x4.b32", ptx)
+end
+
+
+# --- tcgen05 MX block-scale schemas on exact a/f targets -------------------
+#
+# PTX 9.3 §9.7.17.10.9.1 and Table 60 expose eight modifier spellings.
+# `.scale_vec::*` is architecture-specific and is compiled for both sm_100a
+# and sm_110a.  The equivalent `.block16`/`.block32` aliases are compiled for
+# both family targets, sm_100f and sm_110f.  These are offline PTX→ptxas
+# checks only; no tcgen05 instruction is launched on the CC 12.1 GB10 runner.
+#
+# The cases alternate the two legal A source schemas (SMEM descriptor `ss`
+# and bracketed TMEM address `ts`) and both CTA groups.  Host tests inventory
+# the complete 8 modifiers × 2 CTA groups × 2 A sources surface.
+const _TCGEN05_MX_PTXAS_CASES = (
+    # Architecture-specific scale-vector spellings: sm_100a + sm_110a.
+    (:mxf8f6f4, Symbol("scale_vec::1X"), 1, :ss, v"10.0", :arch, "sm_100a"),
+    (:mxf8f6f4, Symbol("scale_vec::1X"), 2, :ts, v"11.0", :arch, "sm_110a"),
+    (:mxf4,     Symbol("scale_vec::2X"), 2, :ts, v"10.0", :arch, "sm_100a"),
+    (:mxf4,     Symbol("scale_vec::2X"), 1, :ss, v"11.0", :arch, "sm_110a"),
+    (:mxf4nvf4, Symbol("scale_vec::2X"), 1, :ss, v"10.0", :arch, "sm_100a"),
+    (:mxf4nvf4, Symbol("scale_vec::2X"), 2, :ts, v"11.0", :arch, "sm_110a"),
+    (:mxf4nvf4, Symbol("scale_vec::4X"), 2, :ts, v"10.0", :arch, "sm_100a"),
+    (:mxf4nvf4, Symbol("scale_vec::4X"), 1, :ss, v"11.0", :arch, "sm_110a"),
+
+    # Family-compatible aliases: sm_100f + sm_110f.
+    (:mxf8f6f4, :block32, 1, :ss, v"10.0", :family, "sm_100f"),
+    (:mxf8f6f4, :block32, 2, :ts, v"11.0", :family, "sm_110f"),
+    (:mxf4,     :block32, 2, :ts, v"10.0", :family, "sm_100f"),
+    (:mxf4,     :block32, 1, :ss, v"11.0", :family, "sm_110f"),
+    (:mxf4nvf4, :block32, 1, :ss, v"10.0", :family, "sm_100f"),
+    (:mxf4nvf4, :block32, 2, :ts, v"11.0", :family, "sm_110f"),
+    (:mxf4nvf4, :block16, 2, :ts, v"10.0", :family, "sm_100f"),
+    (:mxf4nvf4, :block16, 1, :ss, v"11.0", :family, "sm_110f"),
+)
+
+function _tcgen05_mx_ptxas_name(kind, scale, cg, source, cap, features)
+    safe_scale = replace(String(scale), ":" => "_")
+    Symbol("_bw_tcgen05_mx_", kind, "_", safe_scale, "_cg", cg, "_",
+           source, "_sm", cap.major, cap.minor, "_", features, "!")
+end
+
+# CUDACore 6.2.1's target database stops before sm_110, even though the
+# bundled CUDA 13.3 ptxas accepts sm_110a/sm_110f.  For those two targets we
+# therefore ask LLVM to emit the *identical wrapper body* at the matching
+# sm_100 feature level, rewrite only the module's `.target` directive, and
+# invoke ptxas directly.  The round-trip assertion makes this a deliberately
+# narrow ptxas-retargeting oracle; it must not become a general PTX rewrite.
+function _ptxas_retarget_sm100_to_sm110(ptx::String, source_target::String,
+                                        target::String)
+    @assert source_target in ("sm_100a", "sm_100f")
+    @assert target == replace(source_target, "sm_100" => "sm_110")
+    source_directive = ".target $source_target"
+    target_directive = ".target $target"
+    @assert length(findall(source_directive, ptx)) == 1
+
+    retargeted = replace(ptx, source_directive => target_directive; count = 1)
+    @assert replace(retargeted, target_directive => source_directive;
+                    count = 1) == ptx
+
+    mktempdir() do dir
+        ptx_path = joinpath(dir, "retargeted.ptx")
+        cubin_path = joinpath(dir, "retargeted.cubin")
+        write(ptx_path, retargeted)
+        cmd = `$(CUDACore.CUDA_Compiler.ptxas()) --gpu-name $target --output-file $cubin_path $ptx_path`
+        log = IOBuffer()
+        proc = run(pipeline(ignorestatus(cmd), stdout = log, stderr = log))
+        success(proc) || error("ptxas rejected retargeted $target PTX:\n" *
+                               String(take!(log)))
+    end
+    retargeted
+end
+
+for (kind, scale, cg, source, cap, features, _target) in
+        _TCGEN05_MX_PTXAS_CASES
+    mods = (:mma, Symbol("cta_group::", cg), Symbol("kind::", kind),
+            :block_scale, scale)
+    op = PTX.Operation{:tcgen05, mods}()
+    fname = _tcgen05_mx_ptxas_name(kind, scale, cg, source, cap, features)
+    if source === :ss
+        @eval function $fname(d::UInt32, a_desc::UInt64, b_desc::UInt64,
+                              idesc::UInt32, scale_a::UInt32, scale_b::UInt32)
+            $op(d, a_desc, b_desc, idesc, scale_a, scale_b, false)
+            return nothing
+        end
+    else
+        @eval function $fname(d::UInt32, a_tmem::UInt32, b_desc::UInt64,
+                              idesc::UInt32, scale_a::UInt32, scale_b::UInt32)
+            $op(d, a_tmem, b_desc, idesc, scale_a, scale_b, false)
+            return nothing
+        end
+    end
+end
+
+@testset "tcgen05 MX $kind.$scale cg$cg/$source at $target" for
+        (kind, scale, cg, source, cap, features, target) in
+            _TCGEN05_MX_PTXAS_CASES
+    fname = _tcgen05_mx_ptxas_name(kind, scale, cg, source, cap, features)
+    f = getfield(@__MODULE__, fname)
+    a_T = source === :ss ? UInt64 : UInt32
+    types = Tuple{UInt32, a_T, UInt64, UInt32, UInt32, UInt32}
+    source_target = features === :arch ? "sm_100a" : "sm_100f"
+    source_ptx = emit_ptx(f, types; cap = v"10.0", feature_set = features)
+    if cap == v"10.0"
+        @test ptxas_compiles(f, types; cap, feature_set = features)
+        ptx = source_ptx
+    else
+        ptx = _ptxas_retarget_sm100_to_sm110(source_ptx, source_target, target)
+        @test replace(ptx, ".target $target" => ".target $source_target";
+                      count = 1) == source_ptx
+    end
+    @test occursin(".target $target", ptx)
+    @test occursin("tcgen05.mma.cta_group::$cg.kind::$kind" *
+                   ".block_scale.$scale", ptx)
+    if source === :ts
+        @test occursin(r"tcgen05\.mma[^;]+\[%r\d+\], \[%r\d+\], %rd\d+", ptx)
+    end
 end
 
 
