@@ -1,0 +1,7 @@
+id = "CVTPACK-001"
+status = "confirmed"
+severity = "high"
+category = "correctness"
+summary = "cvt.pack infers its destination from a conversion modifier although the ISA requires a u32 destination."
+source_handoffs = ["wave1-lowering.md", "wave4-data-movement.md", "targeted-probes.md"]
+validation_tier = "host plus ptxas rejection"

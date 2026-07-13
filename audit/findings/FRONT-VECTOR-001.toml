@@ -1,0 +1,7 @@
+id = "FRONT-VECTOR-001"
+status = "confirmed"
+severity = "high"
+category = "parser"
+summary = "Legal v2/v4 declarations throw ArgumentError outside the advertised RawLine recovery path."
+source_handoffs = ["wave6-frontend-tests.md"]
+validation_tier = "direct parser probes"

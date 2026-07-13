@@ -1,0 +1,7 @@
+id = "TEST-TARGET-001"
+status = "confirmed"
+severity = "medium"
+category = "test_architecture"
+summary = "CC-only test banners cannot represent baseline/family/arch target semantics or produce a centralized executed/skipped capability manifest."
+source_handoffs = ["wave6-frontend-tests.md"]
+validation_tier = "test-runner audit"
