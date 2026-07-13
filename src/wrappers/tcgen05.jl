@@ -12,7 +12,8 @@
 # stay 32-bit registers in the emitted PTX).
 #
 # Intrinsic mapping (probed against llc 22.1.7, sm_100a):
-#   - alloc → alloc.shared.cgN (p3 dst): identical spelling.
+#   - alloc → alloc.shared.cgN (p3 dst): ISel emits `.shared::cta` explicitly,
+#     including for the ISA's equivalent generic-address spelling.
 #   - dealloc/shift/cp/wait/relinquish → 1:1, identical spellings.
 #   - ld/st → ld.<shape>.<count> / st.<shape>.<count>: identical
 #     spellings. The data moves as an LLVM vector (v<N>i32), so the
@@ -220,6 +221,17 @@
 
 # --- alloc / relinquish / wait / commit ----------------------------------------
 
+# Generic-address alloc form. The ISA permits omitting `.shared::cta` while
+# still requiring `dst` to lie in the CTA shared-memory window. Keep the
+# pointer schema exact so a wrong address space, pointee, arity, or nCols
+# carrier cannot fall through to generic tcgen05 rendering.
+@inline (::Operation{:tcgen05, (:alloc, Symbol("cta_group::1"), :sync, :aligned,
+        :b32)})(dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32) =
+    nvvm"tcgen05.alloc.shared.cg1"(dst, ncols)
+@inline (::Operation{:tcgen05, (:alloc, Symbol("cta_group::2"), :sync, :aligned,
+        :b32)})(dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32) =
+    nvvm"tcgen05.alloc.shared.cg2"(dst, ncols)
+
 @inline (::Operation{:tcgen05, (:alloc, Symbol("cta_group::1"), :sync, :aligned,
         Symbol("shared::cta"), :b32)})(dst::UInt32, ncols::UInt32) =
     nvvm"tcgen05.alloc.shared.cg1"(_tc_smem(dst), ncols)
@@ -239,8 +251,25 @@
 @inline (::Operation{:tcgen05, (Symbol("wait::st"), :sync, :aligned)})() =
     nvvm"tcgen05.wait.st"()
 
+# Specialized thread-synchronization fences are side-effecting, no-argument
+# intrinsics. Exact methods prevent an accidental operand from becoming a
+# literal extra PTX operand through the generic chain.
+@inline (::Operation{:tcgen05, (Symbol("fence::before_thread_sync"),)})() =
+    nvvm"tcgen05.fence.before.thread.sync"()
+@inline (::Operation{:tcgen05, (Symbol("fence::after_thread_sync"),)})() =
+    nvvm"tcgen05.fence.after.thread.sync"()
+
 # Both state-space notations lower to the same intrinsic and emit the
 # `.shared::cluster` spelling (see header).
+@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::1"),
+        Symbol("mbarrier::arrive::one"), Symbol("shared::cluster"), :b64)})(
+        mbar::Core.LLVMPtr{UInt64, AS.Shared}) =
+    nvvm"tcgen05.commit.shared.cg1"(mbar)
+@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::2"),
+        Symbol("mbarrier::arrive::one"), Symbol("shared::cluster"), :b64)})(
+        mbar::Core.LLVMPtr{UInt64, AS.Shared}) =
+    nvvm"tcgen05.commit.shared.cg2"(mbar)
+
 @inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::1"),
         Symbol("mbarrier::arrive::one"), Symbol("shared::cta"), :b64)})(mbar::UInt32) =
     nvvm"tcgen05.commit.shared.cg1"(_tc_smem(mbar))

@@ -50,12 +50,16 @@ line in the loop.
 | `stmatrix` | `wrappers/stmatrix.jl` | mirror of `ldmatrix` — `m8n8.b16` (sm_70+) and `m16n8.b8` (Hopper) |
 | `vec_ldst` | `wrappers/vec_ldst.jl` | `ld.global.v{2,4}.{f32,b32,b16}` / `st.global.v{2,4}.{f32,b32,b16}` — braced register-vector I/O for HBM-saturating bandwidth |
 | `wgmma.mma_async` (Hopper sm_90a) | `wrappers/wgmma.jl` | `wgmma.mma_async.sync.aligned.m64nNk{8,16,32}.<d>.<a>.<b>` — accumulator passed by value (tied operands), N stepped by 8 from 8 to 256, 12 dtype tuples × 32 N-values = 384 methods |
-| `tcgen05` (Blackwell sm_100a/sm_110a) | `wrappers/tcgen05.jl` | `shift` / `dealloc` / `cp` / `ld` / `st` whose `taddr` operand is a 32-bit TMEM address (returned by `tcgen05.alloc`), NOT a memory pointer — chain default brackets `LLVMPtr` but treats `UInt32` as a plain scalar |
+| `tcgen05` (Blackwell sm_100a/sm_110a) | `wrappers/tcgen05.jl` | Exact lifecycle, fence/wait, TMEM address, load/store, and dense-MMA forms. `shift` / `dealloc` / `cp` / `ld` / `st` take a 32-bit TMEM address returned by `tcgen05.alloc`, while alloc/commit use reviewed shared-memory carriers. |
 
-Sync ops (`wgmma.fence`, `wgmma.commit_group`, `wgmma.wait_group`,
-`tcgen05.alloc`, `tcgen05.commit`, …) flow through the chain default —
-their opcode prefix is in `NONPURE_OPCODES`, so they get `~{memory}`
-and `side_effects = true` automatically.
+The simple WGMMA synchronization ops (`wgmma.fence`,
+`wgmma.commit_group`, `wgmma.wait_group`) still flow through the reviewed
+generic chain contract. Every `tcgen05` form is typed-wrapper-only, including
+the ptxas-covered pointer forms of `alloc` and non-multicast `commit` and the
+before/after thread-sync fences. An exact method is authoritative and a
+dispatch miss fails before generic asm rendering. This is necessary because
+the shared opcode spans address destinations, register vectors, sinks,
+descriptors, fences, and MMA operands with incompatible schemas.
 
 ## Extended-precision arithmetic
 

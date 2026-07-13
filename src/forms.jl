@@ -68,6 +68,57 @@ const _COLL      = FormContract(convergent = true)         # collective, returns
 const _COLLSINK  = FormContract(convergent = true, returns = false)
 const _COLLMEM   = FormContract(convergent = true, brackets = true)
 
+# Forms below are intentionally callable only through exact typed methods.
+# Their ISA operand/result structure cannot be recovered by `build_call`'s
+# scalar trailing-type rule:
+#
+#   * mma and wgmma.mma_async use shape-dependent register groups;
+#   * tcgen05 spans address destinations, register vectors, sinks, fences, and
+#     matrix descriptors under one opcode; and
+#   * :dual/:pred/:report are PTX.jl-only selectors for grouped destinations,
+#     not literal PTX modifiers.
+#
+# Keep this closed and declarative.  A new entry is an API decision: exact
+# wrapper methods remain usable, while a dispatch miss must fail before LLVM.
+# Explicit `ptx"..."raw` remains the reviewed escape hatch for these purely
+# structural boundaries; unlike implicit CC.CF, no hidden architectural state
+# makes a conservative single raw asm call intrinsically unsound.
+const TYPED_WRAPPER_ONLY_RULES = (
+    (op = :mma,      prefix = (),            marker = nothing,
+     detail = "mma has shape-dependent grouped fragment operands and results"),
+    (op = :wgmma,    prefix = (:mma_async,), marker = nothing,
+     detail = "wgmma.mma_async has shape-dependent tied accumulator groups and descriptors"),
+    (op = :tcgen05,  prefix = (),            marker = nothing,
+     detail = "tcgen05 forms have instruction-specific address, vector, sink, and descriptor schemas"),
+    (op = :setp,     prefix = (),            marker = :dual,
+     detail = ":dual is an internal selector for PTX's p|q destination"),
+    (op = :shfl,     prefix = (),            marker = :pred,
+     detail = ":pred is an internal selector for PTX's d|p destination"),
+    (op = :mbarrier, prefix = (),            marker = :report,
+     detail = ":report is an internal selector for a grouped report destination"),
+)
+
+function _mods_start_with(mods::Tuple{Vararg{Symbol}}, prefix::Tuple)
+    length(prefix) <= length(mods) || return false
+    for i in eachindex(prefix)
+        mods[i] === prefix[i] || return false
+    end
+    return true
+end
+
+function typed_wrapper_only_rule(op::Symbol, mods::Tuple{Vararg{Symbol}})
+    for rule in TYPED_WRAPPER_ONLY_RULES
+        rule.op === op || continue
+        _mods_start_with(mods, rule.prefix) || continue
+        rule.marker === nothing || rule.marker in mods || continue
+        return rule
+    end
+    return nothing
+end
+
+requires_typed_wrapper(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
+    typed_wrapper_only_rule(op, mods) !== nothing
+
 const FORMS = Dict{Symbol, FormFamily}(
     # ── Pure per-lane compute ────────────────────────────────────────────
     # Value ops with no memory access and no cross-lane semantics; the

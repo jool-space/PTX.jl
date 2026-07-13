@@ -1593,12 +1593,11 @@ end
     # The wgmma generator registers methods only for the cross-product
     # `_WGMMA_VARIANTS × _WGMMA_NS` (PTX 9.2 §9.7.14.5). For unsupported
     # combinations — e.g. bf16/bf16 with k=8 (only valid for tf32), N=7, or
-    # N=264 — no specific method exists on `Operation{parts}`. The `Vararg`
-    # chain default in `inst.jl` then catches the call and would emit a
-    # garbage asm string (wrong rettype, wrong operand count) that crashes
-    # in LLVM register allocation. Tests here lock in the registered surface
-    # so a regression that drops a (n,k,dtype) combo from the table is
-    # caught at host time, not via a confusing LLVM error at code-gen.
+    # N=264 — no specific method exists on `Operation{parts}`. Dispatch still
+    # reaches the shared `Vararg` method in `inst.jl`, but its typed-wrapper
+    # boundary must reject the call before it can render garbage asm (wrong
+    # rettype and operand count). Tests here lock in the registered surface so
+    # a dropped (n,k,dtype) combo fails at host time with an actionable error.
 
     # Registered set: for each valid (dtype_d, dtype_a, dtype_b, k) from
     # `_WGMMA_VARIANTS`, a method exists for every N in `_WGMMA_NS`.
@@ -1637,10 +1636,11 @@ end
                   :m64n8k8, :f32, :bf16, :bf16)
     bad_k_method = which(Operation{:wgmma, mods_bad_k}(),
                          (NTuple{4, Float32}, UInt64, UInt64, Bool))
-    # Falls through to the chain default in inst.jl, NOT a wgmma-specific
-    # method. The chain default's source file is inst.jl (the @generated
-    # `(::Operation{op, mods})(args::Vararg{Any,N})`).
+    # Resolves to the shared method in inst.jl, NOT a wgmma-specific method,
+    # but reflection classifies that generic path as forbidden.
     @test endswith(string(bad_k_method.file), "inst.jl")
+    @test PTX.lowering(Operation{:wgmma, mods_bad_k}(),
+                       (NTuple{4, Float32}, UInt64, UInt64, Bool)).tier === :forbidden
 
     # N=7 (not step-by-8) and N=264 (over cap) — same chain-default fallthrough.
     mods_bad_n = (:mma_async, :sync, :aligned,
@@ -1648,6 +1648,8 @@ end
     @test endswith(string(which(Operation{:wgmma, mods_bad_n}(),
                                  (NTuple{4, Float32}, UInt64, UInt64, Bool)).file),
                    "inst.jl")
+    @test PTX.lowering(Operation{:wgmma, mods_bad_n}(),
+                       (NTuple{4, Float32}, UInt64, UInt64, Bool)).tier === :forbidden
 end
 
 @testset "cvt convention (chain-driven)" begin

@@ -260,6 +260,12 @@ const PROBES = Tuple{String, Tuple, String, String, Regex}[
 # state-space notations and orders multicast after the space; dense mma is
 # the maskless form with collector::a::discard explicit (PTX 8.8).
 const p6 = Core.LLVMPtr{UInt8, 6}
+append!(PROBES, [
+    ("llvm.nvvm.tcgen05.fence.before.thread.sync", (), "sm_100a", "+ptx86",
+        r"tcgen05\.fence::before_thread_sync"),
+    ("llvm.nvvm.tcgen05.fence.after.thread.sync", (), "sm_100a", "+ptx86",
+        r"tcgen05\.fence::after_thread_sync"),
+])
 for cg in (1, 2)
     append!(PROBES, [
         ("llvm.nvvm.tcgen05.shift.down.cg$cg", (p6,), "sm_100a", "+ptx86",
@@ -691,6 +697,10 @@ const ATTR_ANCHORS = Pair{String, Tuple{Vararg{Symbol}}}[
     # the mma overlay must not cover tcgen05.mma)
     "llvm.nvvm.tcgen05.ld.32x32b.x1"           => (:convergent, :argmemonly),
     "llvm.nvvm.tcgen05.mma.shared"             => (:argmemonly,),
+    # The specialized thread-sync fences have no memory access, but are
+    # load-bearing code-motion barriers for asynchronous tcgen05 operations.
+    "llvm.nvvm.tcgen05.fence.before.thread.sync" => (:nomem, :sideeffects),
+    "llvm.nvvm.tcgen05.fence.after.thread.sync"  => (:nomem, :sideeffects),
     # the upstream gap the emission overlay corrects (see the overlay
     # testset): mma.sync is IntrNoMem but NOT IntrConvergent at 22.1.7
     "llvm.nvvm.mma.m16n8k16.row.col.bf16"      => (:nomem, :nocallback),                        # [td]
