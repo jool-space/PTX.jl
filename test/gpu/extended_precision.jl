@@ -1,4 +1,4 @@
-# REQUIRES CC >=7.0
+# TEST_TARGET: requires=gpu evidence=runtime target=sm_70
 
 using Random
 

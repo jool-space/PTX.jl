@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # Cross-CTA mbarrier arrive via `mapa.shared::cluster` — the canonical
 # rendezvous pattern for producer/consumer warpgroup splits across the
 # cluster. Each CTA's thread 0 arrives on CTA-0's local mbarrier; CTA 0
@@ -13,8 +14,8 @@
 #      arrives. The intrinsics carry `IntrConvergent`; routing through
 #      `@asmcall` would drop that attribute and the rendezvous deadlocks.
 #
-# No `# REQUIRES CC` banner: ptxas testset is host-only. Runtime testset
-# is gated to clusters-capable arch (Hopper + datacenter Blackwell).
+# The ptxas testset is cross-target; the structured metadata separately
+# gates the Hopper runtime testset.
 
 # barrier.cluster via PTX tier-2 wrappers (CUDACore's cluster_arrive/wait
 # ccall-by-name silently traps on Julia ≤ 1.11 — see wrappers/barrier_cluster.jl)
@@ -69,7 +70,7 @@ end
 # Hopper-only by directory convention ([9.0, 10.0)); the mapa/cluster ops
 # here also work on datacenter Blackwell, but hopper/ tests gate strictly
 # to Hopper — a Blackwell cluster port would live under blackwell/.
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "cluster mbarrier arrive via mapa — runtime" begin
         out = CUDACore.zeros(UInt32, 1)
         @cuda blocks = (2, 1, 1) threads = 128 clustersize = (2, 1, 1) _cluster_arrive_mapa_kernel!(out)

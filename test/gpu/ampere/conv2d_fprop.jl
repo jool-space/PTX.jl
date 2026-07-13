@@ -1,4 +1,4 @@
-# REQUIRES CC 8.0
+# TEST_TARGET: requires=gpu evidence=runtime target=sm_80
 #
 # Ported from cutlass/examples/16_ampere_tensorop_conv2dfprop
 # (NVIDIA CUTLASS, BSD-3-Clause). The original instantiates CUTLASS's

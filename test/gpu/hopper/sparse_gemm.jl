@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # Structured-sparse Hopper GEMM (`wgmma.mma_async.sp`) — ported from
 # cutlass/examples/62_hopper_sparse_gemm (NVIDIA CUTLASS, BSD-3-Clause).
 #
@@ -229,7 +230,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     function spg_run(rng, K_test::Int)
         A_dense, idx = spg_random_24(rng, SPG_BM, K_test)
         B_f32 = randn(rng, Float32, K_test, SPG_BN) .* 0.1f0

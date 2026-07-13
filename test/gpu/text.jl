@@ -1,4 +1,4 @@
-# REQUIRES CC 8.9
+# TEST_TARGET: requires=gpu evidence=compile target=sm_89
 using CUDATools
 
 # These tests close the gap I flagged in v0.0: each wrapper's @asmcall string
@@ -399,4 +399,3 @@ end
 end
 
 # --- ldmatrix.sync.aligned (warp-cooperative shared→register) --------------
-

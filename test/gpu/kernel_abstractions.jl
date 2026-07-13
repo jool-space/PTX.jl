@@ -1,4 +1,4 @@
-# REQUIRES CC 7.0
+# TEST_TARGET: requires=gpu evidence=runtime target=sm_70
 #
 # Verifies PTX.jl's `ptx"..."` and `sreg"..."` macros survive
 # KernelAbstractions.jl's `@kernel` lowering on the CUDA backend.

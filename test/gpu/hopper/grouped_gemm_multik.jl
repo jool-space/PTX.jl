@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # Multi-K grouped GEMM (Hopper) — pyptx's actual perf-tuned config.
 #
 # Same MoE-shape algorithm as grouped_gemm.jl, but each K-iter loads
@@ -154,7 +155,7 @@ end
 
 # --- Runtime — H100 only -------------------------------------------------
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     function _multik_cpu_ref(A3::Array{Float32, 3}, B3::Array{Float32, 3})
         G, M, K = size(A3)
         _, _, N = size(B3)

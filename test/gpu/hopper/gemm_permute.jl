@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # GEMM with fused output permutation — ported from
 # cutlass/examples/53_hopper_gemm_permute (NVIDIA CUTLASS, BSD-3-Clause).
 #
@@ -149,7 +150,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "GEMM + fused (m1, m0) → (m0, m1) output permute (K=32)" begin
         rng = MersenneTwister(0x53)
         K_test = 32

@@ -1,9 +1,8 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # Runtime cluster-launch round-trip for TMA multicast.
 #
-# No `# REQUIRES CC` banner: the ptxas testset is host-only (cross-arch via
-# `ptxas_compiles(...; cap=v"9.0", feature_set=:arch)`) and runs on any
-# CUDACore-loadable device. The runtime cluster-launch testset is gated
-# in-file by `DEV_CAP`.
+# The ptxas testset is cross-target and runs on any CUDACore-loadable device.
+# The structured metadata separately gates the runtime cluster-launch testset.
 #
 #   - `clustersize=(2, 1, 1)` — 2-CTA Hopper cluster
 #   - Each CTA inits a local mbarrier with `count=1`, then a cluster barrier
@@ -74,7 +73,7 @@ end
 # (sm_120/sm_121, RTX 50-series / GB10) dropped clusters entirely. By the
 # hopper/ directory convention this gates strictly to Hopper [9.0, 10.0);
 # a datacenter-Blackwell cluster port would live under blackwell/.
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "TMA multicast cluster round-trip" begin
         input_vals = UInt16[(0x3f80 + i) for i in 0:63]
         src = CuArray(reshape(input_vals, 8, 8))

@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # FP8 GEMM with blockwise scaling — ported from
 # cutlass/examples/67_hopper_fp8_warp_specialized_gemm_with_blockwise_scaling
 # (NVIDIA CUTLASS, BSD-3-Clause).
@@ -186,7 +187,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "FP8 blockwise-scaling GEMM (K=128, non-uniform block scales)" begin
         rng = MersenneTwister(0x67b5)
         K_test = 128

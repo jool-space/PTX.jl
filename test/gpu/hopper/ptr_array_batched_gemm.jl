@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # Ptr-array batched Hopper GEMM — ported from
 # cutlass/examples/56_hopper_ptr_array_batched_gemm (NVIDIA CUTLASS,
 # BSD-3-Clause).
@@ -136,7 +137,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "ptr-array batched GEMM (L=$PAB_L separate allocations)" begin
         rng = MersenneTwister(0xba7c4)
 

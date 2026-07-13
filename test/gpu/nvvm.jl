@@ -1,4 +1,4 @@
-# REQUIRES CC 7.5
+# TEST_TARGET: requires=gpu evidence=runtime target=sm_75
 #
 # nvvm"" semantics on hardware. The ptxas/ tier proves the right instruction
 # is selected; this tier proves the values are right — warp data movement

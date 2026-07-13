@@ -1,4 +1,4 @@
-# REQUIRES CC 8.9
+# TEST_TARGET: requires=gpu evidence=runtime target=sm_89
 #
 # mma.sync.aligned.m16n8k32.row.col.f32.e4m3.e4m3.f32 on Ada (sm_89+).
 # Single warp, single block.

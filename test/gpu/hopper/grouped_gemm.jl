@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # Uniform-shape grouped GEMM (Hopper) — algorithmic port of
 # pyptx/examples/hopper/grouped_gemm.py.
 #
@@ -182,7 +183,7 @@ end
 
 # --- Runtime path — Hopper only (wgmma is sm_90a) -----------------------
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     function _grouped_gemm_cpu_ref(A3::Array{Float32, 3}, B3::Array{Float32, 3})
         G, M, K = size(A3)
         _, _, N = size(B3)

@@ -13,6 +13,10 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
   test-gpu:
+    # `blackwell` is the GB10 runner: CC 12.1 / sm_121a. It is consumer
+    # Blackwell, not a tcgen05-capable sm_100a or sm_103a device. The test
+    # target manifest therefore shows tcgen05 ptxas evidence executing while
+    # its runtime subsections are skipped for an exact target mismatch.
     name: Julia ${{ matrix.version }} - ${{ matrix.arch }} - ${{ matrix.runner }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60

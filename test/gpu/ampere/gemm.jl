@@ -1,4 +1,4 @@
-# REQUIRES CC 8.0
+# TEST_TARGET: requires=gpu evidence=runtime target=sm_80
 #
 # Ported from pyptx/examples/ampere/gemm.py
 # (https://github.com/patrick-toulme/pyptx).

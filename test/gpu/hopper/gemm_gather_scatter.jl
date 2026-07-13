@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # Gather → GEMM → scatter fusion — ported from
 # cutlass/examples/52_hopper_gather_scatter_fusion (NVIDIA CUTLASS,
 # BSD-3-Clause).
@@ -168,7 +169,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "gather-GEMM-scatter (gather 64 of 128 rows, scatter into 96)" begin
         rng = MersenneTwister(0x9a77e5)
 

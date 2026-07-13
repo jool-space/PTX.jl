@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f
 # Blackwell tcgen05 accumulation probe. Ported from pyptx
 # examples/blackwell/tcgen05_accum_probe.py (default build: num_mmas=4,
 # advance_descs=True, scale_c=None, split_after=None).
@@ -22,7 +23,7 @@
 # swizzle-invariant → linear fill, swizzle math skipped (see mma_probe).
 #
 # Static SMEM (< 48 KiB). Always ptxas-validates cross-arch at sm_100a;
-# runtime gated on datacenter Blackwell [10.0, 11.0) — B300 = sm_103a.
+# runtime admits the PTX-defined sm_100f and sm_110f tcgen05 families.
 
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
            BlackwellLayout, tmem_lane_addr
@@ -125,8 +126,8 @@ end
     @test occursin("tcgen05.ld.sync.aligned.32x32b.x64.b32", ptx)
 end
 
-# Datacenter-Blackwell only [10.0, 11.0); see tcgen05_smoke.jl rationale.
-if v"10.0" <= DEV_CAP < v"11.0"
+# tcgen05 family targets only; see tcgen05_smoke.jl rationale.
+if test_runtime_supported(@__FILE__)
     @testset "tcgen05 accumulation probe (B300 runtime, 4·A·B = 64)" begin
         O = CUDACore.zeros(Float32, 32 * 64)
         @cuda blocks=1 threads=128 _tcgen05_accum_probe_kernel!(O)

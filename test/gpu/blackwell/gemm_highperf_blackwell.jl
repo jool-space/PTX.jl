@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f
 # Production Blackwell tcgen05 GEMM — algorithmic port of pyptx
 # examples/blackwell/gemm_highperf_blackwell.py `build_gemm` (the
 # warp-specialized 1-SM core; `build_gemm_persistent` just wraps a
@@ -205,8 +206,8 @@ end
     @test occursin("st.global.v4.b32", ptx)
 end
 
-# Datacenter-Blackwell only [10.0, 11.0); see tcgen05_smoke.jl rationale.
-if v"10.0" <= DEV_CAP < v"11.0"
+# tcgen05 family targets only; see tcgen05_smoke.jl rationale.
+if test_runtime_supported(@__FILE__)
     function _ghb_cpu_ref(A::Matrix{Float32}, B::Matrix{Float32})
         Ab = bf16_to_f32.(bf16_bits.(A))
         Bb = bf16_to_f32.(bf16_bits.(B))
@@ -463,9 +464,9 @@ end
     @test occursin("%nctaid.x", ptx)             # persistent grid stride
 end
 
-# Datacenter-Blackwell only [10.0, 11.0). Reuses `_ghb_cpu_ref` from the
+# tcgen05 family targets only. Reuses `_ghb_cpu_ref` from the
 # core block above (same gate condition → defined when this runs).
-if v"10.0" <= DEV_CAP < v"11.0"
+if test_runtime_supported(@__FILE__)
     function _run_ghb_persistent(M, N, K, num_ctas; rtol = 5e-2, atol = 5e-2)
         @assert M % GHB_BM == 0 && N % GHB_BN == 0 && K % GHB_BK == 0
         rng = MersenneTwister(M * 5557 + N * 89 + K * 7 + num_ctas)

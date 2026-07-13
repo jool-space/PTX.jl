@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # GEMM with L2 weight prefetch — ported from
 # cutlass/examples/63_hopper_gemm_with_weight_prefetch (NVIDIA CUTLASS,
 # BSD-3-Clause).
@@ -172,7 +173,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "weight-prefetch GEMM: ratios 0 / 0.5 / 1.0 agree bit-exactly" begin
         rng = MersenneTwister(0x63)
         K_test = 128                                # 8 K-iters

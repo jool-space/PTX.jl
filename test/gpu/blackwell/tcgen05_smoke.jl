@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f
 # Blackwell tcgen05 smoke kernels — alloc / mma / ld isolated from the full
 # GEMM path. Ported from pyptx examples/blackwell/tcgen05_smoke.py
 # (build_alloc_only / build_mma_only / build_ld_only).
@@ -10,9 +11,11 @@
 # TMEM data integrity is covered separately by tcgen05_roundtrip.jl.
 #
 # Always validates cross-arch (sm_100a ptxas) — runs on the sm_89 dev box
-# where the kernels cannot launch. Runtime launch is gated on real
-# Blackwell datacenter hardware (CC >= 10.0); B300 (sm_103a) is the cloud
-# target. SMEM layout mirrors pyptx exactly (A | B | mbar | tmem_slot)
+# where the kernels cannot launch. PTX 9.3 sections 9.7.17.7, 9.7.17.8,
+# 9.7.17.10, and 9.7.17.12 support every form used here on the `sm_100f`
+# and `sm_110f` families. Those family targets admit later CCs in each
+# family while excluding GB10 `sm_121`, which does not provide tcgen05.
+# SMEM layout mirrors pyptx exactly (A | B | mbar | tmem_slot)
 # and exceeds 48 KiB, so the kernels use dynamic SMEM with an explicit
 # MAX_DYNAMIC_SHARED_SIZE_BYTES opt-in (same idiom as
 # gemm_highperf_hopper.jl).
@@ -177,12 +180,9 @@ end
     @test occursin("tcgen05.wait::ld.sync.aligned", ptx_ld)
 end
 
-# Runtime path — gated on Blackwell *datacenter* hardware. tcgen05 ships
-# on sm_100/sm_103 (B100/B200/B300, CC 10.x); consumer Blackwell
-# (sm_120/sm_121, CC 12.x) dropped it. The datacenter-Blackwell window is
-# [10.0, 11.0): admits B300 (sm_103a, CC 10.3) while skipping the GB10
-# dev box (sm_121a) and the sm_89 box.
-if v"10.0" <= DEV_CAP < v"11.0"
+# Runtime path — gated on the PTX-defined tcgen05 families. The OR-set
+# admits later CCs in the sm_100 and sm_110 families while skipping sm_12x.
+if test_runtime_supported(@__FILE__)
     @testset "tcgen05 smoke kernels (B300 runtime)" begin
         for (kernel!, marker) in (
                 (_tcgen05_alloc_only_kernel!, 11.0f0),

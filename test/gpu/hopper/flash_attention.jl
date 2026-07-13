@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # Hopper FlashAttention forward — simplified port of
 # pyptx/examples/hopper/experimental/flash_attention_hopper.py.
 #
@@ -347,7 +348,7 @@ end
 
 # --- Runtime — H100 only -------------------------------------------------
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     function _fa_cpu_ref(Q::Array{Float32, 2}, K::Array{Float32, 2},
                          V::Array{Float32, 2}, sm_scale::Float32)
         # Q (M, HD), K (N, HD), V (N, HD).

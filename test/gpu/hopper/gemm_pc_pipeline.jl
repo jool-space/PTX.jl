@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # Producer-consumer pipelined Hopper GEMM — the canonical pyptx warp-
 # specialized pattern, isolated from clusters / multicast / scheduling.
 #
@@ -199,7 +200,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "producer-consumer Hopper GEMM (random bf16, K=64)" begin
         # K = 64 → 4 K-iters, 2 wraparounds through the 2-stage ring.
         # Exercises the phase-tracking path (first 2 iters phase=0, last 2 iters phase=1).

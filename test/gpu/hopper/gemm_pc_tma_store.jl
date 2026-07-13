@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # Cluster GEMM with TMA store epilogue + bf16 output.
 #
 # Differs from gemm_pc_pipeline_cluster.jl in only one piece — the
@@ -247,7 +248,7 @@ end
 
 # ── Runtime — Hopper only (wgmma is sm_90a; Blackwell uses tcgen05) ─────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     function _run_pct_case(rng, M_total, N_total, K_test)
         @assert M_total % PCT_BM_CLUSTER == 0
         @assert N_total % PCT_BN         == 0

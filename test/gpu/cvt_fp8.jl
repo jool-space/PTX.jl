@@ -1,4 +1,4 @@
-# REQUIRES CC 8.9
+# TEST_TARGET: requires=gpu evidence=runtime target=sm_89
 using Microfloats
 using Microfloats: NanOnlyAllOnes, SAT, OVF
 

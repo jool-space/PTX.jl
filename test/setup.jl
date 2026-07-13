@@ -6,10 +6,10 @@
 #   ptxas/  — needs a functional CUDA install (toolkit + a device for
 #             compiler_config(device(); ...)), but the `cap` we compile for
 #             is independent of the device's actual capability. Validates
-#             wrappers cross-arch (sm_50..sm_100a) without needing the
-#             corresponding hardware.
-#   gpu/    — real device execution via @cuda. Cap-gated by the
-#             `# REQUIRES CC` banner (see runtests.jl).
+#             wrappers across baseline, family, and architecture-specific
+#             targets without needing the corresponding hardware.
+#   gpu/    — active-device compilation and/or real execution. Routed by the
+#             structured `# TEST_TARGET:` banner (see runtests.jl).
 #
 # `emit_ptx` stops at the LLVM NVPTX backend (string-match only, no ptxas).
 # `ptxas_compiles` runs LLVM → PTX → ptxas → cubin and stops before `link`,
@@ -21,9 +21,29 @@ using CUDACore
 using CUDATools
 using CUDACore.GPUCompiler: methodinstance, CompilerJob
 
-const DEV_CAP = CUDACore.functional() ?
-                CUDACore.capability(CUDACore.device()) :
-                v"0.0"
+isdefined(@__MODULE__, :TestTargets) ||
+    include(joinpath(@__DIR__, "target_requirements.jl"))
+
+const _TEST_DEVICE_CAP = Ref{Union{Nothing,VersionNumber}}(nothing)
+
+# Avoid a redundant `functional()` / device-capability query in workers that
+# never reach a mixed file's optional runtime section.  CUDACore itself is
+# still imported by the shared harness and performs its normal initialization.
+function _test_device_capability()
+    cap = _TEST_DEVICE_CAP[]
+    cap === nothing || return cap
+    cap = CUDACore.functional() ?
+          CUDACore.capability(CUDACore.device()) :
+          v"0.0"
+    _TEST_DEVICE_CAP[] = cap
+    cap
+end
+
+# Mixed gpu/ files always run their cross-target ptxas testsets.  Their
+# optional runtime testsets use the same parsed target policy as the root
+# runner, eliminating ad-hoc capability ranges while retaining per-file scope.
+test_runtime_supported(file::AbstractString) =
+    TestTargets.runtime_supported(file, _test_device_capability())
 
 # LLVM NVPTX backend → PTX text. No ptxas, no driver. Compiled with
 # kernel ABI so `kernel_state` intrinsics (e.g. ptx"mov.u32"(sreg"%tid.x"))

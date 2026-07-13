@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # Single-warpgroup Hopper GEMM — TMA load → mbarrier sync → wgmma → store.
 #
 # Headline Hopper kernel for ROADMAP item 6. Composes the full sm_90a stack:
@@ -158,7 +159,7 @@ end
 # Runtime path — gated on Hopper hardware. wgmma is sm_90a-only; Blackwell
 # (sm_100/sm_120/sm_121) replaced it with tcgen05, so cap is required to be
 # in [9.0, 10.0). On the GB10 dev box (sm_121a) this testset is skipped.
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "single-warpgroup Hopper GEMM (random bf16, K-fast layout)" begin
         # Random non-uniform inputs — exercises the layout fix (both A and B
         # K-fast in SMEM, both descriptors via layout_for_a). Uniform 1.0s

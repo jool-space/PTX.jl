@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f
 # Blackwell tcgen05 TMEM roundtrip — write a known per-lane pattern into
 # TMEM with tcgen05.st, drain with wait::st, read it back with tcgen05.ld,
 # and store to global memory. Ported from pyptx
@@ -9,8 +10,8 @@
 # to the tcgen05_smoke kernels (which only check "did it launch").
 #
 # SMEM is just the 16-byte tcgen05.alloc slot (static, no >48 KiB opt-in).
-# Always validates cross-arch (sm_100a ptxas); runtime gated on Blackwell
-# datacenter hw (CC >= 10.0) — B300 (sm_103a) is the cloud target.
+# Always validates cross-arch (sm_100a ptxas); runtime admits the
+# PTX-defined sm_100f and sm_110f tcgen05 families.
 
 using PTX: smem_addr_u32, tmem_lane_addr
 using CUDACore
@@ -67,9 +68,9 @@ end
     @test occursin("tcgen05.ld.sync.aligned.32x32b.x64.b32", ptx)
 end
 
-# Datacenter-Blackwell only [10.0, 11.0); see tcgen05_smoke.jl for the
-# rationale (excludes consumer sm_120/sm_121).
-if v"10.0" <= DEV_CAP < v"11.0"
+# tcgen05 family targets only; see tcgen05_smoke.jl for the rationale
+# (in particular, this excludes GB10 sm_121).
+if test_runtime_supported(@__FILE__)
     @testset "tcgen05 TMEM roundtrip (B300 runtime)" begin
         O = CUDACore.zeros(Float32, TCR_ROWS * TCR_COLS)
         @cuda blocks=1 threads=128 _tcgen05_roundtrip_kernel!(O)

@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
 # 2-CTA cluster GEMM: producer + 2 consumers per CTA, multicast B-load
 # across the cluster. Builds on gemm_pc_pipeline_split.jl by wrapping
 # its 1-producer + 2-consumer M-split shape inside a 2-CTA cluster
@@ -245,7 +246,7 @@ end
 
 # ── Runtime — Hopper only (wgmma is sm_90a; Blackwell uses tcgen05) ─────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     # Helper: run the kernel for a given (M, N, K) shape and compare
     # against the bf16-rounded reference. M must be a multiple of
     # BM_CLUSTER, N a multiple of BN, K a multiple of BK.

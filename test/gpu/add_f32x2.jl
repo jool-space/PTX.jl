@@ -1,4 +1,4 @@
-# REQUIRES CC 10.0
+# TEST_TARGET: requires=gpu evidence=runtime target=sm_100
 using CUDACore.LLVM
 
 pack_f32x2(lo::Float32, hi::Float32) =

@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=ptxas
 using PTX: IR
 using PTX.Parser: parse as parse_ptx
 using PTX.IR: format
