@@ -93,6 +93,12 @@ function format(b::Block)
     indent * "{" * body * "}"
 end
 
+# IntrinsicScope is construction-time IR rather than parser-produced PTX. Its
+# lexical body nevertheless has the same brace representation as Block when a
+# caller requests structural PTX formatting; its metadata remains available in
+# the IR for normalization and diffing.
+format(s::IntrinsicScope) = format(Block(body = s.body, formatting = s.formatting))
+
 function format(p::Param)
     parts = String[]
     push!(parts, ptx(p.state_space))

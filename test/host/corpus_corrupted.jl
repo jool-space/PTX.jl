@@ -22,11 +22,14 @@ using PTX.IR: Module, Function, Instruction, RawLine, format
 
 const _CORRUPTED_DIR = joinpath(@__DIR__, "..", "corpus", "corrupted")
 
-# Walk a Module's IR for any RawLine, top-level or inside a function body.
+# Walk a Module's IR for RawLine fallback nodes at every nesting depth. Keep
+# the top/body split for this fixture manifest, but do not mistake a direct
+# Function.body scan for a complete inventory: scoped Blocks and
+# IntrinsicScopes can contain fallback nodes too.
 function _count_rawlines(m::Module)
-    top = count(d -> d isa RawLine, m.directives)
-    body = sum(d -> d isa Function ? count(s -> s isa RawLine, d.body) : 0,
-               m.directives; init = 0)
+    paths = _rawline_paths(m)
+    top = count(entry -> !occursin(".body[", first(entry)), paths)
+    body = length(paths) - top
     (top = top, body = body)
 end
 

@@ -16,8 +16,9 @@
 #   - `.reg` declarations dropped entirely — register counts are allocator
 #     output, exactly the noise "modulo naming" must ignore
 #
-# The result still `format`s to readable PTX-shaped text; it is for
-# comparison and review, not for feeding back to ptxas.
+# The result still `format`s to readable PTX-shaped text, including lexical
+# brace scopes; it is for comparison and review, not for feeding back to
+# ptxas.
 
 @public canonicalize
 
@@ -133,6 +134,15 @@ function _canon_body(rn::_Renamer, body::Tuple{Vararg{Statement}})
                 name = _newname(rn, s.name, "var"),
                 array_size = s.array_size, alignment = s.alignment,
                 initializer = s.initializer, linking = s.linking))
+        elseif s isa Block
+            # Braces carry lexical declaration/lifetime scope. Keep the node
+            # while canonicalizing the names nested inside it.
+            push!(out, Block(body = _canon_body(rn, s.body)))
+        elseif s isa IntrinsicScope
+            # Construction-time scopes have the same nested-name requirement
+            # as parsed braces. Retain their metadata for IR comparison.
+            push!(out, IntrinsicScope(name = s.name, args_repr = s.args_repr,
+                                      body = _canon_body(rn, s.body)))
         else
             push!(out, s)   # RawLine, PragmaDirective, ...
         end
@@ -176,8 +186,9 @@ end
 Canonical form for comparing PTX *structure*: `normalize`d, with virtual
 registers, labels, parameters, declared variables, and function names
 renamed to position-stable canonical names, and `.reg` declarations
-dropped. Two modules whose `canonicalize` outputs `format` identically
-contain the same instruction sequences modulo naming — the golden-harness
+dropped. Lexical scope nodes remain, with their nested operands renamed.
+Two modules whose `canonicalize` outputs `format` identically contain the
+same PTX structure modulo allocator-style naming — the golden-harness
 equivalence.
 """
 function canonicalize(m::Module)

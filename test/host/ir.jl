@@ -266,7 +266,7 @@ end
     # body length differs
     d = PTX.IR.diff(parse_ptx(base),
                     parse_ptx(replace(base, "\tret;\n" => "\tadd.u32 %r1, %r0, 1;\n\tret;\n")))
-    @test any(line -> occursin("body length:", line), d)
+    @test any(line -> occursin("directive[1].body length:", line), d)
 end
 
 @testset "IR.diff: entry_only filters helper functions" begin
@@ -346,6 +346,15 @@ end
 _reg(s)  = RegisterOperand(s)
 _imm(s)  = ImmediateOperand(s)
 
+function _module_with_directives(directives::Tuple{Vararg{PTX.IR.Statement}})
+    PTX.IR.Module(
+        version      = Version(8, 0),
+        target       = Target(("sm_89",)),
+        address_size = AddressSize(64),
+        directives   = directives,
+    )
+end
+
 @testset "IR.normalize: non-Instruction body branches" begin
     # Body containing every Statement kind that the body-branch dispatch in
     # `_normalize_body` handles:
@@ -355,8 +364,8 @@ _imm(s)  = ImmediateOperand(s)
     #   RegDecl             — passthrough with formatting cleared
     #   VarDecl             — _normalize_var_decl
     #   Label               — passthrough with formatting cleared
-    #   Block               — flattened
-    #   IntrinsicScope      — flattened
+    #   Block               — recursively normalized and preserved
+    #   IntrinsicScope      — recursively normalized and preserved
     #   PragmaDirective     — passthrough with formatting cleared
     body = (
         Comment("// drop me"),
@@ -379,9 +388,8 @@ _imm(s)  = ImmediateOperand(s)
     n = PTX.IR.normalize(m)
     nf = first(d for d in n.directives if d isa PTX.IR.Function)
 
-    # Comment + BlankLine dropped. Block/IntrinsicScope flatten to their inner
-    # `ret`. Surviving: RawLine, Instruction, RegDecl, VarDecl, Label,
-    # ret(from Block), ret(from IntrinsicScope), PragmaDirective = 8 stmts.
+    # Comment + BlankLine drop. The remaining semantic nodes, including
+    # Block/IntrinsicScope boundaries, remain in the normalized tree.
     @test length(nf.body) == 8
 
     # Each surviving non-Instruction kind has formatting cleared.
@@ -396,11 +404,18 @@ _imm(s)  = ImmediateOperand(s)
     @test any(s -> s isa Label && s.name == "LBL_0",                nf.body)
     @test any(s -> s isa PTX.IR.PragmaDirective && s.value == "nounroll", nf.body)
 
-    # Block / IntrinsicScope flattened — the inner `ret` instructions appear
-    # as direct body entries, with no surviving Block/IntrinsicScope wrapper.
-    @test count(s -> s isa Instruction && s.opcode == "ret", nf.body) == 2
-    @test !any(s -> s isa Block,                  nf.body)
-    @test !any(s -> s isa PTX.IR.IntrinsicScope,  nf.body)
+    # Braces are semantic lexical scope; keep them and recursively clear
+    # formatting in their bodies instead of flattening them into the function.
+    block = only(s for s in nf.body if s isa Block)
+    @test block.formatting === nothing
+    @test only(block.body) isa Instruction
+    @test (only(block.body)).opcode == "ret"
+
+    scope = only(s for s in nf.body if s isa PTX.IR.IntrinsicScope)
+    @test scope.formatting === nothing
+    @test scope.name == "scope" && scope.args_repr == "()"
+    @test only(scope.body) isa Instruction
+    @test (only(scope.body)).opcode == "ret"
 
     # Idempotence — second normalize is a no-op.
     @test PTX.IR.normalize(n) == n
@@ -427,8 +442,10 @@ end
         ),
     )
     n = PTX.IR.normalize(m)
-    # RawLine + Comment + BlankLine all drop at module level.
-    @test !any(d -> d isa RawLine, n.directives)
+    # Top-level RawLine is opaque parser fallback, not cosmetic formatting.
+    # Dropping it would make different module directives compare equal.
+    raw = only(d for d in n.directives if d isa RawLine)
+    @test raw.text == ".dropme"
     @test !any(d -> d isa Comment, n.directives)
 
     var = first(d for d in n.directives if d isa VarDecl)
@@ -436,6 +453,111 @@ end
 
     pr = first(d for d in n.directives if d isa PTX.IR.PragmaDirective)
     @test pr.formatting === nothing && pr.value == "loop_unroll(2)"
+end
+
+@testset "IR.normalize / diff: module directives remain semantic" begin
+    function directive_module(; global_name::String = "state",
+                              initializer::Tuple{Vararg{String}} = ("1",),
+                              pragma::String = "nounroll",
+                              raw::String = ".opaque_module_directive state;")
+        _module_with_directives((
+            VarDecl(state_space = StateSpace.GLOBAL, type = ScalarType.U32,
+                    name = global_name, initializer = initializer),
+            PTX.IR.PragmaDirective(value = pragma),
+            RawLine(raw),
+            PTX.IR.Function(is_entry = true, name = "kernel",
+                            body = (Instruction(opcode = "ret"),)),
+        ))
+    end
+
+    base = directive_module()
+    normalized = PTX.IR.normalize(base)
+    @test any(d -> d isa RawLine && d.text == ".opaque_module_directive state;",
+              normalized.directives)
+    @test occursin(".opaque_module_directive state;",
+                   format(PTX.IR.canonicalize(base)))
+
+    # Each of these was previously erased by function-only diffing.
+    for changed in (
+        directive_module(global_name = "other_state"),
+        directive_module(initializer = ("2",)),
+        directive_module(pragma = "unroll"),
+        directive_module(raw = ".opaque_module_directive other_state;"),
+    )
+        @test !isempty(PTX.IR.diff(base, changed))
+        # entry_only means "omit helper .func bodies", not "ignore globals".
+        @test !isempty(PTX.IR.diff(base, changed; entry_only = true))
+    end
+end
+
+@testset "IR.normalize / diff: lexical scopes survive canonicalization" begin
+    scoped = _build_module((
+        Block(body = (
+            RegDecl(type = ScalarType.B32, name = "r", count = 8),
+            Instruction(opcode = "mov", modifiers = (".u32",),
+                        operands = (_reg("%r5"), _imm("1"))),
+        )),
+        Instruction(opcode = "ret"),
+    ))
+    flat = _build_module((
+        RegDecl(type = ScalarType.B32, name = "r", count = 8),
+        Instruction(opcode = "mov", modifiers = (".u32",),
+                    operands = (_reg("%r5"), _imm("1"))),
+        Instruction(opcode = "ret"),
+    ))
+    normalized = PTX.IR.normalize(scoped)
+    normalized_func = only(d for d in normalized.directives if d isa PTX.IR.Function)
+    body = normalized_func.body
+    @test first(body) isa Block
+    @test !isempty(PTX.IR.diff(scoped, flat))
+
+    # Allocator numbering inside a retained brace scope is still canonicalized.
+    renumbered = _build_module((
+        Block(body = (
+            RegDecl(type = ScalarType.B32, name = "tmp", count = 2),
+            Instruction(opcode = "mov", modifiers = (".u32",),
+                        operands = (_reg("%r19"), _imm("1"))),
+        )),
+        Instruction(opcode = "ret"),
+    ))
+    canon_scoped = PTX.IR.canonicalize(scoped)
+    canon_renumbered = PTX.IR.canonicalize(renumbered)
+    canon_func = only(d for d in canon_scoped.directives if d isa PTX.IR.Function)
+    canon_body = canon_func.body
+    @test first(canon_body) isa Block
+    @test format(canon_scoped) == format(canon_renumbered)
+
+    # IntrinsicScope is construction-time IR, but it must retain its boundary
+    # and recursively canonicalize its children just like a parsed Block.
+    intrinsic = _build_module((
+        PTX.IR.IntrinsicScope(name = "scope", args_repr = "()", body = (
+            Instruction(opcode = "mov", modifiers = (".u32",),
+                        operands = (_reg("%r7"), _imm("1"))),
+        )),
+        Instruction(opcode = "ret"),
+    ))
+    renamed_intrinsic = _build_module((
+        PTX.IR.IntrinsicScope(name = "scope", args_repr = "()", body = (
+            Instruction(opcode = "mov", modifiers = (".u32",),
+                        operands = (_reg("%r11"), _imm("1"))),
+        )),
+        Instruction(opcode = "ret"),
+    ))
+    normalized_intrinsic = PTX.IR.normalize(intrinsic)
+    intrinsic_func = only(d for d in normalized_intrinsic.directives if d isa PTX.IR.Function)
+    intrinsic_body = intrinsic_func.body
+    @test first(intrinsic_body) isa PTX.IR.IntrinsicScope
+    @test !isempty(PTX.IR.diff(intrinsic,
+                               _build_module((PTX.IR.IntrinsicScope(
+                                   name = "other", args_repr = "()",
+                                   body = (Instruction(opcode = "ret"),)),
+                                                Instruction(opcode = "ret")))))
+    canonical_intrinsic = PTX.IR.canonicalize(intrinsic)
+    canonical_intrinsic_func = only(d for d in canonical_intrinsic.directives
+                                    if d isa PTX.IR.Function)
+    @test first(canonical_intrinsic_func.body) isa PTX.IR.IntrinsicScope
+    @test format(canonical_intrinsic) ==
+          format(PTX.IR.canonicalize(renamed_intrinsic))
 end
 
 @testset "IR.diff: Instruction-internal differences (operands / predicate)" begin
@@ -475,7 +597,7 @@ end
     body_b = (Label("L"),
               Instruction(opcode = "ret"))
     d = PTX.IR.diff(_build_module(body_a), _build_module(body_b))
-    @test any(line -> occursin("body[1] type:", line), d)
+    @test any(line -> occursin("directive[1].body[1] type:", line), d)
 
     # Same Statement type, different fields — exercises
     # `_eq_ignoring_formatting` for non-Instruction.
@@ -484,7 +606,8 @@ end
     body_b = (RegDecl(type = ScalarType.B32, name = "different"),
               Instruction(opcode = "ret"))
     d = PTX.IR.diff(_build_module(body_a), _build_module(body_b))
-    @test any(line -> occursin("body[1]:", line) && occursin("different", line), d)
+    @test any(line -> occursin("directive[1].body[1]:", line) &&
+                      occursin("different", line), d)
 
     # Differs only in formatting → equal under _eq_ignoring_formatting.
     body_a = (Label("L", FormattingInfo(indent = "")),
@@ -509,7 +632,7 @@ end
         Instruction(opcode = "ret"),
     )
     d = PTX.IR.diff(_build_module(short_body), _build_module(long_body))
-    @test any(line -> occursin("body length:", line), d)
+    @test any(line -> occursin("directive[1].body length:", line), d)
     # _stmt_summary: ScalarType prints as `B32` (EnumX), not `.b32`.
     @test any(line -> occursin(".reg ", line) && occursin("r<4>", line), d)
     @test any(line -> occursin("VarDecl(smem)", line), d)

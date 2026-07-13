@@ -111,25 +111,187 @@ const GOLDEN_DIR = joinpath(@__DIR__, "golden")
 # would commit polluted goldens that then fail CI. Refuse both, loudly.
 _forced_bounds_checks() = Base.JLOptions().check_bounds == 1
 
-# A golden must be fully structural: a body RawLine keeps its original
-# register numbers (escaping the modulo-renaming guarantee), and a top-level
-# RawLine is dropped by normalize (escaping comparison entirely). Either way
-# the harness silently weakens — a RawLine here means the parser needs
-# extending, and that should be a red test, not a quiet degradation.
-function _assert_structural(m::PTX.IR.Module, name::String)
-    raws = String[]
-    for d in m.directives
-        d isa PTX.IR.RawLine && push!(raws, d.text)
-        d isa PTX.IR.Function || continue
-        for s in d.body
-            s isa PTX.IR.RawLine && push!(raws, s.text)
+# --- Structural-IR oracle helpers ------------------------------------------
+#
+# `IR.unraw` deliberately clears only the module-level raw source. It is a
+# production formatting operation, not a claim that every parsed statement can
+# be reconstructed from its fields. The corpus and golden oracles need the
+# stronger test-only projection below: remove every raw escape while retaining
+# every node, including RawLine fallback nodes. That way a RawLine is visible to
+# the test instead of being quietly preserved as source text.
+
+function _without_raw_line(fi::Union{PTX.IR.FormattingInfo, Nothing})
+    fi === nothing && return nothing
+    PTX.IR.FormattingInfo(
+        indent = fi.indent,
+        trailing = fi.trailing,
+        blank_lines_before = fi.blank_lines_before,
+        preceding_comments = fi.preceding_comments,
+        raw_line = nothing,
+    )
+end
+
+_deep_unraw_statements(stmts::Tuple{Vararg{PTX.IR.Statement}}) =
+    Tuple(_deep_unraw_stmt(stmt) for stmt in stmts)
+
+# Leaf statements without formatting (including RawLine) are intentionally
+# retained. A structural test must reject fallback nodes explicitly, rather
+# than erase them while constructing its test input.
+_deep_unraw_stmt(stmt::PTX.IR.Statement) = stmt
+
+function _deep_unraw_stmt(stmt::PTX.IR.Instruction)
+    PTX.IR.Instruction(
+        opcode = stmt.opcode,
+        modifiers = stmt.modifiers,
+        operands = stmt.operands,
+        predicate = stmt.predicate,
+        formatting = _without_raw_line(stmt.formatting),
+    )
+end
+
+function _deep_unraw_stmt(stmt::PTX.IR.Label)
+    PTX.IR.Label(name = stmt.name,
+                 formatting = _without_raw_line(stmt.formatting))
+end
+
+function _deep_unraw_stmt(stmt::PTX.IR.RegDecl)
+    PTX.IR.RegDecl(
+        type = stmt.type,
+        name = stmt.name,
+        count = stmt.count,
+        formatting = _without_raw_line(stmt.formatting),
+    )
+end
+
+function _deep_unraw_stmt(stmt::PTX.IR.VarDecl)
+    PTX.IR.VarDecl(
+        state_space = stmt.state_space,
+        type = stmt.type,
+        name = stmt.name,
+        array_size = stmt.array_size,
+        alignment = stmt.alignment,
+        initializer = stmt.initializer,
+        linking = stmt.linking,
+        formatting = _without_raw_line(stmt.formatting),
+    )
+end
+
+function _deep_unraw_stmt(stmt::PTX.IR.PragmaDirective)
+    PTX.IR.PragmaDirective(value = stmt.value,
+                            formatting = _without_raw_line(stmt.formatting))
+end
+
+function _deep_unraw_stmt(stmt::PTX.IR.Block)
+    PTX.IR.Block(
+        body = _deep_unraw_statements(stmt.body),
+        formatting = _without_raw_line(stmt.formatting),
+    )
+end
+
+function _deep_unraw_stmt(stmt::PTX.IR.IntrinsicScope)
+    PTX.IR.IntrinsicScope(
+        name = stmt.name,
+        args_repr = stmt.args_repr,
+        body = _deep_unraw_statements(stmt.body),
+        formatting = _without_raw_line(stmt.formatting),
+    )
+end
+
+function _deep_unraw_stmt(stmt::PTX.IR.Function)
+    PTX.IR.Function(
+        is_entry = stmt.is_entry,
+        name = stmt.name,
+        params = stmt.params,
+        return_params = stmt.return_params,
+        body = _deep_unraw_statements(stmt.body),
+        linking = stmt.linking,
+        directives = stmt.directives,
+        formatting = _without_raw_line(stmt.formatting),
+    )
+end
+
+function _deep_unraw(m::PTX.IR.Module)
+    PTX.IR.Module(
+        version = m.version,
+        target = m.target,
+        address_size = m.address_size,
+        leading = _deep_unraw_statements(m.leading),
+        directives = _deep_unraw_statements(m.directives),
+        raw_header = nothing,
+        raw_source = nothing,
+    )
+end
+
+function _raw_snapshot_paths!(paths::Vector{Pair{String, String}},
+                              stmts::Tuple{Vararg{PTX.IR.Statement}},
+                              prefix::String)
+    for (index, stmt) in enumerate(stmts)
+        path = "$prefix[$index]"
+        if hasfield(typeof(stmt), :formatting)
+            formatting = getfield(stmt, :formatting)
+            formatting !== nothing && formatting.raw_line !== nothing &&
+                push!(paths, path => formatting.raw_line)
+        end
+        if stmt isa PTX.IR.Function || stmt isa PTX.IR.Block ||
+           stmt isa PTX.IR.IntrinsicScope
+            _raw_snapshot_paths!(paths, stmt.body, path * ".body")
         end
     end
+    paths
+end
+
+"""Return every per-statement `FormattingInfo.raw_line`, recursively."""
+function _raw_snapshot_paths(m::PTX.IR.Module)
+    paths = Pair{String, String}[]
+    _raw_snapshot_paths!(paths, m.leading, "module.leading")
+    _raw_snapshot_paths!(paths, m.directives, "module.directives")
+    paths
+end
+
+function _rawline_paths!(paths::Vector{Pair{String, String}},
+                         stmts::Tuple{Vararg{PTX.IR.Statement}},
+                         prefix::String)
+    for (index, stmt) in enumerate(stmts)
+        path = "$prefix[$index]"
+        if stmt isa PTX.IR.RawLine
+            push!(paths, path => stmt.text)
+        elseif stmt isa PTX.IR.Function
+            _rawline_paths!(paths, stmt.body, path * ".body")
+        elseif stmt isa PTX.IR.Block
+            _rawline_paths!(paths, stmt.body, path * ".body")
+        elseif stmt isa PTX.IR.IntrinsicScope
+            _rawline_paths!(paths, stmt.body, path * ".body")
+        end
+    end
+    paths
+end
+
+"""Return every `RawLine` fallback as `path => text`, recursively."""
+function _rawline_paths(m::PTX.IR.Module)
+    paths = Pair{String, String}[]
+    _rawline_paths!(paths, m.leading, "module.leading")
+    _rawline_paths!(paths, m.directives, "module.directives")
+    paths
+end
+
+_rawline_count(m::PTX.IR.Module) = length(_rawline_paths(m))
+
+function _assert_no_rawlines(m::PTX.IR.Module, context::AbstractString)
+    raws = _rawline_paths(m)
     isempty(raws) && return nothing
-    error("golden $name: emitted PTX contains $(length(raws)) line(s) the " *
-          "parser could not parse structurally; raw lines bypass canonical " *
-          "renaming. Extend the parser to cover them. First: " *
-          repr(first(raws)))
+    nshow = min(length(raws), 3)
+    examples = join(("$(first(raws[i])) = $(repr(last(raws[i])))"
+                     for i in 1:nshow), "; ")
+    error("$context: parser left $(length(raws)) RawLine fallback node(s); " *
+          "they bypass structural reconstruction. First path(s): $examples")
+end
+
+# A golden must be fully structural: a RawLine retains uncanonicalized source
+# text, while canonicalization can otherwise omit some container detail. Do not
+# let any fallback node at any nesting depth weaken the comparison.
+function _assert_structural(m::PTX.IR.Module, name::String)
+    _assert_no_rawlines(m, "golden $name")
+    nothing
 end
 
 canonical_ptx(f, tt::Type{<:Tuple}; cap::VersionNumber,
