@@ -803,14 +803,15 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
         contract === nothing &&
             return (; tier = :unregistered, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
-        spec = try
-            raw ? build_call(op, mods, argts; raw = true) :
-                  build_call(op, mods, argts; contract)
-        catch err
-            err isa ArgumentError || rethrow()
+        if _result_abi_error(op, mods) !== nothing
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
         end
+        # All policy failures have been classified above. Do not catch a broad
+        # ArgumentError here: rendering/constraint bugs must remain visible to
+        # callers of this introspection API rather than masquerading as policy.
+        spec = raw ? build_call(op, mods, argts; raw = true) :
+                     build_call(op, mods, argts; contract)
         return (; tier = :chain_asm, method = m, rettype = spec.rettype,
                   intrinsics = String[], asm = spec.asm)
     end

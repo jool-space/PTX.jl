@@ -1,6 +1,7 @@
-# Independent oracle for the audited fixed-scalar-result surface.  This test
-# deliberately reconstructs the PTX grammar and result/operand facts instead
-# of consuming SCALAR_RESULT_SCHEMAS to decide what should exist.
+# Independent test-side reconstruction of the audited fixed-scalar-result
+# surface. The PTX grammar and result/operand facts are deliberately duplicated
+# rather than derived from SCALAR_RESULT_SCHEMAS, while the comprehension shape
+# mirrors the same ISA cross-products for reviewability.
 
 const _EXPECTED_SCALAR_SECTIONS = Dict(
     :mixed_add =>
@@ -412,6 +413,10 @@ end
     @test PTX.infer_rettype(:prmt, (:b32,)) === UInt32
 end
 
+struct _ScalarResultRendererBug end
+PTX.constraint_letter(::Type{_ScalarResultRendererBug}) =
+    throw(ArgumentError("sentinel scalar renderer bug"))
+
 @testset "pure and ordinary-cvt result ABI failures are loud" begin
     # These are accepted by some ptxas releases, but are neither canonical ISA
     # grammar nor one of the five contradictory documented example spellings.
@@ -453,6 +458,20 @@ end
     @test vendor_raw.constraints == "~{memory}"
     @test vendor_raw.side_effects
     @test vendor_raw.convergent
+
+    # `:forbidden` is reserved for the explicit policy checks above. An
+    # unrelated ArgumentError raised while rendering either generic tier must
+    # propagate so lowering() cannot hide an implementation defect.
+    for op in (ptx"add.u32", ptx"add.u32"raw)
+        err = try
+            PTX.lowering(op, (_ScalarResultRendererBug, UInt32))
+            nothing
+        catch ex
+            ex
+        end
+        @test err isa ArgumentError
+        @test sprint(showerror, err) == "ArgumentError: sentinel scalar renderer bug"
+    end
 end
 
 function _scalar_transpile_module(instructions;

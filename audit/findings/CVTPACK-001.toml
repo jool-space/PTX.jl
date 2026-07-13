@@ -8,7 +8,7 @@ validation_tier = "exact ISA form ledger, host ABI and transpiler oracles, offli
 
 [resolution]
 pr = 28
-commit = "148931f2d5ca1c0a5c0fbe80179e8fb3d27be65d"
+commit = "79991795a2c742abdfd56b8ea1e383d586f4ea0b"
 scope = "full"
 evidence = [
   "all eight cvt.pack forms are closed over exact modifier spelling, UInt32 result, s32 sources, optional b32 carry-in, PTX 6.5 introduction, and sm_72/sm_75 floors",

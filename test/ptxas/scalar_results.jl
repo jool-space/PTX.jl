@@ -24,13 +24,21 @@ _scalar_ptxas_arg(kind) =
     error("unknown scalar ptxas operand kind $kind")
 
 function _scalar_ptxas_partition(schema)
-    schema.feature_set === :family && return :sm120f
-    schema.feature_set === :baseline ||
-        error("unexpected scalar-result feature set $(schema.feature_set)")
+    label = string(schema.op, ".", join(schema.mods, "."))
+    if schema.feature_set === :family
+        schema.min_sm == v"12.0" || error(
+            "$label has family feature_set but unpartitioned min_sm=" *
+            repr(schema.min_sm) * "; add an exact ptxas target partition")
+        return :sm120f
+    end
+    schema.feature_set === :baseline || error(
+        "$label has unpartitioned feature_set=$(repr(schema.feature_set)), " *
+        "min_sm=$(repr(schema.min_sm))")
     (schema.min_sm === nothing || schema.min_sm <= v"7.5") && return :sm75
     schema.min_sm == v"9.0" && return :sm90
     schema.min_sm == v"10.0" && return :sm100
-    error("unpartitioned scalar-result target floor $(schema.min_sm)")
+    error("$label has unpartitioned baseline min_sm=$(repr(schema.min_sm)); " *
+          "add an exact ptxas target partition")
 end
 
 function _scalar_ptxas_body(partition)
