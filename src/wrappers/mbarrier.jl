@@ -21,6 +21,16 @@
 # currently models cluster-mapped addresses (from mapa.shared::cluster) as
 # AS 3 — they migrate together with proper AS-7 modeling.
 
+# Exact asm-tier methods retain their integer-normalizing convenience
+# signatures, but delegate construction to the same closed schema as the
+# generic and raw paths. In particular, this routes every one through
+# `convergent_asm_ir`, keeping the call-site `convergent nomerge` contract
+# consistent with all llvm.nvvm.mbarrier.* intrinsics.
+@generated function _mbarrier_schema_call(
+        ::Operation{:mbarrier, mods}, args::Vararg{Any,N}) where {mods,N}
+    _chain_call_expr(build_call(:mbarrier, mods, args))
+end
+
 @inline (::Operation{:mbarrier, (:init, :shared, :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared}, count::Integer) where T =
     nvvm"mbarrier.init.shared"(mbar, UInt32(count))
@@ -78,29 +88,17 @@
 # state would be meaningless). Caller passes a cluster-mapped address from
 # `mapa.shared::cluster` when arriving on a remote CTA's mbarrier.
 
-@generated function (::Operation{:mbarrier, (:arrive, Symbol("shared::cluster"), :b64)})(
+@inline function (op::Operation{:mbarrier,
+        (:arrive, Symbol("shared::cluster"), :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared}) where T
-    quote
-        Base.@inline
-        @asmcall("mbarrier.arrive.shared::cluster.b64 _, [\$0];",
-                 "r,~{memory}", true, Nothing,
-                 Tuple{Core.LLVMPtr{$T, AS.Shared}},
-                 mbar)
-        nothing
-    end
+    _mbarrier_schema_call(op, mbar)
 end
 
-@generated function (::Operation{:mbarrier, (:arrive, :expect_tx, Symbol("shared::cluster"), :b64)})(
+@inline function (op::Operation{:mbarrier,
+        (:arrive, :expect_tx, Symbol("shared::cluster"), :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared},
         tx_count::Integer) where T
-    quote
-        Base.@inline
-        @asmcall("mbarrier.arrive.expect_tx.shared::cluster.b64 _, [\$0], \$1;",
-                 "r,r,~{memory}", true, Nothing,
-                 Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
-                 mbar, UInt32(tx_count))
-        nothing
-    end
+    _mbarrier_schema_call(op, mbar, UInt32(tx_count))
 end
 
 # --- PTX 9.3 extensions (layout / phase_type / report), asm tier ------------
@@ -113,17 +111,11 @@ end
 # `mbarrier.init`; only the asm head differs.
 
 for lay in (:v0, :v1)
-    asm = "mbarrier.init.layout::$lay.shared.b64 [\$0], \$1;"
-    @eval @generated function (::Operation{:mbarrier, (:init, Symbol($("layout::$lay")), :shared, :b64)})(
+    mods = (:init, Symbol("layout::$lay"), :shared, :b64)
+    @eval @inline function (op::Operation{:mbarrier, $mods})(
             mbar::Core.LLVMPtr{T, AS.Shared},
             count::Integer) where T
-        quote
-            Base.@inline
-            @asmcall($$asm, "r,r,~{memory}", true, Nothing,
-                     Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
-                     mbar, UInt32(count))
-            nothing
-        end
+        _mbarrier_schema_call(op, mbar, UInt32(count))
     end
 end
 
@@ -132,15 +124,10 @@ end
 # defensively verify a barrier passed in by a caller. sm_90+.
 
 for lay in (:v0, :v1)
-    asm = "mbarrier.check_layout.layout::$lay.shared::cta.b64 \$0, [\$1];"
-    @eval @generated function (::Operation{:mbarrier, (:check_layout, Symbol($("layout::$lay")), Symbol("shared::cta"), :b64)})(
+    mods = (:check_layout, Symbol("layout::$lay"), Symbol("shared::cta"), :b64)
+    @eval @inline function (op::Operation{:mbarrier, $mods})(
             mbar::Core.LLVMPtr{T, AS.Shared}) where T
-        quote
-            Base.@inline
-            @asmcall($$asm, "=b,r,~{memory}", true,
-                     Bool, Tuple{Core.LLVMPtr{$T, AS.Shared}},
-                     mbar)
-        end
+        _mbarrier_schema_call(op, mbar)
     end
 end
 
@@ -162,55 +149,37 @@ end
 
 for wait in (:test_wait, :try_wait)
     # token form: UInt64 state from a prior arrive
-    asm = "{ .reg .b8 report_value; mbarrier.$wait.phase_type::primary.shared.b64 \$0|\$1, report_value, [\$3], \$4; mov.b16 \$2, {report_value, 0}; }"
-    @eval @generated function (::Operation{:mbarrier, ($(QuoteNode(wait)), :report,
-                                                       Symbol("phase_type::primary"), :shared, :b64)})(
+    mods = (wait, :report, Symbol("phase_type::primary"), :shared, :b64)
+    @eval @inline function (op::Operation{:mbarrier, $mods})(
             mbar::Core.LLVMPtr{T, AS.Shared},
             state::Integer) where T
-        quote
-            Base.@inline
-            @asmcall($$asm, "=b,=b,=h,r,l,~{memory}", true,
-                     Tuple{Bool, Bool, UInt16},
-                     Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt64},
-                     mbar, UInt64(state))
-        end
+        _mbarrier_schema_call(op, mbar, UInt64(state))
     end
 
     # parity form: 0/1 phase bit
-    asm_p = "{ .reg .b8 report_value; mbarrier.$wait.parity.phase_type::primary.shared.b64 \$0|\$1, report_value, [\$3], \$4; mov.b16 \$2, {report_value, 0}; }"
-    @eval @generated function (::Operation{:mbarrier, ($(QuoteNode(wait)), :report, :parity,
-                                                       Symbol("phase_type::primary"), :shared, :b64)})(
+    mods = (wait, :report, :parity,
+            Symbol("phase_type::primary"), :shared, :b64)
+    @eval @inline function (op::Operation{:mbarrier, $mods})(
             mbar::Core.LLVMPtr{T, AS.Shared},
             phase::Integer) where T
-        quote
-            Base.@inline
-            @asmcall($$asm_p, "=b,=b,=h,r,r,~{memory}", true,
-                     Tuple{Bool, Bool, UInt16},
-                     Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
-                     mbar, UInt32(phase))
-        end
+        _mbarrier_schema_call(op, mbar, UInt32(phase))
     end
 end
 
 # `.phase_type::conditional` parity waits (single-output):
 # `mbarrier.{test,try}_wait.parity.phase_type::conditional.shared.b64
 #     waitComplete, [mbar], phaseParity;`
-# Layout::v1 only. Observes conditional-phase advance — which only happens
-# when the payload report is zero (no fabric errors). `.parity` is mandatory
-# per the PTX 9.3 syntax block. layout::v0 conditional and primary phases
-# advance in unison, so this variant is meaningful only with layout::v1.
+# Legal for both layouts. It is most useful with layout::v1, where conditional
+# phase advances only when the payload report is zero (no fabric errors); for
+# layout::v0 the conditional and primary phases advance in unison. `.parity`
+# is mandatory per the PTX 9.3 syntax block.
 
 for wait in (:test_wait, :try_wait)
-    asm = "mbarrier.$wait.parity.phase_type::conditional.shared.b64 \$0, [\$1], \$2;"
-    @eval @generated function (::Operation{:mbarrier, ($(QuoteNode(wait)), :parity,
-                                                       Symbol("phase_type::conditional"), :shared, :b64)})(
+    mods = (wait, :parity,
+            Symbol("phase_type::conditional"), :shared, :b64)
+    @eval @inline function (op::Operation{:mbarrier, $mods})(
             mbar::Core.LLVMPtr{T, AS.Shared},
             phase::Integer) where T
-        quote
-            Base.@inline
-            @asmcall($$asm, "=b,r,r,~{memory}", true,
-                     Bool, Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
-                     mbar, UInt32(phase))
-        end
+        _mbarrier_schema_call(op, mbar, UInt32(phase))
     end
 end

@@ -359,7 +359,7 @@ function _build_mbarrier_call(schema::MBarrierFormSchema,
     rettype = _mbarrier_rettype(schema)
     output_operands, output_letters, slot =
         schema.destination === :none ? (String[], String[], 0) :
-        schema.destination === :remote_sink ? (["_"], String[], 0) :
+        schema.destination in (:sink, :remote_sink) ? (["_"], String[], 0) :
         schema.destination === :state ? (["\$0"], ["=l"], 1) :
         schema.destination === :predicate ? (["\$0"], ["=b"], 1) :
         schema.destination === :count ? (["\$0"], ["=r"], 1) :

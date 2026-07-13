@@ -81,12 +81,23 @@ _is_sink_operand(op::RegisterOperand) = op.name == "_"
 _is_sink_operand(::Operand) = false
 
 function _mbarrier_source_operand(kind::Symbol, op::Operand)
-    kind === :address && return op isa AddressOperand
+    # Coordinate lists are a distinct TMA address grammar. Ordinary mbarrier
+    # addresses admit a base plus constant offset, but never `[base, {coords}]`.
+    # `render_operand` intentionally renders only base/offset, so accepting a
+    # coordinate-bearing node here would silently discard source operands.
+    kind === :address && return op isa AddressOperand && op.coords === nothing
     kind === :u64 && return op isa RegisterOperand || op isa ImmediateOperand ||
                             op isa LabelOperand
     kind === :u32 && return op isa RegisterOperand || op isa ImmediateOperand ||
                             op isa LabelOperand
     false
+end
+
+function _mbarrier_sink_selector_mods(mods::Tuple{Vararg{Symbol}})
+    isempty(mods) && return mods
+    first(mods) in (:arrive, :arrive_drop) || return mods
+    Symbol("shared::cluster") in mods && return mods
+    (first(mods), :sink, Base.tail(mods)...)
 end
 
 # Resolve the PTX operand-overloaded primary-report head into an explicit Julia
@@ -198,6 +209,12 @@ function _instruction_mbarrier_schema(cg::CodeGenState, inst::Instruction)
                 "after waitComplete|reportPredicate and optional reportValue"))
         end
         mods = (first(mods), selector, Base.tail(mods)...)
+    elseif !isempty(operands) && _is_sink_operand(operands[1])
+        # PTX spells the discarded state as destination `_`; the Julia chain
+        # needs an explicit synthetic selector because argument/result arity
+        # alone cannot distinguish it from the state-returning form. Explicit
+        # shared::cluster already has a mandatory sink ABI in its base schema.
+        mods = _mbarrier_sink_selector_mods(mods)
     end
 
     schema = mbarrier_form_schema(:mbarrier, mods)
@@ -206,23 +223,20 @@ function _instruction_mbarrier_schema(cg::CodeGenState, inst::Instruction)
     if isempty(destination_operands)
         if schema.destination === :none
             source_start = 1
-        elseif schema.destination === :remote_sink
+        elseif schema.destination in (:sink, :remote_sink)
             !isempty(operands) && _is_sink_operand(operands[1]) ||
                 throw(ArgumentError(
-                    "PTX transpiler: remote shared::cluster mbarrier arrival " *
-                    "requires the `_` destination"))
+                    "PTX transpiler: sink-result mbarrier arrival requires " *
+                    "the `_` destination"))
             source_start = 2
         elseif schema.destination === :state
             isempty(operands) && throw(ArgumentError(
                 "PTX transpiler: mbarrier state form is missing its destination"))
-            if _is_sink_operand(operands[1])
-                source_start = 2
-            else
-                operands[1] isa RegisterOperand || throw(ArgumentError(
-                    "PTX transpiler: mbarrier state destination must be a register or `_`"))
-                push!(destination_operands, operands[1])
-                source_start = 2
-            end
+            operands[1] isa RegisterOperand && !_is_sink_operand(operands[1]) ||
+                throw(ArgumentError(
+                    "PTX transpiler: mbarrier state destination must be a register"))
+            push!(destination_operands, operands[1])
+            source_start = 2
         elseif schema.destination in (:predicate, :count)
             !isempty(operands) && operands[1] isa RegisterOperand ||
                 throw(ArgumentError(

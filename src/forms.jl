@@ -162,8 +162,9 @@ const FORMS = Dict{Symbol, FormFamily}(
     # Every mbarrier chain is additionally gated by mbarrier_forms.jl.  This
     # contract supplies only the conservative memory/optimizer attributes;
     # the exact grammar and destination ABI never come from this family-wide
-    # entry.
-    :mbarrier => FormFamily(_MEM),
+    # entry. LLVM's complete llvm.nvvm.mbarrier.* surface is convergent, so
+    # every schema/raw/asm route must preserve the same call-site boundary.
+    :mbarrier => FormFamily(_COLLMEM),
     :fence    => FormFamily(_MEM),              # brackets vacuous (no ptr args); kept as-was
     :tensormap => FormFamily(_MEMSINK),
     :discard  => FormFamily(_MEM),

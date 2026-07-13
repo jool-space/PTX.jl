@@ -10,10 +10,12 @@
 #
 # Entries below are generated only from the finite cross-products printed in
 # the instruction subsection.  The map key is the complete *Julia* modifier
-# chain; `:report_pred` and `:report` are PTX.jl's synthetic selectors for the
-# predicate pair without/with reportValue, and are removed from `ptxmods`
-# before rendering. Every other modifier is emitted verbatim and in the
-# canonical syntax order.
+# chain; `:sink`, `:report_pred`, and `:report` are PTX.jl's synthetic result
+# selectors and are removed from `ptxmods` before rendering. `:sink` preserves
+# an explicitly discarded local/generic arrival state (required when a
+# generic address names a remote cluster mbarrier). Every other modifier is
+# emitted verbatim and, apart from the two documented `:ptxas_compat` aliases,
+# in the canonical syntax order.
 
 struct MBarrierOperandVariant
     operands::Tuple{Vararg{Symbol}}
@@ -27,6 +29,7 @@ struct MBarrierFormSchema
     destination::Symbol
     variants::Tuple{Vararg{MBarrierOperandVariant}}
     space::Symbol
+    provenance::Symbol
     section::String
 end
 
@@ -36,16 +39,18 @@ const _MBARRIER_SECTION =
 _mb_max_version(xs...) = maximum(xs)
 
 function _mbarrier_form!(schemas, mods, ptxmods, destination, variants,
-                         space)
-    destination in (:none, :state, :remote_sink, :predicate, :count,
+                         space; provenance::Symbol = :canonical)
+    destination in (:none, :sink, :state, :remote_sink, :predicate, :count,
                     :report_pred, :report) ||
         error("invalid mbarrier destination shape: ", destination)
     space in (:none, :generic, :cta, :cluster) ||
         error("invalid mbarrier state space: ", space)
+    provenance in (:canonical, :ptxas_compat) ||
+        error("invalid mbarrier form provenance: ", provenance)
     any(s -> s.mods == mods, schemas) &&
         error("duplicate mbarrier form: mbarrier.", join(mods, "."))
     push!(schemas, MBarrierFormSchema(mods, ptxmods, destination,
-                                     Tuple(variants), space,
+                                     Tuple(variants), space, provenance,
                                      _MBARRIER_SECTION))
 end
 
@@ -114,9 +119,12 @@ const MBARRIER_FORM_SCHEMAS = let schemas = MBarrierFormSchema[]
                         (_mb_variant((:address, :u32), pv, sm),), space_kind)
     end
 
-    # §9.7.14.16.16-.17: local arrivals return state; remote-cluster
-    # arrivals must spell a sink destination.  A count on the ordinary form
-    # has an sm_90 floor, while the noComplete count form is the sm_80 route.
+    # §9.7.14.16.16-.17: local arrivals may return state or explicitly discard
+    # it with `_`; remote-cluster arrivals must spell the sink destination.
+    # A generic address can name either local or remote shared memory, so its
+    # sink selector is correctness-critical for the latter (ISA Example 4).
+    # A count on the ordinary form has an sm_90 floor, while the noComplete
+    # count form is the sm_80 route.
     for subop in (:arrive, :arrive_drop),
         (sem, semp, semsm) in _MB_ARRIVE_SEM_SCOPES,
         (space, sp, ss, space_kind) in _MB_ALL_SPACES
@@ -130,6 +138,10 @@ const MBARRIER_FORM_SCHEMAS = let schemas = MBarrierFormSchema[]
         )
         destination = space_kind === :cluster ? :remote_sink : :state
         _mbarrier_form!(schemas, mods, mods, destination, variants, space_kind)
+        if space_kind !== :cluster
+            sinkmods = (subop, :sink, sem..., space..., :b64)
+            _mbarrier_form!(schemas, sinkmods, mods, :sink, variants, space_kind)
+        end
     end
     for subop in (:arrive, :arrive_drop),
         (sem, semp, semsm) in _MB_ARRIVE_SEM_SCOPES,
@@ -140,6 +152,11 @@ const MBARRIER_FORM_SCHEMAS = let schemas = MBarrierFormSchema[]
         destination = space_kind === :cluster ? :remote_sink : :state
         _mbarrier_form!(schemas, mods, mods, destination,
                         (_mb_variant((:address, :u32), pv, sm),), space_kind)
+        if space_kind !== :cluster
+            sinkmods = (subop, :sink, :expect_tx, sem..., space..., :b64)
+            _mbarrier_form!(schemas, sinkmods, mods, :sink,
+                            (_mb_variant((:address, :u32), pv, sm),), space_kind)
+        end
     end
     for subop in (:arrive, :arrive_drop),
         (sem, semp, semsm) in (((), v"7.0", v"8.0"),
@@ -149,7 +166,41 @@ const MBARRIER_FORM_SCHEMAS = let schemas = MBarrierFormSchema[]
         pv, sm = _mb_max_version(semp, sp), _mb_max_version(semsm, ss)
         _mbarrier_form!(schemas, mods, mods, :state,
                         (_mb_variant((:address, :u32), pv, sm),), space_kind)
+        sinkmods = (subop, :sink, :noComplete, sem..., space..., :b64)
+        _mbarrier_form!(schemas, sinkmods, mods, :sink,
+                        (_mb_variant((:address, :u32), pv, sm),), space_kind)
     end
+
+    # §9.7.14.16.17 prints exactly two arrive_drop examples with the state
+    # space before sem/scope. CUDA 13.3 ptxas accepts those spellings as well
+    # as the syntax-block order. Accept the official examples as closed,
+    # provenance-marked aliases while always emitting canonical PTX.
+    compat_mods = (:arrive_drop, Symbol("shared::cta"),
+                   :release, :cluster, :b64)
+    canonical_mods = (:arrive_drop, :release, :cluster,
+                      Symbol("shared::cta"), :b64)
+    _mbarrier_form!(schemas, compat_mods, canonical_mods, :state,
+                    (_mb_variant((:address,), v"8.0", v"9.0"),
+                     _mb_variant((:address, :u32), v"8.0", v"9.0")),
+                    :cta; provenance = :ptxas_compat)
+    sinkmods = (:arrive_drop, :sink, Symbol("shared::cta"),
+                :release, :cluster, :b64)
+    _mbarrier_form!(schemas, sinkmods, canonical_mods, :sink,
+                    (_mb_variant((:address,), v"8.0", v"9.0"),
+                     _mb_variant((:address, :u32), v"8.0", v"9.0")),
+                    :cta; provenance = :ptxas_compat)
+    compat_mods = (:arrive_drop, :expect_tx, Symbol("shared::cta"),
+                   :relaxed, :cluster, :b64)
+    canonical_mods = (:arrive_drop, :expect_tx, :relaxed, :cluster,
+                      Symbol("shared::cta"), :b64)
+    _mbarrier_form!(schemas, compat_mods, canonical_mods, :state,
+                    (_mb_variant((:address, :u32), v"8.6", v"9.0"),),
+                    :cta; provenance = :ptxas_compat)
+    sinkmods = (:arrive_drop, :sink, :expect_tx, Symbol("shared::cta"),
+                :relaxed, :cluster, :b64)
+    _mbarrier_form!(schemas, sinkmods, canonical_mods, :sink,
+                    (_mb_variant((:address, :u32), v"8.6", v"9.0"),),
+                    :cta; provenance = :ptxas_compat)
 
     # §9.7.14.16.19: single-predicate waits plus PTX.jl's explicit
     # `:report_pred` / `:report` selections for the otherwise
@@ -255,7 +306,7 @@ function mbarrier_schema_miss(mods::Tuple{Vararg{Symbol}})
 end
 
 _mbarrier_rettype(schema::MBarrierFormSchema) =
-    schema.destination in (:none, :remote_sink) ? Nothing :
+    schema.destination in (:none, :sink, :remote_sink) ? Nothing :
     schema.destination === :state ? UInt64 :
     schema.destination === :predicate ? Bool :
     schema.destination === :count ? UInt32 :

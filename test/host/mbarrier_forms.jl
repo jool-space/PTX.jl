@@ -6,9 +6,10 @@ using PTX: Operation, RawOperation, build_call
 # inventory.
 function _expected_mbarrier_forms()
     expected = Dict{Tuple,NamedTuple}()
-    add!(mods, ptxmods, destination, variants, space) = begin
+    add!(mods, ptxmods, destination, variants, space;
+         provenance = :canonical) = begin
         @assert !haskey(expected, mods)
-        expected[mods] = (; ptxmods, destination, variants, space)
+        expected[mods] = (; ptxmods, destination, variants, space, provenance)
     end
 
     local_spaces = (
@@ -43,18 +44,53 @@ function _expected_mbarrier_forms()
         destination = kind === :cluster ? :remote_sink : :state
         add!(mods, mods, destination,
              ((:address,), (:address, :u32)), kind)
+        if kind !== :cluster
+            sinkmods = (subop, :sink, sem..., space..., :b64)
+            add!(sinkmods, mods, :sink,
+                 ((:address,), (:address, :u32)), kind)
+        end
     end
     for subop in (:arrive, :arrive_drop), sem in arrive_pairs,
         (space, kind) in all_spaces
         mods = (subop, :expect_tx, sem..., space..., :b64)
         destination = kind === :cluster ? :remote_sink : :state
         add!(mods, mods, destination, ((:address, :u32),), kind)
+        if kind !== :cluster
+            sinkmods = (subop, :sink, :expect_tx, sem..., space..., :b64)
+            add!(sinkmods, mods, :sink, ((:address, :u32),), kind)
+        end
     end
     for subop in (:arrive, :arrive_drop), sem in ((), (:release, :cta)),
         (space, kind) in local_spaces
         mods = (subop, :noComplete, sem..., space..., :b64)
         add!(mods, mods, :state, ((:address, :u32),), kind)
+        sinkmods = (subop, :sink, :noComplete, sem..., space..., :b64)
+        add!(sinkmods, mods, :sink, ((:address, :u32),), kind)
     end
+
+    # The instruction subsection's two space-before-sem/scope examples are
+    # accepted by CUDA 13.3 ptxas. They are aliases only: emitted PTX uses the
+    # syntax-block order, and sink/state remain explicit ABI choices.
+    compat = (:arrive_drop, Symbol("shared::cta"),
+              :release, :cluster, :b64)
+    canonical = (:arrive_drop, :release, :cluster,
+                 Symbol("shared::cta"), :b64)
+    add!(compat, canonical, :state,
+         ((:address,), (:address, :u32)), :cta;
+         provenance = :ptxas_compat)
+    add!((:arrive_drop, :sink, Symbol("shared::cta"),
+          :release, :cluster, :b64), canonical, :sink,
+         ((:address,), (:address, :u32)), :cta;
+         provenance = :ptxas_compat)
+    compat = (:arrive_drop, :expect_tx, Symbol("shared::cta"),
+              :relaxed, :cluster, :b64)
+    canonical = (:arrive_drop, :expect_tx, :relaxed, :cluster,
+                 Symbol("shared::cta"), :b64)
+    add!(compat, canonical, :state, ((:address, :u32),), :cta;
+         provenance = :ptxas_compat)
+    add!((:arrive_drop, :sink, :expect_tx, Symbol("shared::cta"),
+          :relaxed, :cluster, :b64), canonical, :sink,
+         ((:address, :u32),), :cta; provenance = :ptxas_compat)
 
     for wait in (:test_wait, :try_wait), sem in wait_pairs,
         (space, kind) in local_spaces
@@ -106,7 +142,7 @@ function _expected_mbarrier_forms()
 end
 
 _mb_rettype(destination) =
-    destination in (:none, :remote_sink) ? Nothing :
+    destination in (:none, :sink, :remote_sink) ? Nothing :
     destination === :state ? UInt64 :
     destination === :predicate ? Bool :
     destination === :count ? UInt32 :
@@ -125,6 +161,7 @@ end
 
 function _mb_output(destination)
     destination === :none && return (String[], String[])
+    destination === :sink && return (["_"], String[])
     destination === :remote_sink && return (["_"], String[])
     destination === :state && return (["\$0"], ["=l"])
     destination === :predicate && return (["\$0"], ["=b"])
@@ -138,22 +175,24 @@ end
 @testset "closed mbarrier grammar and ABI ledger" begin
     expected = _expected_mbarrier_forms()
     actual = Dict(schema.mods => schema for schema in PTX.MBARRIER_FORM_SCHEMAS)
-    @test length(expected) == 404
-    @test length(actual) == 404
+    @test length(expected) == 480
+    @test length(actual) == 480
     @test Set(keys(actual)) == Set(keys(expected))
     @test count(k -> first(k) === :init, keys(actual)) == 9
     @test count(k -> first(k) === :inval, keys(actual)) == 3
     @test count(k -> first(k) in (:expect_tx, :complete_tx), keys(actual)) == 24
-    @test count(k -> first(k) in (:arrive, :arrive_drop), keys(actual)) == 92
+    @test count(k -> first(k) in (:arrive, :arrive_drop), keys(actual)) == 168
     @test count(k -> first(k) in (:test_wait, :try_wait), keys(actual)) == 270
     @test count(k -> first(k) === :pending_count, keys(actual)) == 2
     @test count(k -> first(k) === :check_layout, keys(actual)) == 4
+    @test count(s -> s.provenance === :ptxas_compat, values(actual)) == 4
 
     for (mods, want) in expected
         schema = actual[mods]
         @test schema.ptxmods == want.ptxmods
         @test schema.destination === want.destination
         @test schema.space === want.space
+        @test schema.provenance === want.provenance
         @test Tuple(v.operands for v in schema.variants) == want.variants
         @test schema.section ==
             "ptx/9-instruction-set/9.7.14.16-parallel-synchronization-and-communication-instructions-mbarrier.md"
@@ -163,7 +202,7 @@ end
             spec = build_call(:mbarrier, mods, argtypes)
             @test spec.rettype === _mb_rettype(want.destination)
             @test spec.side_effects
-            @test !spec.convergent
+            @test spec.convergent
 
             outputs, outletters = _mb_output(want.destination)
             slot = length(outletters)
@@ -215,8 +254,19 @@ end
     cases = (
         ((:complete_tx, :relaxed, :cta, :shared, :b64), (pS, UInt32),
          Nothing, "mbarrier.complete_tx.relaxed.cta.shared.b64 [\$0], \$1;"),
+        ((:arrive, :sink, :release, :cluster, :b64), (UInt64,),
+         Nothing, "mbarrier.arrive.release.cluster.b64 _, [\$0];"),
+        ((:arrive, :sink, :noComplete, :shared, :b64), (pS, UInt32),
+         Nothing, "mbarrier.arrive.noComplete.shared.b64 _, [\$0], \$1;"),
         ((:arrive, Symbol("shared::cluster"), :b64), (pS,),
          Nothing, "mbarrier.arrive.shared::cluster.b64 _, [\$0];"),
+        ((:arrive_drop, :sink, Symbol("shared::cta"), :release, :cluster, :b64),
+         (pS, UInt32), Nothing,
+         "mbarrier.arrive_drop.release.cluster.shared::cta.b64 _, [\$0], \$1;"),
+        ((:arrive_drop, :expect_tx, Symbol("shared::cta"),
+          :relaxed, :cluster, :b64), (pS, UInt32), UInt64,
+         "mbarrier.arrive_drop.expect_tx.relaxed.cluster.shared::cta.b64 " *
+         "\$0, [\$1], \$2;"),
         ((:test_wait, :acquire, :cta, :shared, :b64), (pS, UInt64),
          Bool, "mbarrier.test_wait.acquire.cta.shared.b64 \$0, [\$1], \$2;"),
         ((:pending_count, :b64), (UInt64,), UInt32,
@@ -236,6 +286,7 @@ end
         spec = build_call(:mbarrier, mods, args)
         @test spec.rettype === rettype
         @test spec.asm == asm
+        @test spec.convergent
         @test PTX.infer_rettype(:mbarrier, mods) === rettype
         @test PTX.lowering(Operation{:mbarrier, mods}(), args).tier in
               (:chain_asm, :intrinsic, :asm)
@@ -329,18 +380,26 @@ end
         .reg .b8 %status;
         .reg .pred %p<5>;
         mbarrier.init.b64 [%rd0], 1;
+        mbarrier.init.b64 [%rd0+8], 1;
         mbarrier.pending_count.b64 %r0, %rd1;
         mbarrier.test_wait.phase_type::primary.b64 %p0|%p1, [%rd0], %rd1;
         mbarrier.try_wait.parity.phase_type::primary.b64 %p2|%p3, %status, [%rd0], %r1, %r2;
+        mbarrier.arrive.release.cluster.b64 _, [%rd2];
+        mbarrier.arrive.noComplete.shared::cta.b64 _, [%r0], %r1;
+        mbarrier.arrive_drop.shared::cta.release.cluster.b64 _, [%r0], %r1;
         mbarrier.arrive.shared::cluster.b64 _, [%r0];
         ret;
     }
     """
     julia = PTX.ptx_to_julia(source)
     @test occursin("ptx\"mbarrier.init.b64\"(rd0, UInt32(1))", julia)
+    @test occursin("ptx\"mbarrier.init.b64\"(rd0 + 8, UInt32(1))", julia)
     @test occursin("r0 = ptx\"mbarrier.pending_count.b64\"(rd1)", julia)
     @test occursin("(p0, p1) = ptx\"mbarrier.test_wait.report_pred.phase_type::primary.b64\"(rd0, rd1)", julia)
     @test occursin("(p2, p3, status) = ptx\"mbarrier.try_wait.report.parity.phase_type::primary.b64\"(rd0, r1, r2)", julia)
+    @test occursin("ptx\"mbarrier.arrive.sink.release.cluster.b64\"(rd2)", julia)
+    @test occursin("ptx\"mbarrier.arrive.sink.noComplete.shared::cta.b64\"(r0, r1)", julia)
+    @test occursin("ptx\"mbarrier.arrive_drop.sink.shared::cta.release.cluster.b64\"(r0, r1)", julia)
     @test occursin("ptx\"mbarrier.arrive.shared::cluster.b64\"(r0)", julia)
     @test !occursin("_ =", julia)
 
@@ -353,6 +412,9 @@ end
                 "mbarrier.arrive.shared::cluster.b64 %rd3, [%r0];"),
         replace(source,
                 ".reg .b8 %status;" => ".reg .b64 %status;"),
+        replace(source,
+                "mbarrier.init.b64 [%rd0], 1;" =>
+                "mbarrier.init.b64 [%rd0, {%r1}], 1;"),
     )
         @test_throws ArgumentError PTX.ptx_to_julia(text)
     end
