@@ -8,11 +8,14 @@ validation_tier = "closed-world test-runner policy and integration audit"
 
 [resolution]
 pr = 25
-commit = "1b57952ff461ac8a28cb86a0b15b8e40869ec9b6"
+commit = "3bd99f4968881e0973bcbd6c01f930f8376ae221"
 scope = "full"
 evidence = [
-  "independent exact banner-to-file inventory for all 65 GPU tests",
-  "exact mixed-runtime guard inventory covering 33 guarded sections",
-  "226 structured routing assertions on Julia 1.10 and Julia 1.12",
-  "deterministic executed/skipped manifest verified through the real test runner",
+  "independent exact banner-to-file inventory for all 65 GPU tests, using direct compute-capability predicates rather than PTX target strings",
+  "exact mixed-runtime guard inventory covering 33 guarded sections, including exact CC 9.0 routing for Hopper and CC 10.x/11.x family routing for base tcgen05 forms",
+  "offline compiler availability is routed independently from functional-GPU availability, with explicit-target PTX and ptxas jobs that do not discover a live device",
+  "248 structured parser, closed-world inventory, and routing assertions on Julia 1.10 and Julia 1.12",
+  "CUDA_VISIBLE_DEVICES=-1 integration: baseline ptxas 52/52 in 16.9s, explicit-target PTX emission 35/35 in 16.4s, and mixed tcgen05 compile 4/4 in 14.9s with runtime correctly skipped",
+  "the formerly GPU-only ptxas/golden suite passes 18/18 with CUDA_VISIBLE_DEVICES=-1",
+  "deterministic executed/skipped manifest reports offline compiler and runtime GPU state separately",
 ]
