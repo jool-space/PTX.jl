@@ -144,6 +144,17 @@ unsigned operands with 32- or 64-bit limbs and returns four limbs. Each fused
 helper is exactly one side-effecting, non-convergent asm call with early-clobber
 outputs and a `~{cc}` clobber. It does not claim a memory effect.
 
+The scalar wrappers are correctness adapters for isolated composition, not the
+efficient way to spell a long chain. For an `N`-limb add/sub that returns the
+final flag, separate scalar wrappers emit `5N - 2` PTX instructions without
+an incoming flag (`5N` with one), while the fused helper emits `N + 2`
+(`N + 4` with one). At four limbs without carry/borrow-in, that is 18 versus
+6 instructions. All of these asm blocks are marked `sideeffect`, so LLVM must
+not CSE or freely hoist identical calls. Prefer the fused helpers in hot loops.
+If optimizer visibility matters more than preserving a specific PTX chain,
+compare ordinary Julia integer arithmetic on the target toolchain; that is a
+separate lowering path and does not guarantee the emitted instruction sequence.
+
 All 48 legal PTX 9.3 §9.7.2 spellings have typed wrappers. A generic or
 `ptx"..."raw` standalone spelling is deliberately rejected: `raw` cannot make
 the hidden dependency visible. The instruction-at-a-time PTX transpiler also
