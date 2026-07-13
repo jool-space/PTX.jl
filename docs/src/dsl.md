@@ -41,7 +41,7 @@ hand-written wrappers register typed methods on the same
 
 Some structured surfaces are **typed-wrapper-only**. All `mma.*`,
 `wgmma.mma_async*`, and all `tcgen05.*` forms, plus the internal
-multi-result selectors `setp.dual`, `shfl.*.pred`, and `mbarrier.*.report`,
+multi-result selectors `setp.dual` and `shfl.*.pred`,
 reject a dispatch miss before generic asm is rendered. Result groups, tuple
 widths, tied accumulators, address roles, or synthetic selector tokens cannot
 be recovered by the scalar trailing-type rule. The established `tcgen05`
@@ -49,6 +49,14 @@ pointer forms of `alloc` and `commit` and the no-argument thread-sync fences
 also have exact methods, so wrong carriers or arity cannot reopen the generic
 path. A rejection usually means the modifier spelling, arity, tuple width, or
 Julia carrier type does not match a reviewed wrapper.
+
+`mbarrier` uses a separate closed form schema rather than a family-wide result
+guess. Every generic or raw chain must match an exact canonical modifier form
+and operand role. The audited synthetic selectors `.report_pred` and `.report`
+choose `waitComplete|reportPredicate` without or with the optional
+`reportValue`; only the emitted instruction head drops that selector. PTX's
+opaque report value is one byte. Because NVPTX has no i8 inline-asm constraint,
+the full-result call carries it in the low byte of a zero-extended `UInt16`.
 
 `ptx"..."raw` is an explicit opt-out for these structural boundaries. It emits
 the requested text under the maximally conservative contract, but generally

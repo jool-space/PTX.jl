@@ -76,6 +76,213 @@ function _instruction_scalar_result_schema(inst::Instruction)
     schema
 end
 
+_is_sink_operand(op::LabelOperand) = op.name == "_"
+_is_sink_operand(op::RegisterOperand) = op.name == "_"
+_is_sink_operand(::Operand) = false
+
+function _mbarrier_source_operand(kind::Symbol, op::Operand)
+    kind === :address && return op isa AddressOperand
+    kind === :u64 && return op isa RegisterOperand || op isa ImmediateOperand ||
+                            op isa LabelOperand
+    kind === :u32 && return op isa RegisterOperand || op isa ImmediateOperand ||
+                            op isa LabelOperand
+    false
+end
+
+# Resolve the PTX operand-overloaded primary-report head into an explicit Julia
+# selector, then validate the exact destination/source structure before shared
+# pointer aliasing or generic destination heuristics can erase it.
+function _mbarrier_register_decl(cg::CodeGenState, name::AbstractString)
+    decl = get(cg.reg_decls, String(name), nothing)
+    decl === nothing || return decl
+    for candidate in values(cg.reg_decls)
+        candidate.count === nothing && continue
+        startswith(name, candidate.name) || continue
+        suffix = SubString(name, nextind(name, lastindex(candidate.name)))
+        index = tryparse(Int, suffix)
+        index === nothing && continue
+        0 <= index < candidate.count && return candidate
+    end
+    nothing
+end
+
+_mbarrier_register_decl(cg::CodeGenState, op::RegisterOperand) =
+    _mbarrier_register_decl(cg, op.name)
+
+function _mbarrier_require_register_type(cg::CodeGenState,
+                                         op::RegisterOperand,
+                                         accepted,
+                                         role::AbstractString)
+    decl = _mbarrier_register_decl(cg, op)
+    decl === nothing && throw(ArgumentError(
+        "PTX transpiler: mbarrier $role register $(op.name) has no preceding " *
+        ".reg declaration"))
+    decl.type in accepted || throw(ArgumentError(
+        "PTX transpiler: mbarrier $role register $(op.name) must be " *
+        join(IR.ptx.(accepted), "/") * ", got $(IR.ptx(decl.type))"))
+end
+
+const _MBARRIER_REG8 =
+    (ScalarType.B8, ScalarType.U8, ScalarType.S8)
+const _MBARRIER_REG32 =
+    (ScalarType.B32, ScalarType.U32, ScalarType.S32)
+const _MBARRIER_REG64 =
+    (ScalarType.B64, ScalarType.U64, ScalarType.S64)
+
+function _validate_mbarrier_destination_types!(cg::CodeGenState, schema,
+                                               destinations)
+    for (i, op) in enumerate(destinations)
+        accepted, role = if schema.destination === :state
+            (_MBARRIER_REG64, "state destination")
+        elseif schema.destination === :predicate
+            ((ScalarType.PRED,), "predicate destination")
+        elseif schema.destination === :count
+            (_MBARRIER_REG32, "pending-count destination")
+        elseif schema.destination === :report_pred ||
+               (schema.destination === :report && i <= 2)
+            ((ScalarType.PRED,), i == 1 ? "waitComplete destination" :
+                                         "reportPredicate destination")
+        elseif schema.destination === :report && i == 3
+            (_MBARRIER_REG8, "reportValue destination")
+        else
+            error("invalid mbarrier destination type shape $(schema.destination)")
+        end
+        _mbarrier_require_register_type(cg, op, accepted, role)
+    end
+end
+
+function _validate_mbarrier_source_type!(cg::CodeGenState, kind::Symbol,
+                                         op::Operand, index::Int)
+    if op isa RegisterOperand && kind in (:u32, :u64)
+        accepted = kind === :u32 ? _MBARRIER_REG32 : _MBARRIER_REG64
+        _mbarrier_require_register_type(cg, op, accepted, "source $index")
+    elseif op isa AddressOperand && startswith(op.base, "%")
+        decl = _mbarrier_register_decl(cg, op.base)
+        decl === nothing && throw(ArgumentError(
+            "PTX transpiler: mbarrier address register $(op.base) has no " *
+            "preceding .reg declaration"))
+        decl.type in (_MBARRIER_REG32..., _MBARRIER_REG64...) ||
+            throw(ArgumentError(
+                "PTX transpiler: mbarrier address register $(op.base) must " *
+                "be 32 or 64 bits, got $(IR.ptx(decl.type))"))
+    end
+end
+
+function _instruction_mbarrier_schema(cg::CodeGenState, inst::Instruction)
+    inst.opcode == "mbarrier" || return nothing
+    mods = _schema_modifiers(inst.modifiers)
+    operands = inst.operands
+    destination_operands = Operand[]
+    source_start = 1
+
+    if !isempty(operands) && operands[1] isa PipeOperand
+        isempty(mods) && throw(mbarrier_schema_miss(mods))
+        pipe = operands[1]::PipeOperand
+        pipe.left isa RegisterOperand && pipe.right isa RegisterOperand ||
+            throw(ArgumentError(
+                "PTX transpiler: mbarrier primary report destination must be " *
+                "a predicate register pair waitComplete|reportPredicate"))
+        if length(operands) >= 2 && operands[2] isa AddressOperand
+            selector = :report_pred
+            append!(destination_operands, (pipe.left, pipe.right))
+            source_start = 2
+        elseif length(operands) >= 3 && operands[3] isa AddressOperand
+            operands[2] isa RegisterOperand || throw(ArgumentError(
+                "PTX transpiler: mbarrier reportValue destination must be a register"))
+            selector = :report
+            append!(destination_operands, (pipe.left, pipe.right, operands[2]))
+            source_start = 3
+        else
+            throw(ArgumentError(
+                "PTX transpiler: mbarrier primary report must place an address " *
+                "after waitComplete|reportPredicate and optional reportValue"))
+        end
+        mods = (first(mods), selector, Base.tail(mods)...)
+    end
+
+    schema = mbarrier_form_schema(:mbarrier, mods)
+    schema === nothing && throw(mbarrier_schema_miss(mods))
+
+    if isempty(destination_operands)
+        if schema.destination === :none
+            source_start = 1
+        elseif schema.destination === :remote_sink
+            !isempty(operands) && _is_sink_operand(operands[1]) ||
+                throw(ArgumentError(
+                    "PTX transpiler: remote shared::cluster mbarrier arrival " *
+                    "requires the `_` destination"))
+            source_start = 2
+        elseif schema.destination === :state
+            isempty(operands) && throw(ArgumentError(
+                "PTX transpiler: mbarrier state form is missing its destination"))
+            if _is_sink_operand(operands[1])
+                source_start = 2
+            else
+                operands[1] isa RegisterOperand || throw(ArgumentError(
+                    "PTX transpiler: mbarrier state destination must be a register or `_`"))
+                push!(destination_operands, operands[1])
+                source_start = 2
+            end
+        elseif schema.destination in (:predicate, :count)
+            !isempty(operands) && operands[1] isa RegisterOperand ||
+                throw(ArgumentError(
+                    "PTX transpiler: mbarrier destination must be a register"))
+            push!(destination_operands, operands[1])
+            source_start = 2
+        else
+            throw(ArgumentError(
+                "PTX transpiler: grouped mbarrier report destination must use `|`"))
+        end
+    end
+
+    sources = source_start > length(operands) ? Operand[] :
+              collect(operands[source_start:end])
+    variant_index = findfirst(v -> length(v.operands) == length(sources),
+                              schema.variants)
+    variant_index === nothing && throw(ArgumentError(
+        "PTX transpiler: mbarrier.$(join(schema.mods, ".")) has invalid source " *
+        "arity $(length(sources)); see $(schema.section)"))
+    variant = schema.variants[variant_index]
+    for (i, (kind, op)) in enumerate(zip(variant.operands, sources))
+        _mbarrier_source_operand(kind, op) && continue
+        throw(ArgumentError(
+            "PTX transpiler: mbarrier.$(join(schema.mods, ".")) source $i " *
+            "does not match the audited $kind operand role; see $(schema.section)"))
+    end
+    _validate_mbarrier_destination_types!(cg, schema, destination_operands)
+    for (i, (kind, op)) in enumerate(zip(variant.operands, sources))
+        _validate_mbarrier_source_type!(cg, kind, op, i)
+    end
+    (; schema, variant, sources, destination_operands)
+end
+
+function _emit_mbarrier!(cg::CodeGenState, inst::Instruction, checked)
+    schema, variant = checked.schema, checked.variant
+    chain = chain_expr(cg, "mbarrier",
+                       Tuple("." * string(mod) for mod in schema.mods))
+    args = String[]
+    for (kind, operand) in zip(variant.operands, checked.sources)
+        push!(args, kind === :address ? render_operand(operand, cg) :
+              render_operand(operand, cg; type_hint = kind))
+    end
+    call = chain * "(" * join(args, ", ") * ")"
+
+    if isempty(checked.destination_operands)
+        emit_with_predicate!(cg, call, inst.predicate, String[])
+        return
+    end
+    names = String[]
+    rendered = String[]
+    for operand in checked.destination_operands
+        dst, dst_names = render_dst(operand, cg)
+        push!(rendered, dst)
+        append!(names, dst_names)
+    end
+    dst = length(rendered) == 1 ? only(rendered) :
+          "(" * join(rendered, ", ") * ")"
+    emit_with_predicate!(cg, dst * " = " * call, inst.predicate, names)
+end
+
 _schema_operand_hint(kind::Symbol) = kind === :bf16 ? :b16 : kind
 
 function _render_schema_source(op::Operand, cg::CodeGenState, kind::Symbol)
@@ -96,6 +303,10 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
         "implicit CC.CF flag; instruction-at-a-time lowering cannot preserve " *
         "that dependency. Use PTX.add_with_carry, PTX.sub_with_borrow, or " *
         "PTX.mul_wide in Julia source."))
+
+    mbarrier_schema = _instruction_mbarrier_schema(cg, inst)
+    mbarrier_schema === nothing ||
+        return _emit_mbarrier!(cg, inst, mbarrier_schema)
 
     # Close fixed-result grammar islands before any instruction can be erased
     # by pointer-alias absorption. The schema also provides a distinct type

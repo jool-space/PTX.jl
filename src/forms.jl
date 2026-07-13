@@ -75,7 +75,7 @@ const _COLLMEM   = FormContract(convergent = true, brackets = true)
 #   * mma and wgmma.mma_async use shape-dependent register groups;
 #   * tcgen05 spans address destinations, register vectors, sinks, fences, and
 #     matrix descriptors under one opcode; and
-#   * :dual/:pred/:report are PTX.jl-only selectors for grouped destinations,
+#   * :dual/:pred are PTX.jl-only selectors for grouped destinations,
 #     not literal PTX modifiers.
 #
 # Keep this closed and declarative.  A new entry is an API decision: exact
@@ -94,8 +94,6 @@ const TYPED_WRAPPER_ONLY_RULES = (
      detail = ":dual is an internal selector for PTX's p|q destination"),
     (op = :shfl,     prefix = (),            marker = :pred,
      detail = ":pred is an internal selector for PTX's d|p destination"),
-    (op = :mbarrier, prefix = (),            marker = :report,
-     detail = ":report is an internal selector for a grouped report destination"),
 )
 
 function _mods_start_with(mods::Tuple{Vararg{Symbol}}, prefix::Tuple)
@@ -161,6 +159,10 @@ const FORMS = Dict{Symbol, FormFamily}(
     :atom     => FormFamily(_MEM),
     :red      => FormFamily(_MEMSINK),          # dtype tail = value written
     :prefetch => FormFamily(_MEM),
+    # Every mbarrier chain is additionally gated by mbarrier_forms.jl.  This
+    # contract supplies only the conservative memory/optimizer attributes;
+    # the exact grammar and destination ABI never come from this family-wide
+    # entry.
     :mbarrier => FormFamily(_MEM),
     :fence    => FormFamily(_MEM),              # brackets vacuous (no ptr args); kept as-was
     :tensormap => FormFamily(_MEMSINK),

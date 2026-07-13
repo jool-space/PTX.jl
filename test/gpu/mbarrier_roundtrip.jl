@@ -71,3 +71,43 @@ end
     @test all(h[1:32])    # phase closed once the full count arrived
     @test h[33]           # ...and was still open right after noComplete
 end
+
+@testset "mbarrier: layout v1 primary report ABI" begin
+    function report!(flags, status)
+        bar = CuStaticSharedArray(Int64, 1)
+        mbar = pointer(bar)
+        t = threadIdx().x
+        if t == 1
+            ptx"mbarrier.init.layout::v1.shared.b64"(mbar, UInt32(32))
+        end
+        sync_threads()
+        state = ptx"mbarrier.arrive.shared.b64"(mbar)
+        complete = false
+        report_pred = true
+        # Public carrier is UInt16; PTX writes the opaque reportValue as b8
+        # and the wrapper zero-extends that byte because NVPTX has no i8
+        # inline-asm constraint.
+        report_value = typemax(UInt16)
+        for _ in 1:1_000_000
+            complete, report_pred, report_value =
+                ptx"mbarrier.test_wait.report.phase_type::primary.shared.b64"(
+                    mbar, state)
+            complete && break
+        end
+        @inbounds flags[t, 1] = complete
+        @inbounds flags[t, 2] = report_pred
+        @inbounds status[t] = report_value
+        sync_threads()
+        if t == 1
+            ptx"mbarrier.inval.shared.b64"(mbar)
+        end
+        return nothing
+    end
+    flags = CUDACore.zeros(Bool, 32, 2)
+    status = CUDACore.zeros(UInt16, 32)
+    @cuda threads=32 report!(flags, status)
+    hflags, hstatus = Array(flags), Array(status)
+    @test all(hflags[:, 1])
+    @test !any(hflags[:, 2])
+    @test all(iszero, hstatus)
+end

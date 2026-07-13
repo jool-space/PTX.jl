@@ -12,7 +12,7 @@ using ..IR: Module, Function, Instruction, Label, RegDecl, VarDecl, Param,
 using ..Parser: parse as parse_ptx
 using ..PTX: uses_implicit_cc, scalar_result_schema,
              requires_scalar_result_schema, scalar_result_schema_miss,
-             infer_rettype
+             infer_rettype, mbarrier_form_schema, mbarrier_schema_miss
 
 include("state.jl")
 include("operands.jl")

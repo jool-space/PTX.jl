@@ -1,7 +1,8 @@
-# mbarrier (PTX 9.2 §9.7.12.15) — second family migrated to tier-2
-# intrinsic lowering. The notation surface is unchanged; the
-# three return shapes (Nothing / UInt64 state / Bool pred) that needed
-# hand-written asm constraints now fall out of the intrinsic signatures.
+# mbarrier (PTX 9.3 §9.7.14.16) — second family migrated to tier-2
+# intrinsic lowering for common pre-9.3 forms. Their sink/state/predicate
+# return shapes fall out of the intrinsic signatures; the complete family,
+# including u32 pending counts and grouped reports, is closed by the exact
+# schema in mbarrier_forms.jl.
 #
 # Intrinsic choice per form is dictated by the cap floor: the new-style
 # scoped intrinsics (`*.scope.cta.space.cta`) carry ISel predicates, and a
@@ -33,13 +34,14 @@
     nvvm"mbarrier.arrive.shared"(mbar)
 
 # `count` is a per-thread arrive count (same as calling arrive `count`
-# times). Does NOT close the phase even if pending hits zero.
+# times). The caller must choose it so this noComplete operation cannot finish
+# the phase; reaching completion is undefined behavior.
 @inline (::Operation{:mbarrier, (:arrive, :noComplete, :shared, :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared}, count::Integer) where T =
     nvvm"mbarrier.arrive.noComplete.shared"(mbar, UInt32(count))
 
-# (sm_90+) Fused expect+arrive: records expected-tx-bytes and bumps pending
-# by 1.
+# (sm_90+) Fused expect+arrive: first increments tx-count by `tx_count`, then
+# performs one arrive-on operation, decrementing pending arrivals by 1.
 @inline (::Operation{:mbarrier, (:arrive, :expect_tx, :shared, :b64)})(
         mbar::Core.LLVMPtr{T, AS.Shared}, tx_count::Integer) where T =
     nvvm"mbarrier.arrive.expect.tx.scope.cta.space.cta"(mbar, UInt32(tx_count))
@@ -125,13 +127,13 @@ for lay in (:v0, :v1)
     end
 end
 
-# `mbarrier.check_layout.layout::{v0,v1}.shared.b64 p, [mbar];` — sets p=True
+# `mbarrier.check_layout.layout::{v0,v1}.shared::cta.b64 p, [mbar];` — sets p=True
 # iff the mbarrier's actual layout matches the qualifier. Lets a callee
 # defensively verify a barrier passed in by a caller. sm_90+.
 
 for lay in (:v0, :v1)
-    asm = "mbarrier.check_layout.layout::$lay.shared.b64 \$0, [\$1];"
-    @eval @generated function (::Operation{:mbarrier, (:check_layout, Symbol($("layout::$lay")), :shared, :b64)})(
+    asm = "mbarrier.check_layout.layout::$lay.shared::cta.b64 \$0, [\$1];"
+    @eval @generated function (::Operation{:mbarrier, (:check_layout, Symbol($("layout::$lay")), Symbol("shared::cta"), :b64)})(
             mbar::Core.LLVMPtr{T, AS.Shared}) where T
         quote
             Base.@inline
@@ -142,45 +144,48 @@ for lay in (:v0, :v1)
     end
 end
 
-# `.phase_type::primary` report forms (dual-output):
+# `.phase_type::primary` report forms (three outputs):
 # `mbarrier.{test,try}_wait[.parity].phase_type::primary.shared.b64
-#     waitComplete, reportValue, [mbar], state-or-phase;`
-# Returns `(reportPredicate, reportValue)` as `Tuple{Bool, UInt64}` (the
-# dual-output asm shape mirrors setp's `.dual`; see wrappers/setp.jl). The
-# predicate is True iff the primary phase completed AND the payload report
-# is zero (no fabric op flagged an error). On layout::v0 mbarriers the value
-# is always zero — the predicate then collapses to plain phase-completion.
+#     waitComplete|reportPredicate, reportValue, [mbar], state-or-phase;`
+# PTX's opaque reportValue is a `.b8` register. NVPTX has no i8 inline-asm
+# constraint, so the wrapper returns its byte in the low half of a `UInt16`:
+# `Tuple{Bool, Bool, UInt16}`. Report fields are undefined until waitComplete
+# is true. Once complete, a set reportPredicate indicates an asynchronous
+# operation reported an error or other condition; if it is clear, reportValue
+# is guaranteed to be zero and the conditional phase advanced. Layout::v0
+# always reports a zero predicate and value.
 #
-# `:report` is a synthetic modifier (no PTX counterpart, mirrors setp's
-# `:dual`) that flags the dual-output dispatch — the notation has no other
-# signal to choose between single-output and dual-output return shapes.
+# `:report` is an audited synthetic result selector (no PTX counterpart) for
+# the predicate pair plus reportValue; `:report_pred` in mbarrier_forms.jl
+# selects the predicate pair without the optional value. PTX uses the same
+# instruction head for all of these destination shapes.
 
 for wait in (:test_wait, :try_wait)
     # token form: UInt64 state from a prior arrive
-    asm = "mbarrier.$wait.phase_type::primary.shared.b64 \$0, \$1, [\$2], \$3;"
+    asm = "{ .reg .b8 report_value; mbarrier.$wait.phase_type::primary.shared.b64 \$0|\$1, report_value, [\$3], \$4; mov.b16 \$2, {report_value, 0}; }"
     @eval @generated function (::Operation{:mbarrier, ($(QuoteNode(wait)), :report,
                                                        Symbol("phase_type::primary"), :shared, :b64)})(
             mbar::Core.LLVMPtr{T, AS.Shared},
             state::Integer) where T
         quote
             Base.@inline
-            @asmcall($$asm, "=b,=l,r,l,~{memory}", true,
-                     Tuple{Bool, UInt64},
+            @asmcall($$asm, "=b,=b,=h,r,l,~{memory}", true,
+                     Tuple{Bool, Bool, UInt16},
                      Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt64},
                      mbar, UInt64(state))
         end
     end
 
     # parity form: 0/1 phase bit
-    asm_p = "mbarrier.$wait.parity.phase_type::primary.shared.b64 \$0, \$1, [\$2], \$3;"
+    asm_p = "{ .reg .b8 report_value; mbarrier.$wait.parity.phase_type::primary.shared.b64 \$0|\$1, report_value, [\$3], \$4; mov.b16 \$2, {report_value, 0}; }"
     @eval @generated function (::Operation{:mbarrier, ($(QuoteNode(wait)), :report, :parity,
                                                        Symbol("phase_type::primary"), :shared, :b64)})(
             mbar::Core.LLVMPtr{T, AS.Shared},
             phase::Integer) where T
         quote
             Base.@inline
-            @asmcall($$asm_p, "=b,=l,r,r,~{memory}", true,
-                     Tuple{Bool, UInt64},
+            @asmcall($$asm_p, "=b,=b,=h,r,r,~{memory}", true,
+                     Tuple{Bool, Bool, UInt16},
                      Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
                      mbar, UInt32(phase))
         end

@@ -66,6 +66,10 @@ function ordinary_cvt_result_type(mods::Tuple{Vararg{Symbol}})
 end
 
 function _result_abi_error(op::Symbol, mods::Tuple{Vararg{Symbol}})
+    if requires_mbarrier_schema(op)
+        schema = mbarrier_form_schema(op, mods)
+        return schema === nothing ? mbarrier_schema_miss(mods) : nothing
+    end
     schema = scalar_result_schema(op, mods)
     schema === nothing || return nothing
     requires_scalar_result_schema(op, mods) &&
@@ -90,6 +94,8 @@ end
 function infer_rettype(op::Symbol, mods::Tuple{Vararg{Symbol}})
     err = _result_abi_error(op, mods)
     err === nothing || throw(err)
+    mbarrier = mbarrier_form_schema(op, mods)
+    mbarrier === nothing || return _mbarrier_rettype(mbarrier)
     schema = scalar_result_schema(op, mods)
     schema === nothing || return schema.rettype
     op in PRED_RESULT_OPCODES && return Bool

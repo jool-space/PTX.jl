@@ -575,7 +575,7 @@ end
 @testset "mbarrier PTX 9.3 extensions (layout / phase_type / report)" begin
     # Asm tier by necessity (no NVVM intrinsics at 22.1.7). Prefix-matching
     # on the @generated body's asm head plus rettype pins; `:report` is the
-    # synthetic dual-output modifier (mirrors setp's `:dual`).
+    # audited synthetic report selector for the predicate pair + value.
     pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
     cases = [
         # mods, argts, rettype, asm head
@@ -583,22 +583,22 @@ end
             "mbarrier.init.layout::v0.shared.b64 ["),
         ((:init, Symbol("layout::v1"), :shared, :b64), (pS, Int), Nothing,
             "mbarrier.init.layout::v1.shared.b64 ["),
-        ((:check_layout, Symbol("layout::v0"), :shared, :b64), (pS,), Bool,
-            "mbarrier.check_layout.layout::v0.shared.b64 "),
-        ((:check_layout, Symbol("layout::v1"), :shared, :b64), (pS,), Bool,
-            "mbarrier.check_layout.layout::v1.shared.b64 "),
-        # dual-output report forms: (reportPredicate, reportValue)
+        ((:check_layout, Symbol("layout::v0"), Symbol("shared::cta"), :b64), (pS,), Bool,
+            "mbarrier.check_layout.layout::v0.shared::cta.b64 "),
+        ((:check_layout, Symbol("layout::v1"), Symbol("shared::cta"), :b64), (pS,), Bool,
+            "mbarrier.check_layout.layout::v1.shared::cta.b64 "),
+        # grouped report forms: (waitComplete, reportPredicate, reportValue)
         ((:test_wait, :report, Symbol("phase_type::primary"), :shared, :b64),
-            (pS, UInt64), Tuple{Bool, UInt64},
+            (pS, UInt64), Tuple{Bool, Bool, UInt16},
             "mbarrier.test_wait.phase_type::primary.shared.b64 "),
         ((:test_wait, :report, :parity, Symbol("phase_type::primary"), :shared, :b64),
-            (pS, UInt32), Tuple{Bool, UInt64},
+            (pS, UInt32), Tuple{Bool, Bool, UInt16},
             "mbarrier.test_wait.parity.phase_type::primary.shared.b64 "),
         ((:try_wait, :report, Symbol("phase_type::primary"), :shared, :b64),
-            (pS, UInt64), Tuple{Bool, UInt64},
+            (pS, UInt64), Tuple{Bool, Bool, UInt16},
             "mbarrier.try_wait.phase_type::primary.shared.b64 "),
         ((:try_wait, :report, :parity, Symbol("phase_type::primary"), :shared, :b64),
-            (pS, UInt32), Tuple{Bool, UInt64},
+            (pS, UInt32), Tuple{Bool, Bool, UInt16},
             "mbarrier.try_wait.parity.phase_type::primary.shared.b64 "),
         # conditional-phase parity waits (layout::v1 only; single output)
         ((:test_wait, :parity, Symbol("phase_type::conditional"), :shared, :b64),
@@ -618,12 +618,14 @@ end
         @test occursin("~{memory}", s)
     end
 
-    # Dual-output constraint shape: two outputs (=b pred, =l value) before
-    # the inputs — the same multi-output asm shape as setp's `.dual`.
+    # Full report shape: predicate pair plus a b8 temporary packed into the
+    # low byte of an NVPTX-compatible UInt16 carrier.
     ci, _ = first(Base.code_typed(
         Operation{:mbarrier, (:test_wait, :report, Symbol("phase_type::primary"),
                               :shared, :b64)}(), (pS, UInt64)))
-    @test occursin("=b,=l,r,l", string(ci))
+    @test occursin("\\\$0|\\\$1, report_value", string(ci))
+    @test occursin("mov.b16 \\\$2, {report_value, 0}", string(ci))
+    @test occursin("=b,=b,=h,r,l", string(ci))
 end
 
 @testset "fabric.* hand-written wrappers (PTX 9.3, sm_100+)" begin

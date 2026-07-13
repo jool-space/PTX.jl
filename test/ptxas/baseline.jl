@@ -152,8 +152,8 @@ function _baseline_mbarrier_lifecycle!(out::CuDeviceVector{UInt64, 1},
     end
     ptx"bar.sync"(Val(0))
 
-    # arrive returns a u64 phase token; arrive.noComplete with count does not
-    # close the phase even when pending hits zero. Both produce u64 state.
+    # Both forms produce a u64 state token. A noComplete count must leave the
+    # phase incomplete; causing completion would be undefined behavior.
     s1 = ptx"mbarrier.arrive.shared.b64"(mbar)
     s2 = ptx"mbarrier.arrive.noComplete.shared.b64"(mbar, UInt32(1))
 
