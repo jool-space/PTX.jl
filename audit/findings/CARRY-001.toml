@@ -1,0 +1,19 @@
+id = "CARRY-001"
+status = "resolved"
+severity = "critical"
+category = "correctness"
+summary = "Pure add.cc/sub.cc/mad.cc inline assembly hides writes to CC.CF from LLVM, leaving carry chains optimizer-unsafe."
+source_handoffs = ["wave5-remaining-isa.md", "validation-carry-chain.md"]
+validation_tier = "ISA plus LLVM contract and optimized host IR; Ada runtime regression required"
+
+[resolution]
+pr = 22
+commit = "e62b30fadbe8e21456b5155047d69b0d84005720"
+merged_at = "2026-07-13"
+scope = "full"
+evidence = [
+  "independent 48-form host and ptxas ledgers",
+  "full ptxas tier",
+  "Ada randomized and boundary runtime",
+  "Julia 1.10 and 1.12 host validation",
+]

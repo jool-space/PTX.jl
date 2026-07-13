@@ -1,0 +1,7 @@
+id = "FRONT-LEXER-001"
+status = "confirmed"
+severity = "high"
+category = "parser"
+summary = "Legal PTX integer, exponent, and preprocessor forms are mis-tokenized or rejected while malformed exact floats and unterminated forms can pass lexing."
+source_handoffs = ["wave6-frontend-tests.md"]
+validation_tier = "direct lexer probes"

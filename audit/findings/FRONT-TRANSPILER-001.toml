@@ -1,0 +1,7 @@
+id = "FRONT-TRANSPILER-001"
+status = "confirmed"
+severity = "high"
+category = "validation"
+summary = "ptx_to_julia tests establish Julia syntax rather than semantic equivalence; unsupported lines, declarations, and control flow can be commented out or guessed."
+source_handoffs = ["wave4-data-movement.md", "wave6-frontend-tests.md", "targeted-probes.md"]
+validation_tier = "host codegen audit; representative ptxas/runtime needed"

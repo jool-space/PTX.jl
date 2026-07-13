@@ -1,0 +1,7 @@
+id = "UNSUPPORTED-SURFACE-001"
+status = "deferred"
+severity = "low"
+category = "coverage_gap"
+summary = "Texture, surface, stack, video, and selected control-flow or complex-result families are intentionally raw-only or missing and must be labeled as such."
+source_handoffs = ["wave5-remaining-isa.md", "wave6-frontend-tests.md"]
+validation_tier = "inventory disposition"

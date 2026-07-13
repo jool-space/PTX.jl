@@ -1,0 +1,7 @@
+id = "B128-COVERAGE-001"
+status = "confirmed"
+severity = "high"
+category = "coverage_gap"
+summary = "Query-cancel and b128 ld/st/atom forms lack a common result and inline-assembly carrier policy."
+source_handoffs = ["wave1-lowering.md", "wave4-data-movement.md"]
+validation_tier = "host construction failure"

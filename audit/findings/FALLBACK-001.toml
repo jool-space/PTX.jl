@@ -1,0 +1,7 @@
+id = "FALLBACK-001"
+status = "confirmed"
+severity = "high"
+category = "validation"
+summary = "Complex matrix and synthetic wrapper misses silently fall into scalar generic assembly instead of failing at the typed boundary."
+source_handoffs = ["wave1-lowering.md", "wave2-matrix.md", "wave3-memory.md"]
+validation_tier = "host dispatch and assembly shape"

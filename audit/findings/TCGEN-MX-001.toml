@@ -1,0 +1,7 @@
+id = "TCGEN-MX-001"
+status = "confirmed"
+severity = "high"
+category = "correctness"
+summary = "Five-argument tcgen05 MX wrappers omit mandatory block-scale modifiers and scale operands and emit non-assemblable PTX."
+source_handoffs = ["wave2-matrix.md", "targeted-probes.md"]
+validation_tier = "ISA grammar plus sm100a ptxas rejection"

@@ -1,0 +1,7 @@
+id = "SCALAR-RESULT-001"
+status = "confirmed"
+severity = "high"
+category = "correctness"
+summary = "Mixed-precision arithmetic, b64 popc/clz, and mixed-sign dot products prove scalar result inference cannot use the terminal modifier universally."
+source_handoffs = ["wave5-remaining-isa.md"]
+validation_tier = "host result and constraint inspection; ptxas/runtime representatives pending"

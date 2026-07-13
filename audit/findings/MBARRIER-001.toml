@@ -1,0 +1,7 @@
+id = "MBARRIER-001"
+status = "confirmed"
+severity = "high"
+category = "correctness"
+summary = "Unrestricted mbarrier fallback invents results for sinks, mis-types waits/pending_count, and report forms omit a predicate and pipe grouping."
+source_handoffs = ["wave1-lowering.md", "wave3-memory.md"]
+validation_tier = "host assembly shape; sm80/sm90 ptxas pending"

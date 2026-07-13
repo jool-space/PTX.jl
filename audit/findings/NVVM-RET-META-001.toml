@@ -1,0 +1,7 @@
+id = "NVVM-RET-META-001"
+status = "confirmed"
+severity = "low"
+category = "tooling"
+summary = "Stored NVVM return Range and NoUndef metadata is not emitted, losing optimization information without known wrong code."
+source_handoffs = ["wave1-lowering.md"]
+validation_tier = "host LLVM IR inspection"
