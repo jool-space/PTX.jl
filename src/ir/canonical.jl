@@ -16,8 +16,10 @@
 #   - `.reg` declarations dropped entirely — register counts are allocator
 #     output, exactly the noise "modulo naming" must ignore
 #
-# The result still `format`s to readable PTX-shaped text; it is for
-# comparison and review, not for feeding back to ptxas.
+# For parser-produced PTX IR, the result still `format`s to readable
+# PTX-shaped text, including lexical brace scopes. Construction-time
+# `IntrinsicScope` nodes are retained for structural comparison but have no
+# PTX spelling, so formatting such a canonical result intentionally errors.
 
 @public canonicalize
 
@@ -133,6 +135,15 @@ function _canon_body(rn::_Renamer, body::Tuple{Vararg{Statement}})
                 name = _newname(rn, s.name, "var"),
                 array_size = s.array_size, alignment = s.alignment,
                 initializer = s.initializer, linking = s.linking))
+        elseif s isa Block
+            # Braces carry lexical declaration/lifetime scope. Keep the node
+            # while canonicalizing the names nested inside it.
+            push!(out, Block(body = _canon_body(rn, s.body)))
+        elseif s isa IntrinsicScope
+            # Construction-time scopes have the same nested-name requirement
+            # as parsed braces. Retain their metadata for IR comparison.
+            push!(out, IntrinsicScope(name = s.name, args_repr = s.args_repr,
+                                      body = _canon_body(rn, s.body)))
         else
             push!(out, s)   # RawLine, PragmaDirective, ...
         end
@@ -176,9 +187,11 @@ end
 Canonical form for comparing PTX *structure*: `normalize`d, with virtual
 registers, labels, parameters, declared variables, and function names
 renamed to position-stable canonical names, and `.reg` declarations
-dropped. Two modules whose `canonicalize` outputs `format` identically
-contain the same instruction sequences modulo naming — the golden-harness
-equivalence.
+dropped. Lexical scope nodes remain, with their nested operands renamed.
+For parser-produced PTX IR, format-identical canonical results have the same
+structure modulo allocator-style naming — the golden-harness equivalence.
+Construction-time `IntrinsicScope` nodes retain metadata but intentionally
+cannot be formatted; compare their canonical IR directly instead.
 """
 function canonicalize(m::Module)
     m = normalize(m)
@@ -192,6 +205,10 @@ function canonicalize(m::Module)
     end
     dirs = Statement[]
     nfun = 0
+    # Non-function module statements use one renamer in directive order, just
+    # like sibling statements in a function body. Function-local renamers
+    # remain isolated because a function is its own declaration namespace.
+    module_rn = _Renamer(copy(names), count)
     for d in m.directives
         if d isa Function
             push!(dirs, _canon_function(d, names, count, nfun))
@@ -203,7 +220,10 @@ function canonicalize(m::Module)
                 array_size = d.array_size, alignment = d.alignment,
                 initializer = d.initializer, linking = d.linking))
         else
-            push!(dirs, d)
+            # Top-level parsing permits instructions, labels, and `.reg`;
+            # retained programmatic scopes recurse too. RawLine/pragma remain
+            # unchanged.
+            append!(dirs, _canon_body(module_rn, (d,)))
         end
     end
     Module(version = m.version, target = m.target,

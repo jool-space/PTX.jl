@@ -1,5 +1,5 @@
 using PTX.Parser: parse as parse_ptx, ParseError
-using PTX.IR: Module, Function, Instruction, RawLine, format
+using PTX.IR: Module, Function, Instruction, RawLine, Block, IntrinsicScope, format
 
 # Ablation tests: each fixture in `test/corpus/corrupted/` is a single-mutation
 # variant of a clean corpus file. The test asserts the expected outcome per
@@ -22,12 +22,50 @@ using PTX.IR: Module, Function, Instruction, RawLine, format
 
 const _CORRUPTED_DIR = joinpath(@__DIR__, "..", "corpus", "corrupted")
 
-# Walk a Module's IR for any RawLine, top-level or inside a function body.
+# Walk a Module's IR for RawLine fallback nodes at every nesting depth. Keep
+# the top/body split for this fixture manifest, but carry that context through
+# the tree instead of inferring it from a rendered node path. `leading` and
+# module-level directives are top-level; every nested scope in a Function is
+# a body node.
 function _count_rawlines(m::Module)
-    top = count(d -> d isa RawLine, m.directives)
-    body = sum(d -> d isa Function ? count(s -> s isa RawLine, d.body) : 0,
-               m.directives; init = 0)
-    (top = top, body = body)
+    top = Ref(0)
+    body = Ref(0)
+
+    function visit(stmts, in_function::Bool)
+        for stmt in stmts
+            if stmt isa RawLine
+                in_function ? (body[] += 1) : (top[] += 1)
+            elseif stmt isa Function
+                visit(stmt.body, true)
+            elseif stmt isa Block || stmt isa IntrinsicScope
+                visit(stmt.body, in_function)
+            end
+        end
+    end
+
+    visit(m.leading, false)
+    visit(m.directives, false)
+    (top = top[], body = body[])
+end
+
+@testset "RawLine tree context" begin
+    m = Module(
+        version = PTX.IR.Version(8, 0),
+        target = PTX.IR.Target(("sm_89",)),
+        address_size = PTX.IR.AddressSize(64),
+        leading = (RawLine("leading fallback"),),
+        directives = (
+            Block(body = (RawLine("module block fallback"),)),
+            IntrinsicScope(name = "module_scope", args_repr = "",
+                           body = (RawLine("module scope fallback"),)),
+            Function(is_entry = true, name = "nested", body = (
+                Block(body = (IntrinsicScope(name = "function_scope",
+                                             args_repr = "",
+                                             body = (RawLine("function scope fallback"),)),)),
+            )),
+        ),
+    )
+    @test _count_rawlines(m) == (top = 3, body = 1)
 end
 
 const _ABLATION_MANIFEST = [
