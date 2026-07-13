@@ -197,6 +197,10 @@ end
 
     @test build_call(:mov, (:u32,), (typeof(sreg"%warpsize"),)).asm ==
           "mov.u32 \$0, 32;"
+    # Direct construction is non-public, but it must honor the same legacy
+    # compatibility normalization as the macro boundary.
+    @test build_call(:mov, (:u32,), (SpecialReg{Symbol("%warpsize")},)).asm ==
+          "mov.u32 \$0, 32;"
 
     # Reading any SpecialReg forces side_effects=true.
     @test build_call(:mov, (:u32,), (typeof(sreg"%tid.x"),)).side_effects == true

@@ -13,13 +13,26 @@ end
 # inside one does not reach the standalone LabelOperand path below. Match PTX
 # identifier boundaries (which include `$`) rather than a bare substring: a
 # user identifier such as `WARP_SZ_limit` must remain untouched.
-const _WARP_SZ_TOKEN = r"(?<![A-Za-z0-9_$])WARP_SZ(?![A-Za-z0-9_$])"
+const _PTX_PREDEFINED_IDENTIFIER = r"^[A-Za-z][A-Za-z0-9_$]*$"
 const _LEGACY_WARP_SIZE_TOKEN = r"(?<![A-Za-z0-9_$])%warpsize(?![A-Za-z0-9_$])"
 
-function _replace_predefined_immediate_tokens(text::AbstractString)
-    value = string(IR.PREDEFINED_IMMEDIATES["WARP_SZ"])
-    replace(String(text), _WARP_SZ_TOKEN => value,
-            _LEGACY_WARP_SIZE_TOKEN => value)
+function _predefined_immediate_token_regex(name::AbstractString)
+    occursin(_PTX_PREDEFINED_IDENTIFIER, name) ||
+        error("PTX predefined immediate $(repr(String(name))) is not an identifier")
+    Regex("(?<![A-Za-z0-9_\\\$])" * name * "(?![A-Za-z0-9_\\\$])")
+end
+
+function _replace_predefined_immediate_tokens(
+        text::AbstractString,
+        immediates::AbstractDict{<:AbstractString,<:Integer} = IR.PREDEFINED_IMMEDIATES)
+    out = String(text)
+    for (name, value) in immediates
+        out = replace(out, _predefined_immediate_token_regex(name) => string(value))
+    end
+    # `%warpsize` is the one legacy pseudo-register spelling. It maps to the
+    # standard WARP_SZ immediate rather than belonging in the generic table.
+    warp_size = string(get(immediates, "WARP_SZ", IR.PREDEFINED_IMMEDIATES["WARP_SZ"]))
+    replace(out, _LEGACY_WARP_SIZE_TOKEN => warp_size)
 end
 
 function render_operand(op::RegisterOperand, cg::CodeGenState;
@@ -78,6 +91,8 @@ end
 
 function render_operand(op::LabelOperand, cg::CodeGenState;
                         type_hint::Union{Symbol, Nothing} = nothing)
+    # WARP_SZ is a PTX predefined identifier (Table 3), so this precedence
+    # cannot shadow a user-defined symbol.
     predefined = _predefined_immediate_expr(op.name)
     predefined !== nothing && return predefined
     # State-space symbols (e.g. a `.shared` decl referenced by name) come

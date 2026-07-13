@@ -317,6 +317,10 @@ function render_arg(::Type{P}, slot::Int, bracket::Bool) where {P <: Core.LLVMPt
 end
 
 function render_arg(::Type{SpecialReg{S}}, slot::Int, ::Bool) where {S}
+    # `SpecialReg` is intentionally not exported, but direct construction
+    # should not resurrect the obsolete `%warpsize` pseudo-register spelling.
+    String(S) == IR.LEGACY_WARP_SIZE_SREG &&
+        return string(IR.PREDEFINED_IMMEDIATES["WARP_SZ"]), InputSlot[], slot
     return String(S), InputSlot[], slot
 end
 
@@ -629,7 +633,10 @@ end
 # globaltimer, pm0..7, smid, warpid, nsmid, gridid) deliberately fall through
 # to the asm path so LLVM doesn't collapse repeated reads. `activemask` is a
 # PTX instruction, not a special register.
-# Names must exist in the backend registry (asserted in test/host/inst.jl);
+# This deliberately is not a mirror of the generated backend registry: LLVM
+# retains `llvm.nvvm.read.ptx.sreg.warpsize`, while the PTX source surface uses
+# WARP_SZ and therefore excludes `%warpsize` here. Names must exist in the
+# backend registry (asserted in test/host/inst.jl);
 # the IN-PROCESS LLVM need not know them — emission goes through the tier-2
 # IntrinsicCall (declare+call), not `ccall(name, llvmcall, ...)`, precisely
 # because ccall resolves against the in-process intrinsic table and demotes

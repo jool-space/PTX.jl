@@ -879,6 +879,9 @@ end
     @test canonical["%pm0"] != canonical["%pm4"]
     @test !isempty(PTX.IR.diff(PTX.Parser.parse(src("%pm0")),
                                PTX.Parser.parse(src("%pm4"))))
+    # `%warpsize` is a legacy parser input, not a PTX special register. It
+    # remains stable here even though it intentionally left SPECIAL_REGS.
+    @test occursin("%warpsize", canon(src("%warpsize")))
     # Allocator noise around every special register still canonicalizes.
     @test occursin("%r0", canonical["%envreg0"])
     @test !occursin("%r7", canonical["%envreg0"])

@@ -213,6 +213,12 @@ end
                          type_hint = :u32) == "UInt32((32 >> 1))"
     @test render_operand(IR.ImmediateOperand("(%warpsize >> 1)"), cg;
                          type_hint = :u32) == "UInt32((32 >> 1))"
+    # Every current/future predefined immediate in the ledger participates in
+    # constant-expression substitution; this test uses a synthetic second
+    # name so the production table need not grow merely to test the loop.
+    @test PTX.Codegen._replace_predefined_immediate_tokens(
+        "(WARP_SZ + FUTURE_CONST)",
+        Dict("WARP_SZ" => 32, "FUTURE_CONST" => 7)) == "(32 + 7)"
     # Token boundaries matter: this is a distinct user identifier, not the
     # predefined WARP_SZ constant.
     @test render_operand(IR.ImmediateOperand("(WARP_SZ_limit >> 1)"), cg;
