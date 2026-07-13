@@ -1,7 +1,21 @@
 id = "SCALAR-RESULT-001"
-status = "confirmed"
+status = "resolved"
 severity = "high"
 category = "correctness"
 summary = "Mixed-precision arithmetic, b64 popc/clz, and mixed-sign dot products prove scalar result inference cannot use the terminal modifier universally."
 source_handoffs = ["wave5-remaining-isa.md"]
-validation_tier = "host result and constraint inspection; ptxas/runtime representatives pending"
+validation_tier = "closed ISA form ledger, host ABI and transpiler oracles, offline ptxas target partitions, and Ada/Blackwell runtime"
+
+[resolution]
+pr = 28
+commit = "148931f2d5ca1c0a5c0fbe80179e8fb3d27be65d"
+scope = "full"
+evidence = [
+  "independent 126-form host oracle pins 121 normative spellings and five exact documented compatibility spellings, including result ABI, operand carriers, PTX version, target floor, feature set, and provenance",
+  "2120 focused host assertions cover exact direct/raw/lowering behavior, carrier and grammar negatives, canonical ordinary-cvt and pure-result fail-loud boundaries, and schema-aware transpilation before pointer-alias absorption",
+  "complete Julia 1.12 host suite passes 35868 assertions; Julia 1.10-1.12 x86 and Blackwell CI test steps also pass",
+  "CUDA 13.3 ptxas assembles every schema in four target partitions: 38 at retained sm_75, 11 at sm_90, 59 at sm_100, and 18 at family-specific sm_120f",
+  "Ada CC 8.9 runtime validates popc/clz, mixed-sign dot products, all eight wide mul/mad ABIs, cvt.pack packing, and prmt semantics",
+  "GB10 CC 12.1 runtime passes on Julia 1.10, 1.11, and 1.12 for mixed f32/f16/bf16 rounding and saturation plus family-specific packed lane arithmetic",
+  "external mov.b128 CLC corpus cases now have an exact fail-loud rejection manifest instead of silently becoming void; grouped b128 lowering remains separately tracked by B128-COVERAGE-001",
+]
