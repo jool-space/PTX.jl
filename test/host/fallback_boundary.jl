@@ -16,13 +16,12 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
     (:tcgen05,  (),            nothing),
     (:setp,     (),            :dual),
     (:shfl,     (),            :pred),
-    (:mbarrier, (),            :report),
 ])
 
 @testset "typed-wrapper-only boundary: closed-world rule inventory" begin
     actual = Set((r.op, r.prefix, r.marker) for r in PTX.TYPED_WRAPPER_ONLY_RULES)
     @test actual == EXPECTED_TYPED_ONLY_RULES
-    @test length(PTX.TYPED_WRAPPER_ONLY_RULES) == 6
+    @test length(PTX.TYPED_WRAPPER_ONLY_RULES) == 5
 
     positives = (
         (:mma, (:sync, :aligned, :m16n8k16, :row, :col,
@@ -34,8 +33,6 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
         (:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x2, :b32)),
         (:setp, (:dual, :eq, :s32)),
         (:shfl, (:sync, :idx, :b32, :pred)),
-        (:mbarrier, (:test_wait, :report,
-                     Symbol("phase_type::primary"), :shared, :b64)),
     )
     for (op, mods) in positives
         @test PTX.requires_typed_wrapper(op, mods)
@@ -48,7 +45,6 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
         (:wgmma, (:mma_asyncish, :sync, :aligned)),
         (:setp, (:duality, :eq, :s32)),
         (:shfl, (:sync, :idx, :b32, :predicate)),
-        (:mbarrier, (:test_wait, :reporting, :shared, :b64)),
         (:fabric, (:try_get, Symbol("mbarrier::report::fabric"))),
         (:tcgen050, (:ld, :sync, :aligned, :b32)),
     )
@@ -76,9 +72,6 @@ end
         (Operation{:setp, (:dual, :eq, :s32)}(), (UInt32, UInt32)),
         (Operation{:shfl, (:sync, :idx, :b32, :pred)}(),
          (Int32, Int32, Int32, Int32)),
-        (Operation{:mbarrier, (:test_wait, :report,
-                               Symbol("phase_type::primary"), :shared, :b64)}(),
-         (Core.LLVMPtr{UInt64, PTX.AS.Global}, UInt64)),
     )
 
     for (op, argts) in misses
@@ -117,8 +110,6 @@ end
         (Operation{:setp, (:dual, :eq, :s32)}(), (UInt32(0), UInt32(0))),
         (Operation{:shfl, (:sync, :idx, :b32, :pred)}(),
          (Int32(0), Int32(0), Int32(0), Int32(0))),
-        (Operation{:mbarrier, (:test_wait, :report,
-                               Symbol("phase_type::primary"), :shared, :b64)}(), ()),
     )
     for (op, args) in dispatch_misses
         @test endswith(String(which(op, Tuple{typeof.(args)...}).file), "inst.jl")
@@ -264,9 +255,6 @@ end
         (:setp, (:dual, :eq, :s32), (UInt32, UInt32)),
         (:shfl, (:sync, :idx, :b32, :pred),
          (Int32, Int32, Int32, Int32)),
-        (:mbarrier, (:test_wait, :report,
-                     Symbol("phase_type::primary"), :shared, :b64),
-         (Core.LLVMPtr{UInt64, PTX.AS.Shared}, Int32)),
     )
 
     for (op, mods, argts) in cases

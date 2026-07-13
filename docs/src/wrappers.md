@@ -42,7 +42,7 @@ line in the loop.
 | `cvt` sub-byte FP packing | `wrappers/cvt.jl` | `cvt.rn.satfinite.e2m1x2.{f32,f16x2,bf16x2}` pack and `cvt.rn.{f16x2,bf16x2}.e2m1x2` unpack — `.b8` carrier through a `mov.b16` brace-pair shim because NVPTX has no i8 constraint |
 | extended precision | `wrappers/extended_precision.jl` | All 48 `add.cc` / `addc` / `sub.cc` / `subc` / `mad.cc` / `madc` scalar forms with explicit `Bool` carry/borrow, plus fused arbitrary-limb add/sub and unsigned 2×2-limb multiply |
 | `ldmatrix` | `wrappers/ldmatrix.jl` | `ldmatrix.sync.aligned.{m8n8,m16n16}.{x1,x2,x4}[.trans].{shared,shared::cta}.{b16,b8}` returning `UInt32` (x1) or `NTuple{N, UInt32}` (x2/x4) |
-| `mbarrier` | `wrappers/mbarrier.jl` | init / inval / arrive[.noComplete\|.expect_tx] / expect_tx / test_wait[.parity] / try_wait[.parity] — three return shapes (`Nothing` / `UInt64` state / `Bool` pred); shared-AS `r` constraint |
+| `mbarrier` | `wrappers/mbarrier.jl`, `mbarrier_forms.jl` | Closed PTX 9.3 form schema for lifecycle, tx-count, arrive/drop, waits, pending-count, layout, sem/scope, and CTA/cluster spaces; exact wrappers accelerate common forms while delegating to the same schema emitter. Results are explicit sink (`.sink` → PTX `_`), `UInt64` state, `Bool`, `UInt32` pending count, `(waitComplete, reportPredicate)`, or `(waitComplete, reportPredicate, reportValueCarrier::UInt16)`. The ISA's two noncanonical `arrive_drop` example heads are provenance-marked aliases and normalize on emission. PTX's 1-byte report value occupies the carrier's low byte because NVPTX has no i8 inline-asm constraint. Explicitly shared addresses use the NVPTX `r` constraint; every route carries `convergent nomerge`. |
 | `mma.sync.aligned` | `wrappers/mma.jl` | `mma.sync.aligned.<shape>.<layA>.<layB>.<d>.<a>.<b>.<c>` for bf16/f16/tf32/FP8 (Ada) and `kind::f8f6f4` 5×5 sub-byte FP A/B (Blackwell sm_100a+); takes/returns `NTuple{N, UInt32}` for A/B and `NTuple{M, Float32\|UInt32}` for C/D |
 | `mma.sync.aligned.kind::mxf*` (block-scaled) | `wrappers/mma_scaled.jl` | Three Blackwell-introduced kinds: `mxf4`, `mxf4nvf4`, `mxf8f6f4`. Operand layout `(scale_data::UInt32, byte_id::UInt16, thread_id::UInt16)` per side per PTX 9.2 §9.7.14.3 |
 | `setp.dual` | `wrappers/setp.jl` | `setp.<cmp>.<dtype>` with `%p\|%q` dual-pred output — 6 cmps × 12 dtypes = 72 generated methods returning `Tuple{Bool, Bool}` |
@@ -51,6 +51,22 @@ line in the loop.
 | `vec_ldst` | `wrappers/vec_ldst.jl` | `ld.global.v{2,4}.{f32,b32,b16}` / `st.global.v{2,4}.{f32,b32,b16}` — braced register-vector I/O for HBM-saturating bandwidth |
 | `wgmma.mma_async` (Hopper sm_90a) | `wrappers/wgmma.jl` | `wgmma.mma_async.sync.aligned.m64nNk{8,16,32}.<d>.<a>.<b>` — accumulator passed by value (tied operands). Floating forms use all 32 N values stepped by 8 through 256; integer forms use the ISA's 16-value grid `8,16,24,32,48:16:224`. The closed surface is 256 floating + 64 integer shape/type forms, each with SS runtime/constant `scale_d` and RF-A runtime variants. |
 | `tcgen05` (Blackwell sm_100a/sm_110a and family targets) | `wrappers/tcgen05.jl` | Exact lifecycle, fence/wait, TMEM address, load/store, dense-MMA, and MX block-scale forms. MX uses the complete seven-operand schema `(d, a_desc_or_tmem, b_desc, idesc, scale_a_tmem, scale_b_tmem, enable_input_d)` and all eight legal `kind × {scale_vec,block}` spellings; the former five-argument MX surface is rejected. `shift` / `dealloc` / `cp` / `ld` / `st` take a 32-bit TMEM address returned by `tcgen05.alloc`, while alloc/commit use reviewed shared-memory carriers. |
+
+For the mbarrier full-report form, `reportValue` is a PTX `.b8`
+destination. This agrees with the CUDA Runtime API's description of
+`cudaFabricOpStatusSourceMbarrierV1` as 1-byte aligned and 1-byte wide, and is
+enforced by ptxas evidence at `sm_90` and `sm_121`. The Julia result is a
+zero-extended `UInt16` carrier because LLVM's NVPTX inline-asm interface has no
+i8 register constraint; only its low byte is the opaque status value.
+
+Arrival calls that spell destination `_` use the synthetic `.sink` selector,
+for example `ptx"mbarrier.arrive.sink.release.cluster.b64"(remote_addr)`.
+This distinction cannot be inferred from argument types: the otherwise
+identical local/generic form returns a `UInt64` state token. It is especially
+important for a generic address produced for a remote cluster mbarrier, where
+the ISA requires the sink destination. Explicit `shared::cluster` forms are
+always sinks and need no selector. Base-plus-constant-offset addresses remain
+valid; tensor-coordinate address lists are rejected rather than truncated.
 
 The simple WGMMA synchronization ops (`wgmma.fence`,
 `wgmma.commit_group`, `wgmma.wait_group`) still flow through the reviewed

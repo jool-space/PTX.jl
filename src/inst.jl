@@ -352,6 +352,62 @@ end
 build_head(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     isempty(mods) ? string(op) : string(op) * "." * join(string.(mods), ".")
 
+function _build_mbarrier_call(schema::MBarrierFormSchema,
+                              @nospecialize(argtypes),
+                              contract::FormContract)
+    variant = validate_mbarrier_args(schema, argtypes)
+    rettype = _mbarrier_rettype(schema)
+    output_operands, output_letters, slot =
+        schema.destination === :none ? (String[], String[], 0) :
+        schema.destination in (:sink, :remote_sink) ? (["_"], String[], 0) :
+        schema.destination === :state ? (["\$0"], ["=l"], 1) :
+        schema.destination === :predicate ? (["\$0"], ["=b"], 1) :
+        schema.destination === :count ? (["\$0"], ["=r"], 1) :
+        schema.destination === :report_pred ?
+            (["\$0|\$1"], ["=b", "=b"], 2) :
+        schema.destination === :report ?
+            (["\$0|\$1", "report_value"], ["=b", "=b", "=h"], 3) :
+        error("invalid mbarrier destination shape: ", schema.destination)
+
+    operand_strs = String[]
+    input_letters = String[]
+    passthrough = Type[]
+    passthrough_ix = Tuple{Int, Union{Nothing, Int}}[]
+    for (i, (kind, T)) in enumerate(zip(variant.operands, argtypes))
+        op_str, slots, slot = render_arg(T, slot, false)
+        kind === :address && (op_str = "[" * op_str * "]")
+        push!(operand_strs, op_str)
+        for (letter, atype, lane) in slots
+            # LLVM retains the addrspace(3) pointer value, while NVPTX's `r`
+            # inline-asm constraint selects the 32-bit PTX register required
+            # for an explicitly shared address. This is the same intentional
+            # exception used by the exact mbarrier wrappers; generic addresses
+            # retain the ordinary 64-bit `l` pointer constraint.
+            kind === :address && T <: Core.LLVMPtr &&
+                schema.space !== :generic && (letter = "r")
+            push!(input_letters, letter)
+            push!(passthrough, atype)
+            push!(passthrough_ix, (i, lane))
+        end
+    end
+
+    head = build_head(:mbarrier, schema.ptxmods)
+    operands = [output_operands; operand_strs]
+    asm = isempty(operands) ? head * ";" :
+          head * " " * join(operands, ", ") * ";"
+    # PTX 9.3's opaque reportValue is a `.b8` destination (the CUDA API
+    # describes mbarrier.layout::v1 status as 1-byte wide). NVPTX has no i8
+    # inline-asm constraint, so bridge it through the low byte of a UInt16.
+    schema.destination === :report &&
+        (asm = "{ .reg .b8 report_value; " * asm *
+               " mov.b16 \$2, {report_value, 0}; }")
+    constraints = join([output_letters; input_letters; "~{memory}"], ",")
+    return (; asm, constraints, side_effects = true,
+              convergent = contract.convergent, rettype,
+              passthrough_argtypes = Tuple(passthrough),
+              passthrough_indices = Tuple(passthrough_ix))
+end
+
 # Pure: no LLVM, no GPU, no @asmcall. Used by both the runtime call site and
 # host-side golden tests. `contract` defaults to the registry lookup; pass one
 # explicitly for host-side rendering tests, or select the raw tier with the
@@ -362,6 +418,9 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     raw && contract !== missing && throw(ArgumentError(
         "PTX.build_call: raw=true selects RAW_CONTRACT internally; " *
         "do not also pass contract=" * repr(contract)))
+    mbarrier = mbarrier_form_schema(op, mods)
+    requires_mbarrier_schema(op) && mbarrier === nothing &&
+        throw(mbarrier_schema_miss(mods))
     schema = scalar_result_schema(op, mods)
     schema === nothing && requires_scalar_result_schema(op, mods) &&
         throw(scalar_result_schema_miss(op, mods))
@@ -387,6 +446,8 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
         "memory, convergence) that must be reviewed per form — add a registry " *
         "entry, or use ptx\"...\"raw for the maximally-conservative contract " *
         "(sideeffect + memory clobber + convergent; pointer operands bracketed).")
+    mbarrier === nothing ||
+        return _build_mbarrier_call(mbarrier, argtypes, selected_contract)
     schema === nothing || validate_scalar_result_args(schema, argtypes)
     rettype = selected_contract.returns ? infer_rettype(op, mods) : Nothing
     nonpure = !selected_contract.pure || has_special_reg(argtypes)
@@ -570,24 +631,25 @@ function format_call(::Operation{op, mods}, @nospecialize(argtypes::Type{<:Tuple
     build_call(op, mods, Tuple(argtypes.parameters)).asm
 end
 
-# --- convergent inline asm (warp-collective asm-tier forms) ------------------
+# --- convergent inline asm ---------------------------------------------------
 #
 # `@asmcall` cannot attach call-site attributes, and `sideeffect` alone does
 # NOT forbid duplicating a call site across a divergent branch (jump
 # threading, tail duplication) — only `convergent` does. For warp-/warpgroup-
-# collective instructions (wgmma.mma_async, the mma.sync asm fallbacks) a
-# split call site means different lanes execute different copies of a
-# collective op: the `active_mask` class of miscompile the convergence spike
-# reproduced on hardware. The attribute binds in the in-process middle end
-# only — llc neither checks nor needs it — so it is asserted by tests on the
-# emitted llvmcall IR, not by ptxas acceptance.
+# collective instructions (wgmma.mma_async and mma.sync fallbacks), a split
+# call site means different lanes execute different copies: the `active_mask`
+# class of miscompile reproduced on hardware. Mbarrier asm uses this path too,
+# matching the convergence contract on the complete llvm.nvvm.mbarrier.*
+# surface regardless of dispatch tier. The attribute binds in the in-process
+# middle end only — llc neither checks nor needs it — so tests assert emitted
+# llvmcall IR rather than ptxas acceptance.
 #
 # Mechanism validated by spikes/raw_asm_attrs.jl: a `convergent` attribute
 # group on an inline-asm call site parses through Base.llvmcall and survives
 # the optimized module. This helper builds the same shape `@asmcall` would —
 # asm callee returns a scalar or literal struct, entry returns Julia's
 # homogeneous-tuple `[N x T]` via extract/insertvalue, Bool passes as i8 —
-# plus `#0 = { convergent nounwind }` on the call.
+# plus `#0 = { convergent nomerge nounwind }` on the call.
 
 _asm_lltype(T::Type) =
     T === Float32 ? "float" :
@@ -627,9 +689,14 @@ function convergent_asm_ir(asm::String, constraints::String,
     elseif rettype <: Tuple
         comps = _asm_lltype.(collect(rettype.parameters))
         # asm returns a scalar (1 output) or a literal struct (N>=2 outputs);
-        # Julia represents the homogeneous NTuple as [N x T].
+        # Julia represents a homogeneous NTuple as [N x T] and a heterogeneous
+        # Tuple as a literal struct. The latter matters for exact-raw mbarrier
+        # report forms: (Bool, Bool, UInt16) under RAW_CONTRACT remains
+        # convergent without corrupting its return ABI.
         callret = length(comps) == 1 ? comps[1] : "{ " * join(comps, ", ") * " }"
-        entryret = "[$(length(comps)) x $(comps[1])]"
+        homogeneous = all(==(first(comps)), comps)
+        entryret = homogeneous ? "[$(length(comps)) x $(comps[1])]" :
+                   "{ " * join(comps, ", ") * " }"
         push!(body, "  %r = " * asmcall(callret))
         prev = "undef"
         for k in 1:length(comps)
@@ -782,6 +849,19 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
         uses_implicit_cc(op, mods) &&
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
+        if requires_mbarrier_schema(op)
+            mbarrier = mbarrier_form_schema(op, mods)
+            mbarrier === nothing &&
+                return (; tier = :forbidden, method = m, rettype = nothing,
+                          intrinsics = String[], asm = nothing)
+            try
+                validate_mbarrier_args(mbarrier, argts)
+            catch err
+                err isa ArgumentError || rethrow()
+                return (; tier = :forbidden, method = m, rettype = nothing,
+                          intrinsics = String[], asm = nothing)
+            end
+        end
         !raw && requires_typed_wrapper(op, mods) &&
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)

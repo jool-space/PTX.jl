@@ -57,12 +57,13 @@ end
 end
 
 # `cp.async.mbarrier.arrive[.noinc].shared.b64 [addr];` — couples
-# completion of the issuing thread's prior cp.async ops to an mbarrier
-# arrive. Without `.noinc`, mbarrier's pending count is bumped by 1
-# before the arrive (so a subsequent in-flight cp.async still decrements
-# correctly). With `.noinc`, the bump is skipped — used when the caller
-# pre-arranged the pending count via `mbarrier.expect_tx`.
-# PTX 9.2 §9.7.13.15.15. Hand-written for the same `r` (i32) constraint
+# completion of the issuing thread's prior cp.async ops to an asynchronous
+# arrive-on operation. Without `.noinc`, pending arrivals are incremented by 1
+# before that later arrive decrements them (zero net change). With `.noinc`,
+# initialization must already include the future asynchronous arrive in its
+# expected/pending arrival count. `mbarrier.expect_tx` is unrelated: it changes
+# tx-count, not arrival accounting.
+# PTX 9.3 §9.7.14.16.18. Hand-written for the same `r` (i32) constraint
 # reason as the other shared-AS wrappers above — and to override the
 # generic dispatch that would (incorrectly) infer rettype = UInt64 from
 # the trailing `.b64` modifier (the chain treats `.b64` as a dtype
