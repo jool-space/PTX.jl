@@ -75,9 +75,11 @@ macro ptx_str(s::String)
     return _ptx_build_interp(s)
 end
 
-# `ptx"..."raw` — RawOperation escape hatch for unregistered chains (static
-# chains only: the raw tier is a deliberate, spelled-out act; interpolation
-# belongs to the registered surface).
+# `ptx"..."raw` — RawOperation escape hatch for eligible unregistered chains
+# (static chains only: the raw tier is a deliberate, spelled-out act;
+# interpolation belongs to the registered surface). Semantic guards such as
+# implicit CC.CF remain fail-loud because conservative attributes cannot model
+# their hidden input/output dependency.
 macro ptx_str(s::String, flag::String)
     flag == "raw" ||
         error("ptx\"...\"$flag: unknown flag (only `raw` is supported)")
@@ -352,10 +354,16 @@ build_head(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
 
 # Pure: no LLVM, no GPU, no @asmcall. Used by both the runtime call site and
 # host-side golden tests. `contract` defaults to the registry lookup; pass
-# one explicitly to build a spec for an unregistered form (the raw tier,
-# host-side rendering tests).
+# one explicitly to build a spec for an eligible unregistered form (the raw
+# tier, host-side rendering tests). Semantic guards are checked first.
 function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argtypes);
                     contract::Union{FormContract, Nothing} = form_contract(op, mods))
+    uses_implicit_cc(op, mods) && throw(ArgumentError(
+        "ptx\"$(build_head(op, mods))\" accesses the implicit PTX CC.CF " *
+        "flag, which cannot safely cross an LLVM inline-asm call boundary. " *
+        "The raw tier does not repair that hidden dependency. Use the typed " *
+        "wrapper with explicit Bool carry/borrow, or PTX.add_with_carry, " *
+        "PTX.sub_with_borrow, or PTX.mul_wide for a fused operation."))
     contract === nothing && error(
         "ptx\"$(build_head(op, mods))\": opcode :$op is not in the form registry " *
         "(src/forms.jl). The chain default makes optimizer promises (purity, " *
@@ -434,11 +442,12 @@ end
 
 # --- The raw tier -------------------------------------------------------------
 #
-# `ptx"..."raw` — the explicit opt-in for chains the form registry doesn't
-# know. Same rendering machinery as the
-# registered chain, but under RAW_CONTRACT: sideeffect + memory clobber +
-# convergent, pointer operands bracketed, trailing-dtype return inference
-# (wrong guesses die loudly in ptxas, never silently in the optimizer).
+# `ptx"..."raw` — the explicit opt-in for eligible chains the form registry
+# doesn't know. Same rendering machinery as the registered chain, but under
+# RAW_CONTRACT: sideeffect + memory clobber + convergent, pointer operands
+# bracketed, trailing-dtype return inference (wrong guesses die loudly in
+# ptxas, never silently in the optimizer). A semantic guard still rejects
+# hidden state, such as CC.CF, that one call cannot model.
 # Composition mirrors Operation so a raw chain can be extended with `*`.
 
 struct RawOperation{op, mods} end
@@ -734,6 +743,8 @@ Returns `(; tier, method, rettype, intrinsics, asm)`:
   (`RAW_CONTRACT` for a `RawOperation`); the text is in `asm`.
 - `tier = :unregistered` — no wrapper and the opcode is not in the form
   registry: the call errors at the blessing boundary.
+- `tier = :forbidden` — a generic/raw spelling accesses implicit architectural
+  state that cannot safely cross the call boundary.
 
 Binding is not selectability: an `:intrinsic` form can still fail ISel below
 its capability floor — that gate lives in the backend, not the registry.
@@ -744,6 +755,9 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
     m = which(o, Tuple{argts...})
     if m === _CHAIN_METHOD || m === _RAW_CHAIN_METHOD
         raw = m === _RAW_CHAIN_METHOD
+        uses_implicit_cc(op, mods) &&
+            return (; tier = :forbidden, method = m, rettype = nothing,
+                      intrinsics = String[], asm = nothing)
         contract = raw ? RAW_CONTRACT : form_contract(op, mods)
         contract === nothing &&
             return (; tier = :unregistered, method = m, rettype = nothing,

@@ -351,12 +351,23 @@ end
     @test propertynames(ptx"mma".sp) == (:sync,)
     @test :m16n8k16 ∉ propertynames(ptx"mma")   # NVVM name segment, not ISA
     @test :block    ∉ propertynames(ptx"mma")   # registry infix, not ISA
+    # Extended-precision wrappers expose only their reviewed safe entry tree.
+    # The scalar generic/raw fallbacks remain forbidden; completion comes from
+    # exact wrapper methods whose Bool carry/borrow makes CC.CF explicit.
+    @test propertynames(ptx"add") == (:cc,)
+    @test propertynames(ptx"sub") == (:cc,)
+    @test propertynames(ptx"add".cc) == (:s32, :s64, :u32, :u64)
+    @test propertynames(ptx"sub".cc) == (:s32, :s64, :u32, :u64)
+    @test propertynames(ptx"addc") == (:cc, :s32, :s64, :u32, :u64)
+    @test propertynames(ptx"subc") == (:cc, :s32, :s64, :u32, :u64)
+    @test propertynames(ptx"madc") == (:hi, :lo)
+    @test propertynames(ptx"madc".hi) == (:cc, :s32, :s64, :u32, :u64)
+
     # cvt surfaces its wrapped family only (the fp8/satfinite conversions);
     # unwrapped pure chains stay empty until the modifier-grammar registry
     # milestone supplies the full ISA enumeration.
     @test propertynames(ptx"cvt") == (:rn,)
     @test :satfinite in propertynames(ptx"cvt".rn)
-    @test propertynames(ptx"add") == ()
 end
 
 @testset "show: objects print as their reconstructing literal" begin

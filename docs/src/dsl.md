@@ -107,6 +107,52 @@ A 16-bit primitive lowers to LLVM `i16`, fitting the same `h` constraint
 as `UInt16`. `reinterpret` between the carrier and the semantic type is
 zero-cost.
 
+## Extended precision and `CC.CF`
+
+PTX extended-precision arithmetic is not an ordinary scalar chain. The
+`add.cc` / `sub.cc` / `mad.*.cc` producers and `addc` / `subc` / `madc`
+consumers communicate through the implicit per-thread flag `CC.CF`. LLVM
+inline-assembly operands cannot express that dependency between two calls, and
+the PTX ISA does not preserve the flag across function calls.
+
+PTX.jl therefore makes carry and borrow explicit at the Julia boundary:
+
+```julia
+lo, carry = ptx"add.cc.u32"(a0, b0)
+hi, carry = ptx"addc.cc.u32"(a1, b1, carry)
+top        = ptx"addc.u32"(a2, b2, carry)
+
+lo, borrow = ptx"sub.cc.u32"(a0, b0)
+hi         = ptx"subc.u32"(a1, b1, borrow)
+```
+
+Each typed call seeds and/or materializes `CC.CF` as needed inside one opaque
+asm block; the extra `Bool` argument/result is an SSA dependency visible to
+LLVM. For a whole multi-limb operation, prefer the fused helpers:
+
+```julia
+sum, carry = PTX.add_with_carry(a_words, b_words)
+sum, carry = PTX.add_with_carry(a_words, b_words, carry_in)
+
+difference, borrow = PTX.sub_with_borrow(a_words, b_words)
+product = PTX.mul_wide(a_2words, b_2words)
+```
+
+Limb tuples are little-endian. Add/sub accept equally sized nonempty tuples of
+`UInt32`, `Int32`, `UInt64`, or `Int64`; `mul_wide` accepts two two-limb
+unsigned operands with 32- or 64-bit limbs and returns four limbs. Each fused
+helper is exactly one side-effecting, non-convergent asm call with early-clobber
+outputs and a `~{cc}` clobber. It does not claim a memory effect.
+
+All 48 legal PTX 9.3 §9.7.2 spellings have typed wrappers. A generic or
+`ptx"..."raw` standalone spelling is deliberately rejected: `raw` cannot make
+the hidden dependency visible. The instruction-at-a-time PTX transpiler also
+rejects these forms until it can fuse a complete straight-line chain.
+
+Compatibility is independent by family: 32-bit add/sub forms date to PTX 1.2
+and all targets; 32-bit `mad`/`madc` date to PTX 3.0 and require `sm_20`; every
+64-bit extended-precision form dates to PTX 4.3 and requires `sm_20`.
+
 ## Side-effect classification
 
 Inline asm is opaque to LLVM; without explicit annotation, LLVM may

@@ -10,6 +10,7 @@ using ..IR: Module, Function, Instruction, Label, RegDecl, VarDecl, Param,
             AddressOperand, ParenthesizedOperand, NegatedOperand, PipeOperand,
             ScalarType, StateSpace, LinkingDirective, ptx
 using ..Parser: parse as parse_ptx
+using ..PTX: uses_implicit_cc
 
 include("state.jl")
 include("operands.jl")

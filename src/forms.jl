@@ -20,9 +20,11 @@
 # trap, a reordered barrier, a merged activemask); in the conservative
 # direction it only costs optimization. Chains under an opcode absent from
 # this table ERROR at compile time — `ptx"..."raw` is the explicit opt-in
-# that gets RAW_CONTRACT (maximally conservative) instead. Adding an entry
-# here is a review act: check the ISA for memory effects, cross-lane
-# semantics, and whether the chain tail names a result or an operand.
+# that gets RAW_CONTRACT (maximally conservative) instead, unless a semantic
+# guard rejects architectural state that no single asm call can model (such as
+# CC.CF). Adding an entry here is a review act: check the ISA for memory
+# effects, cross-lane semantics, and whether the chain tail names a result or
+# an operand.
 
 struct FormContract
     pure::Bool
@@ -37,12 +39,14 @@ struct FormContract
     end
 end
 
-# Maximally conservative: every restriction, no promises. What `ptx"..."raw`
-# gets, and the only safe answer for a form nobody has reviewed. `brackets`
-# is a text-level guess (most pointer-taking PTX instructions are memory
-# ops wanting `[%addr]`); a raw chain that needs a bare pointer operand
-# should pass the address as an integer instead — either way the failure
-# is a loud ptxas reject, never a miscompile.
+# Maximally conservative: every restriction, no promises. What eligible
+# `ptx"..."raw` calls get, and the only safe contract for a form nobody has
+# reviewed. Semantic guards can still forbid raw lowering when even this
+# contract cannot expose an architectural dependency. `brackets` is a
+# text-level guess (most pointer-taking PTX instructions are memory ops wanting
+# `[%addr]`); a raw chain that needs a bare pointer operand should pass the
+# address as an integer instead — either way the failure is a loud ptxas reject,
+# never a miscompile.
 const RAW_CONTRACT = FormContract(pure = false, convergent = true,
                                   brackets = true, returns = true)
 
@@ -157,11 +161,18 @@ const FORMS = Dict{Symbol, FormFamily}(
     form_contract(op, mods) -> Union{FormContract, Nothing}
 
 The registry's contract for a chain form: the opcode's default, refined by
-the longest matching mods-prefix override. `nothing` for an unregistered
-opcode — callers decide whether that errors (the `ptx"..."` chain default)
-or falls back explicitly (`ptx"..."raw` → RAW_CONTRACT).
+the longest matching mods-prefix override. Returns `nothing` for an
+unregistered opcode or for a typed-wrapper-only form whose semantics cannot
+use the generic/raw chain (currently the implicit-`CC.CF` family). Callers
+distinguish the fail-loud semantic boundary from an ordinary unregistered
+opcode before considering the explicit raw tier.
 """
 function form_contract(op::Symbol, mods::Tuple{Vararg{Symbol}})
+    # CC.CF cannot cross an LLVM inline-asm call boundary.  Typed wrappers in
+    # wrappers/extended_precision.jl expose the flag explicitly or fuse the
+    # complete operation; the generic and raw tiers must never claim a scalar
+    # contract for these spellings.
+    uses_implicit_cc(op, mods) && return nothing
     fam = get(FORMS, op, nothing)
     fam === nothing && return nothing
     best, bestlen = fam.default, 0
