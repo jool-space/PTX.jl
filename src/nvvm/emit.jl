@@ -122,6 +122,16 @@ slotaccepts(kind::Symbol, @nospecialize(T)) =
 # its own table and never sees ours.
 
 function memory_attr(props)::Union{String,Nothing}
+    # `IntrNoMem` describes memory access; `IntrHasSideEffects` independently
+    # says the call is observable even without a result. LLVM IR has no
+    # declaration attribute spelling for the latter. Claiming `readnone` /
+    # `memory(none)` therefore throws away the only conservative signal an
+    # in-process LLVM has when it does not recognize a newer NVVM intrinsic,
+    # and lets ordinary DCE erase the call. Leave the memory effect unspecified
+    # for this exact upstream-property combination. LLVMs that recognize the
+    # intrinsic still recover their more precise built-in contract.
+    :nomem in props && :sideeffects in props && return nothing
+
     rw = :readmem in props ? "read" : :writemem in props ? "write" : "readwrite"
     if Base.libllvm_version < v"16"
         # LLVM 15 (Julia 1.10) predates the memory(...) attribute; these
