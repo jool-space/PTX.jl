@@ -247,19 +247,15 @@ end
 end
 
 
-# --- tcgen05 sink-form chain default at sm_100a --------------------------
+# --- tcgen05 lifecycle wrappers at sm_100a -------------------------------
 #
 # tcgen05 mixes memory-pointer-taking sinks (alloc destination, commit's
 # mbarrier ptr) with TMEM-address-taking ops (shift, cp, dealloc, ld, st)
-# that need a 32-bit address operand without an LLVMPtr carrier. Memory-
-# pointer sinks plus the no-arg fence/wait ops route through chain default;
-# the TMEM-address ops have typed wrappers in src/wrappers/tcgen05.jl,
-# ported from pyptx's _Tcgen05 operand discipline.
-#
-# Per-prefix returns=false overrides in the form registry (src/forms.jl)
-# suppress the
-# spurious `.b32`/`.b64` return-type inference for `alloc`, `commit`,
-# `relinquish_alloc_permit`.
+# that need a 32-bit address operand without an LLVMPtr carrier. All tcgen05
+# calls now require exact typed wrappers; in particular the pointer lifecycle
+# forms and no-arg fences can no longer fall through to scalar rendering.
+# The alloc intrinsic canonicalizes the equivalent generic-address spelling
+# below to an explicit `.shared::cta` qualifier.
 #
 # LLVM corpus reference: test/corpus/external/llvm/tcgen05-{alloc,commit,
 # fence}__test_*.ptx — verified call-site forms.
@@ -284,12 +280,14 @@ end
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tcgen05_lifecycle!, types;
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("tcgen05.alloc.cta_group::1.sync.aligned.b32", ptx)
+    @test occursin("tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32", ptx)
     @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64", ptx)
     @test occursin("tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned", ptx)
 end
 
-# tcgen05 fences and waits — pure no-arg ops, chain default sufficient.
+# tcgen05 fences and waits — exact no-arg wrappers. The fences intentionally
+# use side-effecting inline PTX with a memory clobber so LLVM versions that do
+# not recognize their NVVM intrinsics cannot delete or move them.
 function _bw_tcgen05_sync!()
     ptx"tcgen05.fence::before_thread_sync"()
     ptx"tcgen05.fence::after_thread_sync"()
@@ -303,10 +301,20 @@ end
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tcgen05_sync!, Tuple{};
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("tcgen05.fence::before_thread_sync", ptx)
-    @test occursin("tcgen05.fence::after_thread_sync",  ptx)
-    @test occursin("tcgen05.wait::ld.sync.aligned",     ptx)
-    @test occursin("tcgen05.wait::st.sync.aligned",     ptx)
+    spellings = (
+        "tcgen05.fence::before_thread_sync",
+        "tcgen05.fence::after_thread_sync",
+        "tcgen05.wait::ld.sync.aligned",
+        "tcgen05.wait::st.sync.aligned",
+    )
+    positions = map(spellings) do spelling
+        @test length(findall(spelling, ptx)) == 1
+        findfirst(spelling, ptx)
+    end
+    @test all(!isnothing, positions)
+    if all(!isnothing, positions)
+        @test issorted(first.(positions))
+    end
 end
 
 

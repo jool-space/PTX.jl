@@ -39,6 +39,25 @@ hand-written wrappers register typed methods on the same
 `Operation{...}` singleton. Same call site, no user-visible change. See
 [Wrappers](wrappers.md).
 
+Some structured surfaces are **typed-wrapper-only**. All `mma.*`,
+`wgmma.mma_async*`, and all `tcgen05.*` forms, plus the internal
+multi-result selectors `setp.dual`, `shfl.*.pred`, and `mbarrier.*.report`,
+reject a dispatch miss before generic asm is rendered. Result groups, tuple
+widths, tied accumulators, address roles, or synthetic selector tokens cannot
+be recovered by the scalar trailing-type rule. The established `tcgen05`
+pointer forms of `alloc` and `commit` and the no-argument thread-sync fences
+also have exact methods, so wrong carriers or arity cannot reopen the generic
+path. A rejection usually means the modifier spelling, arity, tuple width, or
+Julia carrier type does not match a reviewed wrapper.
+
+`ptx"..."raw` is an explicit opt-out for these structural boundaries. It emits
+the requested text under the maximally conservative contract, but it does not
+validate modifier grammar, operand grouping, result ABI, PTX version, or target
+support. In particular, `raw` does not turn a malformed scalar rendering into a
+valid matrix or grouped-result instruction. The implicit-`CC.CF` family is
+stricter still: its hidden dependency makes even a standalone raw call unsafe,
+so raw extended-precision forms remain forbidden.
+
 ## Modifier syntax
 
 The macro splits on `.`; each segment becomes one Symbol verbatim.
@@ -80,11 +99,12 @@ Three families break this rule and are special-cased:
   destination is `parts[end-1]`. `cvt.rn.f16.f32` returns `Float16`.
 - **`setp`** — `setp.<cmp>.<dtype>` always returns `Bool`. The trailing
   modifier describes the *input* compare type, not the output.
-- **No-return families** — `setmaxnreg.{inc,dec}.sync.aligned.u32`,
-  `tensormap.replace.tile.<field>...b{32,64}`, and the `tcgen05` sinks
-  (`alloc`, `commit`, `relinquish_alloc_permit`) all carry a trailing
-  width modifier that describes an *input* operand. The chain treats
-  them as void; otherwise ptxas would reject with "Arguments mismatch".
+- **No-return families** — `setmaxnreg.{inc,dec}.sync.aligned.u32` and
+  `tensormap.replace.tile.<field>...b{32,64}` carry a trailing width modifier
+  that describes an *input* operand. Their contracts treat them as void;
+  otherwise ptxas would reject with "Arguments mismatch". The analogous
+  `tcgen05` sinks (`alloc`, `commit`, `relinquish_alloc_permit`) are handled by
+  exact typed wrappers instead of terminal-type inference.
 
 ### Packed FP carriers
 

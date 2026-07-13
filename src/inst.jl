@@ -353,26 +353,40 @@ build_head(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     isempty(mods) ? string(op) : string(op) * "." * join(string.(mods), ".")
 
 # Pure: no LLVM, no GPU, no @asmcall. Used by both the runtime call site and
-# host-side golden tests. `contract` defaults to the registry lookup; pass
-# one explicitly to build a spec for an eligible unregistered form (the raw
-# tier, host-side rendering tests). Semantic guards are checked first.
+# host-side golden tests. `contract` defaults to the registry lookup; pass one
+# explicitly for host-side rendering tests, or select the raw tier with the
+# distinct `raw=true` signal. Semantic guards are checked first.
 function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argtypes);
-                    contract::Union{FormContract, Nothing} = form_contract(op, mods))
+                    contract::Union{FormContract, Nothing, Missing} = missing,
+                    raw::Bool = false)
+    raw && contract !== missing && throw(ArgumentError(
+        "PTX.build_call: raw=true selects RAW_CONTRACT internally; " *
+        "do not also pass contract=" * repr(contract)))
+    selected_contract = raw ? RAW_CONTRACT :
+                        contract === missing ? form_contract(op, mods) : contract
     uses_implicit_cc(op, mods) && throw(ArgumentError(
         "ptx\"$(build_head(op, mods))\" accesses the implicit PTX CC.CF " *
         "flag, which cannot safely cross an LLVM inline-asm call boundary. " *
         "The raw tier does not repair that hidden dependency. Use the typed " *
         "wrapper with explicit Bool carry/borrow, or PTX.add_with_carry, " *
         "PTX.sub_with_borrow, or PTX.mul_wide for a fused operation."))
-    contract === nothing && error(
+    rule = typed_wrapper_only_rule(op, mods)
+    rule !== nothing && !raw && throw(ArgumentError(
+        "ptx\"$(build_head(op, mods))\" requires an exact typed wrapper: " *
+        rule.detail * ". No typed method matched this call, and the generic " *
+        "scalar chain cannot preserve its operand/result structure. Check the " *
+        "modifier spelling, arity, tuple widths, and carrier types, or use " *
+        "ptx\"$(build_head(op, mods))\"raw for an explicit conservative " *
+        "textual escape hatch."))
+    selected_contract === nothing && error(
         "ptx\"$(build_head(op, mods))\": opcode :$op is not in the form registry " *
         "(src/forms.jl). The chain default makes optimizer promises (purity, " *
         "memory, convergence) that must be reviewed per form — add a registry " *
         "entry, or use ptx\"...\"raw for the maximally-conservative contract " *
         "(sideeffect + memory clobber + convergent; pointer operands bracketed).")
-    rettype = contract.returns ? infer_rettype(op, mods) : Nothing
-    nonpure = !contract.pure || has_special_reg(argtypes)
-    bracket = contract.brackets
+    rettype = selected_contract.returns ? infer_rettype(op, mods) : Nothing
+    nonpure = !selected_contract.pure || has_special_reg(argtypes)
+    bracket = selected_contract.brackets
     head = build_head(op, mods)
 
     operand_strs   = String[]
@@ -401,7 +415,7 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     constraints = join(cparts, ",")
 
     return (; asm, constraints, side_effects = nonpure,
-              convergent = contract.convergent, rettype,
+              convergent = selected_contract.convergent, rettype,
               passthrough_argtypes = Tuple(passthrough),
               passthrough_indices  = Tuple(passthrough_ix))
 end
@@ -458,7 +472,7 @@ Base.:*(::RawOperation{op, M},  s::Symbol) where {op, M} =
     RawOperation{op, (M..., s)}()
 
 @generated function (::RawOperation{op, mods})(args::Vararg{Any,N}) where {op, mods, N}
-    _chain_call_expr(build_call(op, mods, args; contract = RAW_CONTRACT))
+    _chain_call_expr(build_call(op, mods, args; raw = true))
 end
 
 # --- Property notation: composition + completion ------------------------------
@@ -743,8 +757,10 @@ Returns `(; tier, method, rettype, intrinsics, asm)`:
   (`RAW_CONTRACT` for a `RawOperation`); the text is in `asm`.
 - `tier = :unregistered` — no wrapper and the opcode is not in the form
   registry: the call errors at the blessing boundary.
-- `tier = :forbidden` — a generic/raw spelling accesses implicit architectural
-  state that cannot safely cross the call boundary.
+- `tier = :forbidden` — the selected generic path is unsafe: either a spelling
+  accesses implicit architectural state that cannot cross the call boundary,
+  or a typed-wrapper-only form missed its exact method. Explicit raw remains
+  available for the latter structural case only.
 
 Binding is not selectability: an `:intrinsic` form can still fail ISel below
 its capability floor — that gate lives in the backend, not the registry.
@@ -758,11 +774,15 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
         uses_implicit_cc(op, mods) &&
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
+        !raw && requires_typed_wrapper(op, mods) &&
+            return (; tier = :forbidden, method = m, rettype = nothing,
+                      intrinsics = String[], asm = nothing)
         contract = raw ? RAW_CONTRACT : form_contract(op, mods)
         contract === nothing &&
             return (; tier = :unregistered, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
-        spec = build_call(op, mods, argts; contract)
+        spec = raw ? build_call(op, mods, argts; raw = true) :
+                     build_call(op, mods, argts; contract)
         return (; tier = :chain_asm, method = m, rettype = spec.rettype,
                   intrinsics = String[], asm = spec.asm)
     end

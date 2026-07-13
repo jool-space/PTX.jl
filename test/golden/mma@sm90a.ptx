@@ -19,8 +19,7 @@ ld.param.b32 %r15, [param8];
 ld.param.b32 %r16, [param9];
 mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 {%r17, %r18}, {%r0, %r1, %r2, %r3}, {%r4, %r5}, {%r15, %r16};
 st.global.b32 [%rd0+8], %r17;
-mov.b32 %r19, 0;
-mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32 %r20, {%r0, %r1}, {%r4}, {%r19, %r19, %r19, %r19};
-st.global.b32 [%rd0+12], %r20;
+mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32 {%r19, %r20, %r21, %r22}, {%r0, %r1, %r2, %r3}, {%r4, %r5}, {%r6, %r6, %r6, %r6};
+st.global.b32 [%rd0+12], %r19;
 ret;
 }

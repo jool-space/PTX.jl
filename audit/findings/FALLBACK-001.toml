@@ -1,7 +1,21 @@
 id = "FALLBACK-001"
-status = "confirmed"
+
+status = "resolved"
 severity = "high"
 category = "validation"
 summary = "Complex matrix and synthetic wrapper misses silently fall into scalar generic assembly instead of failing at the typed boundary."
 source_handoffs = ["wave1-lowering.md", "wave2-matrix.md", "wave3-memory.md"]
-validation_tier = "host dispatch and assembly shape"
+validation_tier = "host dispatch, LLVM selection, emitted PTX, and ptxas"
+
+[resolution]
+pr = 24
+commit = "0422edf2ab062648550724ea87c803f5c061b21c"
+scope = "full"
+evidence = [
+  "independent closed-world six-rule typed-wrapper boundary manifest",
+  "361 host boundary assertions including exact tcgen05 carrier and arity negatives",
+  "4231 NVVM selection and attribute conformance assertions",
+  "optimized LLVM retains both tcgen05 thread fences as side-effecting asm with memory clobbers",
+  "60 sm_100a emitted-PTX order and ptxas assertions cover the migrated tcgen05 lifecycle forms",
+  "dense m16n8k8 tf32 golden and ptxas checks pin the ISA-required A4/B2/C4 fragment schema",
+]
