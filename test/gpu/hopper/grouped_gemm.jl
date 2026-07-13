@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Uniform-shape grouped GEMM (Hopper) — algorithmic port of
 # pyptx/examples/hopper/grouped_gemm.py.
 #

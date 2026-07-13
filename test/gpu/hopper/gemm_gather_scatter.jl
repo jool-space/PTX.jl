@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Gather → GEMM → scatter fusion — ported from
 # cutlass/examples/52_hopper_gather_scatter_fusion (NVIDIA CUTLASS,
 # BSD-3-Clause).

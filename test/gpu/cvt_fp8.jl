@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=gpu evidence=runtime target=sm_89
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9
 using Microfloats
 using Microfloats: NanOnlyAllOnes, SAT, OVF
 

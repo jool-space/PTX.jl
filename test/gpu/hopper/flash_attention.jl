@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Hopper FlashAttention forward — simplified port of
 # pyptx/examples/hopper/experimental/flash_attention_hopper.py.
 #

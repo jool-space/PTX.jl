@@ -1,43 +1,32 @@
 module TestTargets
 
-using CUDACore: SMVersion
-import CUDACore
-
-export ActiveArchFloor, TestEnvironment, TestRequirement, PlanEntry,
+export CapabilityPredicate, TestEnvironment, TestRequirement, PlanEntry,
        format_manifest, parse_test_requirement, plan_entry,
-       read_test_requirement, requirement_for_test, runtime_supported,
-       suite_requires_cuda_routing, target_matches
+       capability_matches, read_test_requirement, requirement_for_test,
+       requires_gpu, requires_toolchain, runtime_supported
 
-"""
-A source-level requirement that selects the live device's own architecture-
-specific target at or above `cap`.  This is deliberately distinct from an
-`sm_NNa` requirement: an `sm_100a` cubin is exact-CC and does not become
-forward-compatible merely because the same Julia source can be recompiled for
-the active device's `a` target.
-"""
-struct ActiveArchFloor
+"""A direct live-device compute-capability predicate."""
+struct CapabilityPredicate
+    kind::Symbol
     cap::VersionNumber
 end
 
-const RuntimeTarget = Union{SMVersion, ActiveArchFloor}
-
-"""Structured resource, evidence, and live-device target policy for one test file."""
+"""Structured resource, evidence, and live-device capability policy for one test file."""
 struct TestRequirement
     requires::Symbol
     evidence::Symbol
-    targets::Vector{RuntimeTarget}
+    runtime::Vector{CapabilityPredicate}
 end
 
 struct TestEnvironment
-    cuda_routing_checked::Bool
-    cuda_functional::Bool
+    toolchain_checked::Bool
+    toolchain_available::Bool
+    toolchain_version::Union{Nothing,VersionNumber}
+    gpu_checked::Bool
+    gpu_functional::Bool
     capability::VersionNumber
     device_name::String
 end
-
-TestEnvironment(cuda_functional::Bool, capability::VersionNumber,
-                device_name::String) =
-    TestEnvironment(true, cuda_functional, capability, device_name)
 
 struct PlanEntry
     test::String
@@ -49,53 +38,57 @@ end
 const _BANNER_START_RE = r"^\s*#\s*TEST_TARGET\b"
 const _BANNER_RE = r"^\s*#\s*TEST_TARGET\s*:\s*(.*?)\s*$"
 const _FIELD_RE = r"^([a-z_]+)=([^\s]+)$"
-const _ACTIVE_ARCH_RE = r"^active-arch>=(\d+)\.(\d+)$"
-const _ALLOWED_FIELDS = Set(("requires", "evidence", "target"))
+const _MIN_CC_RE = r"^cc>=(\d+)(?:\.(\d+))?$"
+const _EQUAL_CC_RE = r"^cc==(\d+)(?:\.(\d+))?$"
+const _ALLOWED_FIELDS = Set(("requires", "evidence", "runtime"))
 
 _cap_string(cap::VersionNumber) = "$(cap.major).$(cap.minor)"
 
-function _sm_string(sm::SMVersion)
-    suffix = sm.feature_set === :arch ? "a" :
-             sm.feature_set === :family ? "f" : ""
-    "sm_$(sm.major)$(sm.minor)$suffix"
+function _parse_runtime(text::AbstractString)
+    m = match(_MIN_CC_RE, text)
+    if m !== nothing
+        major = parse(Int, m.captures[1])
+        minor = m.captures[2] === nothing ? 0 : parse(Int, m.captures[2])
+        return CapabilityPredicate(:minimum, VersionNumber(major, minor))
+    end
+    m = match(_EQUAL_CC_RE, text)
+    if m !== nothing
+        major = parse(Int, m.captures[1])
+        if m.captures[2] === nothing
+            return CapabilityPredicate(:major, VersionNumber(major))
+        end
+        return CapabilityPredicate(:exact,
+                                   VersionNumber(major, parse(Int, m.captures[2])))
+    end
+    throw(ArgumentError("invalid TEST_TARGET runtime predicate $(repr(text)); expected cc>=X[.Y], cc==X.Y, or cc==X"))
 end
 
-_target_string(target::SMVersion) = _sm_string(target)
-_target_string(target::ActiveArchFloor) =
-    "active-arch>=$(_cap_string(target.cap))"
-
-function _parse_target(text::AbstractString)::RuntimeTarget
-    m = match(_ACTIVE_ARCH_RE, text)
-    if m !== nothing
-        major, minor = parse.(Int, m.captures)
-        return ActiveArchFloor(VersionNumber(major, minor))
-    end
-    try
-        return SMVersion(text)
-    catch err
-        throw(ArgumentError("invalid TEST_TARGET target $(repr(text)): $(sprint(showerror, err))"))
-    end
+function _runtime_string(predicate::CapabilityPredicate)
+    predicate.kind === :minimum && return "cc>=$(_cap_string(predicate.cap))"
+    predicate.kind === :exact && return "cc==$(_cap_string(predicate.cap))"
+    predicate.kind === :major && return "cc==$(predicate.cap.major)"
+    error("unknown capability predicate kind $(repr(predicate.kind))")
 end
 
 function _validate_requirement(req::TestRequirement)
     if req.requires === :host
-        req.evidence === :host && isempty(req.targets) ||
-            throw(ArgumentError("requires=host needs evidence=host and no target"))
+        req.evidence === :host && isempty(req.runtime) ||
+            throw(ArgumentError("requires=host needs evidence=host and no runtime predicate"))
     elseif req.requires === :toolkit
-        if req.evidence === :ptxas
-            isempty(req.targets) ||
-                throw(ArgumentError("ptxas-only tests must declare their explicit targets at the compile call, not as a live-device target"))
+        if req.evidence in (:compile, :ptxas)
+            isempty(req.runtime) ||
+                throw(ArgumentError("offline compile tests must not declare a live-device runtime predicate"))
         elseif req.evidence === :mixed
-            isempty(req.targets) &&
-                throw(ArgumentError("mixed ptxas/runtime tests need a runtime target"))
+            isempty(req.runtime) &&
+                throw(ArgumentError("mixed ptxas/runtime tests need a runtime predicate"))
         else
-            throw(ArgumentError("requires=toolkit needs evidence=ptxas or evidence=mixed"))
+            throw(ArgumentError("requires=toolkit needs evidence=compile, evidence=ptxas, or evidence=mixed"))
         end
     elseif req.requires === :gpu
         req.evidence in (:runtime, :compile) ||
             throw(ArgumentError("requires=gpu needs evidence=runtime or evidence=compile"))
-        isempty(req.targets) &&
-            throw(ArgumentError("requires=gpu needs a live-device target"))
+        isempty(req.runtime) &&
+            throw(ArgumentError("requires=gpu needs a live-device runtime predicate"))
     else
         throw(ArgumentError("unknown TEST_TARGET resource $(repr(req.requires)); expected host, toolkit, or gpu"))
     end
@@ -105,11 +98,12 @@ end
 """
     parse_test_requirement(line)
 
-Parse one strict metadata banner.  Target alternatives use `|`, for example:
+Parse one strict metadata banner. Runtime alternatives use `|`, for example:
 
-    # TEST_TARGET: requires=gpu evidence=runtime target=sm_89
-    # TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f
-    # TEST_TARGET: requires=gpu evidence=runtime target=active-arch>=10.0
+    # TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9
+    # TEST_TARGET: requires=toolkit evidence=compile
+    # TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10|cc==11
+    # TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 """
 function parse_test_requirement(line::AbstractString)
     m = match(_BANNER_RE, line)
@@ -133,19 +127,19 @@ function parse_test_requirement(line::AbstractString)
         haskey(fields, key) ||
             throw(ArgumentError("TEST_TARGET banner is missing $key=..."))
     end
-    targets = RuntimeTarget[]
-    if haskey(fields, "target")
-        raw_targets = split(fields["target"], '|')
-        any(isempty, raw_targets) &&
-            throw(ArgumentError("TEST_TARGET target alternatives must be nonempty"))
-        append!(targets, _parse_target.(raw_targets))
-        length(unique(_target_string.(targets))) == length(targets) ||
-            throw(ArgumentError("TEST_TARGET contains a duplicate target alternative"))
+    runtime = CapabilityPredicate[]
+    if haskey(fields, "runtime")
+        raw_predicates = split(fields["runtime"], '|')
+        any(isempty, raw_predicates) &&
+            throw(ArgumentError("TEST_TARGET runtime alternatives must be nonempty"))
+        append!(runtime, _parse_runtime.(raw_predicates))
+        length(unique(_runtime_string.(runtime))) == length(runtime) ||
+            throw(ArgumentError("TEST_TARGET contains a duplicate runtime alternative"))
     end
 
     _validate_requirement(TestRequirement(Symbol(fields["requires"]),
                                           Symbol(fields["evidence"]),
-                                          targets))
+                                          runtime))
 end
 
 function read_test_requirement(file::AbstractString)
@@ -170,8 +164,8 @@ function read_test_requirement(file::AbstractString)
     parse_test_requirement(line)
 end
 
-const _HOST_REQUIREMENT = TestRequirement(:host, :host, RuntimeTarget[])
-const _PTXAS_REQUIREMENT = TestRequirement(:toolkit, :ptxas, RuntimeTarget[])
+const _HOST_REQUIREMENT = TestRequirement(:host, :host, CapabilityPredicate[])
+const _PTXAS_REQUIREMENT = TestRequirement(:toolkit, :ptxas, CapabilityPredicate[])
 
 """Return the explicit or path-derived policy for a discovered test."""
 function requirement_for_test(test::AbstractString, test_dir::AbstractString)
@@ -186,26 +180,31 @@ function requirement_for_test(test::AbstractString, test_dir::AbstractString)
     end
 end
 
-target_matches(target::SMVersion, cap::VersionNumber) =
-    CUDACore.runs_on(target, cap)
-target_matches(target::ActiveArchFloor, cap::VersionNumber) =
-    cap >= target.cap
-target_matches(req::TestRequirement, cap::VersionNumber) =
-    any(target -> target_matches(target, cap), req.targets)
+capability_matches(predicate::CapabilityPredicate, cap::VersionNumber) =
+    predicate.kind === :minimum ? cap >= predicate.cap :
+    predicate.kind === :exact ? cap == predicate.cap :
+    predicate.kind === :major ? cap.major == predicate.cap.major :
+    error("unknown capability predicate kind $(repr(predicate.kind))")
+capability_matches(req::TestRequirement, cap::VersionNumber) =
+    any(predicate -> capability_matches(predicate, cap), req.runtime)
 
 runtime_supported(req::TestRequirement, cap::VersionNumber) =
-    !isempty(req.targets) && target_matches(req, cap)
+    !isempty(req.runtime) && capability_matches(req, cap)
 runtime_supported(file::AbstractString, cap::VersionNumber) =
     runtime_supported(read_test_requirement(file), cap)
 
-"""Whether a selected suite needs a CUDA functionality/capability routing check."""
-suite_requires_cuda_routing(tests) =
-    any(test -> startswith(test, "gpu/") || startswith(test, "ptxas/"), tests)
+"""Whether a requirement needs the offline CUDA compiler/toolchain."""
+requires_toolchain(req::TestRequirement) = req.requires !== :host
+
+"""Whether a requirement contains active-device compile or runtime evidence."""
+requires_gpu(req::TestRequirement) =
+    req.requires === :gpu ||
+    (req.requires === :toolkit && req.evidence === :mixed)
 
 function _describe(req::TestRequirement)
-    target = isempty(req.targets) ? "" :
-             " target=" * join(_target_string.(req.targets), "|")
-    "requires=$(req.requires) evidence=$(req.evidence)$target"
+    runtime = isempty(req.runtime) ? "" :
+              " runtime=" * join(_runtime_string.(req.runtime), "|")
+    "requires=$(req.requires) evidence=$(req.evidence)$runtime"
 end
 
 function plan_entry(test::AbstractString, req::TestRequirement,
@@ -213,42 +212,64 @@ function plan_entry(test::AbstractString, req::TestRequirement,
     eligible = runtime_supported(req, env.capability)
     if forced
         if req.requires === :toolkit && req.evidence === :mixed
-            runtime = eligible ? "runtime eligible" :
-                                 "runtime remains skipped (live device target mismatch)"
+            runtime = if !env.gpu_checked
+                "runtime routing check skipped"
+            elseif !env.gpu_functional
+                "runtime remains skipped (functional GPU unavailable)"
+            elseif eligible
+                "runtime eligible"
+            else
+                "runtime remains skipped (live device capability mismatch)"
+            end
             return PlanEntry(String(test), :execute, req,
-                             "explicit selection executes cross-target ptxas compile; $runtime")
+                             "explicit selection executes offline cross-target ptxas compile; $runtime")
         end
-        detail = isempty(req.targets) ? "" :
-                 eligible ? "; runtime target eligible" :
-                            "; runtime target ineligible but gate bypassed"
+        detail = isempty(req.runtime) ? "" :
+                 env.gpu_functional && eligible ? "; runtime capability eligible" :
+                 env.gpu_functional ? "; runtime capability ineligible but gate bypassed" :
+                                      "; functional GPU unavailable but gate bypassed"
         return PlanEntry(String(test), :execute, req,
                          "explicit selection bypasses default routing$detail")
     end
 
     if req.requires === :host
         return PlanEntry(String(test), :execute, req, "host-only")
-    elseif !env.cuda_routing_checked
+    elseif !env.toolchain_checked
         return PlanEntry(String(test), :skip, req,
-                         "CUDA routing check skipped for host-only selection")
-    elseif !env.cuda_functional
+                         "offline compiler routing check skipped for host-only selection")
+    elseif !env.toolchain_available
         return PlanEntry(String(test), :skip, req,
-                         "functional CUDA toolkit/device unavailable")
+                         "offline CUDA compiler/ptxas unavailable")
     elseif req.requires === :toolkit
-        if req.evidence === :ptxas
+        if req.evidence in (:compile, :ptxas)
+            kind = req.evidence === :compile ? "PTX emission" : "ptxas compile"
             return PlanEntry(String(test), :execute, req,
-                             "cross-target ptxas compile; live-device target is not a gate")
+                             "offline explicit-target $kind; live GPU is not required")
         end
-        runtime = eligible ? "runtime eligible" :
-                             "runtime skipped (live device target mismatch)"
+        runtime = if !env.gpu_checked
+            "runtime routing check skipped"
+        elseif !env.gpu_functional
+            "runtime skipped (functional GPU unavailable)"
+        elseif eligible
+            "runtime eligible"
+        else
+            "runtime skipped (live device capability mismatch)"
+        end
         return PlanEntry(String(test), :execute, req,
-                         "cross-target ptxas compile; $runtime")
+                         "offline cross-target ptxas compile; $runtime")
+    elseif !env.gpu_checked
+        return PlanEntry(String(test), :skip, req,
+                         "GPU routing check skipped for non-GPU selection")
+    elseif !env.gpu_functional
+        return PlanEntry(String(test), :skip, req,
+                         "functional GPU unavailable")
     elseif eligible
-        kind = req.evidence === :compile ? "active-device compile target satisfied" :
-                                          "runtime target satisfied"
+        kind = req.evidence === :compile ? "active-device compile capability satisfied" :
+                                          "runtime capability satisfied"
         return PlanEntry(String(test), :execute, req, kind)
     else
         return PlanEntry(String(test), :skip, req,
-                         "live device target mismatch")
+                         "live device capability mismatch")
     end
 end
 
@@ -257,20 +278,27 @@ function format_manifest(entries::AbstractVector{PlanEntry}, env::TestEnvironmen
     ordered = sort(entries; by = entry -> entry.test)
     executed = count(entry -> entry.action === :execute, ordered)
     skipped = count(entry -> entry.action === :skip, ordered)
-    environment = if !env.cuda_routing_checked
-        # CUDACore is still imported by the test harness and performs its own
-        # initialization.  This only says that the runner did not issue an
-        # additional functionality/device-capability query for routing.
-        "CUDA routing-check=skipped selection=host-only"
-    elseif env.cuda_functional
+    toolchain = if !env.toolchain_checked
+        "offline-compiler routing-check=skipped"
+    elseif env.toolchain_available
+        version = env.toolchain_version === nothing ? "unknown" :
+                  string(env.toolchain_version)
+        "offline-compiler=available version=$version"
+    else
+        "offline-compiler=unavailable"
+    end
+    gpu = if !env.gpu_checked
+        "GPU routing-check=skipped"
+    elseif env.gpu_functional
         # Capability is factual device evidence.  Do not synthesize an
         # `sm_NNa` target from it: architecture-specific targets exist only
         # for selected architectures, and the compiler may choose another
         # compatible target.
-        "CUDA=functional device=$(repr(env.device_name)) capability=$(_cap_string(env.capability))"
+        "GPU=functional device=$(repr(env.device_name)) capability=$(_cap_string(env.capability))"
     else
-        "CUDA=unavailable"
+        "GPU=unavailable"
     end
+    environment = "$toolchain; $gpu"
     lines = String[
         "PTX test target manifest",
         "  environment: $environment",

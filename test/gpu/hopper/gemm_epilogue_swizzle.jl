@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Int8 GEMM with SMEM-staged vectorized epilogue — ported from
 # cutlass/examples/50_hopper_gemm_with_epilogue_swizzle (NVIDIA CUTLASS,
 # BSD-3-Clause).

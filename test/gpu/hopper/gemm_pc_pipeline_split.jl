@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Producer + 2 consumers (M-split) pipelined Hopper GEMM.
 #
 # Extension of gemm_pc_pipeline.jl: same producer-consumer rendezvous,

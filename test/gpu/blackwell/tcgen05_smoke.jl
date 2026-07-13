@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10|cc==11
 # Blackwell tcgen05 smoke kernels — alloc / mma / ld isolated from the full
 # GEMM path. Ported from pyptx examples/blackwell/tcgen05_smoke.py
 # (build_alloc_only / build_mma_only / build_ld_only).
@@ -10,11 +10,12 @@
 # the Blackwell analog of Hopper's gemm_warpgroup smoke kernel. Numeric
 # TMEM data integrity is covered separately by tcgen05_roundtrip.jl.
 #
-# Always validates cross-arch (sm_100a ptxas) — runs on the sm_89 dev box
-# where the kernels cannot launch. PTX 9.3 sections 9.7.17.7, 9.7.17.8,
-# 9.7.17.10, and 9.7.17.12 support every form used here on the `sm_100f`
-# and `sm_110f` families. Those family targets admit later CCs in each
-# family while excluding GB10 `sm_121`, which does not provide tcgen05.
+# Always validates cross-target (sm_100a ptxas) — runs on the CC 8.9 dev box
+# where the kernels cannot launch. The concrete forms inventoried here are
+# allocation/deallocation/relinquish (PTX 9.3 9.7.17.7), base ld/wait
+# (9.7.17.8), f16 MMA (9.7.17.10), and commit (9.7.17.12). Their target notes
+# support the sm_10x and sm_11x families, so runtime admits CC major 10 or 11
+# and excludes GB10 CC 12.1. Any a-only tcgen form needs an exact-minor policy.
 # SMEM layout mirrors pyptx exactly (A | B | mbar | tmem_slot)
 # and exceeds 48 KiB, so the kernels use dynamic SMEM with an explicit
 # MAX_DYNAMIC_SHARED_SIZE_BYTES opt-in (same idiom as
@@ -180,8 +181,7 @@ end
     @test occursin("tcgen05.wait::ld.sync.aligned", ptx_ld)
 end
 
-# Runtime path — gated on the PTX-defined tcgen05 families. The OR-set
-# admits later CCs in the sm_100 and sm_110 families while skipping sm_12x.
+# Runtime path — gated on the concrete family-safe forms' CC 10.x/11.x policy.
 if test_runtime_supported(@__FILE__)
     @testset "tcgen05 smoke kernels (B300 runtime)" begin
         for (kernel!, marker) in (

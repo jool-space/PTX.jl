@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Full warp-specialized Hopper GEMM. Port of
 # pyptx/examples/hopper/gemm_highperf_hopper.py. Composes every Hopper
 # brick validated in this directory + adds the three remaining pieces:

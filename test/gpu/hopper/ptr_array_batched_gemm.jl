@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Ptr-array batched Hopper GEMM — ported from
 # cutlass/examples/56_hopper_ptr_array_batched_gemm (NVIDIA CUTLASS,
 # BSD-3-Clause).

@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Single-warpgroup Hopper GEMM — TMA load → mbarrier sync → wgmma → store.
 #
 # Headline Hopper kernel for ROADMAP item 6. Composes the full sm_90a stack:

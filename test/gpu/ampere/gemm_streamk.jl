@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=gpu evidence=runtime target=sm_80
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.0
 #
 # Ported from cutlass/examples/47_ampere_gemm_universal_streamk
 # (NVIDIA CUTLASS, BSD-3-Clause). The original demonstrates CUTLASS's

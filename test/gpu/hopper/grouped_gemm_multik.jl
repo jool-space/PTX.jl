@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Multi-K grouped GEMM (Hopper) — pyptx's actual perf-tuned config.
 #
 # Same MoE-shape algorithm as grouped_gemm.jl, but each K-iter loads

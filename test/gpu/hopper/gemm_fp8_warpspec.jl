@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # FP8 warp-specialized Hopper GEMM — ported from
 # cutlass/examples/54_hopper_fp8_warp_specialized_gemm (NVIDIA CUTLASS,
 # BSD-3-Clause).

@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Structured-sparse Hopper GEMM (`wgmma.mma_async.sp`) — ported from
 # cutlass/examples/62_hopper_sparse_gemm (NVIDIA CUTLASS, BSD-3-Clause).
 #

@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # TMA shared-memory swizzle placement probe — documents and regression-
 # guards what the hardware actually does with `:B32` / `:B64` / `:B128`
 # tensor-map swizzle modes.

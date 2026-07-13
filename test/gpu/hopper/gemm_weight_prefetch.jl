@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # GEMM with L2 weight prefetch — ported from
 # cutlass/examples/63_hopper_gemm_with_weight_prefetch (NVIDIA CUTLASS,
 # BSD-3-Clause).

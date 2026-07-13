@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Cluster GEMM with TMA store epilogue + bf16 output.
 #
 # Differs from gemm_pc_pipeline_cluster.jl in only one piece — the

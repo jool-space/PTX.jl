@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Mixed-dtype Hopper GEMM (int8 weights → bf16 in-mainloop upconvert) —
 # ported from cutlass/examples/55_hopper_mixed_dtype_gemm (NVIDIA CUTLASS,
 # BSD-3-Clause).

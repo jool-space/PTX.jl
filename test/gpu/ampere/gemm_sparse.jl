@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=gpu evidence=runtime target=sm_80
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.0
 #
 # Ported from cutlass/examples/15_ampere_sparse_tensorop_gemm
 # (NVIDIA CUTLASS, BSD-3-Clause). The original runs CUTLASS's 2:4

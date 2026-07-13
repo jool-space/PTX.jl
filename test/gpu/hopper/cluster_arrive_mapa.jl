@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Cross-CTA mbarrier arrive via `mapa.shared::cluster` — the canonical
 # rendezvous pattern for producer/consumer warpgroup splits across the
 # cluster. Each CTA's thread 0 arrives on CTA-0's local mbarrier; CTA 0

@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10|cc==11
 # Blackwell tcgen05 accumulation probe. Ported from pyptx
 # examples/blackwell/tcgen05_accum_probe.py (default build: num_mmas=4,
 # advance_descs=True, scale_c=None, split_after=None).
@@ -22,8 +22,8 @@
 # add-on-descriptor path in the port. Uniform 0x3F803F80 fill is
 # swizzle-invariant → linear fill, swizzle math skipped (see mma_probe).
 #
-# Static SMEM (< 48 KiB). Always ptxas-validates cross-arch at sm_100a;
-# runtime admits the PTX-defined sm_100f and sm_110f tcgen05 families.
+# Static SMEM (< 48 KiB). Always ptxas-validates cross-target at sm_100a;
+# the concrete base forms used here are runtime-eligible on CC 10.x/11.x.
 
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
            BlackwellLayout, tmem_lane_addr
@@ -126,7 +126,7 @@ end
     @test occursin("tcgen05.ld.sync.aligned.32x32b.x64.b32", ptx)
 end
 
-# tcgen05 family targets only; see tcgen05_smoke.jl rationale.
+# Family-safe tcgen05 forms on CC 10.x/11.x; see tcgen05_smoke.jl rationale.
 if test_runtime_supported(@__FILE__)
     @testset "tcgen05 accumulation probe (B300 runtime, 4·A·B = 64)" begin
         O = CUDACore.zeros(Float32, 32 * 64)

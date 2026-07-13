@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10|cc==11
 # Blackwell tcgen05 B128 *non-uniform* isolation probe.
 #
 # This is the probe BLACKWELL_INTERFACE_NOTES.md friction #1 and memory
@@ -26,8 +26,8 @@
 # host-tested PTX helpers instead of inlined magic.
 #
 # SMEM = A 16384 + B 16384 + bar 8 + slot 4 = 32796 B < 48 KiB → static.
-# Always ptxas-validates cross-arch at sm_100a; runtime admits the
-# PTX-defined sm_100f and sm_110f tcgen05 families.
+# Always ptxas-validates cross-target at sm_100a; the concrete base forms
+# used here are runtime-eligible on CC 10.x/11.x.
 
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
            tcgen05_layout_kmajor, kmajor_swizzled_logical_bytes,
@@ -154,7 +154,7 @@ end
     @test occursin("tcgen05.commit.cta_group::1", ptx)
 end
 
-# tcgen05 family targets only; see tcgen05_smoke.jl rationale.
+# Family-safe tcgen05 forms on CC 10.x/11.x; see tcgen05_smoke.jl rationale.
 if test_runtime_supported(@__FILE__)
     @testset "tcgen05 B128 non-uniform probe (B300 runtime, A·Bᵀ)" begin
         # Pack two bf16 per b32 word, K-major: word(row,kw) holds

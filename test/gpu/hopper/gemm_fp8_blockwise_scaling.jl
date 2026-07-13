@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # FP8 GEMM with blockwise scaling — ported from
 # cutlass/examples/67_hopper_fp8_warp_specialized_gemm_with_blockwise_scaling
 # (NVIDIA CUTLASS, BSD-3-Clause).

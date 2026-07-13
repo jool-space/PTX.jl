@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=gpu evidence=runtime target=sm_90
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=9.0
 #
 # mbarrier semantics on hardware after the tier-2 migration: a full
 # init → arrive → wait cycle through the notation surface, exercising the

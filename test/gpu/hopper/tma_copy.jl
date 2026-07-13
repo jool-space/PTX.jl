@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=gpu evidence=runtime target=sm_90
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=9.0
 #
 # End-to-end TMA round-trip: host builds a 2D `CUtensorMap` for an 8×8 bf16
 # source tensor, uploads the 128-byte descriptor blob to device memory, then

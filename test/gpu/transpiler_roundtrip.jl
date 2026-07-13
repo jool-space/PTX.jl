@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=gpu evidence=runtime target=sm_70
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=7.0
 using CUDATools
 
 # Roundtrip test: capture PTX from each example kernel via CUDATools.code_ptx,

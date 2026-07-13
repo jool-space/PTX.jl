@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # 2-CTA cluster GEMM: producer + 2 consumers per CTA, multicast B-load
 # across the cluster. Builds on gemm_pc_pipeline_split.jl by wrapping
 # its 1-producer + 2-consumer M-split shape inside a 2-CTA cluster

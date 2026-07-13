@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Runtime cluster-launch round-trip for TMA multicast.
 #
 # The ptxas testset is cross-target and runs on any CUDACore-loadable device.

@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # GETT — Generalized Tensor times Tensor contraction — ported from
 # cutlass/examples/51_hopper_gett (NVIDIA CUTLASS, BSD-3-Clause).
 #

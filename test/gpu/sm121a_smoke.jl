@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=gpu evidence=runtime target=sm_121a
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc==12.1
 #
 # Hardware smoke test for the consumer-Blackwell sub-byte FP tensor core.
 # Mirrors `_exec_mma_bf16_smoke!` at test/gpu/exec.jl:158 — A=B=0, identity C,

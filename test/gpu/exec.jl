@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=gpu evidence=runtime target=sm_89
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9
 #
 # End-to-end tests: kernels launch on a real device and produce correct
 # numerical results. Compile-only Hopper/Blackwell tests live under

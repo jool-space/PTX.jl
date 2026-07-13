@@ -2,96 +2,99 @@ using .TestTargets
 
 @testset "structured test target metadata" begin
     @testset "strict parser" begin
-        baseline = parse_test_requirement(
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_89")
-        @test baseline.requires === :gpu
-        @test baseline.evidence === :runtime
-        @test length(baseline.targets) == 1
-        @test baseline.targets[1].feature_set === :baseline
+        floor = parse_test_requirement(
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9")
+        @test floor.requires === :gpu
+        @test floor.evidence === :runtime
+        @test only(floor.runtime) == CapabilityPredicate(:minimum, v"8.9")
 
         family = parse_test_requirement(
-            "# TEST_TARGET: requires=gpu evidence=compile target=sm_100f")
-        @test family.targets[1].feature_set === :family
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc==10")
+        @test only(family.runtime) == CapabilityPredicate(:major, v"10.0")
 
         exact = parse_test_requirement(
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_121a")
-        @test exact.targets[1].feature_set === :arch
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc==12.1")
+        @test only(exact.runtime) == CapabilityPredicate(:exact, v"12.1")
 
         tcgen = parse_test_requirement(
-            "# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f")
+            "# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10|cc==11")
         @test tcgen.requires === :toolkit
         @test tcgen.evidence === :mixed
-        @test length(tcgen.targets) == 2
+        @test length(tcgen.runtime) == 2
 
-        active = parse_test_requirement(
-            "# TEST_TARGET: requires=gpu evidence=runtime target=active-arch>=10.0")
-        @test only(active.targets) == ActiveArchFloor(v"10.0")
+        compile = parse_test_requirement(
+            "# TEST_TARGET: requires=toolkit evidence=compile")
+        @test isempty(compile.runtime)
 
         ptxas = parse_test_requirement(
             "# TEST_TARGET: requires=toolkit evidence=ptxas")
-        @test isempty(ptxas.targets)
+        @test isempty(ptxas.runtime)
 
         bad = [
-            "# TEST_TARGET requires=gpu evidence=runtime target=sm_89",
-            "# TEST_TARGET: evidence=runtime target=sm_89",
-            "# TEST_TARGET: requires=gpu target=sm_89",
+            "# TEST_TARGET requires=gpu evidence=runtime runtime=cc>=8.9",
+            "# TEST_TARGET: evidence=runtime runtime=cc>=8.9",
+            "# TEST_TARGET: requires=gpu runtime=cc>=8.9",
             "# TEST_TARGET: requires=gpu evidence=runtime",
-            "# TEST_TARGET: requires=gpu evidence=ptxas target=sm_89",
+            "# TEST_TARGET: requires=gpu evidence=ptxas runtime=cc>=8.9",
             "# TEST_TARGET: requires=toolkit evidence=mixed",
-            "# TEST_TARGET: requires=toolkit evidence=ptxas target=sm_90a",
-            "# TEST_TARGET: requires=host evidence=host target=sm_70",
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_89|sm_89",
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_89|",
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_9x",
-            "# TEST_TARGET: requires=gpu evidence=runtime target=active-arch>10.0",
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_89 surprise=yes",
-            "# TEST_TARGET: requires=gpu requires=host evidence=runtime target=sm_89",
+            "# TEST_TARGET: requires=toolkit evidence=ptxas runtime=cc==9.0",
+            "# TEST_TARGET: requires=toolkit evidence=compile runtime=cc>=8.9",
+            "# TEST_TARGET: requires=host evidence=host runtime=cc>=7.0",
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9|cc>=8.9",
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9|",
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc=8.9",
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc==10.0.1",
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc-major==10",
+            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_89",
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9 surprise=yes",
+            "# TEST_TARGET: requires=gpu requires=host evidence=runtime runtime=cc>=8.9",
         ]
         for line in bad
             @test_throws ArgumentError parse_test_requirement(line)
         end
     end
 
-    @testset "baseline, family, arch, and active-arch compatibility" begin
-        baseline = parse_test_requirement(
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_89")
-        @test !target_matches(baseline, v"8.8")
-        @test target_matches(baseline, v"8.9")
-        @test target_matches(baseline, v"9.0")
-        @test target_matches(baseline, v"12.1")
+    @testset "minimum, exact-major, and exact-minor capability predicates" begin
+        floor = parse_test_requirement(
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9")
+        @test !capability_matches(floor, v"8.8")
+        @test capability_matches(floor, v"8.9")
+        @test capability_matches(floor, v"9.0")
+        @test capability_matches(floor, v"12.1")
 
         family = parse_test_requirement(
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_100f")
-        @test !target_matches(family, v"9.0")
-        @test target_matches(family, v"10.0")
-        @test target_matches(family, v"10.3")
-        @test !target_matches(family, v"11.0")
-        @test !target_matches(family, v"12.1")
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc==10")
+        @test !capability_matches(family, v"9.0")
+        @test capability_matches(family, v"10.0")
+        @test capability_matches(family, v"10.3")
+        @test !capability_matches(family, v"11.0")
+        @test !capability_matches(family, v"12.1")
 
-        arch = parse_test_requirement(
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_100a")
-        @test target_matches(arch, v"10.0")
-        @test !target_matches(arch, v"10.3")
-        @test !target_matches(arch, v"12.1")
+        exact = parse_test_requirement(
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc==10.0")
+        @test capability_matches(exact, v"10.0")
+        @test !capability_matches(exact, v"10.3")
+        @test !capability_matches(exact, v"12.1")
 
         tcgen = parse_test_requirement(
-            "# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f")
-        @test target_matches(tcgen, v"10.0")
-        @test target_matches(tcgen, v"10.3")
-        @test target_matches(tcgen, v"11.0")
-        @test !target_matches(tcgen, v"12.1") # GB10 is not tcgen05.
+            "# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10|cc==11")
+        @test capability_matches(tcgen, v"10.0")
+        @test capability_matches(tcgen, v"10.3")
+        @test capability_matches(tcgen, v"11.0")
+        @test capability_matches(tcgen, v"11.7")
+        @test !capability_matches(tcgen, v"12.1") # GB10 is not tcgen05.
 
         gb10 = parse_test_requirement(
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_121a")
-        @test target_matches(gb10, v"12.1")
-        @test !target_matches(gb10, v"12.0")
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc==12.1")
+        @test capability_matches(gb10, v"12.1")
+        @test !capability_matches(gb10, v"12.0")
 
-        active = parse_test_requirement(
-            "# TEST_TARGET: requires=gpu evidence=runtime target=active-arch>=10.0")
-        @test !target_matches(active, v"9.0")
-        @test target_matches(active, v"10.0")
-        @test target_matches(active, v"10.3")
-        @test target_matches(active, v"12.1")
+        floor10 = parse_test_requirement(
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=10")
+        @test !capability_matches(floor10, v"9.0")
+        @test capability_matches(floor10, v"10.0")
+        @test capability_matches(floor10, v"10.3")
+        @test capability_matches(floor10, v"12.1")
     end
 
     @testset "all GPU files have one parseable policy" begin
@@ -101,17 +104,17 @@ using .TestTargets
                       for name in names if endswith(name, ".jl")])
 
         # Independent closed-world inventory: registration and oracle do not
-        # derive from the same banners, so changing sm_90a to sm_90 (or moving
-        # a file between evidence tiers) is a review-visible test failure.
+        # derive from the same banners, so changing an exact predicate to a
+        # floor (or moving a file between evidence tiers) is review-visible.
         expected_by_banner = Dict(
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_70" => Set([
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=7.0" => Set([
                 "extended_precision.jl", "kernel_abstractions.jl",
                 "layer_norm.jl", "rms_norm.jl", "softmax.jl", "swiglu.jl",
                 "transpiler_roundtrip.jl",
             ]),
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_75" =>
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=7.5" =>
                 Set(["nvvm.jl"]),
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_80" => Set([
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.0" => Set([
                 "ampere/conv2d_fprop.jl", "ampere/gemm.jl",
                 "ampere/gemm_3xtf32.jl", "ampere/gemm_fp64.jl",
                 "ampere/gemm_highperf.jl", "ampere/gemm_highperf_swizzled.jl",
@@ -119,26 +122,24 @@ using .TestTargets
                 "ampere/gemm_sparse.jl", "ampere/gemm_streamk.jl",
                 "ampere/gemm_tf32.jl",
             ]),
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_89" => Set([
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9" => Set([
                 "ada/gemm_fp8.jl", "corpus_launch.jl", "cvt_fp8.jl",
                 "exec.jl", "mma_fp8.jl",
             ]),
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_90" =>
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=9.0" =>
                 Set(["hopper/tma_copy.jl", "mbarrier_roundtrip.jl",
                      "tensor_map.jl"]),
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_100" =>
-                Set(["add_f32x2.jl"]),
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_121a" =>
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=10.0" =>
+                Set(["add_f32x2.jl", "cvt_subbyte_fp.jl"]),
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc==12.1" =>
                 Set(["sm121a_smoke.jl"]),
-            "# TEST_TARGET: requires=gpu evidence=runtime target=active-arch>=10.0" =>
-                Set(["cvt_subbyte_fp.jl"]),
-            "# TEST_TARGET: requires=gpu evidence=compile target=sm_89" =>
+            "# TEST_TARGET: requires=toolkit evidence=compile" =>
                 Set(["text.jl"]),
             "# TEST_TARGET: requires=toolkit evidence=ptxas" => Set([
                 "corpus_compile.jl", "hopper/tma_epilogue.jl",
                 "hopper/wgmma_sweep.jl",
             ]),
-            "# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a" => Set([
+            "# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0" => Set([
                 "hopper/cluster_arrive_mapa.jl", "hopper/flash_attention.jl",
                 "hopper/gemm_activation_fusion.jl",
                 "hopper/gemm_epilogue_swizzle.jl",
@@ -159,9 +160,9 @@ using .TestTargets
                 "hopper/tma_swizzle_probe.jl",
             ]),
             # PTX 9.3 sections 9.7.17.7, .8, .10, and .12 support the
-            # alloc/ld/st/wait/f16-mma/commit forms used by these files on
-            # both family targets.  Exact sm_100a|sm_103a would omit sm_11x.
-            "# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f" => Set([
+            # alloc/ld/st/wait/f16-mma/commit forms used by these files in
+            # both CC 10.x and CC 11.x families, but not CC 12.x.
+            "# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10|cc==11" => Set([
                 "blackwell/gemm_highperf_blackwell.jl",
                 "blackwell/grouped_gemm.jl",
                 "blackwell/tcgen05_accum_probe.jl",
@@ -191,8 +192,8 @@ using .TestTargets
         @test length(files) == length(expected) == 65
 
         mixed_names = union(
-            expected_by_banner["# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a"],
-            expected_by_banner["# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f"],
+            expected_by_banner["# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0"],
+            expected_by_banner["# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10|cc==11"],
         )
         two_runtime_sections = Set([
             "blackwell/gemm_highperf_blackwell.jl",
@@ -210,9 +211,12 @@ using .TestTargets
                            req.evidence === :mixed, requirements) == 31
         @test count(req -> req.requires === :toolkit &&
                            req.evidence === :ptxas, requirements) == 3
-        @test count(req -> req.requires === :gpu, requirements) == 31
+        @test count(req -> req.requires === :toolkit &&
+                           req.evidence === :compile, requirements) == 1
+        @test count(req -> req.requires === :gpu, requirements) == 30
         @test all(file -> !occursin("REQUIRES CC", read(file, String)), files)
         @test all(file -> !occursin(r"\bDEV_CAP\b", read(file, String)), files)
+        @test all(file -> !occursin(r"TEST_TARGET.*\bsm_", read(file, String)), files)
 
         mktemp() do path, io
             write(io, "# ordinary comment\n")
@@ -220,22 +224,22 @@ using .TestTargets
             @test_throws ArgumentError read_test_requirement(path)
         end
         mktemp() do path, io
-            write(io, "# TEST_TARGET: requires=gpu evidence=runtime target=sm_80\n")
-            write(io, "# TEST_TARGET: requires=gpu evidence=runtime target=sm_89\n")
+            write(io, "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.0\n")
+            write(io, "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9\n")
             close(io)
             @test_throws ArgumentError read_test_requirement(path)
         end
         mktemp() do path, io
-            write(io, "# TEST_TARGET: requires=gpu evidence=runtime target=sm_80\n")
+            write(io, "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.0\n")
             for _ in 1:24
                 write(io, "# padding\n")
             end
-            write(io, "# TEST_TARGET: requires=gpu evidence=runtime target=sm_89\n")
+            write(io, "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9\n")
             close(io)
             @test_throws ArgumentError read_test_requirement(path)
         end
         mktemp() do path, io
-            write(io, "# TEST_TARGET: requires=gpu evidence=runtime target=sm_80\n")
+            write(io, "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.0\n")
             for _ in 1:24
                 write(io, "# padding\n")
             end
@@ -247,29 +251,39 @@ using .TestTargets
             for _ in 1:20
                 write(io, "# padding\n")
             end
-            write(io, "# TEST_TARGET: requires=gpu evidence=runtime target=sm_80\n")
+            write(io, "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.0\n")
             close(io)
             @test_throws ArgumentError read_test_requirement(path)
         end
     end
 
     @testset "deterministic routing and manifest" begin
-        @test !suite_requires_cuda_routing(["host/parser", "setup"])
-        @test suite_requires_cuda_routing(["host/parser", "gpu/exec"])
-        @test suite_requires_cuda_routing(["ptxas/baseline"])
-
         host = parse_test_requirement(
             "# TEST_TARGET: requires=host evidence=host")
+        compile = parse_test_requirement(
+            "# TEST_TARGET: requires=toolkit evidence=compile")
         ptxas = parse_test_requirement(
             "# TEST_TARGET: requires=toolkit evidence=ptxas")
         hopper = parse_test_requirement(
-            "# TEST_TARGET: requires=gpu evidence=runtime target=sm_90a")
+            "# TEST_TARGET: requires=gpu evidence=runtime runtime=cc==9.0")
         mixed = parse_test_requirement(
-            "# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a")
+            "# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0")
         tcgen = parse_test_requirement(
-            "# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f")
+            "# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10|cc==11")
 
-        ada = TestEnvironment(true, v"8.9", "Ada")
+        @test !requires_toolchain(host)
+        @test !requires_gpu(host)
+        @test requires_toolchain(compile)
+        @test !requires_gpu(compile)
+        @test requires_toolchain(ptxas)
+        @test !requires_gpu(ptxas)
+        @test requires_toolchain(mixed)
+        @test requires_gpu(mixed)
+        @test requires_toolchain(hopper)
+        @test requires_gpu(hopper)
+
+        ada = TestEnvironment(true, true, v"13.3.33",
+                              true, true, v"8.9", "Ada")
         entries = [
             plan_entry("z/hopper", hopper, ada),
             plan_entry("a/host", host, ada),
@@ -280,29 +294,46 @@ using .TestTargets
         @test entries[2].action === :execute
         @test entries[3].action === :execute
         @test entries[4].action === :execute
-        @test occursin("live-device target is not a gate", entries[3].reason)
+        @test occursin("live GPU is not required", entries[3].reason)
         @test occursin("runtime skipped", entries[4].reason)
 
         manifest = format_manifest(entries, ada)
         @test manifest == format_manifest(reverse(entries), ada)
         @test occursin("summary: execute=3 skip=1 total=4", manifest)
+        @test occursin("offline-compiler=available version=13.3.33", manifest)
         @test occursin("device=\"Ada\" capability=8.9", manifest)
         @test !occursin("active_target", manifest)
         @test !occursin("sm_89a", manifest)
         @test findfirst("a/host", manifest) < findfirst("z/hopper", manifest)
 
-        no_cuda = TestEnvironment(false, v"0.0", "")
-        @test plan_entry("host", host, no_cuda).action === :execute
-        @test plan_entry("ptxas", ptxas, no_cuda).action === :skip
-        @test plan_entry("gpu", hopper, no_cuda).action === :skip
+        offline = TestEnvironment(true, true, v"13.3.33",
+                                  true, false, v"0.0", "")
+        @test plan_entry("host", host, offline).action === :execute
+        @test plan_entry("compile", compile, offline).action === :execute
+        @test plan_entry("ptxas", ptxas, offline).action === :execute
+        @test plan_entry("mixed", mixed, offline).action === :execute
+        @test occursin("functional GPU unavailable",
+                       plan_entry("mixed", mixed, offline).reason)
+        @test plan_entry("gpu", hopper, offline).action === :skip
+        @test occursin("GPU=unavailable",
+                       format_manifest([plan_entry("ptxas", ptxas, offline)], offline))
 
-        host_only = TestEnvironment(false, false, v"0.0", "")
+        no_toolchain = TestEnvironment(true, false, nothing,
+                                       true, false, v"0.0", "")
+        @test plan_entry("host", host, no_toolchain).action === :execute
+        @test plan_entry("ptxas", ptxas, no_toolchain).action === :skip
+        @test plan_entry("mixed", mixed, no_toolchain).action === :skip
+        @test plan_entry("gpu", hopper, no_toolchain).action === :skip
+
+        host_only = TestEnvironment(false, false, nothing,
+                                    false, false, v"0.0", "")
         host_only_entry = plan_entry("host/parser", host, host_only)
         @test host_only_entry.action === :execute
-        @test occursin("CUDA routing-check=skipped selection=host-only",
-                       format_manifest([host_only_entry], host_only))
+        host_manifest = format_manifest([host_only_entry], host_only)
+        @test occursin("offline-compiler routing-check=skipped", host_manifest)
+        @test occursin("GPU routing-check=skipped", host_manifest)
         @test plan_entry("gpu", hopper, host_only).action === :skip
-        @test occursin("routing check skipped",
+        @test occursin("offline compiler routing check skipped",
                        plan_entry("gpu", hopper, host_only).reason)
 
         forced = plan_entry("hopper", hopper, ada; forced = true)
@@ -311,11 +342,12 @@ using .TestTargets
 
         forced_mixed = plan_entry("mixed", mixed, ada; forced = true)
         @test forced_mixed.action === :execute
-        @test occursin("cross-target ptxas compile", forced_mixed.reason)
+        @test occursin("offline cross-target ptxas compile", forced_mixed.reason)
         @test occursin("runtime remains skipped", forced_mixed.reason)
         @test !occursin("gate bypassed", forced_mixed.reason)
 
-        gb10 = TestEnvironment(true, v"12.1", "GB10")
+        gb10 = TestEnvironment(true, true, v"13.3.33",
+                               true, true, v"12.1", "GB10")
         tcgen_entry = plan_entry("gpu/blackwell/tcgen05", tcgen, gb10)
         @test tcgen_entry.action === :execute # ptxas still runs
         @test occursin("runtime skipped", tcgen_entry.reason)
@@ -327,7 +359,7 @@ using .TestTargets
         ptxas = requirement_for_test("ptxas/hopper", joinpath(@__DIR__, ".."))
         @test ptxas.requires === :toolkit
         @test ptxas.evidence === :ptxas
-        @test isempty(ptxas.targets)
+        @test isempty(ptxas.runtime)
 
         host = requirement_for_test("host/parser", joinpath(@__DIR__, ".."))
         @test host.requires === :host

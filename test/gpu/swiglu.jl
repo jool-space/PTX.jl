@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=gpu evidence=runtime target=sm_70
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=7.0
 using Random
 
 # Ported from pyptx/examples/hopper/swiglu.py

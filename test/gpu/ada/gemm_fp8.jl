@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=gpu evidence=runtime target=sm_89
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9
 #
 # Ported from cutlass/examples/58_ada_fp8_gemm (NVIDIA CUTLASS,
 # BSD-3-Clause). The original instantiates a CUTLASS fp8 GEMM with f32

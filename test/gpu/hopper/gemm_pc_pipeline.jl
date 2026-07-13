@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Producer-consumer pipelined Hopper GEMM — the canonical pyptx warp-
 # specialized pattern, isolated from clusters / multicast / scheduling.
 #

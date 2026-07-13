@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # GEMM with fused output permutation — ported from
 # cutlass/examples/53_hopper_gemm_permute (NVIDIA CUTLASS, BSD-3-Clause).
 #

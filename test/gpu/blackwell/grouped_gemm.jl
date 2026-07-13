@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_100f|sm_110f
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10|cc==11
 # Uniform-shape grouped GEMM (Blackwell) — algorithmic port of
 # pyptx/examples/blackwell/grouped_gemm.py.
 #
@@ -175,7 +175,7 @@ end
     @test occursin("%ctaid.z", ptx)             # Z-grid grouping plumbed
 end
 
-# tcgen05 family targets only; see tcgen05_smoke.jl rationale.
+# Family-safe tcgen05 forms on CC 10.x/11.x; see tcgen05_smoke.jl rationale.
 # (No hardware currently available — kept ready + faithful.)
 if test_runtime_supported(@__FILE__)
     function _ggb_cpu_ref(A3::Array{Float32, 3}, B3::Array{Float32, 3})

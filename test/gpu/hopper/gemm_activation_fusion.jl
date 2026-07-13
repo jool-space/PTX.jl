@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=toolkit evidence=mixed target=sm_90a
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Hopper GEMM with fused activation epilogue — ported from
 # cutlass/examples/113_hopper_gemm_activation_fusion (NVIDIA CUTLASS,
 # BSD-3-Clause), the `113_hopper_gemm_fused_act.cu` variant.
