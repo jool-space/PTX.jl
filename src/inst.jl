@@ -275,14 +275,22 @@ end
 Construct a `SpecialReg{Symbol("%name")}` singleton — a compile-time
 literal for a PTX special register. Bakes the verbatim asm token, so
 underscore-bearing names (`%cluster_ctarank`, `%lanemask_eq`,
-`%total_smem_size`) round-trip losslessly. Accepts either form:
+`%total_smem_size`) round-trip losslessly. The legacy spelling
+`%warpsize` is the exception: PTX 9.3 defines `WARP_SZ` as an immediate,
+so it returns `Val(32)`. Other names accept either form:
 
     sreg"tid.x"            ≡ sreg"%tid.x"            → "%tid.x"
     sreg"cluster_ctarank"  ≡ sreg"%cluster_ctarank"  → "%cluster_ctarank"
+    sreg"warpsize"         ≡ sreg"%warpsize"         → Val(32)
 """
 macro sreg_str(s::String)
     isempty(s) && error("sreg\"\": empty register name")
     name = startswith(s, '%') ? s : '%' * s
+    # PTX 9.3 has WARP_SZ (an immediate constant), not %warpsize. Preserve
+    # legacy spelling at the public macro boundary while making it valid in
+    # every immediate-accepting instruction position.
+    name == IR.LEGACY_WARP_SIZE_SREG &&
+        return :( Base.Val($(IR.PREDEFINED_IMMEDIATES["WARP_SZ"])) )
     sym = Symbol(name)
     :( $SpecialReg{$(QuoteNode(sym))}() )
 end
@@ -618,8 +626,9 @@ end
 # `llvm.nvvm.read.ptx.sreg.*` lets LLVM CSE redundant reads and propagate
 # range metadata — neither expressible via `@asmcall` + `~{memory}`. Only
 # invariant-per-thread sregs are listed; volatile ones (clock, clock64,
-# globaltimer, activemask, pm0..7, smid, warpid, nsmid, gridid) deliberately
-# fall through to the asm path so LLVM doesn't collapse repeated reads.
+# globaltimer, pm0..7, smid, warpid, nsmid, gridid) deliberately fall through
+# to the asm path so LLVM doesn't collapse repeated reads. `activemask` is a
+# PTX instruction, not a special register.
 # Names must exist in the backend registry (asserted in test/host/inst.jl);
 # the IN-PROCESS LLVM need not know them — emission goes through the tier-2
 # IntrinsicCall (declare+call), not `ccall(name, llvmcall, ...)`, precisely
@@ -631,7 +640,7 @@ const NVVM_SREG_U32 = Dict{Symbol, String}(
     Symbol("%ntid.x")   => "ntid.x",   Symbol("%ntid.y")   => "ntid.y",   Symbol("%ntid.z")   => "ntid.z",
     Symbol("%ctaid.x")  => "ctaid.x",  Symbol("%ctaid.y")  => "ctaid.y",  Symbol("%ctaid.z")  => "ctaid.z",
     Symbol("%nctaid.x") => "nctaid.x", Symbol("%nctaid.y") => "nctaid.y", Symbol("%nctaid.z") => "nctaid.z",
-    Symbol("%laneid")   => "laneid",   Symbol("%warpsize") => "warpsize",
+    Symbol("%laneid")   => "laneid",
     Symbol("%lanemask_eq") => "lanemask.eq", Symbol("%lanemask_lt") => "lanemask.lt",
     Symbol("%lanemask_le") => "lanemask.le", Symbol("%lanemask_ge") => "lanemask.ge",
     Symbol("%lanemask_gt") => "lanemask.gt",

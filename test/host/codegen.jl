@@ -95,21 +95,100 @@ end
     @test sreg_val_expr("%cluster_ctaid.x") == "sreg\"%cluster_ctaid.x\""
 end
 
-@testset "SPECIAL_REGS: perf-counter and env regs" begin
-    # %pm0..%pm3 and %envreg0..%envreg31 are PTX special registers; without
-    # them in SPECIAL_REGS the transpiler emits bare identifiers (`pm0`)
-    # that have no Julia binding and won't compile.
-    for r in ("%pm0", "%pm1", "%pm2", "%pm3")
-        @test r in PTX.Codegen.SPECIAL_REGS
-    end
-    for i in 0:31
-        @test "%envreg$i" in PTX.Codegen.SPECIAL_REGS
-    end
-
+@testset "PTX 9.3 scalar special-register lowering" begin
+    # Codegen shares the reviewed scalar subset, while canonicalization keeps
+    # the full inventory (including bare v4 roots) for structural comparison.
+    @test PTX.Codegen.SPECIAL_REGS === PTX.IR.SCALAR_SPECIAL_REGS
+    @test length(PTX.Codegen.SPECIAL_REGS) == 141
+    @test !("%warpsize" in PTX.Codegen.SPECIAL_REGS)
     cg = CodeGenState()
-    @test render_operand(IR.RegisterOperand("%pm0"), cg) == "sreg\"%pm0\""
-    @test render_operand(IR.RegisterOperand("%envreg5"), cg) == "sreg\"%envreg5\""
-    @test render_operand(IR.RegisterOperand("%envreg31"), cg) == "sreg\"%envreg31\""
+    for reg in PTX.IR.SCALAR_SPECIAL_REGS
+        @test render_operand(IR.RegisterOperand(reg), cg) == "sreg\"$reg\""
+    end
+    # PTX 9.3 spells the standard immediate WARP_SZ. Keep older parsed
+    # %warpsize input working by lowering both spellings to the same literal.
+    @test render_operand(IR.LabelOperand("WARP_SZ"), cg) == "Val(32)"
+    @test render_operand(IR.RegisterOperand("%warpsize"), cg) == "Val(32)"
+
+    # A whole v4 special-register value is legal PTX but not yet representable
+    # by the scalar parser/lowering path. Reject it instead of emitting an
+    # unbound Julia variable or malformed scalar inline asm.
+    for root in PTX.IR.V4_SPECIAL_REG_ROOTS
+        @test !(root in PTX.Codegen.SPECIAL_REGS)
+        @test_throws ArgumentError render_operand(IR.RegisterOperand(root), cg)
+    end
+    @test_throws ArgumentError ptx_to_julia(""".version 8.0
+    .target sm_80
+    .address_size 64
+    .visible .entry vector_sreg_probe()
+    {
+    .reg .b32 %r0, %r1, %r2, %r3;
+    mov.v4.u32 {%r0, %r1, %r2, %r3}, %tid;
+    ret;
+    }
+    """)
+
+    # Exercise parser -> IR -> Julia rendering across the scalar result types
+    # and target floors implicated by the old omissions. This is structural
+    # lowering coverage only; PM and reserved-SMEM runtime behavior is
+    # intentionally not executed (the ISA leaves it undefined/restricted).
+    for (decl, dst, op, reg) in (
+            (".reg .u32 %r0;", "%r0", "mov.u32", "%pm4"),
+            (".reg .b32 %r0;", "%r0", "mov.b32", "%reserved_smem_offset_0"),
+            (".reg .u64 %rd0;", "%rd0", "mov.u64", "%current_graph_exec"),
+            (".reg .pred %p0;", "%p0", "mov.pred", "%is_explicit_cluster"),
+        )
+        src = """.version 8.1
+        .target sm_90
+        .address_size 64
+        .visible .entry sreg_probe()
+        {
+        $decl
+        $op $dst, $reg;
+        ret;
+        }
+        """
+        out = ptx_to_julia(src)
+        @test occursin("sreg\"$reg\"", out)
+        parsed = Meta.parseall(out)
+        @test !any(arg -> arg isa Expr && arg.head == :error, parsed.args)
+    end
+    for spelling in ("WARP_SZ", "%warpsize")
+        src = """.version 8.1
+        .target sm_90
+        .address_size 64
+        .visible .entry warp_size_probe()
+        {
+        .reg .u32 %r0;
+        mov.u32 %r0, $spelling;
+        ret;
+        }
+        """
+        out = ptx_to_julia(src)
+        @test occursin("Val(32)", out)
+        parsed = Meta.parseall(out)
+        @test !any(arg -> arg isa Expr && arg.head == :error, parsed.args)
+    end
+    # The parser retains parenthesized constant expressions as raw immediate
+    # text. Both PTX spellings must still become a Julia constant rather than
+    # an unbound `WARP_SZ`/`warpsize` identifier.
+    for spelling in ("WARP_SZ", "%warpsize")
+        src = """.version 8.1
+        .target sm_90
+        .address_size 64
+        .visible .entry warp_size_expr_probe()
+        {
+        .reg .u32 %r0;
+        mov.u32 %r0, ($spelling >> 1);
+        ret;
+        }
+        """
+        out = ptx_to_julia(src)
+        @test occursin("UInt32((32 >> 1))", out)
+        @test !occursin(spelling, out)
+        parsed = Meta.parseall(out)
+        @test !any(arg -> arg isa Expr && arg.head == :error, parsed.args)
+    end
 end
 
 # --- operand rendering ------------------------------------------------------
@@ -130,6 +209,14 @@ end
           "Int32(42)"
     @test render_operand(IR.ImmediateOperand("0xFF"), cg; type_hint = :b32) ==
           "UInt32(0xFF)"
+    @test render_operand(IR.ImmediateOperand("(WARP_SZ >> 1)"), cg;
+                         type_hint = :u32) == "UInt32((32 >> 1))"
+    @test render_operand(IR.ImmediateOperand("(%warpsize >> 1)"), cg;
+                         type_hint = :u32) == "UInt32((32 >> 1))"
+    # Token boundaries matter: this is a distinct user identifier, not the
+    # predefined WARP_SZ constant.
+    @test render_operand(IR.ImmediateOperand("(WARP_SZ_limit >> 1)"), cg;
+                         type_hint = :u32) == "UInt32((WARP_SZ_limit >> 1))"
     # `.b32` with negative literal → reinterpret(UInt32, Int32(-1)).
     @test render_operand(IR.ImmediateOperand("-1"), cg; type_hint = :b32) ==
           "reinterpret(UInt32, Int32(-1))"

@@ -212,6 +212,7 @@ end
 
 include("format.jl")
 include("normalize.jl")
+include("special_registers.jl")
 include("canonical.jl")
 
 end # module IR

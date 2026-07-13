@@ -34,33 +34,10 @@ _Renamer(names::Dict{String,String}, namecount::Int) =
     _Renamer(Dict{String,String}(), Dict{String,Int}(),
              Dict{String,String}(), names, namecount)
 
-# PTX special registers (PTX 9.2 §10). The authoritative list for both the
-# canonicalizer (names that must never be renamed as virtual registers) and
-# the transpiler (names that render as `sreg"..."` — Codegen aliases this
-# set). Most sregs contain `.` or `_` and can't match `_VREG` anyway; the
-# ones that can — `%envregN`, `%pmN`, `%clock64` — are why the exclusion in
-# `_sym` exists.
-const SPECIAL_REGS = Set{String}(vcat(
-    String[
-        "%tid.x", "%tid.y", "%tid.z",
-        "%ntid.x", "%ntid.y", "%ntid.z",
-        "%ctaid.x", "%ctaid.y", "%ctaid.z",
-        "%nctaid.x", "%nctaid.y", "%nctaid.z",
-        "%laneid", "%warpid", "%warpsize", "%clock", "%clock64",
-        "%globaltimer", "%globaltimer_lo", "%globaltimer_hi",
-        "%gridid", "%smid", "%nsmid",
-        "%cluster_ctarank", "%cluster_nctarank",
-        "%clusterid.x", "%clusterid.y", "%clusterid.z", "%clusterid.w",
-        "%nclusterid.x", "%nclusterid.y", "%nclusterid.z", "%nclusterid.w",
-        "%cluster_ctaid.x", "%cluster_ctaid.y", "%cluster_ctaid.z",
-        "%cluster_nctaid.x", "%cluster_nctaid.y", "%cluster_nctaid.z",
-        "%is_explicit_cluster",
-        "%lanemask_eq", "%lanemask_le", "%lanemask_lt", "%lanemask_ge", "%lanemask_gt",
-        "%total_smem_size", "%dynamic_smem_size",
-        "%pm0", "%pm1", "%pm2", "%pm3",
-    ],
-    String["%envreg$i" for i in 0:31],
-))
+# SPECIAL_REGS is the reviewed full PTX 9.3 inventory from
+# special_registers.jl. Most names contain . or _ and cannot match _VREG; the
+# digit-suffixed forms (%envregN, %pmN, %clock64) must be excluded explicitly
+# so semantic changes are never allocator-renamed away.
 
 const _VREG = r"^%([a-z]+)(\d+)$"
 

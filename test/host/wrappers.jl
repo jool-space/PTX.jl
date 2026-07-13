@@ -37,7 +37,13 @@ end
     @test haskey(PTX.NVVM_SREG_U32, Symbol("%ntid.y"))
     @test haskey(PTX.NVVM_SREG_U32, Symbol("%ctaid.z"))
     @test haskey(PTX.NVVM_SREG_U32, Symbol("%laneid"))
-    @test haskey(PTX.NVVM_SREG_U32, Symbol("%warpsize"))
+    # PTX 9.3 uses WARP_SZ (an immediate), not a %warpsize special register.
+    # The public sreg macro normalizes that legacy spelling to Val(32), so it
+    # must not leak into either PTX or NVVM-sreg inventories.
+    @test !haskey(PTX.NVVM_SREG_U32, Symbol("%warpsize"))
+    @test !("%warpsize" in PTX.IR.SPECIAL_REGS)
+    @test format_call(ptx"mov.u32", Tuple{typeof(sreg"%warpsize")}) ==
+        "mov.u32 \$0, 32;"
     @test haskey(PTX.NVVM_SREG_U32, Symbol("%cluster_ctarank"))
     @test haskey(PTX.NVVM_SREG_U32, Symbol("%lanemask_eq"))
 

@@ -171,11 +171,15 @@ end
 
 @testset "sreg\"...\" string macro + SpecialReg render" begin
     # Macro produces SpecialReg{Symbol("%name")}() for both naked and
-    # %-prefixed input forms.
+    # %-prefixed PTX special-register input forms.
     @test sreg"tid.x"  === SpecialReg{Symbol("%tid.x")}()
     @test sreg"%tid.x" === SpecialReg{Symbol("%tid.x")}()
     @test sreg"cluster_ctarank" === SpecialReg{Symbol("%cluster_ctarank")}()
     @test sreg"lanemask_eq"     === SpecialReg{Symbol("%lanemask_eq")}()
+    # PTX 9.3 spells the warp-size value WARP_SZ (an immediate), not
+    # %warpsize. Preserve the legacy macro spelling by normalizing it.
+    @test sreg"warpsize" === Val(32)
+    @test sreg"%warpsize" === Val(32)
 
     # Empty rejected at expansion.
     @test_throws LoadError @eval sreg""
@@ -190,6 +194,9 @@ end
     # Mixed (real underscore + real dot) — only verbatim path gets it right.
     @test build_call(:mov, (:u32,), (typeof(sreg"%cluster_ctaid.x"),)).asm ==
           "mov.u32 \$0, %cluster_ctaid.x;"
+
+    @test build_call(:mov, (:u32,), (typeof(sreg"%warpsize"),)).asm ==
+          "mov.u32 \$0, 32;"
 
     # Reading any SpecialReg forces side_effects=true.
     @test build_call(:mov, (:u32,), (typeof(sreg"%tid.x"),)).side_effects == true

@@ -77,10 +77,10 @@ function julia_label(name::AbstractString)
     s
 end
 
-# The authoritative sreg list lives in IR (src/ir/canonical.jl) — the same
-# names the canonicalizer must never rename are the names the transpiler
-# renders as `sreg"..."`. One list, two consumers.
-const SPECIAL_REGS = IR.SPECIAL_REGS
+# The reviewed PTX 9.3 ledger lives in IR. Canonicalization uses its full
+# inventory; codegen intentionally uses only scalar/component spellings until
+# vector-valued PTX operands have structured parsing and lowering support.
+const SPECIAL_REGS = IR.SCALAR_SPECIAL_REGS
 
 sreg_val_expr(name::AbstractString) = "sreg\"" * name * "\""
 

@@ -178,6 +178,11 @@ Underscore-bearing names (`%cluster_ctarank`, `%lanemask_eq`,
 `%total_smem_size`) round-trip losslessly because the macro bakes the
 exact PTX token.
 
+PTX 9.3 spells the warp-size operand as the immediate `WARP_SZ`, not a
+special register. For compatibility, standalone `sreg"%warpsize"` lowers
+to `Val(32)`; when the transpiler encounters either spelling inside a parsed
+PTX constant expression, it substitutes the literal `32`.
+
 ### Homogeneous tuple → braced register-vector
 
 Each tuple element becomes its own LLVM input slot; the asm emits a
