@@ -32,26 +32,7 @@ normalize(m::Module) = Module(
 )
 
 function _normalize_directives(directives::Tuple{Vararg{Statement}})
-    out = Statement[]
-    for d in directives
-        d isa Comment   && continue
-        d isa BlankLine && continue
-        if d isa Function
-            push!(out, _normalize_function(d))
-        elseif d isa RegDecl
-            # Legacy module-scoped registers are still semantic PTX. They are
-            # uncommon under the ABI, but formatting must not make their
-            # comparison noisy.
-            push!(out, RegDecl(type = d.type, name = d.name, count = d.count))
-        elseif d isa VarDecl
-            push!(out, _normalize_var_decl(d))
-        elseif d isa PragmaDirective
-            push!(out, PragmaDirective(value = d.value))
-        else
-            push!(out, d)
-        end
-    end
-    Tuple(out)
+    _normalize_statements(directives)
 end
 
 _normalize_function(f::Function) = Function(
@@ -65,16 +46,28 @@ _normalize_function(f::Function) = Function(
     formatting    = nothing,
 )
 
-function _normalize_body(body::Tuple{Vararg{Statement}})
+_normalize_body(body::Tuple{Vararg{Statement}}) = _normalize_statements(body)
+
+# Module directives and function bodies share the same statement model. Keep
+# their normalization in one exhaustive dispatcher so a newly modeled
+# statement cannot silently retain FormattingInfo in only one position.
+function _normalize_statements(statements::Tuple{Vararg{Statement}})
     out = Statement[]
-    for s in body
-        s isa Comment   && continue
-        s isa BlankLine && continue
+    for s in statements
         if s isa RawLine
-            push!(out, s)               # body RawLines carry real instructions
+            # An opaque parser fallback is structure, not whitespace. It must
+            # survive in both module and function positions.
+            push!(out, s)
+        elseif s isa Comment || s isa BlankLine
+            continue
+        elseif s isa Function
+            push!(out, _normalize_function(s))
         elseif s isa Instruction
             push!(out, _normalize_instruction(s))
         elseif s isa RegDecl
+            # Legacy module-scoped registers are still semantic PTX. They are
+            # uncommon under the ABI, but formatting must not make their
+            # comparison noisy.
             push!(out, RegDecl(type = s.type, name = s.name, count = s.count))
         elseif s isa VarDecl
             push!(out, _normalize_var_decl(s))
@@ -89,7 +82,7 @@ function _normalize_body(body::Tuple{Vararg{Statement}})
         elseif s isa PragmaDirective
             push!(out, PragmaDirective(value = s.value))
         else
-            push!(out, s)
+            throw(ArgumentError("normalize does not handle statement type $(typeof(s)); add an explicit structural normalization case"))
         end
     end
     Tuple(out)
@@ -115,8 +108,10 @@ _normalize_var_decl(v::VarDecl) = VarDecl(
 )
 
 # Compares every semantic module node after normalizing cosmetic information.
-# `entry_only` omits non-entry `.func` bodies, but keeps module directives:
-# globals, opaque fallbacks, and pragmas can affect an entry kernel.
+# `entry_only` excludes every non-entry `.func` Function directive in full—its
+# declaration, signature, linkage, function directives, and body—but keeps
+# other module directives: globals, opaque fallbacks, and pragmas can affect an
+# entry kernel.
 # Returns human-readable difference lines; empty ⇔ identical normalized IR
 # structure (with opaque RawLine text compared verbatim). This is not a
 # substitute for PTX ISA or ptxas semantic validation.

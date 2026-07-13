@@ -114,8 +114,9 @@ diffs = PTX.IR.diff(m1, m2)
 isempty(diffs) || foreach(println, diffs)
 ```
 
-Pass `entry_only = true` to ignore `.func` helpers and only compare
-`.entry` kernels.
+Pass `entry_only = true` to ignore non-entry `.func` helpers. Module-level
+directives still compare, since globals, pragmas, and opaque fallback lines
+can affect an `.entry` kernel.
 
 See the [Reference](reference.md) page for full docstrings of
 [`ptx_to_julia`](@ref) and [`ir_to_julia`](@ref).

@@ -93,11 +93,14 @@ function format(b::Block)
     indent * "{" * body * "}"
 end
 
-# IntrinsicScope is construction-time IR rather than parser-produced PTX. Its
-# lexical body nevertheless has the same brace representation as Block when a
-# caller requests structural PTX formatting; its metadata remains available in
-# the IR for normalization and diffing.
-format(s::IntrinsicScope) = format(Block(body = s.body, formatting = s.formatting))
+# `IntrinsicScope` is construction-time IR rather than parser-produced PTX.
+# It has no PTX spelling, and treating it as a bare Block would silently erase
+# its `name` and `args_repr`.  In particular, that would make a formatted
+# canonical IR disagree with `diff` about whether two scopes are equal.
+function format(s::IntrinsicScope)
+    throw(ArgumentError("cannot format construction-time IntrinsicScope " *
+                        "$(repr(s.name)) as PTX; lower it to PTX IR first"))
+end
 
 function format(p::Param)
     parts = String[]
@@ -151,6 +154,8 @@ when present and to field-driven reconstruction when not.
 
 Per-statement `format(stmt)` methods (one per `IR.Statement` kind)
 implement the structural fallback and can be called individually.
+Construction-time-only nodes without a PTX spelling, such as
+`IntrinsicScope`, error rather than discarding their metadata.
 """
 function format(m::Module)
     m.raw_source !== nothing && return m.raw_source

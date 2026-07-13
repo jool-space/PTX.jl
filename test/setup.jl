@@ -131,96 +131,33 @@ function _without_raw_line(fi::Union{PTX.IR.FormattingInfo, Nothing})
     )
 end
 
-_deep_unraw_statements(stmts::Tuple{Vararg{PTX.IR.Statement}}) =
-    Tuple(_deep_unraw_stmt(stmt) for stmt in stmts)
+# Rebuild through every declared field instead of hand-copying each node
+# type. The projection consequently fails loudly for a node without a normal
+# positional constructor, and automatically preserves a future IR field rather
+# than quietly weakening a structural oracle by omitting it.
+function _deep_unraw_field(name::Symbol, value)
+    name === :formatting && return _without_raw_line(value)
+    (name === :raw_header || name === :raw_source) && return nothing
 
-# Leaf statements without formatting (including RawLine) are intentionally
-# retained. A structural test must reject fallback nodes explicitly, rather
-# than erase them while constructing its test input.
-_deep_unraw_stmt(stmt::PTX.IR.Statement) = stmt
-
-function _deep_unraw_stmt(stmt::PTX.IR.Instruction)
-    PTX.IR.Instruction(
-        opcode = stmt.opcode,
-        modifiers = stmt.modifiers,
-        operands = stmt.operands,
-        predicate = stmt.predicate,
-        formatting = _without_raw_line(stmt.formatting),
-    )
+    # RawLine is a Statement too, so it remains present in any projected tree.
+    # Only actual statement containers are recursed into; operand/parameter
+    # tuples and every other field retain their exact values.
+    value isa PTX.IR.Statement && return _deep_unraw_stmt(value)
+    if value isa Tuple && all(item -> item isa PTX.IR.Statement, value)
+        return Tuple(_deep_unraw_stmt(item) for item in value)
+    end
+    value
 end
 
-function _deep_unraw_stmt(stmt::PTX.IR.Label)
-    PTX.IR.Label(name = stmt.name,
-                 formatting = _without_raw_line(stmt.formatting))
+function _deep_unraw_node(node::T) where {T}
+    names = fieldnames(T)
+    values = ntuple(i -> _deep_unraw_field(names[i], getfield(node, i)),
+                    fieldcount(T))
+    T(values...)
 end
 
-function _deep_unraw_stmt(stmt::PTX.IR.RegDecl)
-    PTX.IR.RegDecl(
-        type = stmt.type,
-        name = stmt.name,
-        count = stmt.count,
-        formatting = _without_raw_line(stmt.formatting),
-    )
-end
-
-function _deep_unraw_stmt(stmt::PTX.IR.VarDecl)
-    PTX.IR.VarDecl(
-        state_space = stmt.state_space,
-        type = stmt.type,
-        name = stmt.name,
-        array_size = stmt.array_size,
-        alignment = stmt.alignment,
-        initializer = stmt.initializer,
-        linking = stmt.linking,
-        formatting = _without_raw_line(stmt.formatting),
-    )
-end
-
-function _deep_unraw_stmt(stmt::PTX.IR.PragmaDirective)
-    PTX.IR.PragmaDirective(value = stmt.value,
-                            formatting = _without_raw_line(stmt.formatting))
-end
-
-function _deep_unraw_stmt(stmt::PTX.IR.Block)
-    PTX.IR.Block(
-        body = _deep_unraw_statements(stmt.body),
-        formatting = _without_raw_line(stmt.formatting),
-    )
-end
-
-function _deep_unraw_stmt(stmt::PTX.IR.IntrinsicScope)
-    PTX.IR.IntrinsicScope(
-        name = stmt.name,
-        args_repr = stmt.args_repr,
-        body = _deep_unraw_statements(stmt.body),
-        formatting = _without_raw_line(stmt.formatting),
-    )
-end
-
-function _deep_unraw_stmt(stmt::PTX.IR.Function)
-    PTX.IR.Function(
-        is_entry = stmt.is_entry,
-        name = stmt.name,
-        params = stmt.params,
-        return_params = stmt.return_params,
-        body = _deep_unraw_statements(stmt.body),
-        linking = stmt.linking,
-        directives = stmt.directives,
-        formatting = _without_raw_line(stmt.formatting),
-    )
-end
-
-function _deep_unraw(m::PTX.IR.Module)
-    PTX.IR.Module(
-        version = m.version,
-        target = m.target,
-        address_size = m.address_size,
-        leading = _deep_unraw_statements(m.leading),
-        directives = _deep_unraw_statements(m.directives),
-        raw_header = nothing,
-        raw_source = nothing,
-    )
-end
+_deep_unraw_stmt(stmt::PTX.IR.Statement) = _deep_unraw_node(stmt)
+_deep_unraw(m::PTX.IR.Module) = _deep_unraw_node(m)
 
 function _raw_snapshot_paths!(paths::Vector{Pair{String, String}},
                               stmts::Tuple{Vararg{PTX.IR.Statement}},

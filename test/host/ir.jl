@@ -437,6 +437,18 @@ end
                     formatting = FormattingInfo(indent = "")),
             PTX.IR.PragmaDirective(value = "loop_unroll(2)",
                                     formatting = FormattingInfo(indent = "")),
+            Label(name = "module_label",
+                  formatting = FormattingInfo(raw_line = "module_label:")),
+            Block(body = (
+                Instruction(opcode = "ret",
+                            formatting = FormattingInfo(raw_line = "  ret;")),
+            ), formatting = FormattingInfo(indent = "  ")),
+            PTX.IR.IntrinsicScope(
+                name = "construction_scope", args_repr = "()",
+                body = (Instruction(opcode = "ret",
+                                    formatting = FormattingInfo(raw_line = "  ret;")),),
+                formatting = FormattingInfo(indent = "  "),
+            ),
             PTX.IR.Function(is_entry = true, name = "f",
                              body = (Instruction(opcode = "ret"),)),
         ),
@@ -453,6 +465,20 @@ end
 
     pr = first(d for d in n.directives if d isa PTX.IR.PragmaDirective)
     @test pr.formatting === nothing && pr.value == "loop_unroll(2)"
+
+    # The parser normally creates only a top-level subset of Statement kinds,
+    # but module IR can retain scope-like nodes through fallback-adjacent or
+    # programmatic construction. They must take the same formatting-clearing
+    # path as body nodes, or `diff` becomes whitespace-sensitive solely
+    # because it now walks directives.
+    label = only(d for d in n.directives if d isa Label)
+    @test label.formatting === nothing
+    block = only(d for d in n.directives if d isa Block)
+    @test block.formatting === nothing
+    @test only(block.body).formatting === nothing
+    scope = only(d for d in n.directives if d isa PTX.IR.IntrinsicScope)
+    @test scope.formatting === nothing
+    @test only(scope.body).formatting === nothing
 end
 
 @testset "IR.normalize / diff: module directives remain semantic" begin
@@ -488,6 +514,56 @@ end
         # entry_only means "omit helper .func bodies", not "ignore globals".
         @test !isempty(PTX.IR.diff(base, changed; entry_only = true))
     end
+end
+
+@testset "canonicalize: module-level statements and lexical scopes" begin
+    function module_scopes(block_reg::String, scope_reg::String,
+                           direct_reg::String, label::String;
+                           scope_name::String = "construction_scope",
+                           args_repr::String = "(opaque)")
+        _module_with_directives((
+            Block(body = (
+                RegDecl(type = ScalarType.B32, name = "block_reg", count = 8),
+                Instruction(opcode = "mov", modifiers = (".u32",),
+                            operands = (_reg(block_reg), _imm("1"))),
+            )),
+            PTX.IR.IntrinsicScope(
+                name = scope_name,
+                args_repr = args_repr,
+                body = (
+                    RegDecl(type = ScalarType.B32, name = "scope_reg", count = 4),
+                    Instruction(opcode = "mov", modifiers = (".u32",),
+                                operands = (_reg(scope_reg), _imm("2"))),
+                ),
+            ),
+            RegDecl(type = ScalarType.B32, name = "module_reg", count = 16),
+            Label(name = label),
+            Instruction(opcode = "mov", modifiers = (".u32",),
+                        operands = (_reg(direct_reg), _imm("3"))),
+        ))
+    end
+
+    canonical = PTX.IR.canonicalize(
+        module_scopes("%r5", "%r17", "%r23", "\$L__BB0_3"))
+    renumbered = PTX.IR.canonicalize(
+        module_scopes("%r29", "%r41", "%r53", "\$L__BB9_7"))
+    @test canonical == renumbered
+
+    block, scope, canonical_label, direct = canonical.directives
+    @test block isa Block
+    @test scope isa PTX.IR.IntrinsicScope
+    # One module-level renamer means sibling scopes have the same
+    # first-appearance ordering as scopes in a Function.body.
+    @test only(block.body).operands[1].name == "%r0"
+    @test only(scope.body).operands[1].name == "%r1"
+    @test canonical_label.name == "\$L0"
+    @test direct.operands[1].name == "%r2"
+    @test !any(d -> d isa RegDecl, canonical.directives)
+    @test scope.name == "construction_scope"
+    @test scope.args_repr == "(opaque)"
+    @test canonical != PTX.IR.canonicalize(module_scopes(
+        "%r29", "%r41", "%r53", "\$L__BB9_7";
+        scope_name = "other_scope"))
 end
 
 @testset "IR.normalize / diff: lexical scopes survive canonicalization" begin
@@ -536,7 +612,7 @@ end
         )),
         Instruction(opcode = "ret"),
     ))
-    renamed_intrinsic = _build_module((
+    renumbered_intrinsic = _build_module((
         PTX.IR.IntrinsicScope(name = "scope", args_repr = "()", body = (
             Instruction(opcode = "mov", modifiers = (".u32",),
                         operands = (_reg("%r11"), _imm("1"))),
@@ -547,17 +623,40 @@ end
     intrinsic_func = only(d for d in normalized_intrinsic.directives if d isa PTX.IR.Function)
     intrinsic_body = intrinsic_func.body
     @test first(intrinsic_body) isa PTX.IR.IntrinsicScope
-    @test !isempty(PTX.IR.diff(intrinsic,
-                               _build_module((PTX.IR.IntrinsicScope(
-                                   name = "other", args_repr = "()",
-                                   body = (Instruction(opcode = "ret"),)),
-                                                Instruction(opcode = "ret")))))
     canonical_intrinsic = PTX.IR.canonicalize(intrinsic)
     canonical_intrinsic_func = only(d for d in canonical_intrinsic.directives
                                     if d isa PTX.IR.Function)
-    @test first(canonical_intrinsic_func.body) isa PTX.IR.IntrinsicScope
-    @test format(canonical_intrinsic) ==
-          format(PTX.IR.canonicalize(renamed_intrinsic))
+    canonical_scope = first(canonical_intrinsic_func.body)
+    @test canonical_scope isa PTX.IR.IntrinsicScope
+    @test canonical_scope.name == "scope"
+    @test canonical_scope.args_repr == "()"
+
+    # Canonicalization renumbers nested values but retains construction-time
+    # scope metadata.  `diff` must still surface a metadata-only change.
+    @test canonical_intrinsic == PTX.IR.canonicalize(renumbered_intrinsic)
+    renamed_scope = _build_module((
+        PTX.IR.IntrinsicScope(name = "other", args_repr = "()", body = (
+            Instruction(opcode = "mov", modifiers = (".u32",),
+                        operands = (_reg("%r11"), _imm("1"))),
+        )),
+        Instruction(opcode = "ret"),
+    ))
+    changed_args_scope = _build_module((
+        PTX.IR.IntrinsicScope(name = "scope", args_repr = "(opaque)", body = (
+            Instruction(opcode = "mov", modifiers = (".u32",),
+                        operands = (_reg("%r11"), _imm("1"))),
+        )),
+        Instruction(opcode = "ret"),
+    ))
+    @test any(line -> occursin("name:", line), PTX.IR.diff(intrinsic, renamed_scope))
+    @test any(line -> occursin("args:", line), PTX.IR.diff(intrinsic, changed_args_scope))
+    @test PTX.IR.canonicalize(intrinsic) != PTX.IR.canonicalize(renamed_scope)
+    @test PTX.IR.canonicalize(intrinsic) != PTX.IR.canonicalize(changed_args_scope)
+
+    # `IntrinsicScope` is not PTX syntax.  Refuse to turn it into a bare
+    # brace block, which would otherwise make the formatting oracle erase the
+    # metadata that the structural oracle compares.
+    @test_throws ArgumentError format(canonical_intrinsic)
 end
 
 @testset "IR.diff: Instruction-internal differences (operands / predicate)" begin
