@@ -1000,8 +1000,10 @@ end
                                          a_major = :MN, b_major = :MN) ===
           (base | (UInt32(1) << 15) | (UInt32(1) << 16))
 
-    # M and N field placement: m=64 → bits[27:24]=4, m=256 → 16.
+    # M and N field placement: m=32 → bits[28:24]=2, m=256 → 16.
     # n=8 → bits[22:17]=1, n=128 → 16.
+    @test tcgen05_instr_desc_f16bf16_f32(m = 32,  n = 256, ab_dtype = :bf16) ===
+          UInt32((2  << 24) | (32 << 17) | 0x490)
     @test tcgen05_instr_desc_f16bf16_f32(m = 64,  n = 256, ab_dtype = :bf16) ===
           UInt32((4  << 24) | (32 << 17) | 0x490)
     @test tcgen05_instr_desc_f16bf16_f32(m = 256, n = 256, ab_dtype = :bf16) ===
@@ -1011,20 +1013,20 @@ end
     @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 128, ab_dtype = :bf16) ===
           UInt32((8  << 24) | (16 << 17) | 0x490)
 
-    # sparse / saturate / max_shift bits.
+    # sparse / max_shift bits. Saturation is integer-only in Table 45 and is
+    # deliberately absent from this floating-point builder.
     @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :bf16,
                                          sparse = true) ===
           UInt32(base | (UInt32(1) << 2))
-    @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :bf16,
-                                         saturate = true) ===
-          UInt32(base | (UInt32(1) << 3))
+    @test_throws MethodError tcgen05_instr_desc_f16bf16_f32(
+        m = 128, n = 256, ab_dtype = :bf16, saturate = true)
     @test tcgen05_instr_desc_f16bf16_f32(m = 128, n = 256, ab_dtype = :bf16,
                                          max_shift = 3) ===
           UInt32(base | (UInt32(3) << 30))
 
     # Range checks.
     @test_throws ArgumentError tcgen05_instr_desc_f16bf16_f32(
-        m = 96, n = 256, ab_dtype = :bf16)              # m must be 64/128/256
+        m = 96, n = 256, ab_dtype = :bf16)           # m must be 32/64/128/256
     @test_throws ArgumentError tcgen05_instr_desc_f16bf16_f32(
         m = 128, n = 12, ab_dtype = :bf16)              # n must be multiple of 8
     @test_throws ArgumentError tcgen05_instr_desc_f16bf16_f32(
@@ -1042,66 +1044,60 @@ end
 @testset "tcgen05_descriptor packing" begin
     using PTX: tcgen05_descriptor, BlackwellLayout
 
-    # Field-isolation tests pass version=0 to suppress the default-1 bit
-    # (pyptx parity: descriptor()'s version defaults to 1).
+    # PTX Table 43 fixes bits 46–48 at 0b001 in every valid descriptor.
+    fixed = UInt64(1) << 46
 
-    # Empty descriptor: all zeros.
+    # An otherwise-empty descriptor still carries the fixed constant.
     @test tcgen05_descriptor(UInt32(0); leading_bytes = 0,
-                                         stride_bytes = 0,
-                                         version = 0) === UInt64(0)
+                                         stride_bytes = 0) === fixed
 
     # Address: 14-bit field at bits [13:0], encoded as (addr & 0x3FFF0) >> 4.
     # 0x100 → 0x10. Sits in low 14 bits.
     @test tcgen05_descriptor(UInt32(0x100); leading_bytes = 0,
-                                            stride_bytes = 0,
-                                            version = 0) ===
-          UInt64(0x10)
-    # 0x40000 (bit 18) is outside the 14-bit window → 0.
-    @test tcgen05_descriptor(UInt32(0x40000); leading_bytes = 0,
-                                              stride_bytes = 0,
-                                              version = 0) ===
-          UInt64(0)
+                                            stride_bytes = 0) ===
+          fixed | UInt64(0x10)
+    # Values outside the 18-bit input window are rejected, not truncated.
+    @test_throws ArgumentError tcgen05_descriptor(
+        UInt32(0x40000); leading_bytes = 0, stride_bytes = 0)
 
     # Leading / stride byte fields.
     @test tcgen05_descriptor(UInt32(0); leading_bytes = 16,
-                                         stride_bytes = 0,
-                                         version = 0) ===
-          UInt64(1) << 16
+                                         stride_bytes = 0) ===
+          fixed | (UInt64(1) << 16)
     @test tcgen05_descriptor(UInt32(0); leading_bytes = 0,
-                                         stride_bytes = 1024,
-                                         version = 0) ===
-          UInt64(64) << 32
+                                         stride_bytes = 1024) ===
+          fixed | (UInt64(64) << 32)
 
     # Layout-type at bit 61 (3 bits — distinct from wgmma's 2-bit field).
     @test tcgen05_descriptor(UInt32(0); leading_bytes = 0,
                                          stride_bytes = 0,
-                                         version = 0,
                                          swizzle = BlackwellLayout.B128) ===
-          UInt64(BlackwellLayout.B128) << 61
+          fixed | (UInt64(BlackwellLayout.B128) << 61)
     @test tcgen05_descriptor(UInt32(0); leading_bytes = 0,
                                          stride_bytes = 0,
-                                         version = 0,
                                          swizzle = BlackwellLayout.B64) ===
-          UInt64(BlackwellLayout.B64)  << 61
+          fixed | (UInt64(BlackwellLayout.B64) << 61)
 
-    # version (default 1) → bit 46. Pass version=0 to clear it.
-    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0, stride_bytes = 0,
-                                         version = 0) === UInt64(0)
-    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0, stride_bytes = 0,
-                                         version = 1) === UInt64(1) << 46
-    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0, stride_bytes = 0,
-                                         version = 3) === UInt64(3) << 46
+    # The former caller-controlled `version` keyword is gone: this is a fixed
+    # ISA constant, not a version field.
+    @test tcgen05_descriptor(UInt32(0); leading_bytes = 0,
+                                         stride_bytes = 0) === fixed
+    @test_throws MethodError tcgen05_descriptor(
+        UInt32(0); leading_bytes = 0, stride_bytes = 0, version = 1)
 
-    # base_offset / lbo_mode.
+    # base_offset / lbo_mode. Absolute mode requires 128B swizzling with 16B
+    # atomicity and base_offset=0 (PTX §9.7.17.3.1.2).
     @test tcgen05_descriptor(UInt32(0); leading_bytes = 0, stride_bytes = 0,
-                                         version = 0, base_offset = 5) ===
-          UInt64(5) << 49
+                                         base_offset = 5) ===
+          fixed | (UInt64(5) << 49)
     @test tcgen05_descriptor(UInt32(0); leading_bytes = 0, stride_bytes = 0,
-                                         version = 0, lbo_mode = 1) ===
-          UInt64(1) << 52
+                                         swizzle = BlackwellLayout.B128,
+                                         lbo_mode = 1) ===
+          fixed | (UInt64(1) << 52) |
+          (UInt64(BlackwellLayout.B128) << 61)
 
     # The pyptx-equivalent BLACKWELL_MASKED_DESC_B128 constant:
-    # leading=16, stride=1024, swizzle=B128, version=1.
+    # leading=16, stride=1024, swizzle=B128, fixed bits=0b001.
     @test tcgen05_descriptor(UInt32(0); leading_bytes = 16,
                                          stride_bytes = 1024,
                                          swizzle = BlackwellLayout.B128) ===
@@ -1112,8 +1108,6 @@ end
         UInt32(0); leading_bytes = 8, stride_bytes = 0)         # not 16-aligned
     @test_throws ArgumentError tcgen05_descriptor(
         UInt32(0); leading_bytes = 0, stride_bytes = 24)        # not 16-aligned
-    @test_throws ArgumentError tcgen05_descriptor(
-        UInt32(0); leading_bytes = 0, stride_bytes = 0, version = 4)
     @test_throws ArgumentError tcgen05_descriptor(
         UInt32(0); leading_bytes = 0, stride_bytes = 0, base_offset = 8)
     @test_throws ArgumentError tcgen05_descriptor(
