@@ -2,6 +2,22 @@ using PTX: NVVM
 using PTX.NVVM: Intrinsic, intrinsic, isintrinsic, matching, overloaded,
                 llvmtype, ptr, slot, anyptr, anyint, anyfloat, TABLE,
                 synthesize, IntrinsicCall, @nvvm_str
+using InteractiveUtils: code_llvm
+
+# Host-optimizer contract probe. Both branches deliberately call the same
+# recognized NVVM intrinsic with identical operands; without call-site
+# convergence LLVM merges them before the branch. This is not executed on a
+# GPU: divergent WMMA would itself violate PTX's uniform-warp requirement.
+@noinline function _wmma_convergence_probe(c::Bool, a::Float64, b::Float64,
+                                           x::Float64, y::Float64)
+    if c
+        r = nvvm"wmma.m8n8k4.mma.row.col.f64"(a, b, x, y)
+        return r[1] + 1.0
+    else
+        r = nvvm"wmma.m8n8k4.mma.row.col.f64"(a, b, x, y)
+        return r[2] + 2.0
+    end
+end
 
 # The registry's contract: the committed table
 # is the backend's intrinsic surface, queryable, with no silent gaps. The
@@ -128,11 +144,77 @@ end
     s = synthesize("llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta",
                    (Core.LLVMPtr{Int64,3}, UInt32))
     @test occursin("declare i64 @\"llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta\"(i8 addrspace(3)*, i32) #0", s.ir)
+    @test occursin(r"call i64 @\"llvm\.nvvm\.mbarrier\.arrive\.expect\.tx\.scope\.cta\.space\.cta\"\([^\n]+\) #2", s.ir)
     @test occursin("attributes #0 = { convergent nomerge nounwind nocallback }", s.ir)
     @test occursin("attributes #1 = { alwaysinline }", s.ir)
+    @test occursin("attributes #2 = { convergent nomerge }", s.ir)
     @test s.rettype == UInt64
     @test s.tupletype == Tuple{Core.LLVMPtr{Int64,3}, UInt32}
     @test s.runtime == [1, 2]
+end
+
+@testset "synthesize: WMMA convergence is a call-site contract" begin
+    # These representatives cover the emitter's scalar, aggregate, and void
+    # branches and WMMA's read/none/write declaration-memory classes.
+    cases = [
+        ("llvm.nvvm.wmma.m8n8k4.load.a.col.f64",
+         (Core.LLVMPtr{UInt8,0},), 1),
+        ("llvm.nvvm.wmma.m8n8k4.mma.row.col.f64",
+         (Float64, Float64, Float64, Float64), 2),
+        ("llvm.nvvm.wmma.m8n8k4.store.d.col.f64",
+         (Core.LLVMPtr{UInt8,0}, Float64, Float64), 0),
+    ]
+    for (name, argtypes, nret) in cases
+        i = intrinsic(name)
+        s = synthesize(name, argtypes)
+        calls = [String(line) for line in eachline(IOBuffer(s.ir))
+                 if occursin(" call ", line) && occursin("@\"$name", line)]
+
+        @test length(i.ret) == nret
+        @test length(calls) == 1
+        if length(calls) == 1
+            @test endswith(strip(only(calls)), "#2")
+        end
+        @test NVVM.callsiteattrs(i) == "convergent nomerge"
+        @test occursin("attributes #0 = { $(NVVM.fnattrs(i)) }", s.ir)
+        @test occursin("attributes #2 = { convergent nomerge }", s.ir)
+    end
+
+    # `tcgen05.mma` has single-thread issue semantics and must not inherit the
+    # WMMA overlay merely because its name also contains `mma`.
+    tcgen = synthesize("llvm.nvvm.tcgen05.mma.shared",
+        (Core.LLVMPtr{UInt32,6}, UInt64, UInt64, UInt32, Bool,
+         Val{2}, Val{1}, Val{0}))
+    @test !occursin("attributes #2", tcgen.ir)
+end
+
+@testset "optimized WMMA calls retain their branch-local convergence sites" begin
+    llvm = sprint() do io
+        code_llvm(io, _wmma_convergence_probe,
+                  Tuple{Bool,Float64,Float64,Float64,Float64};
+                  optimize=true, raw=true, debuginfo=:none, dump_module=true)
+    end
+    name = "@llvm.nvvm.wmma.m8n8k4.mma.row.col.f64"
+    calls = [String(line) for line in eachline(IOBuffer(llvm))
+             if occursin(" call ", line) && occursin(name, line)]
+
+    # The unfixed emitter produces one hoisted call here on LLVM 18. Every
+    # retained call must reference a group carrying both optimizer barriers;
+    # checking an unrelated module-level group would be a false positive.
+    @test length(calls) == 2
+    groups = Dict{String,String}()
+    for line in eachline(IOBuffer(llvm))
+        m = match(r"^attributes #([0-9]+) = \{([^}]*)\}", strip(line))
+        m === nothing || (groups[m.captures[1]] = m.captures[2])
+    end
+    for call in calls
+        m = match(r" #([0-9]+)(?:,|$)", strip(call))
+        @test m !== nothing
+        m === nothing && continue
+        attrs = get(groups, m.captures[1], "")
+        @test occursin(r"\bconvergent\b", attrs)
+        @test occursin(r"\bnomerge\b", attrs)
+    end
 end
 
 @testset "synthesize: mangling and aggregate repack (ldmatrix)" begin

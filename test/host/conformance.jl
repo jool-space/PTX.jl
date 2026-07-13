@@ -517,23 +517,86 @@ end
 end
 
 # The emission-side convergent overlay (NVVM.CONVERGENT_OVERLAY_PREFIXES):
-# upstream 22.1.7 marks the whole mma.sync surface IntrNoMem but NOT
-# IntrConvergent, though mma.sync.aligned is warp-collective by ISA
-# contract. fnattrs must emit `convergent nomerge` for every one of the 94
-# names regardless. The !(:convergent in props) leg flips when a
-# regenerated table gains IntrConvergent — the signal to delete the
-# overlay rather than double-source the flag.
+# upstream 22.1.7 marks the whole `llvm.nvvm.mma.` surface IntrNoMem but NOT
+# IntrConvergent, though mma.sync.aligned is warp-collective by ISA contract.
+# Pin the complete generated namespace, not merely the subset selected by
+# current wrappers. The !(:convergent in props) leg flips when a regenerated
+# table gains IntrConvergent — the signal to review/remove the overlay rather
+# than silently double-source the flag.
 @testset "convergent overlay covers the mma upstream-props gap" begin
-    for n in vcat(PTX.MMA_INTRINSIC_NAMES, PTX.MMA_SP_INTRINSIC_NAMES,
-                  PTX.MMA_SCALED_INTRINSIC_NAMES)
+    names = NVVM.matching("llvm.nvvm.mma.")
+    observed = Dict{Symbol,Int}()
+    @test length(names) == 390
+    for n in names
         i = NVVM.intrinsic(n)
+        family = Symbol(split(n, '.'; limit=5)[4])
+        observed[family] = get(observed, family, 0) + 1
         @test !(:convergent in i.props)
         @test NVVM.is_convergent(i)
+        @test NVVM.callsiteattrs(i) == "convergent nomerge"
         @test occursin("convergent nomerge", NVVM.fnattrs(i))
     end
+    @test observed == Dict(
+        :and => 3, :block => 54,
+        :m16n8k16 => 20, :m16n8k32 => 74, :m16n8k4 => 2,
+        :m16n8k64 => 8, :m16n8k8 => 5,
+        :m8n8k16 => 8, :m8n8k32 => 8, :m8n8k4 => 13,
+        :sp => 192, :xor => 3,
+    )
+    wrapped = Set(vcat(PTX.MMA_INTRINSIC_NAMES, PTX.MMA_SP_INTRINSIC_NAMES,
+                       PTX.MMA_SCALED_INTRINSIC_NAMES))
+    @test length(wrapped) == 110
+    @test wrapped ⊆ Set(names)
     # the overlay must not leak beyond mma.*
     @test !NVVM.is_convergent(NVVM.intrinsic("llvm.nvvm.fence.proxy.async"))
     @test !NVVM.is_convergent(NVVM.intrinsic("llvm.nvvm.tcgen05.mma.shared"))
+end
+
+# PTX 9.3 §9.7.15.4.3–.5 makes every WMMA load, mma, and store a
+# mandatory `.sync.aligned` warp collective. LLVM 22.1.7 omits
+# IntrConvergent from all of them, so the emitter overlays the missing
+# property. This inventory is intentionally stricter than a prefix count: it
+# forces review if regeneration adds a shape or a different helper under the
+# namespace instead of silently declaring that helper collective.
+@testset "WMMA convergence overlay has an exact audited boundary" begin
+    names = NVVM.matching("llvm.nvvm.wmma.")
+    grammar = r"^llvm\.nvvm\.wmma\.(m16n16k16|m16n16k8|m32n8k16|m8n32k16|m8n8k128|m8n8k32|m8n8k4)\.(load\.[abc]|mma|store\.d)\.[a-z0-9]+(?:\.[a-z0-9]+)*$"
+    observed = Dict{Tuple{Symbol,Symbol},Int}()
+
+    @test length(names) == 414
+    for name in names
+        m = match(grammar, name)
+        @test m !== nothing
+        if m !== nothing
+            shape = Symbol(m.captures[1])
+            family = startswith(m.captures[2], "load.") ? :load :
+                     m.captures[2] == "mma" ? :mma : :store
+            key = (shape, family)
+            observed[key] = get(observed, key, 0) + 1
+        end
+
+        i = NVVM.intrinsic(name)
+        @test !(:convergent in i.props)
+        @test NVVM.is_convergent(i)
+        @test NVVM.callsiteattrs(i) == "convergent nomerge"
+        @test occursin("convergent nomerge", NVVM.fnattrs(i))
+    end
+
+    @test observed == Dict(
+        (:m16n16k16, :load) => 44, (:m16n16k16, :mma) => 52, (:m16n16k16, :store) => 12,
+        (:m16n16k8,  :load) => 12, (:m16n16k8,  :mma) => 4,  (:m16n16k8,  :store) => 4,
+        (:m32n8k16,  :load) => 44, (:m32n8k16,  :mma) => 52, (:m32n8k16,  :store) => 12,
+        (:m8n32k16,  :load) => 44, (:m8n32k16,  :mma) => 52, (:m8n32k16,  :store) => 12,
+        (:m8n8k128,  :load) => 8,  (:m8n8k128,  :mma) => 2,  (:m8n8k128,  :store) => 4,
+        (:m8n8k32,   :load) => 12, (:m8n8k32,   :mma) => 4,  (:m8n8k32,   :store) => 4,
+        (:m8n8k4,    :load) => 12, (:m8n8k4,    :mma) => 20, (:m8n8k4,    :store) => 4,
+    )
+    @test sum(v for ((_, family), v) in observed if family == :load) == 176
+    @test sum(v for ((_, family), v) in observed if family == :mma) == 186
+    @test sum(v for ((_, family), v) in observed if family == :store) == 52
+
+    @test !NVVM.is_convergent(NVVM.intrinsic("llvm.nvvm.tcgen05.mma.shared"))
+    @test NVVM.callsiteattrs(NVVM.intrinsic("llvm.nvvm.tcgen05.mma.shared")) == ""
 end
 
 @testset "selection probes through the artifact llc" begin

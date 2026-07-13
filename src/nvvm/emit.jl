@@ -1,8 +1,9 @@
 # Tier-2 emission: registry-checked `Base.llvmcall` synthesis. Everything
 # the spikes validated lands here: explicit
-# attribute groups on the declaration (the in-process LLVM knows nothing
-# about these intrinsics, so an absent attribute is an absent constraint —
-# spikes/convergence.jl), aggregate returns unpacked to tuples
+# attribute groups on declarations and load-bearing convergence attributes
+# on call sites (the in-process LLVM may know and canonicalize some legacy
+# intrinsics, so a declaration alone is not an optimizer boundary), aggregate
+# returns unpacked to tuples
 # (spikes/aggregate_return.jl), and canonical mangled names for overloaded
 # intrinsics (llc accepts and silently remangles wrong spellings, so
 # acceptance testing would never catch a mangling bug).
@@ -144,21 +145,29 @@ function memory_attr(props)::Union{String,Nothing}
     return nothing
 end
 
-# Upstream-props correction: IntrinsicsNVVM.td at 22.1.7 marks the whole
-# mma.sync surface (dense + block.scale, all 94 names) IntrNoMem but NOT
-# IntrConvergent — yet `mma.sync.aligned` is warp-collective by ISA
-# contract (mandatory .sync/.aligned: every lane must execute the same
-# instruction), so a call site duplicated across a divergent branch is the
-# activemask miscompile class. The overlay forces convergent(+nomerge) on
-# emission; `nomem` stays (pure AND unmovable-across-divergence is
-# coherent — CSE within a block remains legal). Candidate upstream patch;
-# pinned by the conformance props testset so a future table regeneration
-# that gains IntrConvergent shows up as a removable overlay, not a silent
-# double-source.
-const CONVERGENT_OVERLAY_PREFIXES = ("llvm.nvvm.mma.",)
+# Upstream-props corrections: IntrinsicsNVVM.td at 22.1.7 omits
+# IntrConvergent from both warp-collective matrix namespaces:
+#
+#   - the existing `llvm.nvvm.mma.` namespace (390 pinned records);
+#   - all 414 `wmma` load/mma/store records.
+#
+# PTX requires every lane to execute the same instruction in both families.
+# The overlays are deliberately namespace-based and paired with closed-world
+# registry tests: a future addition must be audited before a prefix can
+# silently broaden. The WMMA test additionally pins its exact shape/operation
+# matrix. `tcgen05.mma` is not included because it has single-thread issue
+# semantics. Generated memory properties remain unchanged.
+const CONVERGENT_OVERLAY_PREFIXES = ("llvm.nvvm.mma.", "llvm.nvvm.wmma.")
 
 is_convergent(i::Intrinsic) = :convergent in i.props ||
     any(p -> startswith(i.name, p), CONVERGENT_OVERLAY_PREFIXES)
+
+# These are intentionally the only declaration properties copied to a call
+# site. In particular, declaration attributes such as `speculatable` are not
+# universally legal or appropriate there. A dedicated group also survives
+# LLVM's canonicalization of recognized legacy NVVM declarations.
+callsiteattrs(i::Intrinsic)::String =
+    is_convergent(i) ? "convergent nomerge" : ""
 
 function fnattrs(i::Intrinsic)::String
     attrs = String[]
@@ -344,15 +353,20 @@ function synthesize(name::String, argtypes)
     callret = isempty(irts) ? "void" :
               length(irts) == 1 ? irts[1] : "{ " * join(irts, ", ") * " }"
 
+    callattrs = callsiteattrs(i)
+    callattrref = isempty(callattrs) ? "" : " #2"
+    intrinsic_call = "call $callret @\"$mangled\"($(join(callargs, ", ")))" *
+                     callattrref
+
     body = copy(glue)
     if isempty(jts)
         rettype = Nothing
         entryret = "void"
-        push!(body, "  call void @\"$mangled\"($(join(callargs, ", ")))")
+        push!(body, "  " * intrinsic_call)
         push!(body, "  ret void")
     elseif length(jts) == 1
         rettype = jts[1]
-        push!(body, "  %r = call $callret @\"$mangled\"($(join(callargs, ", ")))")
+        push!(body, "  %r = " * intrinsic_call)
         if i.ret[1] === :i1
             rettype = Bool
             entryret = "i8"
@@ -367,7 +381,7 @@ function synthesize(name::String, argtypes)
         comps = abityp.(jts)                       # Bool components are i8
         entryret = allequal(comps) ? "[$(length(comps)) x $(comps[1])]" :
                                      "{ " * join(comps, ", ") * " }"
-        push!(body, "  %r = call $callret @\"$mangled\"($(join(callargs, ", ")))")
+        push!(body, "  %r = " * intrinsic_call)
         prev = "undef"
         for (k, tok) in enumerate(i.ret)
             push!(body, "  %e$k = extractvalue $callret %r, $(k-1)")
@@ -382,6 +396,8 @@ function synthesize(name::String, argtypes)
         push!(body, "  ret $entryret $prev")
     end
 
+    callattrdef = isempty(callattrs) ? "" :
+                  "attributes #2 = { $callattrs }"
     ir = """
         declare $callret @"$mangled"($(join(decl, ", "))) #0
         define $entryret @entry($(join(entry, ", "))) #1 {
@@ -389,6 +405,7 @@ function synthesize(name::String, argtypes)
         }
         attributes #0 = { $(fnattrs(i)) }
         attributes #1 = { alwaysinline }
+        $callattrdef
         """
 
     return (; ir, rettype, tupletype=Tuple{argtypes[runtime]...}, runtime)

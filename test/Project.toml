@@ -1,6 +1,7 @@
 [deps]
 CUDACore = "bd0ed864-bdfe-4181-a5ed-ce625a5fdea2"
 CUDATools = "9ec180c6-1c07-47c7-9e6e-ebefa4d1f6d0"
+InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 Microfloats = "31c70f10-a750-4521-b13c-797315ae2933"
