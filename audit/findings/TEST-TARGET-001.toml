@@ -8,7 +8,7 @@ validation_tier = "closed-world test-runner policy and integration audit"
 
 [resolution]
 pr = 25
-commit = "3bd99f4968881e0973bcbd6c01f930f8376ae221"
+commit = "35e07f4a842e9787daa7b01b1b9888e395cc074e"
 scope = "full"
 evidence = [
   "independent exact banner-to-file inventory for all 65 GPU tests, using direct compute-capability predicates rather than PTX target strings",
@@ -17,5 +17,6 @@ evidence = [
   "248 structured parser, closed-world inventory, and routing assertions on Julia 1.10 and Julia 1.12",
   "CUDA_VISIBLE_DEVICES=-1 integration: baseline ptxas 52/52 in 16.9s, explicit-target PTX emission 35/35 in 16.4s, and mixed tcgen05 compile 4/4 in 14.9s with runtime correctly skipped",
   "the formerly GPU-only ptxas/golden suite passes 18/18 with CUDA_VISIBLE_DEVICES=-1",
+  "device-free optimized LLVM and Hopper ptxas assertions pass 132/132 with CUDA_VISIBLE_DEVICES=-1",
   "deterministic executed/skipped manifest reports offline compiler and runtime GPU state separately",
 ]
