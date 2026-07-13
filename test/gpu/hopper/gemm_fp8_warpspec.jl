@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # FP8 warp-specialized Hopper GEMM — ported from
 # cutlass/examples/54_hopper_fp8_warp_specialized_gemm (NVIDIA CUTLASS,
 # BSD-3-Clause).
@@ -185,7 +186,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "FP8 warp-specialized GEMM (random e4m3, K=128, fused amax)" begin
         rng = MersenneTwister(0xf8f8)
         K_test = 128                            # 4 K-iters, 2 ring wraps

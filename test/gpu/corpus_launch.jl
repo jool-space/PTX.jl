@@ -1,4 +1,4 @@
-# REQUIRES CC 8.9
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.9
 using PTX: IR
 using PTX.Parser: parse as parse_ptx
 using PTX.IR: format

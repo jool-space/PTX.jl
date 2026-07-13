@@ -3,27 +3,46 @@
 # Three tiers of test live alongside each other:
 #
 #   host/   — pure host. No CUDA toolkit, no GPU.
-#   ptxas/  — needs a functional CUDA install (toolkit + a device for
-#             compiler_config(device(); ...)), but the `cap` we compile for
-#             is independent of the device's actual capability. Validates
-#             wrappers cross-arch (sm_50..sm_100a) without needing the
-#             corresponding hardware.
-#   gpu/    — real device execution via @cuda. Cap-gated by the
-#             `# REQUIRES CC` banner (see runtests.jl).
+#   ptxas/  — needs the CUDA compiler/ptxas artifact, but no live GPU.
+#             `compiler_config(nothing; arch=...)` validates wrappers across
+#             baseline, family, and architecture-specific targets without
+#             device discovery or corresponding hardware.
+#   gpu/    — active-device compilation and/or real execution. Routed by the
+#             structured `# TEST_TARGET:` banner (see runtests.jl).
 #
 # `emit_ptx` stops at the LLVM NVPTX backend (string-match only, no ptxas).
 # `ptxas_compiles` runs LLVM → PTX → ptxas → cubin and stops before `link`,
-# so the cubin is never loaded onto the device — meaning a sm_89 box can
-# validate sm_90a or sm_100a wrapper output. ptxas's stderr surfaces in the
-# thrown error when it rejects.
+# so the cubin is never loaded onto a device — meaning a host with no visible
+# GPU can validate sm_90a or sm_100a wrapper output. ptxas's stderr surfaces
+# in the thrown error when it rejects.
 
 using CUDACore
 using CUDATools
 using CUDACore.GPUCompiler: methodinstance, CompilerJob
 
-const DEV_CAP = CUDACore.functional() ?
-                CUDACore.capability(CUDACore.device()) :
-                v"0.0"
+isdefined(@__MODULE__, :TestTargets) ||
+    include(joinpath(@__DIR__, "target_requirements.jl"))
+
+const _TEST_DEVICE_CAP = Ref{Union{Nothing,VersionNumber}}(nothing)
+
+# Avoid a redundant `functional()` / device-capability query in workers that
+# never reach a mixed file's optional runtime section. CUDACore itself is
+# still imported by the shared harness and performs its normal initialization.
+function _test_device_capability()
+    cap = _TEST_DEVICE_CAP[]
+    cap === nothing || return cap
+    cap = CUDACore.functional() ?
+          CUDACore.capability(CUDACore.device()) :
+          v"0.0"
+    _TEST_DEVICE_CAP[] = cap
+    cap
+end
+
+# Mixed gpu/ files always run their cross-target ptxas testsets.  Their
+# optional runtime testsets use the same parsed target policy as the root
+# runner, eliminating ad-hoc capability ranges while retaining per-file scope.
+test_runtime_supported(file::AbstractString) =
+    TestTargets.runtime_supported(file, _test_device_capability())
 
 # LLVM NVPTX backend → PTX text. No ptxas, no driver. Compiled with
 # kernel ABI so `kernel_state` intrinsics (e.g. ptx"mov.u32"(sreg"%tid.x"))
@@ -32,11 +51,32 @@ const DEV_CAP = CUDACore.functional() ?
 # Since CUDACore 6.2 the feature set is part of the target (`SMVersion`),
 # not a separate compiler kwarg; the helpers keep the (cap, feature_set)
 # signature so the ~100 call sites stay as they are.
+function _explicit_target_job(f, tt::Type{<:Tuple};
+                              cap::VersionNumber,
+                              feature_set::Symbol = :baseline)
+    source = methodinstance(typeof(f), Base.to_tuple_type(tt))
+    arch = SMVersion(cap.major, cap.minor, feature_set)
+    config = CUDACore.compiler_config(nothing; kernel = true, arch)
+    CompilerJob(source, config)
+end
+
 function emit_ptx(f, tt::Type{<:Tuple};
                   cap::VersionNumber, feature_set::Symbol = :baseline)
     io = IOBuffer()
-    arch = SMVersion(cap.major, cap.minor, feature_set)
-    CUDATools.code_ptx(io, f, tt; arch, kernel = true)
+    job = _explicit_target_job(f, tt; cap, feature_set)
+    CUDACore.invoke_frozen(CUDACore.GPUCompiler.code_native, io, job)
+    String(take!(io))
+end
+
+# Optimized LLVM for attribute/code-motion assertions, using the same
+# device-free explicit target as PTX emission. `dump_module=true` keeps
+# call-site attribute groups visible to the test oracle.
+function emit_llvm(f, tt::Type{<:Tuple};
+                   cap::VersionNumber, feature_set::Symbol = :baseline)
+    io = IOBuffer()
+    job = _explicit_target_job(f, tt; cap, feature_set)
+    CUDACore.invoke_frozen(CUDACore.GPUCompiler.code_llvm, io, job;
+                           optimize = true, dump_module = true)
     String(take!(io))
 end
 
@@ -44,11 +84,7 @@ end
 # Throws on ptxas rejection (stderr is in the error message).
 function ptxas_compiles(f, tt::Type{<:Tuple};
                         cap::VersionNumber, feature_set::Symbol = :baseline)
-    source = methodinstance(typeof(f), Base.to_tuple_type(tt))
-    arch = SMVersion(cap.major, cap.minor, feature_set)
-    config = CUDACore.compiler_config(CUDACore.device();
-                                      kernel = true, arch)
-    job = CompilerJob(source, config)
+    job = _explicit_target_job(f, tt; cap, feature_set)
     CUDACore.invoke_frozen(CUDACore.compile, job)
     true
 end

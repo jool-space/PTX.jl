@@ -1,4 +1,4 @@
-# REQUIRES CC 9.0
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=9.0
 #
 # Smoke tests for `tensor_map_encode_tiled` — the host-side wrapper around
 # CUDA driver's `cuTensorMapEncodeTiled`. Although encoding is a host-side

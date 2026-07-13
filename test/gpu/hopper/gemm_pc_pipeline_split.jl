@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # Producer + 2 consumers (M-split) pipelined Hopper GEMM.
 #
 # Extension of gemm_pc_pipeline.jl: same producer-consumer rendezvous,
@@ -190,7 +191,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "producer-2-consumer Hopper GEMM (K=64, random bf16)" begin
         rng = MersenneTwister(0x5912)
         K_test = 64

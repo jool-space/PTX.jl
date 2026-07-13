@@ -1,4 +1,4 @@
-# REQUIRES CC 8.0
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.0
 #
 # Variant of test/gpu/ampere_gemm_highperf.jl with a CUTLASS-style log2
 # ThreadBlock swizzle (grid rasterization) applied at the top of the kernel.

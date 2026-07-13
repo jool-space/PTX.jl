@@ -442,11 +442,8 @@ end
 
 @testset "wgmma convergent attribute survives optimization" begin
     types = Tuple{CuDeviceVector{Float32, 1}, UInt64, UInt64}
-    llvm = sprint() do io
-        CUDATools.code_llvm(io, _hopper_wgmma_divergent!, types;
-                            arch = SMVersion(9, 0, :arch), kernel = true,
-                            dump_module = true)
-    end
+    llvm = emit_llvm(_hopper_wgmma_divergent!, types;
+                     cap = v"9.0", feature_set = :arch)
     # two distinct call sites, each carrying an attribute group
     sites = collect(eachmatch(r"call [^\n]*asm sideeffect \"wgmma\.mma_async[^\n]*", llvm))
     @test length(sites) == 2

@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=7.0
 using Random
 
 # Fused RMS-norm port from pyptx/examples/hopper/rms_norm.py.

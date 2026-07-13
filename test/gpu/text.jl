@@ -1,13 +1,12 @@
-# REQUIRES CC 8.9
-using CUDATools
-
+# TEST_TARGET: requires=toolkit evidence=compile
 # These tests close the gap I flagged in v0.0: each wrapper's @asmcall string
 # is compared against the wrapper's host-side `ir_*()` golden by compiling the
-# kernel for the active SM and grepping the emitted PTX. If a wrapper's asm
-# string drifts from its ir_* helper, the goldens still match each other but
-# the *actual* PTX no longer contains the expected instruction — caught here.
+# kernel for explicit target sm_89 and grepping the emitted PTX. If a
+# wrapper's asm string drifts from its ir_* helper, the goldens still match
+# each other but the *actual* PTX no longer contains the expected instruction
+# — caught here.
 
-ptx_for(kernel, argtypes::Type) = sprint(io -> CUDATools.code_ptx(io, kernel, argtypes))
+ptx_for(kernel, argtypes::Type) = emit_ptx(kernel, argtypes; cap = v"8.9")
 
 
 # --- add.f32 ----------------------------------------------------------------
@@ -399,4 +398,3 @@ end
 end
 
 # --- ldmatrix.sync.aligned (warp-cooperative shared→register) --------------
-

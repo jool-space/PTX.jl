@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=ptxas
 # Parametric wgmma m64n*k* sweep — every wgmma shape pyptx ports against.
 # Each entry: (dtype_d, dtype_a, dtype_b, N, K, has_trans). The wgmma chain
 # generates one method per combo; this validates each lowers cleanly under

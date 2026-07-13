@@ -1,4 +1,4 @@
-# REQUIRES CC 8.0
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8.0
 #
 # Reference 16×8×16 bf16 GEMM tile — single warp, single block.
 #

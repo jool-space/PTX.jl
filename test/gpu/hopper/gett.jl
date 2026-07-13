@@ -1,3 +1,4 @@
+# TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==9.0
 # GETT — Generalized Tensor times Tensor contraction — ported from
 # cutlass/examples/51_hopper_gett (NVIDIA CUTLASS, BSD-3-Clause).
 #
@@ -137,7 +138,7 @@ end
 
 # ── Runtime — Hopper hardware ──────────────────────────────────────────
 
-if v"9.0" <= DEV_CAP < v"10.0"
+if test_runtime_supported(@__FILE__)
     @testset "GETT D[(m0,m1),n] = Σk A[k,m0,m1]·B[k,n] (K=64, 2 CTAs)" begin
         rng = MersenneTwister(0x9e77)
         K_test = 64
