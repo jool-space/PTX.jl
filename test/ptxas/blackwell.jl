@@ -7,6 +7,86 @@
 # block-scale forms are validated on exact `a` and `f` target classes below.
 
 
+# --- clusterlaunchcontrol.try_cancel address roles -------------------------
+# PTX 9.3 §9.7.14.18: four grammar forms (generic/shared::cta ×
+# base/multicast), all with two mandatory bracketed addresses. These are
+# compile-only: meaningful execution requires a cluster launch, a live
+# mbarrier phase, and 16-byte aligned response storage.
+
+function _bw_clc_try_cancel_generic_u32!(response::UInt32, mbar::UInt32)
+    ptx"clusterlaunchcontrol.try_cancel.async.mbarrier::complete_tx::bytes.b128"(
+        address(response), address(mbar))
+    return nothing
+end
+
+function _bw_clc_try_cancel_generic_u64!(response::UInt64, mbar::UInt64)
+    ptx"clusterlaunchcontrol.try_cancel.async.mbarrier::complete_tx::bytes.b128"(
+        address(response), address(mbar))
+    return nothing
+end
+
+function _bw_clc_try_cancel_shared!(response::UInt32, mbar::UInt32)
+    ptx"clusterlaunchcontrol.try_cancel.async.shared::cta.mbarrier::complete_tx::bytes.b128"(
+        address(response), address(mbar))
+    return nothing
+end
+
+function _bw_clc_try_cancel_generic_multicast!(response::UInt64, mbar::UInt64)
+    ptx"clusterlaunchcontrol.try_cancel.async.mbarrier::complete_tx::bytes.multicast::cluster::all.b128"(
+        address(response), address(mbar))
+    return nothing
+end
+
+function _bw_clc_try_cancel_shared_multicast!(response::UInt32, mbar::UInt32)
+    ptx"clusterlaunchcontrol.try_cancel.async.shared::cta.mbarrier::complete_tx::bytes.multicast::cluster::all.b128"(
+        address(response), address(mbar))
+    return nothing
+end
+
+@testset "clusterlaunchcontrol.try_cancel base forms at sm_100" begin
+    generic_u32_types = Tuple{UInt32, UInt32}
+    generic_u64_types = Tuple{UInt64, UInt64}
+    shared_types = Tuple{UInt32, UInt32}
+    @test ptxas_compiles(_bw_clc_try_cancel_generic_u32!, generic_u32_types;
+                         cap = v"10.0", feature_set = :baseline)
+    @test ptxas_compiles(_bw_clc_try_cancel_generic_u64!, generic_u64_types;
+                         cap = v"10.0", feature_set = :baseline)
+    @test ptxas_compiles(_bw_clc_try_cancel_shared!, shared_types;
+                         cap = v"10.0", feature_set = :baseline)
+    generic_u32_ptx = emit_ptx(_bw_clc_try_cancel_generic_u32!,
+                               generic_u32_types;
+                               cap = v"10.0", feature_set = :baseline)
+    generic_u64_ptx = emit_ptx(_bw_clc_try_cancel_generic_u64!,
+                               generic_u64_types;
+                               cap = v"10.0", feature_set = :baseline)
+    shared_ptx = emit_ptx(_bw_clc_try_cancel_shared!, shared_types;
+                          cap = v"10.0", feature_set = :baseline)
+    @test occursin(
+        r"clusterlaunchcontrol\.try_cancel\.async\.mbarrier::complete_tx::bytes\.b128 \[%r\d+\], \[%r\d+\]",
+        generic_u32_ptx)
+    @test occursin(
+        r"clusterlaunchcontrol\.try_cancel\.async\.mbarrier::complete_tx::bytes\.b128 \[%rd\d+\], \[%rd\d+\]",
+        generic_u64_ptx)
+    @test occursin(
+        r"clusterlaunchcontrol\.try_cancel\.async\.shared::cta\.mbarrier::complete_tx::bytes\.b128 \[%r\d+\], \[%r\d+\]",
+        shared_ptx)
+end
+
+@testset "clusterlaunchcontrol.try_cancel multicast forms at sm_100a/f" begin
+    cases = (
+        (_bw_clc_try_cancel_generic_multicast!, Tuple{UInt64, UInt64}, "%rd"),
+        (_bw_clc_try_cancel_shared_multicast!, Tuple{UInt32, UInt32}, "%r"),
+    )
+    for feature_set in (:arch, :family), (f, tt, register) in cases
+        @test ptxas_compiles(f, tt; cap = v"10.0", feature_set)
+        ptx = emit_ptx(f, tt; cap = v"10.0", feature_set)
+        @test occursin(".target sm_100" * (feature_set === :arch ? "a" : "f"), ptx)
+        @test occursin(".multicast::cluster::all.b128", ptx)
+        @test length(collect(eachmatch(Regex("\\[\\" * register * "\\d+\\]"), ptx))) >= 2
+    end
+end
+
+
 # --- add.f32x2 (SIMD32-pair add) -------------------------------------------
 #
 # add.f32x2 packs two Float32 lanes into a UInt64 and adds element-wise.
@@ -324,7 +404,9 @@ end
 # alloc), not a memory pointer. Ported from pyptx/pyptx/ptx.py `_Tcgen05`.
 
 function _bw_tcgen05_shift!(taddr::UInt32)
-    ptx"tcgen05.shift.cta_group::1.down"(taddr)
+    # Exercise the exact Address{UInt32} adapter rather than the bare payload
+    # method; both must select the same tcgen05 intrinsic and PTX spelling.
+    ptx"tcgen05.shift.cta_group::1.down"(address(taddr))
     return nothing
 end
 
@@ -469,13 +551,15 @@ for (kind, scale, cg, source, cap, features, _target) in
     if source === :ss
         @eval function $fname(d::UInt32, a_desc::UInt64, b_desc::UInt64,
                               idesc::UInt32, scale_a::UInt32, scale_b::UInt32)
-            $op(d, a_desc, b_desc, idesc, scale_a, scale_b, false)
+            $op(address(d), a_desc, b_desc, idesc,
+                address(scale_a), address(scale_b), false)
             return nothing
         end
     else
         @eval function $fname(d::UInt32, a_tmem::UInt32, b_desc::UInt64,
                               idesc::UInt32, scale_a::UInt32, scale_b::UInt32)
-            $op(d, a_tmem, b_desc, idesc, scale_a, scale_b, false)
+            $op(address(d), address(a_tmem), b_desc, idesc,
+                address(scale_a), address(scale_b), false)
             return nothing
         end
     end
@@ -501,9 +585,10 @@ end
     @test occursin(".target $target", ptx)
     @test occursin("tcgen05.mma.cta_group::$cg.kind::$kind" *
                    ".block_scale.$scale", ptx)
-    if source === :ts
-        @test occursin(r"tcgen05\.mma[^;]+\[%r\d+\], \[%r\d+\], %rd\d+", ptx)
-    end
+    bracket_roles = source === :ss ?
+        r"tcgen05\.mma[^;]+\[%r\d+\], %rd\d+, %rd\d+, %r\d+, \[%r\d+\], \[%r\d+\], %p\d+;" :
+        r"tcgen05\.mma[^;]+\[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, \[%r\d+\], \[%r\d+\], %p\d+;"
+    @test occursin(bracket_roles, ptx)
 end
 
 

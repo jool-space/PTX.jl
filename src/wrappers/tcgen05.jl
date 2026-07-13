@@ -410,3 +410,88 @@ for (kind, scale_vec, block) in _TCGEN05_MX_SCALE_VARIANTS,
         scale in (scale_vec, block), cta_group in (1, 2)
     _tcgen05_mx_register(kind, scale, cta_group)
 end
+
+# Exact integer-address adapters for the reviewed tcgen05 surface. PTX 9.3
+# §9.7.17 does not give the family one uniform operand convention: most forms
+# bracket operand 1, `dealloc` brackets no operand, and MX block-scale MMA also
+# brackets its scale descriptors plus an optional tensor-memory A operand.
+# Encode the complete Julia signature, including every Address role, so an
+# arity/carrier/role miss reaches the typed-wrapper-only rejection instead of
+# silently shedding one marker and entering generic asm. Generic-address alloc
+# and pointer commit forms need no entry because `address(::Core.LLVMPtr)` is
+# identity.
+struct TCGen05IntegerAddressAdapter
+    mods::Tuple{Vararg{Symbol}}
+    argtypes::Tuple{Vararg{Type}}
+end
+
+const TCGEN05_INTEGER_ADDRESS_ADAPTERS = let
+    specs = TCGen05IntegerAddressAdapter[]
+    A32 = Address{UInt32}
+    add(mods, argtypes) =
+        push!(specs, TCGen05IntegerAddressAdapter(mods, argtypes))
+    for cg in 1:2
+        cta = Symbol("cta_group::", cg)
+        add((:shift, cta, :down), (A32,))
+        for shape in (Symbol("128x256b"), Symbol("4x256b"),
+                      Symbol("128x128b"))
+            add((:cp, cta, shape), (A32, UInt64))
+        end
+    end
+    for (shape, counts) in (
+            (Symbol("16x64b"),  (1, 2, 4, 8, 16, 32, 64, 128)),
+            (Symbol("32x32b"),  (1, 2, 4, 8, 16, 32, 64, 128)),
+            (Symbol("16x128b"), (1, 2, 4, 8, 16, 32, 64)),
+            (Symbol("16x256b"), (1, 2, 4, 8, 16, 32)))
+        for count in counts, op in (:ld, :st)
+            mods = (op, :sync, :aligned, shape, Symbol("x", count), :b32)
+            if op === :ld
+                add(mods, (A32,))
+            else
+                base = shape in (Symbol("16x64b"), Symbol("32x32b")) ? 1 :
+                       shape === Symbol("16x128b") ? 2 : 4
+                add(mods, (A32, NTuple{base * count, UInt32}))
+            end
+        end
+    end
+    for cg in 1:2
+        cta = Symbol("cta_group::", cg)
+        add((:alloc, cta, :sync, :aligned,
+             Symbol("shared::cta"), :b32), (A32, UInt32))
+        for space in (Symbol("shared::cta"), Symbol("shared::cluster"))
+            add((:commit, cta, Symbol("mbarrier::arrive::one"), space, :b64),
+                (A32,))
+        end
+        add((:commit, cta, Symbol("mbarrier::arrive::one"),
+             Symbol("multicast::cluster"),
+             Symbol("shared::cluster"), :b64), (A32, Integer))
+        for kind in (:f16, :tf32, :f8f6f4, :i8)
+            add((:mma, cta, Symbol("kind::", kind)),
+                (A32, UInt64, UInt64, UInt32, Bool))
+        end
+    end
+    for (kind, scale_vec, block) in _TCGEN05_MX_SCALE_VARIANTS,
+            scale in (scale_vec, block), cg in 1:2
+        mods = (:mma, Symbol("cta_group::", cg), Symbol("kind::", kind),
+                :block_scale, scale)
+        add(mods, (A32, UInt64, UInt64, UInt32, A32, A32, Bool))
+        add(mods, (A32, A32, UInt64, UInt32, A32, A32, Bool))
+    end
+    keys = ((s.mods, s.argtypes) for s in specs)
+    allunique(keys) || error("duplicate tcgen05 integer-address adapter signature")
+    Tuple(specs)
+end
+
+const TCGEN05_INTEGER_ADDRESS_FORMS =
+    Tuple(unique(s.mods for s in TCGEN05_INTEGER_ADDRESS_ADAPTERS))
+
+for spec in TCGEN05_INTEGER_ADDRESS_ADAPTERS
+    mods, argtypes = spec.mods, spec.argtypes
+    names = [gensym(:arg) for _ in argtypes]
+    decls = [:($(names[i])::$(argtypes[i])) for i in eachindex(argtypes)]
+    args = [argtypes[i] <: Address ? :($(names[i]).value) : names[i]
+            for i in eachindex(argtypes)]
+    @eval @inline function (op::Operation{:tcgen05, $mods})($(decls...))
+        op($(args...))
+    end
+end

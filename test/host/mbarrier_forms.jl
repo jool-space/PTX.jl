@@ -516,6 +516,29 @@ end
                             (UInt32, UInt32))
     @test sharedaddr.asm == "mbarrier.init.shared.b64 [\$0], \$1;"
     @test sharedaddr.constraints == "r,r,~{memory}"
+
+    # Explicit integer address roles compose with the mbarrier schema instead
+    # of falling through to the generic address contract. Pin a state result,
+    # a sink result, and a wait predicate; each Address must render one pair
+    # of brackets and be unwrapped before reaching LLVM inline assembly.
+    A32, A64 = PTX.Address{UInt32}, PTX.Address{UInt64}
+    address_cases = (
+        ((:arrive, :shared, :b64), (A32,),
+         "mbarrier.arrive.shared.b64 \$0, [\$1];", UInt64, (UInt32,)),
+        ((:arrive, :sink, :release, :cluster, :b64), (A64,),
+         "mbarrier.arrive.release.cluster.b64 _, [\$0];", Nothing, (UInt64,)),
+        ((:test_wait, :shared, :b64), (A32, UInt64),
+         "mbarrier.test_wait.shared.b64 \$0, [\$1], \$2;", Bool,
+         (UInt32, UInt64)),
+    )
+    for (mods, argtypes, asm, rettype, passthrough) in address_cases
+        spec = build_call(:mbarrier, mods, argtypes)
+        @test spec.asm == asm
+        @test !occursin("[[", spec.asm)
+        @test spec.rettype === rettype
+        @test spec.passthrough_argtypes === passthrough
+        @test spec.passthrough_unwrap_address[1]
+    end
 end
 
 @testset "mbarrier transpiler preserves sinks and grouped destinations" begin
@@ -547,17 +570,18 @@ end
     }
     """
     julia = PTX.ptx_to_julia(source)
-    @test occursin("ptx\"mbarrier.init.b64\"(rd0, UInt32(1))", julia)
-    @test occursin("ptx\"mbarrier.init.b64\"(rd0 + 8, UInt32(1))", julia)
+    @test occursin("ptx\"mbarrier.init.b64\"(address(rd0), UInt32(1))", julia)
+    @test occursin("ptx\"mbarrier.init.b64\"(address(rd0 + 8), UInt32(1))", julia)
     @test occursin("r0 = ptx\"mbarrier.pending_count.b64\"(rd1)", julia)
-    @test occursin("(p0, p1) = ptx\"mbarrier.test_wait.report_pred.phase_type::primary.b64\"(rd0, rd1)", julia)
-    @test occursin("(p2, p3, status) = ptx\"mbarrier.try_wait.report.parity.phase_type::primary.b64\"(rd0, r1, r2)", julia)
-    @test occursin("ptx\"mbarrier.arrive.sink.release.cluster.b64\"(rd2)", julia)
-    @test occursin("ptx\"mbarrier.arrive.sink.noComplete.shared::cta.b64\"(r0, r1)", julia)
-    @test occursin("ptx\"mbarrier.arrive_drop.sink.shared::cta.release.cluster.b64\"(r0, r1)", julia)
-    @test occursin("ptx\"mbarrier.arrive.shared::cluster.b64\"(r0)", julia)
-    @test occursin("complete = ptx\"mbarrier.try_wait.parity.shared.b64\"(rd0, r1)", julia)
+    @test occursin("(p0, p1) = ptx\"mbarrier.test_wait.report_pred.phase_type::primary.b64\"(address(rd0), rd1)", julia)
+    @test occursin("(p2, p3, status) = ptx\"mbarrier.try_wait.report.parity.phase_type::primary.b64\"(address(rd0), r1, r2)", julia)
+    @test occursin("ptx\"mbarrier.arrive.sink.release.cluster.b64\"(address(rd2))", julia)
+    @test occursin("ptx\"mbarrier.arrive.sink.noComplete.shared::cta.b64\"(address(r0), r1)", julia)
+    @test occursin("ptx\"mbarrier.arrive_drop.sink.shared::cta.release.cluster.b64\"(address(r0), r1)", julia)
+    @test occursin("ptx\"mbarrier.arrive.shared::cluster.b64\"(address(r0))", julia)
+    @test occursin("complete = ptx\"mbarrier.try_wait.parity.shared.b64\"(address(rd0), r1)", julia)
     @test !occursin("_ =", julia)
+    @test !occursin(r"\w+\s*=\s*ptx\"mbarrier\.init", julia)
 
     for text in (
         replace(source,

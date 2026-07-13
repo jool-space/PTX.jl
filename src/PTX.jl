@@ -19,6 +19,8 @@ include("nvvm/NVVM.jl")
 using .NVVM: NVVM, @nvvm_str
 
 include("address_space.jl")
+include("address_operands.jl")
+export Address, address
 include("forms.jl")
 include("types.jl")
 

@@ -18,6 +18,8 @@ PTX.@mod_str
 ## Pointers
 
 ```@docs
+PTX.Address
+PTX.address
 PTX.reinterpret_addrspace
 ```
 

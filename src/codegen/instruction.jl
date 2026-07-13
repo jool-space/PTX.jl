@@ -678,6 +678,29 @@ function _instruction_cvt_source_schema(cg::CodeGenState, inst::Instruction,
     schema
 end
 
+function _instruction_clc_try_cancel_schema(inst::Instruction)
+    inst.opcode == "clusterlaunchcontrol" || return nothing
+    op = :clusterlaunchcontrol
+    mods = _schema_modifiers(inst.modifiers)
+    schema = clc_try_cancel_schema(mods)
+    schema === nothing && requires_clc_try_cancel_schema(op, mods) &&
+        throw(clc_try_cancel_schema_miss(mods))
+    schema === nothing && return nothing
+    length(inst.operands) == 2 || throw(ArgumentError(
+        "PTX transpiler: clusterlaunchcontrol.try_cancel has exactly two " *
+        "mandatory address operands ([addr], [mbar]); got " *
+        "$(length(inst.operands))"))
+    for (i, operand) in enumerate(inst.operands)
+        operand isa AddressOperand || throw(ArgumentError(
+            "PTX transpiler: clusterlaunchcontrol.try_cancel operand $i " *
+            "must be bracketed in the input PTX, got $(typeof(operand))"))
+        (operand::AddressOperand).coords === nothing || throw(ArgumentError(
+            "PTX transpiler: clusterlaunchcontrol.try_cancel operand $i " *
+            "must be a scalar PTX address, not a tensor-coordinate address"))
+    end
+    schema
+end
+
 function emit_instruction!(cg::CodeGenState, inst::Instruction)
     # Drop debug directives.
     (inst.opcode == ".loc" || inst.opcode == ".file") && return
@@ -706,6 +729,7 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     scalar_schema = structured_checked === nothing ?
                     _instruction_scalar_result_schema(inst) : nothing
     cvt_schema = _instruction_cvt_source_schema(cg, inst, scalar_schema)
+    _instruction_clc_try_cancel_schema(inst)
 
     if inst.opcode == "ret" && isempty(inst.operands)
         if inst.predicate === nothing
