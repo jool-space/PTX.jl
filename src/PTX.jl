@@ -8,6 +8,8 @@ using .IR
 
 include("parser/Parser.jl")
 
+include("implicit_state.jl")
+
 include("codegen/Codegen.jl")
 using .Codegen: ptx_to_julia, ir_to_julia
 export ptx_to_julia, ir_to_julia
@@ -26,6 +28,7 @@ include("wrappers/barrier.jl")
 include("wrappers/barrier_cluster.jl")
 include("wrappers/cp_async.jl")
 include("wrappers/cvt.jl")
+include("wrappers/extended_precision.jl")
 include("wrappers/fabric.jl")
 include("wrappers/fence.jl")
 include("wrappers/ldmatrix.jl")

@@ -40,6 +40,7 @@ line in the loop.
 | `cp.async` (scalar) | `wrappers/cp_async.jl` | `cp.async.{ca,cg}.shared.global [smem], [global], Val(N)` — needs shared `r` constraint and `N`-baked size |
 | `cp.async.bulk.tensor` (TMA) | `wrappers/tma.jl` | `cp.async.bulk.tensor.{1..5}d.{shared::cluster\|shared::cta}.global.tile.mbarrier::complete_tx::bytes` (load) and `.global.shared::cta.tile.bulk_group` (store) — coord vector becomes a positional `Int32` argument list |
 | `cvt` sub-byte FP packing | `wrappers/cvt.jl` | `cvt.rn.satfinite.e2m1x2.{f32,f16x2,bf16x2}` pack and `cvt.rn.{f16x2,bf16x2}.e2m1x2` unpack — `.b8` carrier through a `mov.b16` brace-pair shim because NVPTX has no i8 constraint |
+| extended precision | `wrappers/extended_precision.jl` | All 48 `add.cc` / `addc` / `sub.cc` / `subc` / `mad.cc` / `madc` scalar forms with explicit `Bool` carry/borrow, plus fused arbitrary-limb add/sub and unsigned 2×2-limb multiply |
 | `ldmatrix` | `wrappers/ldmatrix.jl` | `ldmatrix.sync.aligned.{m8n8,m16n16}.{x1,x2,x4}[.trans].{shared,shared::cta}.{b16,b8}` returning `UInt32` (x1) or `NTuple{N, UInt32}` (x2/x4) |
 | `mbarrier` | `wrappers/mbarrier.jl` | init / inval / arrive[.noComplete\|.expect_tx] / expect_tx / test_wait[.parity] / try_wait[.parity] — three return shapes (`Nothing` / `UInt64` state / `Bool` pred); shared-AS `r` constraint |
 | `mma.sync.aligned` | `wrappers/mma.jl` | `mma.sync.aligned.<shape>.<layA>.<layB>.<d>.<a>.<b>.<c>` for bf16/f16/tf32/FP8 (Ada) and `kind::f8f6f4` 5×5 sub-byte FP A/B (Blackwell sm_100a+); takes/returns `NTuple{N, UInt32}` for A/B and `NTuple{M, Float32\|UInt32}` for C/D |
@@ -55,6 +56,25 @@ Sync ops (`wgmma.fence`, `wgmma.commit_group`, `wgmma.wait_group`,
 `tcgen05.alloc`, `tcgen05.commit`, …) flow through the chain default —
 their opcode prefix is in `NONPURE_OPCODES`, so they get `~{memory}`
 and `side_effects = true` automatically.
+
+## Extended-precision arithmetic
+
+The extended-precision wrapper is a correctness boundary, not only an
+ergonomic overload. PTX `CC.CF` is implicit state that LLVM cannot name as an
+input/output constraint. Scalar typed wrappers reify it as `Bool`; aggregate
+helpers keep the entire chain in one asm unit. Generic, raw, and transpiled
+instruction-at-a-time fallbacks are rejected instead of emitting optimizer-
+unsafe calls.
+
+The public helpers are [`PTX.add_with_carry`](@ref),
+[`PTX.sub_with_borrow`](@ref), and [`PTX.mul_wide`](@ref); their full API
+documentation is in the [reference](reference.md#Extended-precision-arithmetic).
+
+The blocks are per-thread (`convergent=false`), carry `sideeffect` and `~{cc}`
+but no false memory clobber, and use early-clobber word outputs so a low result
+cannot alias a high input that a later instruction still needs. Subtraction
+seeds and materializes the flag through `sub.cc`/`subc`, directly mirroring PTX
+borrow semantics instead of relying on a cross-family flag representation.
 
 ## Host-side descriptor builders
 

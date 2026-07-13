@@ -21,6 +21,14 @@ PTX.@mod_str
 PTX.reinterpret_addrspace
 ```
 
+## Extended-precision arithmetic
+
+```@docs
+PTX.add_with_carry
+PTX.sub_with_borrow
+PTX.mul_wide
+```
+
 ## Transpiler
 
 ```@docs

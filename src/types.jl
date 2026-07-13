@@ -12,6 +12,9 @@ constraint_letter(::Type{Int32})   = "r"
 constraint_letter(::Type{UInt32})  = "r"
 constraint_letter(::Type{Int64})   = "l"
 constraint_letter(::Type{UInt64})  = "l"
+# LLVM NVPTX's `b` constraint selects the predicate register class for an
+# LLVM `i1` operand/result; this is target-specific LLVM syntax, not CUDA C++
+# inline-asm syntax.
 constraint_letter(::Type{Bool})    = "b"
 constraint_letter(::Type{<:Core.LLVMPtr}) = "l"
 

@@ -55,6 +55,17 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     # Drop debug directives.
     (inst.opcode == ".loc" || inst.opcode == ".file") && return
 
+    # CC.CF is implicit architectural state and is not preserved across calls.
+    # Instruction-at-a-time Julia emission would split a straight-line carry
+    # chain into independent inline-asm calls with no LLVM-visible dependency;
+    # it can also let pointer-alias propagation erase an add.cc/sub.cc producer.
+    # Reject until the transpiler can fuse the complete chain into one block.
+    uses_implicit_cc(inst.opcode, inst.modifiers) && throw(ArgumentError(
+        "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) accesses the " *
+        "implicit CC.CF flag; instruction-at-a-time lowering cannot preserve " *
+        "that dependency. Use PTX.add_with_carry, PTX.sub_with_borrow, or " *
+        "PTX.mul_wide in Julia source."))
+
     if inst.opcode == "ret" && isempty(inst.operands)
         if inst.predicate === nothing
             emit!(cg, "return nothing")

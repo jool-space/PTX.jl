@@ -16,10 +16,14 @@ julia_src = ptx_to_julia(source)
 println(julia_src)
 ```
 
-Output is `Meta.parse`-valid: paste it into a Julia file (or `eval` it),
-add a `@cuda` launch, and the kernel runs. Each emitted line lowers to
-the same `@asmcall` site the chain DSL produces, so the resulting PTX
-is byte-for-byte close to the original.
+For the supported instruction-at-a-time subset, output is `Meta.parse`-valid:
+paste it into a Julia file (or `eval` it), add a `@cuda` launch, and the kernel
+runs. Unsupported semantic shapes throw instead of emitting plausible but
+unsafe Julia. In particular, `add.cc` / `addc`, `sub.cc` / `subc`, and
+`mad.cc` / `madc` communicate through implicit `CC.CF`; splitting them into
+independent calls would hide the dependency from LLVM. Write those operations
+with the explicit-Bool wrappers or fused helpers described in
+[Extended precision and `CC.CF`](dsl.md#Extended-precision-and-CC.CF).
 
 ## Pipeline
 
