@@ -1,0 +1,18 @@
+id = "TEST-TARGET-001"
+status = "resolved"
+severity = "medium"
+category = "test_architecture"
+summary = "CC-only test banners cannot represent baseline/family/arch target semantics or produce a centralized executed/skipped capability manifest."
+source_handoffs = ["wave6-frontend-tests.md"]
+validation_tier = "closed-world test-runner policy and integration audit"
+
+[resolution]
+pr = 25
+commit = "1b57952ff461ac8a28cb86a0b15b8e40869ec9b6"
+scope = "full"
+evidence = [
+  "independent exact banner-to-file inventory for all 65 GPU tests",
+  "exact mixed-runtime guard inventory covering 33 guarded sections",
+  "226 structured routing assertions on Julia 1.10 and Julia 1.12",
+  "deterministic executed/skipped manifest verified through the real test runner",
+]
