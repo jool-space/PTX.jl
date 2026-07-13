@@ -8,11 +8,13 @@ validation_tier = "host dispatch, LLVM selection, emitted PTX, and ptxas"
 
 [resolution]
 pr = 24
-commit = "b7f190b28edc76ce8ccf8c43472a773f7562a296"
+commit = "0422edf2ab062648550724ea87c803f5c061b21c"
 scope = "full"
 evidence = [
   "independent closed-world six-rule typed-wrapper boundary manifest",
-  "357 host boundary assertions including exact tcgen05 carrier and arity negatives",
+  "361 host boundary assertions including exact tcgen05 carrier and arity negatives",
   "4231 NVVM selection and attribute conformance assertions",
-  "58 Blackwell ptxas assertions covering the migrated lifecycle forms",
+  "optimized LLVM retains both tcgen05 thread fences as side-effecting asm with memory clobbers",
+  "60 sm_100a emitted-PTX order and ptxas assertions cover the migrated tcgen05 lifecycle forms",
+  "dense m16n8k8 tf32 golden and ptxas checks pin the ISA-required A4/B2/C4 fragment schema",
 ]
