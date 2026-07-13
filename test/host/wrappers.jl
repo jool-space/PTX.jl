@@ -824,9 +824,9 @@ end
     @test occursin("convergent nomerge", s)
 
     # Tier-2 mma (dense + scaled): upstream props lack IntrConvergent (the
-    # whole 94-name surface is IntrNoMem only at 22.1.7) — the emission
-    # overlay (NVVM.CONVERGENT_OVERLAY_PREFIXES) must put `convergent
-    # nomerge` on the declaration anyway.
+    # whole generated `llvm.nvvm.mma.` surface is IntrNoMem only at 22.1.7).
+    # The emission overlay must put `convergent nomerge` on the call site;
+    # retaining it on the declaration is harmless but insufficient alone.
     mma_t2 = Operation{:mma, (:sync, :aligned, :m16n8k16, :row, :col,
                               :f32, :bf16, :bf16, :f32)}()
     ci, rt = first(Base.code_typed(mma_t2,
