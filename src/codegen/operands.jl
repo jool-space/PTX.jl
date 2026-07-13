@@ -4,10 +4,49 @@
 
 # `type_hint` (a dtype Symbol like `:f32`/`:s32`) wraps integer literals with
 # the matching Julia type so chain dispatch matches; other operand kinds ignore.
+function _predefined_immediate_expr(name::AbstractString)
+    value = get(IR.PREDEFINED_IMMEDIATES, String(name), nothing)
+    value === nothing ? nothing : "Val($value)"
+end
+
+# Constant expressions are held as raw IR text, so a predefined identifier
+# inside one does not reach the standalone LabelOperand path below. Match PTX
+# identifier boundaries (which include `$`) rather than a bare substring: a
+# user identifier such as `WARP_SZ_limit` must remain untouched.
+const _PTX_PREDEFINED_IDENTIFIER = r"^[A-Za-z][A-Za-z0-9_$]*$"
+const _LEGACY_WARP_SIZE_TOKEN = r"(?<![A-Za-z0-9_$])%warpsize(?![A-Za-z0-9_$])"
+
+function _predefined_immediate_token_regex(name::AbstractString)
+    occursin(_PTX_PREDEFINED_IDENTIFIER, name) ||
+        error("PTX predefined immediate $(repr(String(name))) is not an identifier")
+    Regex("(?<![A-Za-z0-9_\\\$])" * name * "(?![A-Za-z0-9_\\\$])")
+end
+
+function _replace_predefined_immediate_tokens(
+        text::AbstractString,
+        immediates::AbstractDict{<:AbstractString,<:Integer} = IR.PREDEFINED_IMMEDIATES)
+    out = String(text)
+    for (name, value) in immediates
+        out = replace(out, _predefined_immediate_token_regex(name) => string(value))
+    end
+    # `%warpsize` is the one legacy pseudo-register spelling. It maps to the
+    # standard WARP_SZ immediate rather than belonging in the generic table.
+    warp_size = string(get(immediates, "WARP_SZ", IR.PREDEFINED_IMMEDIATES["WARP_SZ"]))
+    replace(out, _LEGACY_WARP_SIZE_TOKEN => warp_size)
+end
+
 function render_operand(op::RegisterOperand, cg::CodeGenState;
                         type_hint::Union{Symbol, Nothing} = nothing)
     name = op.name
+    # Compatibility spelling from older NVVM-facing code. PTX itself spells
+    # this standard immediate WARP_SZ, so lower it as an immediate in every
+    # instruction position rather than emitting invalid %warpsize PTX.
+    name == IR.LEGACY_WARP_SIZE_SREG && return _predefined_immediate_expr("WARP_SZ")
     name in SPECIAL_REGS && return sreg_val_expr(name)
+    name in IR.V4_SPECIAL_REG_ROOTS &&
+        throw(ArgumentError(
+            "PTX codegen does not yet lower vector-valued special register $name; " *
+            "use a scalar component such as $name.x or add vector IR/lowering support"))
     jname = julia_var(name)
     haskey(cg.pointer_aliases, jname) && return cg.pointer_aliases[jname]
     jname
@@ -15,7 +54,10 @@ end
 
 function render_operand(op::ImmediateOperand, cg::CodeGenState;
                         type_hint::Union{Symbol, Nothing} = nothing)
-    text = op.text
+    # PTX permits WARP_SZ wherever an immediate is allowed, including inside
+    # constant expressions such as `(WARP_SZ >> 1)`. Replace the predefined
+    # token before turning the raw PTX expression into Julia source.
+    text = _replace_predefined_immediate_tokens(op.text)
     # PTX f32 hex literal `0fXXXXXXXX` — decode bit-exactly.
     if length(text) == 10 && startswith(text, "0f")
         bits = tryparse(UInt32, text[3:end], base = 16)
@@ -49,6 +91,10 @@ end
 
 function render_operand(op::LabelOperand, cg::CodeGenState;
                         type_hint::Union{Symbol, Nothing} = nothing)
+    # WARP_SZ is a PTX predefined identifier (Table 3), so this precedence
+    # cannot shadow a user-defined symbol.
+    predefined = _predefined_immediate_expr(op.name)
+    predefined !== nothing && return predefined
     # State-space symbols (e.g. a `.shared` decl referenced by name) come
     # through as LabelOperand. If we've translated the symbol, substitute.
     jname = julia_var(op.name)

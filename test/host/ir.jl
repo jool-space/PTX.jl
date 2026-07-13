@@ -790,11 +790,73 @@ end
     @test canon(a) != canon(d)
 end
 
-@testset "canonicalize: digit-suffixed special registers are stable" begin
-    # `%envreg0`, `%pm0`, `%clock64` match the virtual-register shape
-    # (letters+digits) but are hardware names. Renamed first-appearance,
-    # a kernel reading %envreg3 would canonicalize identically to one
-    # reading %envreg0 — a semantic change the golden harness must see.
+@testset "PTX 9.3 special-register ledger and canonicalization" begin
+    # Independent PTX 9.3 manifest. Keep this separate from the reviewed
+    # source ledger so a future table edit cannot silently narrow the oracle.
+    v4_roots = (
+        "%tid", "%ntid", "%ctaid", "%nctaid",
+        "%clusterid", "%nclusterid", "%cluster_ctaid", "%cluster_nctaid",
+    )
+    v4_components = (".x", ".y", ".z", ".w", ".r", ".g", ".b", ".a")
+    expected_scalar = Set{String}((
+        "%laneid", "%warpid", "%nwarpid", "%smid", "%nsmid", "%gridid",
+        "%is_explicit_cluster", "%cluster_ctarank", "%cluster_nctarank",
+        "%lanemask_eq", "%lanemask_le", "%lanemask_lt", "%lanemask_ge",
+        "%lanemask_gt", "%clock", "%clock_hi", "%clock64",
+        "%globaltimer", "%globaltimer_lo", "%globaltimer_hi",
+        "%reserved_smem_offset_begin", "%reserved_smem_offset_end",
+        "%reserved_smem_offset_cap", "%reserved_smem_offset_0",
+        "%reserved_smem_offset_1", "%total_smem_size", "%aggr_smem_size",
+        "%dynamic_smem_size", "%current_graph_exec",
+    ))
+    for root in v4_roots, component in v4_components
+        push!(expected_scalar, root * component)
+    end
+    for i in 0:7
+        push!(expected_scalar, "%pm$i")
+        push!(expected_scalar, "%pm$(i)_64")
+    end
+    for i in 0:31
+        push!(expected_scalar, "%envreg$i")
+    end
+    expected_all = union(copy(expected_scalar), Set(v4_roots))
+
+    @test length(expected_scalar) == 141
+    @test length(expected_all) == 149
+    @test PTX.IR.SCALAR_SPECIAL_REGS == expected_scalar
+    @test PTX.IR.SPECIAL_REGS == expected_all
+    @test !("%warpsize" in PTX.IR.SPECIAL_REGS)
+    @test all(root -> root in PTX.IR.SPECIAL_REGS, v4_roots)
+    @test all(root -> !(root in PTX.IR.SCALAR_SPECIAL_REGS), v4_roots)
+
+    # The ledger retains the version/target floor of every family. Assert the
+    # historically omitted groups explicitly; nothing means every target.
+    family_for(name) = only(filter(f -> name in f.spellings,
+                                   PTX.IR.SPECIAL_REGISTER_FAMILIES))
+    for (name, introduced, min_sm, section) in (
+            ("%pm4", Version(3, 0), 20, "10.25"),
+            ("%pm0_64", Version(4, 0), 50, "10.26"),
+            ("%clock_hi", Version(5, 0), 20, "10.23"),
+            ("%reserved_smem_offset_0", Version(7, 6), 80, "10.29"),
+            ("%aggr_smem_size", Version(8, 1), 90, "10.31"),
+            ("%current_graph_exec", Version(8, 0), 50, "10.33"),
+            ("%cluster_ctaid.a", Version(7, 8), 90, "10.12"),
+        )
+        family = family_for(name)
+        @test family.introduced == introduced
+        @test family.min_sm == min_sm
+        @test occursin(section, family.section)
+    end
+
+    # This is a lexical structural fixture, not an instruction-legality
+    # sweep: it deliberately uses mov.u32 for every scalar spelling so the
+    # only varying IR field is the source token. Type-correct PTX assembly is
+    # covered separately for representative u32/b32/u64/pred forms in codegen.
+    #
+    # envreg0, pm0, and clock64 match the virtual-register shape
+    # (letters+digits) but are hardware names. The same is true of the
+    # formerly missing pm4–pm7; renaming any of them first-appearance would
+    # let a semantic hardware-input change pass the golden oracle.
     src(sr) = """
         .version 8.3
         .target sm_90
@@ -808,12 +870,26 @@ end
         }
         """
     canon(s) = PTX.IR.format(PTX.IR.canonicalize(PTX.Parser.parse(s)))
-    for sr in ("%envreg0", "%envreg31", "%pm0", "%pm3", "%clock64")
-        @test occursin(sr, canon(src(sr)))
-    end
-    # Different env registers stay distinguishable...
-    @test canon(src("%envreg0")) != canon(src("%envreg3"))
-    # ...while the virtual registers around them still rename.
-    @test occursin("%r0", canon(src("%envreg0")))
-    @test !occursin("%r7", canon(src("%envreg0")))
+    canonical = Dict(sr => canon(src(sr)) for sr in expected_scalar)
+    @test all(sr -> occursin(sr, canonical[sr]), expected_scalar)
+    # This is the all-pairs noncollision proof: every source differs only in
+    # the special-register operand, so duplicate canonical text would erase a
+    # real hardware-input distinction.
+    @test length(unique(values(canonical))) == length(expected_scalar)
+    @test canonical["%pm0"] != canonical["%pm4"]
+    @test !isempty(PTX.IR.diff(PTX.Parser.parse(src("%pm0")),
+                               PTX.Parser.parse(src("%pm4"))))
+    # `%warpsize` is a legacy parser input, not a PTX special register. It
+    # remains stable here even though it intentionally left SPECIAL_REGS.
+    @test occursin("%warpsize", canon(src("%warpsize")))
+    # Allocator noise around every special register still canonicalizes.
+    @test occursin("%r0", canonical["%envreg0"])
+    @test !occursin("%r7", canonical["%envreg0"])
+
+    # Whole `.v4` values are equally semantic inputs, even though scalar
+    # codegen deliberately rejects them today. Keep every root stable in the
+    # structural oracle rather than treating it as a virtual register.
+    canonical_v4 = Dict(sr => canon(src(sr)) for sr in v4_roots)
+    @test all(sr -> occursin(sr, canonical_v4[sr]), v4_roots)
+    @test length(unique(values(canonical_v4))) == length(v4_roots)
 end
