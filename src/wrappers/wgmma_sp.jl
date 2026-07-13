@@ -110,7 +110,7 @@ function _wgmma_sp_register(dtype_d::Symbol, dtype_a::Symbol, dtype_b::Symbol,
 end
 
 for (dt_d, dt_a, dt_b, k, has_trans) in _WGMMA_SP_VARIANTS
-    for n in (dt_d === :s32 ? _WGMMA_SP_INT_NS : _WGMMA_NS)
+    for n in (dt_d === :s32 ? _WGMMA_SP_INT_NS : _WGMMA_FLOAT_NS)
         _wgmma_sp_register(dt_d, dt_a, dt_b, n, k, has_trans)
     end
 end

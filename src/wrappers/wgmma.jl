@@ -4,7 +4,7 @@
 # the same physical register file. `imm_scale_a/b` and `imm_trans_a/b` are
 # baked. Sync ops (`wgmma.fence/commit_group/wait_group`) flow through the
 # chain — `:wgmma` is registered nonpure + convergent in the form
-# registry (src/forms.jl). Source: PTX 9.2 §9.7.14.5.
+# registry (src/forms.jl). Source: PTX 9.3 §9.7.16.5.
 #
 # Four variants per shape:
 #   1. `scale_d::Bool`        — runtime SREG (b constraint, $nd+2 slot).
@@ -24,15 +24,23 @@
 #      path's zero-init DCE, which RF mainloops (upconvert-in-registers,
 #      CUTLASS mixed-dtype style) don't hit in practice.
 
-# Valid N values for wgmma — step by 8 from 8 to 256.
-const _WGMMA_NS = (8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112,
-                   120, 128, 136, 144, 152, 160, 168, 176, 184, 192, 200,
-                   208, 216, 224, 232, 240, 248, 256)
+# PTX 9.3 §9.7.16.5.2 does not give every dtype family the same N grid.
+# Floating-point forms use every multiple of eight through 256.  Integer
+# forms use 8,16,24,32 and then multiples of sixteen from 48 through 224.
+# Thus every 8-mod-16 value after 32 (n40, n56, ..., n232, n248) and every
+# value above 224 (including n240 and n256) is illegal for integer WGMMA.
+# Keep the grids separate so registration cannot accidentally manufacture
+# the floating×integer cross-product again.
+const _WGMMA_FLOAT_NS = (8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96,
+                         104, 112, 120, 128, 136, 144, 152, 160, 168, 176,
+                         184, 192, 200, 208, 216, 224, 232, 240, 248, 256)
+const _WGMMA_INT_NS = (8, 16, 24, 32, 48, 64, 80, 96, 112, 128, 144, 160,
+                       176, 192, 208, 224)
 
 # (dtype_d, dtype_a, dtype_b, k, has_trans). k is fixed per ab-dtype:
 # bf16/f16 → k16; tf32 → k8; e4m3/e5m2 → k32. has_trans is true only for
 # f16/bf16 inputs (their SMEM descriptor accepts `.trans`).
-const _WGMMA_VARIANTS = (
+const _WGMMA_FLOAT_VARIANTS = (
     (:f32, :bf16, :bf16, 16, true),
     (:f32, :f16,  :f16,  16, true),
     (:f32, :tf32, :tf32, 8,  false),
@@ -41,6 +49,9 @@ const _WGMMA_VARIANTS = (
     (:f16, :f16,  :f16,  16, true),
     (:f16, :e4m3, :e4m3, 32, false),
     (:f16, :e5m2, :e5m2, 32, false),
+)
+
+const _WGMMA_INT_VARIANTS = (
     (:s32, :s8, :s8, 32, false),
     (:s32, :u8, :u8, 32, false),
     (:s32, :s8, :u8, 32, false),
@@ -64,10 +75,10 @@ function wgmma_mma_async_spec(dtype_d::Symbol, dtype_a::Symbol, dtype_b::Symbol,
     nd, _, d_let = _wgmma_dvec_kind(dtype_d, n)
     head = "wgmma.mma_async.sync.aligned.m64n$(n)k$(k).$dtype_d.$dtype_a.$dtype_b"
     d_slots = "{" * join(("\$$i" for i in 0:nd-1), ", ") * "}"
-    # PTX 9.2 §9.7.14.5.7: integer wgmma takes only `scale-d` (no scale-a/b
+    # PTX 9.3 §9.7.16.5.2: integer wgmma takes only `scale-d` (no scale-a/b
     # or trans-a/b). FP wgmma takes `scale-d, scale-a, scale-b` plus optional
-    # `trans-a, trans-b` for f16/bf16/tf32 inputs (mantissa-shape A/B
-    # descriptors). FP8 inputs have no trans bits.
+    # `trans-a, trans-b` for f16/bf16 inputs. TF32 and FP8 inputs have no
+    # transpose bits.
     imms_tail = if dtype_d === :s32
         ""
     elseif has_trans
@@ -230,6 +241,11 @@ function _wgmma_mma_async_register(
     nothing
 end
 
-for (dt_d, dt_a, dt_b, k, has_trans) in _WGMMA_VARIANTS, n in _WGMMA_NS
+for (dt_d, dt_a, dt_b, k, has_trans) in _WGMMA_FLOAT_VARIANTS,
+        n in _WGMMA_FLOAT_NS
+    _wgmma_mma_async_register(dt_d, dt_a, dt_b, n, k, has_trans)
+end
+for (dt_d, dt_a, dt_b, k, has_trans) in _WGMMA_INT_VARIANTS,
+        n in _WGMMA_INT_NS
     _wgmma_mma_async_register(dt_d, dt_a, dt_b, n, k, has_trans)
 end

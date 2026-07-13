@@ -5,8 +5,9 @@
 # sm_90a ptxas, with the right N → d-vec arity (N/2 for f32, N/4 for f16,
 # N/2 for s32 accumulator).
 #
-# Source of truth: PTX 9.2 §9.7.14.5 + PTX.jl's `_WGMMA_VARIANTS` table in
-# src/wrappers/wgmma.jl. Each variant goes through a host-side `wgmma_descriptor`
+# Source of truth: PTX 9.3 §9.7.16.5 + PTX.jl's separate floating/integer
+# variant and N inventories in src/wrappers/wgmma.jl. Each variant goes
+# through a host-side `wgmma_descriptor`
 # build with the canonical layout picked by `wgmma_layout`, so the two
 # helper layers compose end-to-end here.
 
@@ -36,7 +37,7 @@ const WGMMA_CASES = [
     (:f32, :tf32, :tf32, 16,  8,  false, Float32, 8),
 
     # FP8 inputs (k32), f32 acc, no trans. Same-dtype only — mixed e4m3/e5m2
-    # is valid PTX 9.2 but not yet registered in PTX.jl's _WGMMA_VARIANTS.
+    # is valid PTX 9.3 but not yet registered in PTX.jl's floating inventory.
     (:f32, :e4m3, :e4m3, 16,  32, false, Float32, 8),
     (:f32, :e4m3, :e4m3, 64,  32, false, Float32, 32),
     (:f32, :e5m2, :e5m2, 128, 32, false, Float32, 64),
@@ -48,6 +49,7 @@ const WGMMA_CASES = [
     (:s32, :s8,   :s8,   8,   32, false, Int32,   4),
     (:s32, :u8,   :u8,   64,  32, false, Int32,   32),
     (:s32, :s8,   :u8,   128, 32, false, Int32,   64),
+    (:s32, :u8,   :s8,   224, 32, false, Int32,   112),
 ]
 
 # wgmma reads N input scalars (input frags) per lane = N/4 UInt32 packed.

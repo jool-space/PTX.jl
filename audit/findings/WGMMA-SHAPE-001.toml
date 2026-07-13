@@ -1,7 +1,19 @@
 id = "WGMMA-SHAPE-001"
-status = "confirmed"
+status = "resolved"
 severity = "high"
 category = "validation"
 summary = "Integer WGMMA methods reuse the floating N grid and expose definitely illegal holes such as N=40."
 source_handoffs = ["wave2-matrix.md"]
-validation_tier = "ISA matrix and host method audit; sm90a ptxas pending"
+validation_tier = "ISA matrix, closed-world host dispatch audit, and sm90a ptxas"
+
+[resolution]
+pr = 27
+commit = "679dff88911050cc6cc8c920530bff6fea959f6a"
+scope = "full"
+evidence = [
+  "independent PTX 9.3 inventories pin 32 floating N values and the distinct 16-value dense integer N grid",
+  "exhaustive host dispatch audit checks every dtype tuple and every N candidate from 8 through 256 across all four public signatures",
+  "illegal dense integer forms including N40, N240, and N256 reach the fail-loud typed-wrapper boundary",
+  "sm90a ptxas covers floating endpoints N8/N256 and integer N8/N32/N48/N224 for every registered dtype tuple",
+  "modified device-free WGMMA sweep passes 61/61 and the combined focused host plus ptxas suite passes 8145/8145",
+]

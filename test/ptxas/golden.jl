@@ -229,9 +229,8 @@ end
 # --- tcgen05: lifecycle, data movement, dense mma ----------------------------
 # One straight-line kernel touching every wrapped verb: alloc/dealloc/
 # relinquish, cp, shift, ld/st (scalar and multi-register shapes), waits,
-# commit (cta + cluster spellings, multicast), dense mma (f16 cg1, tf32
-# cg2) and one mx kind (block-scale operands are not in the notation
-# surface — pinned to prove the migration leaves it on the asm tier).
+# commit (cta + cluster spellings, multicast), dense mma (f16 + tf32,
+# both cg1), and one MX kind with its complete block-scale operand schema.
 
 function _golden_tcgen05_sm100a!(out::CuDeviceVector{UInt32, 1},
                                  s_desc::UInt64, idesc::UInt32)
@@ -244,10 +243,14 @@ function _golden_tcgen05_sm100a!(out::CuDeviceVector{UInt32, 1},
     taddr = @inbounds slot[1]
     ptx"tcgen05.cp.cta_group::1.128x128b"(taddr, s_desc)
     ptx"tcgen05.mma.cta_group::1.kind::f16"(taddr, s_desc, s_desc, idesc, false)
-    ptx"tcgen05.mma.cta_group::2.kind::tf32"(taddr, s_desc, s_desc, idesc, true)
-    ptx"tcgen05.mma.cta_group::1.kind::mxf8f6f4"(taddr, s_desc, s_desc, idesc, false)
+    # PTX requires every tcgen05 instruction in one kernel to use the same
+    # cta_group.  Keep this broad golden cg1-only; isolated cg2 ptxas probes
+    # live in blackwell.jl.
+    ptx"tcgen05.mma.cta_group::1.kind::tf32"(taddr, s_desc, s_desc, idesc, true)
+    ptx"tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale.scale_vec::1X"(
+        taddr, s_desc, s_desc, idesc, taddr, taddr, false)
     ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cta.b64"(mbar_addr)
-    ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64"(mbar_addr)
+    ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64"(mbar_addr)
     ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64"(
         mbar_addr, UInt16(0x3))
     r1 = ptx"tcgen05.ld.sync.aligned.32x32b.x1.b32"(taddr)

@@ -1,7 +1,20 @@
 id = "TCGEN-MX-001"
-status = "confirmed"
+status = "resolved"
 severity = "high"
 category = "correctness"
 summary = "Five-argument tcgen05 MX wrappers omit mandatory block-scale modifiers and scale operands and emit non-assemblable PTX."
 source_handoffs = ["wave2-matrix.md", "targeted-probes.md"]
-validation_tier = "ISA grammar plus sm100a ptxas rejection"
+validation_tier = "ISA grammar, closed-world typed surface, and exact a/f target ptxas matrix"
+
+[resolution]
+pr = 27
+commit = "679dff88911050cc6cc8c920530bff6fea959f6a"
+scope = "full"
+evidence = [
+  "old five-argument MX calls and incomplete or illegal modifier schemas fail at the typed-wrapper boundary",
+  "independent host inventory covers all eight explicit Table 60 spellings across both CTA groups and both SMEM/TMEM A-source schemas",
+  "every registered wrapper emits the seven-operand block-scale grammar with both mandatory bracketed TMEM scale addresses",
+  "CUDA 13.3 ptxas accepts the complete explicit modifier inventory across sm100a, sm100f, sm110a, and sm110f target classes",
+  "sm110 evidence changes only the target directive of the identical sm100-emitted body and asserts exact reverse equality because CUDACore 6.2.1 cannot select sm110",
+  "tcgen05 structural golden uses one consistent cta_group and the complete MX operand schema",
+]
