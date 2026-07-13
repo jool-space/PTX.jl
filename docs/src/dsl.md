@@ -51,12 +51,18 @@ path. A rejection usually means the modifier spelling, arity, tuple width, or
 Julia carrier type does not match a reviewed wrapper.
 
 `ptx"..."raw` is an explicit opt-out for these structural boundaries. It emits
-the requested text under the maximally conservative contract, but it does not
-validate modifier grammar, operand grouping, result ABI, PTX version, or target
-support. In particular, `raw` does not turn a malformed scalar rendering into a
-valid matrix or grouped-result instruction. The implicit-`CC.CF` family is
-stricter still: its hidden dependency makes even a standalone raw call unsafe,
-so raw extended-precision forms remain forbidden.
+the requested text under the maximally conservative contract, but generally
+does not validate modifier grammar, operand grouping, PTX version, or target
+support. The audited fixed-scalar-result ledger remains enforced on raw calls:
+an exact form has the same result ABI and carrier checks as the registered
+chain, while an in-island miss is rejected because raw has no syntax for
+declaring an alternative result ABI. Raw does not turn a malformed scalar
+rendering into a valid matrix or grouped-result instruction. The
+implicit-`CC.CF` family is stricter still: its hidden dependency makes even a
+standalone raw call unsafe, so raw extended-precision forms remain forbidden.
+Likewise, a reviewed pure value operation whose spelling would infer `Nothing`,
+or a noncanonical ordinary `cvt`, fails on both normal and raw paths instead of
+emitting destination-less asm with an unknown result ABI.
 
 ## Modifier syntax
 
@@ -74,8 +80,11 @@ error at expansion.
 
 ## Return type inference
 
-The terminal modifier of the chain, if it's a recognized PTX dtype
-suffix, gives the return type:
+For generic scalar forms, the terminal modifier of the chain, if it's a
+recognized PTX dtype suffix, gives the return type. A closed audited ledger
+handles scalar grammar islands where that convention is false; a spelling in
+one of those islands must match the ledger exactly and must use the reviewed
+operand carriers.
 
 | Modifier | Julia type |
 |---|---|
@@ -90,15 +99,47 @@ suffix, gives the return type:
 | `.e4m3x4` / `.e5m2x4` / `.e2m3x4` / `.e3m2x4` / `.e2m1x4` | `UInt32` (packed FP carrier) |
 | `.f32x2` | `UInt64` |
 
-If the trailing modifier isn't a recognized dtype, the chain emits a void
-asm and returns `Nothing`.
+For reviewed pure value opcodes, an unrecognized trailing modifier is an error:
+a pure PTX instruction cannot silently become destination-less asm. Reviewed
+sink and side-effect families whose contract is genuinely void still return
+`Nothing`.
 
-Three families break this rule and are special-cased:
+The fixed-result ledger contains 126 exact spellings. Of these, 121 are
+canonical ISA grammar (`provenance = :isa`). Five are the exact contradictory
+spellings printed by PTX ISA examples—three mixed-float examples,
+`add.s8x4.sat`, and `min.s16x2.relu`—and are marked
+`provenance = :ptxas_compat`. This compatibility layer is deliberately not a
+license to accept every modifier permutation ptxas happens to assemble;
+undocumented postfix or duplicated variants fail loud. Each schema also records
+its PTX version and target feature set, including `sm_120f` family-specific
+packed operations.
 
-- **`cvt`** — grammar is `cvt.<modifiers...>.<dst>.<src>`, so the
-  destination is `parts[end-1]`. `cvt.rn.f16.f32` returns `Float16`.
+The exceptions are:
+
+- **Ordinary `cvt`** — grammar is `cvt.<modifiers...>.<dst>.<src>`, so the
+  destination is `parts[end-1]`. Both terminal tokens must be recognized dtypes
+  in that canonical order; `cvt.rn.f16.f32` returns `Float16`. Contradictory
+  reversed/postfix examples remain unsupported under `CVT-IMMEDIATE-001`
+  rather than being assigned a plausible but wrong ABI.
+- **`cvt.pack`** — every reviewed pack form returns `UInt32`; its conversion,
+  source, and optional carry-in width tokens all describe inputs.
 - **`setp`** — `setp.<cmp>.<dtype>` always returns `Bool`. The trailing
   modifier describes the *input* compare type, not the output.
+- **Mixed-precision `add` / `sub` / `fma`** — the reviewed
+  `.f32.{f16,bf16}` forms return `Float32`; the final token describes their
+  narrow multiplicand carrier.
+- **`popc` / `clz`** — both `.b32` and `.b64` source forms return `UInt32`.
+- **`dp2a` / `dp4a`** — the accumulator and result are `UInt32` only when
+  both multiplicand modifiers are `.u32`; otherwise both are `Int32`.
+- **`mul.wide` / `mad.wide`** — `.u16`/`.s16` inputs produce a 32-bit result,
+  while `.u32`/`.s32` inputs produce a 64-bit result; `mad.wide` takes its
+  accumulator at that widened width too.
+- **`prmt.b32.<mode>`** — `.f4e`, `.b4e`, `.rc8`, `.ecl`, `.ecr`, and `.rc16`
+  are control modes, not result types. All six return `UInt32` from three
+  `.b32`-compatible sources. Base `prmt.b32` remains terminal-inference-safe.
+- **Packed integer arithmetic** — reviewed `add`/`sub`/`neg`/`min`/`max`
+  `.u16x2`/`.s16x2`/`.u8x4`/`.s8x4` forms use `UInt32` bit carriers for packed
+  operands and results. The `.relu.s32` min/max forms instead return `Int32`.
 - **No-return families** — `setmaxnreg.{inc,dec}.sync.aligned.u32` and
   `tensormap.replace.tile.<field>...b{32,64}` carry a trailing width modifier
   that describes an *input* operand. Their contracts treat them as void;

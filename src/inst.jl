@@ -362,6 +362,9 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     raw && contract !== missing && throw(ArgumentError(
         "PTX.build_call: raw=true selects RAW_CONTRACT internally; " *
         "do not also pass contract=" * repr(contract)))
+    schema = scalar_result_schema(op, mods)
+    schema === nothing && requires_scalar_result_schema(op, mods) &&
+        throw(scalar_result_schema_miss(op, mods))
     selected_contract = raw ? RAW_CONTRACT :
                         contract === missing ? form_contract(op, mods) : contract
     uses_implicit_cc(op, mods) && throw(ArgumentError(
@@ -384,6 +387,7 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
         "memory, convergence) that must be reviewed per form — add a registry " *
         "entry, or use ptx\"...\"raw for the maximally-conservative contract " *
         "(sideeffect + memory clobber + convergent; pointer operands bracketed).")
+    schema === nothing || validate_scalar_result_args(schema, argtypes)
     rettype = selected_contract.returns ? infer_rettype(op, mods) : Nothing
     nonpure = !selected_contract.pure || has_special_reg(argtypes)
     bracket = selected_contract.brackets
@@ -459,9 +463,11 @@ end
 # `ptx"..."raw` — the explicit opt-in for eligible chains the form registry
 # doesn't know. Same rendering machinery as the registered chain, but under
 # RAW_CONTRACT: sideeffect + memory clobber + convergent, pointer operands
-# bracketed, trailing-dtype return inference (wrong guesses die loudly in
-# ptxas, never silently in the optimizer). A semantic guard still rejects
-# hidden state, such as CC.CF, that one call cannot model.
+# bracketed, generic scalar return inference. Audited fixed-result forms retain
+# their exact ABI and carrier validation, and an unmatched spelling inside one
+# of those grammar islands is rejected because raw has no explicit-result
+# syntax. A semantic guard still rejects hidden state, such as CC.CF, that one
+# call cannot model.
 # Composition mirrors Operation so a raw chain can be extended with `*`.
 
 struct RawOperation{op, mods} end
@@ -757,10 +763,12 @@ Returns `(; tier, method, rettype, intrinsics, asm)`:
   (`RAW_CONTRACT` for a `RawOperation`); the text is in `asm`.
 - `tier = :unregistered` — no wrapper and the opcode is not in the form
   registry: the call errors at the blessing boundary.
-- `tier = :forbidden` — the selected generic path is unsafe: either a spelling
+- `tier = :forbidden` — the selected generic path is unsafe: a spelling
   accesses implicit architectural state that cannot cross the call boundary,
-  or a typed-wrapper-only form missed its exact method. Explicit raw remains
-  available for the latter structural case only.
+  a typed-wrapper-only form missed its exact method, or a fixed-scalar-result
+  grammar island missed its audited ABI. Explicit raw remains available for
+  the typed-wrapper structural case, but not hidden state or an unknown scalar
+  result ABI.
 
 Binding is not selectability: an `:intrinsic` form can still fail ISel below
 its capability floor — that gate lives in the backend, not the registry.
@@ -777,10 +785,31 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
         !raw && requires_typed_wrapper(op, mods) &&
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
+        scalar_result_schema(op, mods) === nothing &&
+            requires_scalar_result_schema(op, mods) &&
+            return (; tier = :forbidden, method = m, rettype = nothing,
+                      intrinsics = String[], asm = nothing)
+        schema = scalar_result_schema(op, mods)
+        if schema !== nothing
+            try
+                validate_scalar_result_args(schema, argts)
+            catch err
+                err isa ArgumentError || rethrow()
+                return (; tier = :forbidden, method = m, rettype = nothing,
+                          intrinsics = String[], asm = nothing)
+            end
+        end
         contract = raw ? RAW_CONTRACT : form_contract(op, mods)
         contract === nothing &&
             return (; tier = :unregistered, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
+        if _result_abi_error(op, mods) !== nothing
+            return (; tier = :forbidden, method = m, rettype = nothing,
+                      intrinsics = String[], asm = nothing)
+        end
+        # All policy failures have been classified above. Do not catch a broad
+        # ArgumentError here: rendering/constraint bugs must remain visible to
+        # callers of this introspection API rather than masquerading as policy.
         spec = raw ? build_call(op, mods, argts; raw = true) :
                      build_call(op, mods, argts; contract)
         return (; tier = :chain_asm, method = m, rettype = spec.rettype,

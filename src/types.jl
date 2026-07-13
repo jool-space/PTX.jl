@@ -39,18 +39,63 @@ const DTYPE_RETTYPE = Dict{Symbol, Type}(
 # `setp.eq.s32` returns Bool, not Int32 — trailing dtype is the input compare type.
 const PRED_RESULT_OPCODES = Set{Symbol}((:setp,))
 
-# `cvt` grammar is `cvt.<modifiers...>.<dst>.<src>` — destination is mods[end-1].
+# Ordinary `cvt` grammar is `cvt.<modifiers...>.<dst>.<src>` — destination is
+# mods[end-1]. `cvt.pack` is instead covered by the fixed-u32 scalar-result
+# ledger before this fallback.
 # Sink forms whose dtype tail names an *operand* (st, red, nanosleep, ...) are
 # gated by the form registry's `returns` flag (src/forms.jl) — without that
 # gate the chain would reserve $0 for a phantom output and ptxas would reject
 # with "Arguments mismatch".
+function _ordinary_cvt_result_abi_error(mods::Tuple{Vararg{Symbol}})
+    length(mods) >= 2 && haskey(DTYPE_RETTYPE, mods[end - 1]) &&
+        haskey(DTYPE_RETTYPE, mods[end]) && return nothing
+    spelling = isempty(mods) ? "cvt" : "cvt." * join(mods, ".")
+    ArgumentError(
+        "ptx\"$spelling\" does not use the supported canonical ordinary " *
+        "cvt.<modifiers...>.<dst>.<src> order with two known terminal " *
+        "dtype tokens. Reversed/postfix spellings from contradictory ISA " *
+        "examples remain unsupported under CVT-IMMEDIATE-001 because " *
+        "terminal inference would assign the wrong result ABI; raw cannot " *
+        "supply an explicit result ABI.")
+end
+
+function ordinary_cvt_result_type(mods::Tuple{Vararg{Symbol}})
+    err = _ordinary_cvt_result_abi_error(mods)
+    err === nothing || throw(err)
+    DTYPE_RETTYPE[mods[end - 1]]
+end
+
+function _result_abi_error(op::Symbol, mods::Tuple{Vararg{Symbol}})
+    schema = scalar_result_schema(op, mods)
+    schema === nothing || return nothing
+    requires_scalar_result_schema(op, mods) &&
+        return scalar_result_schema_miss(op, mods)
+    op in PRED_RESULT_OPCODES && return nothing
+    c = form_contract(op, mods)
+    c !== nothing && !c.returns && return nothing
+    op === :cvt && return _ordinary_cvt_result_abi_error(mods)
+    rettype = isempty(mods) ? Nothing : get(DTYPE_RETTYPE, last(mods), Nothing)
+    if rettype === Nothing && c !== nothing && c.pure && c.returns
+        spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))
+        return ArgumentError(
+            "ptx\"$spelling\" is in the reviewed pure-form registry but " *
+            "does not expose a known scalar result ABI. A pure PTX value " *
+            "instruction cannot be emitted as void; check modifier order and " *
+            "spelling or add an audited result schema. The raw tier cannot " *
+            "supply an explicit result ABI.")
+    end
+    nothing
+end
+
 function infer_rettype(op::Symbol, mods::Tuple{Vararg{Symbol}})
+    err = _result_abi_error(op, mods)
+    err === nothing || throw(err)
+    schema = scalar_result_schema(op, mods)
+    schema === nothing || return schema.rettype
     op in PRED_RESULT_OPCODES && return Bool
     c = form_contract(op, mods)
     c !== nothing && !c.returns && return Nothing
-    if op === :cvt && length(mods) >= 2
-        rettype = get(DTYPE_RETTYPE, mods[end - 1], nothing)
-        rettype === nothing || return rettype
-    end
-    isempty(mods) ? Nothing : get(DTYPE_RETTYPE, last(mods), Nothing)
+    op === :cvt && return ordinary_cvt_result_type(mods)
+    rettype = isempty(mods) ? Nothing : get(DTYPE_RETTYPE, last(mods), Nothing)
+    rettype
 end
