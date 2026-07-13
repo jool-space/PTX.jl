@@ -1,7 +1,18 @@
 id = "TCGEN-DESC-001"
-status = "confirmed"
+status = "resolved"
 severity = "high"
 category = "validation"
 summary = "Public tcgen05 descriptor builders expose fixed or reserved fields as caller-controlled version and saturation options."
 source_handoffs = ["wave2-matrix.md"]
 validation_tier = "host bitfield reproduction"
+
+[resolution]
+pr = 29
+commit = "0296b21a18cfc60ef8dfec2546d32268a6b0165b"
+scope = "full"
+evidence = [
+  "PTX 9.3 Tables 43 and 45 fix shared-descriptor bits 46-48 and reserve the floating-point saturation bit instead of exposing either as caller-controlled state",
+  "independent exhaustive host oracle covers every 14-bit shared-descriptor field value and the complete public instruction-descriptor cross-product",
+  "alignment, range, swizzle, reserved-bit, absolute-leading-address-mode, shape, axis, scale, and shift violations fail loud instead of truncating into adjacent fields",
+  "sm_100a compiler probe accepts the corrected descriptors",
+]

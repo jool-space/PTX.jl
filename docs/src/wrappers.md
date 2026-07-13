@@ -100,12 +100,35 @@ bit-packing helpers for both:
 | Helper | Used by |
 |---|---|
 | `wgmma_descriptor` | Hopper `wgmma.mma_async` SMEM operand encoding (14-bit field windows + swizzle + base offset) |
-| `tcgen05_descriptor` | Blackwell `tcgen05.mma` SMEM operand encoding (3-bit layout vs wgmma's 2-bit; adds `version` and `lbo_mode`) |
-| `tcgen05_instr_desc_f16bf16_f32` | Blackwell `tcgen05.mma` 32-bit instruction descriptor for the dense F16/BF16/TF32 → F32 path. Mirrors CUTLASS/CuTe's `UMMA::make_instr_desc`. |
+| `tcgen05_descriptor` | Blackwell `tcgen05.mma` SMEM operand encoding (3-bit layout vs wgmma's 2-bit; legal swizzle values only). The ISA-fixed `0b001` field is inserted internally; `lbo_mode=1` selects the restricted `sm_103a` absolute leading-address mode. |
+| `tcgen05_instr_desc_f16bf16_f32` | Blackwell `tcgen05.mma` 32-bit instruction descriptor for F16/BF16/TF32 → F32 paths. The integer-only saturation bit and reserved bits are fixed at zero. Mirrors CUTLASS/CuTe's `UMMA::make_instr_desc`. |
 | `smem_addr_u32` | Convert a `Core.LLVMPtr{T, AS.Shared}` to its 32-bit in-CTA SMEM offset (used as the `smem_addr_u32` argument to the descriptor builders). |
 
 These are not exported but are part of the documented API. Access them
 as `PTX.wgmma_descriptor`, `PTX.tcgen05_descriptor`, etc.
+
+The `tcgen05` builders deliberately expose semantic fields rather than every
+bit in the packed values. In particular, `tcgen05_descriptor` has no `version`
+keyword: PTX 9.3 §9.7.17.4.1 defines bits 46–48 as the fixed constant
+`0b001`, not a version selector. Likewise,
+`tcgen05_instr_desc_f16bf16_f32` has no `saturate` keyword because Table 45
+defines that bit only for integer MMA kinds. Matrix addresses and byte offsets
+must be 16-byte aligned and fit the 18-bit descriptor input window; invalid
+swizzle encodings and values that would spill into reserved fields fail with
+`ArgumentError` instead of being truncated.
+
+Absolute leading-address mode (`lbo_mode=1`) is the PTX 9.3
+§9.7.17.3.1.2 escape hatch for a 48-byte K dimension. The builder enforces
+its shared-descriptor restrictions: 128-byte swizzling with 16-byte atomicity
+(`BlackwellLayout.B128`, code 2) and `base_offset=0`. Because K and major axes
+live outside the shared descriptor, the caller must still pair it with K-major
+A and B (instruction-descriptor transpose bits 15 and 16 both zero), K=48B,
+and the architecture-specific `sm_103a` target.
+
+```@docs
+PTX.tcgen05_descriptor
+PTX.tcgen05_instr_desc_f16bf16_f32
+```
 
 ## GMMA layout helpers
 
