@@ -1,0 +1,7 @@
+id = "ASYNC-COVERAGE-001"
+status = "confirmed"
+severity = "medium"
+category = "coverage_gap"
+summary = "Advanced TMA, ranged fence, gather/scatter/im2col/reduce, cache, and ldmatrix decompression classes lack strict callable schemas."
+source_handoffs = ["wave3-memory.md", "wave4-data-movement.md"]
+validation_tier = "inventory and source audit"

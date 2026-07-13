@@ -1,0 +1,7 @@
+id = "NVVM-SIDEFX-001"
+status = "confirmed"
+severity = "high"
+category = "lowering"
+summary = "NVVM records marked both sideeffects and nomem still receive readnone or memory(none), allowing unrecognized void intrinsics to be deleted by older LLVM optimizers."
+source_handoffs = ["round1-ci-pr24.md"]
+validation_tier = "closed-world intrinsic-property inventory and optimized LLVM retention across supported Julia/LLVM versions"

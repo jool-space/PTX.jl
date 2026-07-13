@@ -1,0 +1,7 @@
+id = "IMMEDIATE-001"
+status = "confirmed"
+severity = "medium"
+category = "validation"
+summary = "setmaxnreg, pmevent, and lop3 accept runtime or out-of-domain immediates instead of enforcing ISA ranges and shape."
+source_handoffs = ["wave5-remaining-isa.md"]
+validation_tier = "host contract audit"

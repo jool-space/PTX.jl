@@ -1,0 +1,7 @@
+id = "FRONT-HEADER-001"
+status = "confirmed"
+severity = "high"
+category = "parser"
+summary = "The parser rejects valid omitted address_size and later target directives while accepting invalid address sizes and unvalidated targets."
+source_handoffs = ["wave6-frontend-tests.md"]
+validation_tier = "direct parser probes"
