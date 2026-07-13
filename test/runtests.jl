@@ -76,7 +76,10 @@ if args.list === nothing
         push!(manifest, entry)
         entry.action === :execute
     end
-    println(format_manifest(manifest, environment))
+    # CI keeps the complete audit trail. Local runs show the environment,
+    # summary, and skips without printing the entire test catalog.
+    println(format_manifest(manifest, environment;
+                            verbose = get(ENV, "CI", "") == "true"))
 end
 
 runtests(PTX, ARGS; init_code, testsuite)

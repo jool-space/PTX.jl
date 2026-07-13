@@ -76,7 +76,7 @@ function emit_llvm(f, tt::Type{<:Tuple};
     io = IOBuffer()
     job = _explicit_target_job(f, tt; cap, feature_set)
     CUDACore.invoke_frozen(CUDACore.GPUCompiler.code_llvm, io, job;
-                           dump_module = true)
+                           optimize = true, dump_module = true)
     String(take!(io))
 end
 

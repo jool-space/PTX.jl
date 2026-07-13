@@ -35,7 +35,7 @@ struct PlanEntry
     reason::String
 end
 
-const _BANNER_START_RE = r"^\s*#\s*TEST_TARGET\b"
+const _BANNER_START_RE = r"^\s*#\s*TEST_TARGET\s*:"
 const _BANNER_RE = r"^\s*#\s*TEST_TARGET\s*:\s*(.*?)\s*$"
 const _FIELD_RE = r"^([a-z_]+)=([^\s]+)$"
 const _MIN_CC_RE = r"^cc>=(\d+)(?:\.(\d+))?$"
@@ -85,8 +85,8 @@ function _validate_requirement(req::TestRequirement)
             throw(ArgumentError("requires=toolkit needs evidence=compile, evidence=ptxas, or evidence=mixed"))
         end
     elseif req.requires === :gpu
-        req.evidence in (:runtime, :compile) ||
-            throw(ArgumentError("requires=gpu needs evidence=runtime or evidence=compile"))
+        req.evidence === :runtime ||
+            throw(ArgumentError("requires=gpu needs evidence=runtime"))
         isempty(req.runtime) &&
             throw(ArgumentError("requires=gpu needs a live-device runtime predicate"))
     else
@@ -147,9 +147,9 @@ function read_test_requirement(file::AbstractString)
     banners = Pair{Int,String}[]
     for (line_number, line) in enumerate(eachline(file))
         occursin(_BANNER_START_RE, line) || continue
-        # Validate every banner-looking line, even one far below the header.
-        # A later malformed or conflicting policy must not hide outside the
-        # 20-line discovery window.
+        # Validate every directive-looking line, even one far below the
+        # header. Prose comments beginning with `# TEST_TARGET` but no colon
+        # are documentation, not malformed policy.
         match(_BANNER_RE, line) === nothing &&
             throw(ArgumentError("malformed TEST_TARGET banner at $file:$line_number: $(repr(line))"))
         push!(banners, line_number => line)
@@ -210,71 +210,26 @@ end
 function plan_entry(test::AbstractString, req::TestRequirement,
                     env::TestEnvironment; forced::Bool = false)
     eligible = runtime_supported(req, env.capability)
-    if forced
-        if req.requires === :toolkit && req.evidence === :mixed
-            runtime = if !env.gpu_checked
-                "runtime routing check skipped"
-            elseif !env.gpu_functional
-                "runtime remains skipped (functional GPU unavailable)"
-            elseif eligible
-                "runtime eligible"
-            else
-                "runtime remains skipped (live device capability mismatch)"
-            end
-            return PlanEntry(String(test), :execute, req,
-                             "explicit selection executes offline cross-target ptxas compile; $runtime")
-        end
-        detail = isempty(req.runtime) ? "" :
-                 env.gpu_functional && eligible ? "; runtime capability eligible" :
-                 env.gpu_functional ? "; runtime capability ineligible but gate bypassed" :
-                                      "; functional GPU unavailable but gate bypassed"
-        return PlanEntry(String(test), :execute, req,
-                         "explicit selection bypasses default routing$detail")
-    end
+    forced && return PlanEntry(String(test), :execute, req,
+                               "explicit selection")
 
     if req.requires === :host
-        return PlanEntry(String(test), :execute, req, "host-only")
-    elseif !env.toolchain_checked
-        return PlanEntry(String(test), :skip, req,
-                         "offline compiler routing check skipped for host-only selection")
+        return PlanEntry(String(test), :execute, req, "host")
     elseif !env.toolchain_available
         return PlanEntry(String(test), :skip, req,
-                         "offline CUDA compiler/ptxas unavailable")
+                         "toolchain unavailable")
     elseif req.requires === :toolkit
-        if req.evidence in (:compile, :ptxas)
-            kind = req.evidence === :compile ? "PTX emission" : "ptxas compile"
-            return PlanEntry(String(test), :execute, req,
-                             "offline explicit-target $kind; live GPU is not required")
-        end
-        runtime = if !env.gpu_checked
-            "runtime routing check skipped"
-        elseif !env.gpu_functional
-            "runtime skipped (functional GPU unavailable)"
-        elseif eligible
-            "runtime eligible"
-        else
-            "runtime skipped (live device capability mismatch)"
-        end
-        return PlanEntry(String(test), :execute, req,
-                         "offline cross-target ptxas compile; $runtime")
-    elseif !env.gpu_checked
-        return PlanEntry(String(test), :skip, req,
-                         "GPU routing check skipped for non-GPU selection")
-    elseif !env.gpu_functional
-        return PlanEntry(String(test), :skip, req,
-                         "functional GPU unavailable")
-    elseif eligible
-        kind = req.evidence === :compile ? "active-device compile capability satisfied" :
-                                          "runtime capability satisfied"
-        return PlanEntry(String(test), :execute, req, kind)
+        return PlanEntry(String(test), :execute, req, "offline evidence")
+    elseif !env.gpu_functional || !eligible
+        return PlanEntry(String(test), :skip, req, "runtime ineligible")
     else
-        return PlanEntry(String(test), :skip, req,
-                         "live device capability mismatch")
+        return PlanEntry(String(test), :execute, req, "runtime eligible")
     end
 end
 
 """Render a stable, sorted executed/skipped plan for CI and local audit logs."""
-function format_manifest(entries::AbstractVector{PlanEntry}, env::TestEnvironment)
+function format_manifest(entries::AbstractVector{PlanEntry}, env::TestEnvironment;
+                         verbose::Bool = false)
     ordered = sort(entries; by = entry -> entry.test)
     executed = count(entry -> entry.action === :execute, ordered)
     skipped = count(entry -> entry.action === :skip, ordered)
@@ -304,7 +259,9 @@ function format_manifest(entries::AbstractVector{PlanEntry}, env::TestEnvironmen
         "  environment: $environment",
         "  summary: execute=$executed skip=$skipped total=$(length(ordered))",
     ]
-    for entry in ordered
+    displayed = verbose ? ordered : filter(entry -> entry.action === :skip,
+                                           ordered)
+    for entry in displayed
         action = entry.action === :execute ? "EXEC" : "SKIP"
         push!(lines, "  $action $(entry.test) [$(_describe(entry.requirement))] — $(entry.reason)")
     end
