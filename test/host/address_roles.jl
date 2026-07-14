@@ -211,7 +211,6 @@ end
 
     A32, A64 = Address{UInt32}, Address{UInt64}
     cases = (
-        (ptx"ld.global.v2.b32", (A64,)),
         (ptx"st.global.v4.b32", (A64, NTuple{4, UInt32})),
         (ptx"atom.global.add.v8.u32", (A64, NTuple{8, UInt32})),
         (ptx"red.global.add.v2.u32", (A64, NTuple{2, UInt32})),
@@ -234,6 +233,14 @@ end
         @test_throws ArgumentError build_call(op_sym, mods, argtypes)
         @test_throws ArgumentError build_call(op_sym, mods, argtypes; raw = true)
     end
+
+    # An audited vector-result form is authoritative for its own address
+    # operand: an integer Address routes through the vector schema (which
+    # validates and brackets it) instead of the exact-wrapper-only fallback.
+    vector_ld = build_call(:ld, (:global, :v2, :b32), (A64,))
+    @test vector_ld.asm == "ld.global.v2.b32 {\$0, \$1}, [\$2];"
+    @test vector_ld.rettype === NTuple{2, UInt32}
+    @test PTX.lowering(ptx"ld.global.v2.b32", (A64,)).tier === :chain_asm
 
     # Classic cp.async is scalar-structure-safe with explicit integer address
     # widths: two bracketed addresses, one baked size, and no result.

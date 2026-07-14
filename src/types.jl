@@ -74,6 +74,10 @@ function _result_abi_error(op::Symbol, mods::Tuple{Vararg{Symbol}})
     if requires_structured_result_schema(op)
         return structured === nothing ? structured_result_schema_miss(op, mods) : nothing
     end
+    vector = vector_result_schema(op, mods)
+    vector === nothing || return nothing
+    requires_vector_result_schema(op, mods) &&
+        return vector_result_schema_miss(op, mods)
     schema = scalar_result_schema(op, mods)
     schema === nothing || return nothing
     requires_scalar_result_schema(op, mods) &&
@@ -101,6 +105,8 @@ function infer_rettype(op::Symbol, mods::Tuple{Vararg{Symbol}})
     mbarrier === nothing || return _mbarrier_rettype(mbarrier)
     structured = structured_result_schema(op, mods)
     structured === nothing || return structured_result_type(structured)
+    vector = vector_result_schema(op, mods)
+    vector === nothing || return vector_result_type(vector)
     schema = scalar_result_schema(op, mods)
     schema === nothing || return schema.rettype
     c = form_contract(op, mods)
