@@ -312,3 +312,158 @@ function golden_test(name::String, f, tt::Type{<:Tuple}; cap::VersionNumber,
     end
     return false
 end
+
+# --- compile-touch sweep engine ---------------------------------------------
+#
+# Shared by the ptxas/compile_touch_* shards. Every wrapper-owned Operation
+# method must compile through its own Julia surface: conformance pins intrinsic
+# selection by synthesizing IR directly, so the Julia-side glue (operand
+# marshaling, address-space casts, tuple flattening) of the long-tail wrappers
+# is verified nowhere else. The sweep enumerates the wrapper method table,
+# synthesizes the argument-TYPE tuple per method (emit_ptx needs types, not
+# values), and backend-compiles each at its family's cap floor — no hardware,
+# no goldens.
+#
+# The surface is sharded across files (wgmma alone is ~3/4 of it) so the
+# parallel runner spreads the cost over workers, and methods within one
+# (cap, feature_set) group are batched several calls per kernel: most of the
+# per-method cost is GPUCompiler per-job overhead, not the wrapper itself.
+# A failing batch is recompiled one method at a time, so attribution is only
+# paid on failure.
+
+# The kernel body: dispatch each operation, discard the results.
+# record_coverage fires at cache-populate time (pre-optimization), so even a
+# pure form that DCEs away still verifies inference and records coverage.
+_touch(o, args...) = (o(args...); return nothing)
+
+@inline _touch_all(::Tuple{}, ::Tuple{}) = nothing
+@inline function _touch_all(ops::Tuple, args::Tuple)
+    first(ops)(first(args)...)
+    _touch_all(Base.tail(ops), Base.tail(args))
+end
+_touch_batch(ops, args) = (_touch_all(ops, args); return nothing)
+
+const _WRAPPER_DIR = joinpath(dirname(@__DIR__), "src", "wrappers")
+
+# Cap floor per family — refined by mods where one opcode spans arch
+# generations. Everything here is a *compilation* target; no device.
+function _touch_target(op::Symbol, mods)
+    has(s) = any(m -> occursin(s, String(m)), mods)
+    op === :tcgen05 && return (v"10.0", :arch)
+    op === :wgmma   && return (v"9.0", :arch)
+    op === :mma     && (has("kind::") || :block_scale in mods) &&
+        return (v"12.1", :arch)
+    op === :mma     && return (v"9.0", :arch)
+    (op === :ldmatrix || op === :stmatrix) && :b8 in mods &&
+        return (v"10.0", :arch)
+    # cta_group is a Blackwell cluster-pair feature; g2s with a nonzero
+    # cta_group operand cannot ISel below sm_100 (ledger: validated sm_100a).
+    op === :cp && has("cta_group::2") && return (v"10.0", :arch)
+    op === :cvt && (has("e2m") || has("e3m") || has("e4m") || has("e5m") ||
+                    has("ue8m0")) && return (v"12.1", :arch)
+    (v"9.0", :arch)
+end
+
+# Argument-type synthesis from the method signature. Substitution rules:
+#   - free TypeVars instantiate to their `_touch_tv` pick (LLVMPtr element
+#     types and the like — UInt64 unless a failure teaches us otherwise)
+#   - Union parameters take their first concrete member
+_touch_tv(tv::TypeVar) = UInt64
+
+function _touch_argtypes(m::Method)
+    sig = m.sig
+    while sig isa UnionAll
+        sig = sig{_touch_tv(sig.var)}
+    end
+    out = Any[]
+    for T in sig.parameters[2:end]
+        if T isa Union
+            members = Base.uniontypes(T)
+            i = findfirst(isconcretetype, members)
+            i === nothing && return nothing
+            push!(out, members[i])
+        elseif T === Integer
+            # duck-typed coordinate/count/mask operands — any Integer works
+            push!(out, Int32)
+        elseif T === Val
+            # unconstrained immediate (mma.sp sparsity selector) — 0 is
+            # inside every form's immarg range
+            push!(out, Val{0})
+        elseif T isa DataType || T isa Core.TypeofBottom
+            isconcretetype(T) || return nothing
+            push!(out, T)
+        else
+            return nothing
+        end
+    end
+    out
+end
+
+# Sweep every wrapper method with `want(op) == true`. Returns
+# (; touched, failures, unsynthesized); the caller owns the @test layer.
+# `want` is deliberately unannotated: setup.jl is evaluated in every test
+# module before the test file's own imports, and spelling `Function` here
+# would resolve that name to Base.Function and silently break test files
+# that later import PTX.IR.Function (Julia 1.10/1.11 ignore the conflicting
+# import with only a warning).
+function compile_touch_sweep(want; batch::Int = 16)
+    entries = Tuple{Method, Symbol, Any, Vector{Any}, String}[]
+    failures = String[]
+    unsynthesized = String[]
+    PTX._visit_operation_methods() do m, op, mods
+        want(op) || return
+        startswith(String(m.file), _WRAPPER_DIR) || return
+        label = "ptx\"$(join((String(op), String.(mods)...), '.'))\"" *
+                "($(m.sig isa UnionAll ? "…" : join(m.sig.parameters[2:end], ", ")))"
+        argts = _touch_argtypes(m)
+        if argts === nothing
+            push!(unsynthesized, label)
+            return
+        end
+        push!(entries, (m, op, mods, argts, label))
+    end
+
+    # Group by compilation target, then compile `batch` methods per kernel.
+    groups = Dict{Tuple{VersionNumber, Symbol}, Vector{Int}}()
+    for (i, (_, op, mods, _, _)) in enumerate(entries)
+        push!(get!(Vector{Int}, groups, _touch_target(op, mods)), i)
+    end
+
+    touched = 0
+    single_failure(i, cap) = begin
+        m, _, _, argts, label = entries[i]
+        opT = Base.unwrap_unionall(m.sig).parameters[1]
+        try
+            emit_ptx(_touch, Tuple{opT, argts...};
+                     cap = cap[1], feature_set = cap[2])
+            touched += 1
+            nothing
+        catch err
+            push!(failures,
+                  label * "  @sm_" * string(cap[1].major) * string(cap[1].minor) *
+                  "\n      " * first(sprint(showerror, err), 200))
+        end
+    end
+    for (cap, idxs) in groups
+        for chunk in Iterators.partition(idxs, batch)
+            opTs = Tuple{(Base.unwrap_unionall(entries[i][1].sig).parameters[1]
+                          for i in chunk)...}
+            argTs = Tuple{(Tuple{entries[i][4]...} for i in chunk)...}
+            ok = try
+                emit_ptx(_touch_batch, Tuple{opTs, argTs};
+                         cap = cap[1], feature_set = cap[2])
+                true
+            catch
+                false
+            end
+            if ok
+                touched += length(chunk)
+            else
+                # Attribute the failure: recompile the batch one method at a
+                # time so the report names exact spellings, not a chunk.
+                foreach(i -> single_failure(i, cap), chunk)
+            end
+        end
+    end
+    (; touched, failures, unsynthesized)
+end

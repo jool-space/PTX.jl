@@ -56,6 +56,12 @@ function _td_expected_idesc(m, n, ab_dtype, a_major, b_major,
     UInt32(max_shift) << 30
 end
 
+function _td_sdesc_invariants_hold(desc)
+    desc & _TD_SDESC_FIXED_MASK == _TD_SDESC_FIXED_VALUE &&
+        iszero(desc & _TD_SDESC_ZERO_MASK) &&
+        iszero(desc & ~_TD_SDESC_ALLOWED_MASK)
+end
+
 function _td_assert_sdesc_invariants(desc)
     @test desc & _TD_SDESC_FIXED_MASK == _TD_SDESC_FIXED_VALUE
     @test iszero(desc & _TD_SDESC_ZERO_MASK)
@@ -65,25 +71,38 @@ end
 @testset "tcgen05 shared descriptor: exhaustive field windows" begin
     # Exercise every one of the 2^14 encodable values independently in each
     # address/offset field. This catches both truncation and a one-bit shift
-    # into each neighboring reserved field.
+    # into each neighboring reserved field. The sweep stays exhaustive but
+    # reports in aggregate: one recorded mismatch per bad encoding, and a
+    # final count proving the sweep actually swept, instead of half a million
+    # per-value @test records for a 1.7s loop.
+    mismatches = String[]
+    checked = 0
     for encoded in UInt32(0):UInt32(0x3fff)
         bytes = encoded << 4
-
-        addr_desc = tcgen05_descriptor(bytes; leading_bytes = 0,
-                                       stride_bytes = 0)
-        @test addr_desc == _td_expected_sdesc(bytes, 0, 0, 0, 0, 0)
-        _td_assert_sdesc_invariants(addr_desc)
-
-        leading_desc = tcgen05_descriptor(UInt32(0); leading_bytes = bytes,
-                                          stride_bytes = 0)
-        @test leading_desc == _td_expected_sdesc(0, bytes, 0, 0, 0, 0)
-        _td_assert_sdesc_invariants(leading_desc)
-
-        stride_desc = tcgen05_descriptor(UInt32(0); leading_bytes = 0,
-                                         stride_bytes = bytes)
-        @test stride_desc == _td_expected_sdesc(0, 0, bytes, 0, 0, 0)
-        _td_assert_sdesc_invariants(stride_desc)
+        cases = (
+            ("addr", tcgen05_descriptor(bytes; leading_bytes = 0,
+                                        stride_bytes = 0),
+             _td_expected_sdesc(bytes, 0, 0, 0, 0, 0)),
+            ("leading", tcgen05_descriptor(UInt32(0); leading_bytes = bytes,
+                                           stride_bytes = 0),
+             _td_expected_sdesc(0, bytes, 0, 0, 0, 0)),
+            ("stride", tcgen05_descriptor(UInt32(0); leading_bytes = 0,
+                                          stride_bytes = bytes),
+             _td_expected_sdesc(0, 0, bytes, 0, 0, 0)),
+        )
+        for (field, desc, expected) in cases
+            checked += 1
+            desc == expected && _td_sdesc_invariants_hold(desc) && continue
+            length(mismatches) < 16 && push!(mismatches,
+                "$field=0x$(string(bytes, base = 16)): " *
+                "got 0x$(string(desc, base = 16)), " *
+                "expected 0x$(string(expected, base = 16))")
+        end
     end
+    isempty(mismatches) ||
+        foreach(m -> println("SDESC MISMATCH: ", m), mismatches)
+    @test isempty(mismatches)
+    @test checked == 3 * 2^14
 end
 
 @testset "tcgen05 shared descriptor: legal control cross-product" begin
@@ -168,6 +187,10 @@ end
 end
 
 @testset "tcgen05 float instruction descriptor: exhaustive public fields" begin
+    # Full cross-product of every public keyword; aggregated reporting for
+    # the same reason as the shared-descriptor sweep above.
+    mismatches = String[]
+    checked = 0
     for m in (32, 64, 128, 256), n in 8:8:256,
         ab_dtype in (:f16, :bf16, :tf32), a_major in (:K, :MN),
         b_major in (:K, :MN), scale_a in (1, -1), scale_b in (1, -1),
@@ -178,13 +201,24 @@ end
             max_shift)
         expected = _td_expected_idesc(m, n, ab_dtype, a_major, b_major,
                                       scale_a, scale_b, sparse, max_shift)
-        @test desc == expected
-        @test iszero(desc & _TD_IDESC_ZERO_MASK)
-        @test _td_field(desc, 4, 2) == 1       # dtype = f32
-        @test _td_field(desc, 7, 3) == _td_field(desc, 10, 3)
-        @test _td_field(desc, 17, 6) == n >> 3
-        @test _td_field(desc, 24, 5) == m >> 4
+        checked += 1
+        ok = desc == expected &&
+             iszero(desc & _TD_IDESC_ZERO_MASK) &&
+             _td_field(desc, 4, 2) == 1 &&      # dtype = f32
+             _td_field(desc, 7, 3) == _td_field(desc, 10, 3) &&
+             _td_field(desc, 17, 6) == n >> 3 &&
+             _td_field(desc, 24, 5) == m >> 4
+        ok && continue
+        length(mismatches) < 16 && push!(mismatches,
+            "(m=$m n=$n $ab_dtype a=$a_major b=$b_major " *
+            "sa=$scale_a sb=$scale_b sparse=$sparse shift=$max_shift): " *
+            "got 0x$(string(desc, base = 16)), " *
+            "expected 0x$(string(expected, base = 16))")
     end
+    isempty(mismatches) ||
+        foreach(m -> println("IDESC MISMATCH: ", m), mismatches)
+    @test isempty(mismatches)
+    @test checked == 4 * 32 * 3 * 2 * 2 * 2 * 2 * 2 * 4
 end
 
 @testset "tcgen05 float instruction descriptor: unsafe encodings rejected" begin
