@@ -50,7 +50,7 @@ function gemm_sparse_kernel!(
         Ac::CuDeviceVector{BFloat16},      # (M, K/2) compressed, row-major
         B_T::CuDeviceVector{BFloat16},     # (N, K) row-major
         meta::CuDeviceVector{UInt32},      # (M/16, K/32, 8, 2) flat
-        ::Val{M}, ::Val{N}, ::Val{K}) where {M, N, K}
+        ::Val{M}, ::Val{N}, ::Val{K}, ::Val{ORDERED}) where {M, N, K, ORDERED}
     n_iters = K ÷ SP_BK
     Kc      = K ÷ 2
 
@@ -90,8 +90,13 @@ function gemm_sparse_kernel!(
         # ignored, so tig&1 gives them a valid (unused) load.
         e = meta[((tm * n_iters + kt) * 8 + gid) * 2 + (tig & 1) + 1]
 
-        acc = ptx"mma.sp.sync.aligned.m16n8k32.row.col.f32.bf16.bf16.f32"(
-            (a1, a2, a3, a4), (b1, b2, b3, b4), acc, e, Val(0))
+        acc = if ORDERED
+            ptx"mma.sp::ordered_metadata.sync.aligned.m16n8k32.row.col.f32.bf16.bf16.f32"(
+                (a1, a2, a3, a4), (b1, b2, b3, b4), acc, e, Val(0))
+        else
+            ptx"mma.sp.sync.aligned.m16n8k32.row.col.f32.bf16.bf16.f32"(
+                (a1, a2, a3, a4), (b1, b2, b3, b4), acc, e, Val(0))
+        end
     end
 
     d_col = n_base + cl
@@ -179,7 +184,8 @@ function gemm_sparse_k16_kernel!(
         Ac::CuDeviceVector{BFloat16},      # (M, K/2) compressed, row-major
         B_T::CuDeviceVector{BFloat16},     # (N, K) row-major
         meta::CuDeviceVector{UInt32},      # (M/16, K/16, 8) flat
-        ::Val{M}, ::Val{N}, ::Val{K}, ::Val{SEL}) where {M, N, K, SEL}
+        ::Val{M}, ::Val{N}, ::Val{K}, ::Val{SEL},
+        ::Val{ORDERED}) where {M, N, K, SEL, ORDERED}
     n_iters = K ÷ 16
     Kc      = K ÷ 2
 
@@ -214,8 +220,13 @@ function gemm_sparse_k16_kernel!(
         e = tig == SEL ? meta[(tm * n_iters + kt) * 8 + gid + 1] :
                          UInt32(0x44444444)
 
-        acc = ptx"mma.sp.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(
-            (a1, a2), (b1, b2), acc, e, Val(SEL))
+        acc = if ORDERED
+            ptx"mma.sp::ordered_metadata.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(
+                (a1, a2), (b1, b2), acc, e, Val(SEL))
+        else
+            ptx"mma.sp.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(
+                (a1, a2), (b1, b2), acc, e, Val(SEL))
+        end
     end
 
     d_col = n_base + cl
@@ -241,26 +252,42 @@ function sparse_inputs(M::Int, N::Int, K::Int)
             D_ref = A_pruned * BT_f32')   # dense reference over the pruned A
 end
 
-function run_sparse_gemm(M::Int, N::Int, K::Int)
+function run_sparse_gemm(M::Int, N::Int, K::Int; ordered::Bool = false)
     @assert M % SP_BM == 0 && N % SP_BN == 0 && K % SP_BK == 0
     inp    = sparse_inputs(M, N, K)
     meta_d = CuArray(pack_meta_k32(inp.nib, M, K))
     D_d    = CUDACore.zeros(Float32, M * N)
     @cuda blocks=(N ÷ SP_BN, M ÷ SP_BM) threads=32 gemm_sparse_kernel!(
-        D_d, inp.Ac_d, inp.BT_d, meta_d, Val(M), Val(N), Val(K))
+        D_d, inp.Ac_d, inp.BT_d, meta_d, Val(M), Val(N), Val(K), Val(ordered))
     CUDACore.synchronize()
     return Matrix(reshape(Array(D_d), N, M)'), inp.D_ref
 end
 
-function run_sparse_gemm_k16(M::Int, N::Int, K::Int, sel::Int)
+function run_sparse_gemm_k16(M::Int, N::Int, K::Int, sel::Int;
+                             ordered::Bool = false)
     @assert M % SP_BM == 0 && N % SP_BN == 0 && K % 16 == 0
     inp    = sparse_inputs(M, N, K)
     meta_d = CuArray(pack_meta_k16(inp.nib, M, K))
     D_d    = CUDACore.zeros(Float32, M * N)
     @cuda blocks=(N ÷ SP_BN, M ÷ SP_BM) threads=32 gemm_sparse_k16_kernel!(
-        D_d, inp.Ac_d, inp.BT_d, meta_d, Val(M), Val(N), Val(K), Val(sel))
+        D_d, inp.Ac_d, inp.BT_d, meta_d, Val(M), Val(N), Val(K), Val(sel),
+        Val(ordered))
     CUDACore.synchronize()
     return Matrix(reshape(Array(D_d), N, M)'), inp.D_ref
+end
+
+@testset "Ampere ordered-metadata sparse GEMM (m16n8k32 bf16)" begin
+    # prune_2_4 sorts every kept pair before packing its metadata nibble, which
+    # is the additional semantic precondition of sp::ordered_metadata.
+    D, D_ref = run_sparse_gemm(32, 16, 64; ordered = true)
+    @test all(abs.(D .- D_ref) .<= 1f-2 .+ 1f-2 .* abs.(D_ref))
+end
+
+@testset "Ampere ordered-metadata sparse GEMM (m16n8k16 selector sweep)" begin
+    for sel in 0:3
+        D, D_ref = run_sparse_gemm_k16(32, 16, 64, sel; ordered = true)
+        @test all(abs.(D .- D_ref) .<= 1f-2 .+ 1f-2 .* abs.(D_ref))
+    end
 end
 
 @testset "Ampere 2:4 sparse GEMM (mma.sp m16n8k32 bf16)" begin

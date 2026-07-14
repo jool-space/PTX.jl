@@ -1785,12 +1785,19 @@ end
     silent() do
         # Re-register (idempotent bookkeeping) + early-return path.
         PTX._mma_sp_register(:m16n8k32, :f32, :bf16, :bf16, :f32)
+        PTX._mma_sp_register(:m16n8k32, :f32, :bf16, :bf16, :f32;
+                             ordered = true)
         @test PTX._mma_sp_register(:m99n99k99, :f32, :bf16, :bf16, :f32) === nothing
     end
     @test which(Operation{:mma,
             (:sp, :sync, :aligned, :m16n8k32, :row, :col, :f32, :bf16, :bf16, :f32)}(),
         (NTuple{4, UInt32}, NTuple{4, UInt32}, NTuple{4, Float32},
          UInt32, Val{0})).module == PTX
+    @test which(Operation{:mma,
+            (Symbol("sp::ordered_metadata"), :sync, :aligned, :m16n8k32,
+             :row, :col, :f32, :bf16, :bf16, :f32)}(),
+        (NTuple{4, UInt32}, NTuple{4, UInt32}, NTuple{4, Float32},
+         UInt32, Val{1})).module == PTX
 
     # ---- _mma_scaled_register ----
     silent() do
