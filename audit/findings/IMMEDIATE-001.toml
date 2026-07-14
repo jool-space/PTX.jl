@@ -1,7 +1,21 @@
 id = "IMMEDIATE-001"
-status = "confirmed"
+status = "resolved"
 severity = "medium"
 category = "validation"
 summary = "setmaxnreg, pmevent, and lop3 accept runtime or out-of-domain immediates instead of enforcing ISA ranges and shape."
 source_handoffs = ["wave5-remaining-isa.md"]
-validation_tier = "host contract audit"
+validation_tier = "closed ISA immediate ledger, host boundary/transpiler oracles, and offline ptxas target partitions"
+
+[resolution]
+pr = 41
+commit = "4037cf9f9d7c1f4437c7ac973e5c2dd75835f4ae"
+scope = "full"
+evidence = [
+  "five-record PTX 9.3 ledger pins both setmaxnreg actions, both pmevent forms, and one delegated lop3 domain contract with exact constants, ranges, stride, PTX versions, targets, side-effect/result shape, and section provenance",
+  "direct and raw calls plus lowering introspection reject spelling, arity, runtime, Bool, range, and setmaxnreg multiple-of-eight misses; side-effect forms remain destinationless on both tiers",
+  "transpilation validates pmevent/setmaxnreg before destination inference or pointer-alias absorption and reduces parser-supported PTX integer constant expressions to Val",
+  "the existing three-form structured-result ledger remains the single lop3 validator, with a load-time cross-check proving its exact forms and immLut position match the delegated immediate contract",
+  "the NVVM synthesis overlay closes the backend registry's setmaxnreg stride omission for both llvm.nvvm intrinsic spellings",
+  "252 focused host assertions and 8 CUDA 13.3 offline ptxas assertions pass; ptxas covers pmevent and both lop3 forms at retained sm_75 plus setmaxnreg at exact sm_90a",
+  "existing host inst/structured-result/NVVM and Hopper/structured-result ptxas suites pass; no new runtime tier is justified because lop3 already has Ada/GB10 runtime evidence, pmevent needs performance-monitor configuration, and setmaxnreg needs warpgroup launch semantics unavailable on the owned devices",
+]
