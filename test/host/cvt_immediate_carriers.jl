@@ -16,6 +16,29 @@ const _EXPECTED_CVT_SOURCE_CARRIERS = Dict(
     :ue8m0x2 => :b16, :s2f6x2 => :b16,
 )
 
+@testset "PTX integer constant evaluator uses fixed s64/u64 semantics" begin
+    cases = (
+        "0377" => Int64(255),
+        "(WARP_SZ >> 1)" => Int64(16),
+        "(0xffffffff << 32)" => Int64(-4294967296),
+        "(0xffffffffffffffff + 2)" => UInt64(1),
+        "(0x7fffffffffffffff + 1)" => typemin(Int64),
+        "(((.u64) -8 >> 60) & 0xff)" => UInt64(15),
+        # §4.5.5 says usual conversions; Table 5 conflicts, but ptxas 12.8
+        # produces a signed bitwise result and therefore an arithmetic shift.
+        "(((-1) & (-1)) >> 63)" => Int64(-1),
+        "(-1 % 16)" => Int64(15),
+    )
+    for (text, expected) in cases
+        @test PTX.Codegen._ptx_integer_constant(text) === expected
+    end
+    for bad in ("18446744073709551616", "0x10000000000000000",
+                "42U", "0b1010", "1 ^ 2", "1 ? 2 : 3",
+                "0 && (1 / 0)", "1 || (1 / 0)")
+        @test_throws ArgumentError PTX.Codegen._ptx_integer_constant(bad)
+    end
+end
+
 function _expected_ordinary_cvt_source_schemas()
     expected = Dict{Tuple{Symbol,Symbol,Bool,Bool},NamedTuple}()
     add!(destination, source, operands;
@@ -187,6 +210,10 @@ end
         cvt.s16.s8 %s160, 255;
         cvt.u32.u32 %u320, -1;
         cvt.u32.u32 %u321, 0x100000000;
+        cvt.u16.u8 %u162, 0377;
+        cvt.u64.u64 %rd1, (0xffffffff << 32);
+        cvt.u64.u64 %rd2, ((.u64) -1 >> 63);
+        cvt.s64.s64 %rd3, (0x4000000000000000 << 1);
         cvt.rn.f16.f32 %h0, 1.25;
         cvt.rn.f16.f32 %h1, 0F3fc00000;
         cvt.rn.f16.f32 %h2, 0D3ff8000000000000;
@@ -203,13 +230,17 @@ end
     out = PTX.ptx_to_julia(source)
     _assert_parseable_julia(out)
     for line in (
-        "f0 = ptx\"cvt.rn.f32.s32\"((-7) % Int32)",
-        "f1 = ptx\"cvt.rn.f32.u8\"((255) % UInt8)",
-        "rd0 = ptx\"cvt.u64.u32\"((17) % UInt32)",
-        "u160 = ptx\"cvt.u16.u8\"((256) % UInt8)",
-        "s160 = ptx\"cvt.s16.s8\"((255) % Int8)",
-        "u320 = ptx\"cvt.u32.u32\"((-1) % UInt32)",
-        "u321 = ptx\"cvt.u32.u32\"((0x100000000) % UInt32)",
+        "f0 = ptx\"cvt.rn.f32.s32\"(Int32(-7))",
+        "f1 = ptx\"cvt.rn.f32.u8\"(UInt8(0xff))",
+        "rd0 = ptx\"cvt.u64.u32\"(UInt32(0x00000011))",
+        "u160 = ptx\"cvt.u16.u8\"(UInt8(0x00))",
+        "s160 = ptx\"cvt.s16.s8\"(Int8(-1))",
+        "u320 = ptx\"cvt.u32.u32\"(UInt32(0xffffffff))",
+        "u321 = ptx\"cvt.u32.u32\"(UInt32(0x00000000))",
+        "u162 = ptx\"cvt.u16.u8\"(UInt8(0xff))",
+        "rd1 = ptx\"cvt.u64.u64\"(UInt64(0xffffffff00000000))",
+        "rd2 = ptx\"cvt.u64.u64\"(UInt64(0x0000000000000001))",
+        "rd3 = ptx\"cvt.s64.s64\"(Int64(-9223372036854775808))",
         "h0 = ptx\"cvt.rn.f16.f32\"(Float32(1.25))",
         "h1 = ptx\"cvt.rn.f16.f32\"(Float32(reinterpret(Float32, 0x3fc00000)))",
         "h2 = ptx\"cvt.rn.f16.f32\"(Float32(reinterpret(Float64, 0x3ff8000000000000)))",
@@ -217,8 +248,8 @@ end
         "fd0 = ptx\"cvt.f64.f32\"(Float32(reinterpret(Float64, 0x3ff0000000000000)))",
         "b160 = ptx\"cvt.rn.satfinite.e4m3x2.f32\"(Float32(1.0), Float32(2.0))",
         "f3 = ptx\"cvt.rn.f32.u32\"(Val(32))",
-        "f4 = ptx\"cvt.rn.f32.u32\"(((32 >> 1)) % UInt32)",
-        "r0 = ptx\"cvt.rn.scaled::n2::ue8m0.bf16x2.e4m3x2\"(b161, (0x7f7f) % UInt16)",
+        "f4 = ptx\"cvt.rn.f32.u32\"(UInt32(0x00000010))",
+        "r0 = ptx\"cvt.rn.scaled::n2::ue8m0.bf16x2.e4m3x2\"(b161, UInt16(0x7f7f))",
         "r2 = ptx\"cvt.rs.f16x2.f32\"(Float32(3.0), Float32(4.0), r1)",
         "r3 = ptx\"cvt.rs.satfinite.e4m3x4.f32\"((f5, f6, f7, f8), r4)",
         "r5 = ptx\"cvt.pack.sat.u8.s32.b32\"(Int32(1), Int32(2), UInt32(3))",
@@ -235,6 +266,7 @@ end
         "cvt.rn.f16.f32 %h0, 1;",
         "cvt.rn.f32.s32 %f0, 1.0;",
         "cvt.rn.f32.s32 %f0, 0F3f800000;",
+        "cvt.u64.u64 %rd0, 18446744073709551616;",
         "cvt.rn.scaled::n2::ue8m0.bf16x2.e4m3x2 %r0, %b160, 1.0;",
         "cvt.rs.f16x2.f32 %r0, 1.0, 2.0, 3;",
         "cvt.rs.f16x2.f32 %r0, 1.0, 2.0, %f0;",
@@ -284,13 +316,71 @@ end
     @test_throws ArgumentError PTX.ptx_to_julia(wrong_named)
 end
 
+@testset "cvt register inventory is token-safe and scope-local" begin
+    # The parser's RegDecl node retains only the first declarator. Recover the
+    # rest from lexer tokens so a legal all-b32 stochastic source vector is
+    # validated without weakening the role to arbitrary 32-bit integer regs.
+    all_b32 = _cvt_immediate_module(
+        "cvt.rs.satfinite.e4m3x4.f32 %dst, {%a, %b, %e, %f}, %rbits;";
+        declarations =
+            ".reg .b32 %dst, %a, %b, %e, %f, %rbits;")
+    all_b32_out = PTX.ptx_to_julia(all_b32)
+    @test occursin(
+        "dst = ptx\"cvt.rs.satfinite.e4m3x4.f32\"((a, b, e, f), rbits)",
+        all_b32_out)
+
+    for dtype in (".u32", ".s32")
+        wrong_integer = _cvt_immediate_module(
+            "cvt.rs.satfinite.e4m3x4.f32 %dst, {%a, %b, %e, %f}, %rbits;";
+            declarations = """
+            .reg .b32 %dst, %rbits;
+            .reg $dtype %a, %b, %e, %f;
+            """)
+        @test_throws ArgumentError PTX.ptx_to_julia(wrong_integer)
+    end
+
+    # Commas and semicolons inside comments are one COMMENT token. They must
+    # neither truncate the real declaration nor manufacture `%fake`.
+    commented_decls =
+        ".reg .b32 %dst, /* %fake, ; */ %a, %b, %e, %f, %rbits;"
+    commented = _cvt_immediate_module(
+        "cvt.rs.satfinite.e4m3x4.f32 %dst, {%a, %b, %e, %f}, %rbits;";
+        declarations = commented_decls)
+    @test occursin(
+        "dst = ptx\"cvt.rs.satfinite.e4m3x4.f32\"((a, b, e, f), rbits)",
+        PTX.ptx_to_julia(commented))
+    fake = _cvt_immediate_module(
+        "cvt.rs.satfinite.e4m3x4.f32 %dst, {%a, %b, %e, %fake}, %rbits;";
+        declarations = commented_decls)
+    @test_throws ArgumentError PTX.ptx_to_julia(fake)
+
+    scoped = _cvt_immediate_module("""
+        {
+            .reg .b32 %inner;
+            cvt.rs.f16x2.f32 %dst, 1.0, 2.0, %inner;
+        }
+        """; declarations = ".reg .b32 %dst;")
+    @test occursin(
+        "dst = ptx\"cvt.rs.f16x2.f32\"(Float32(1.0), Float32(2.0), inner)",
+        PTX.ptx_to_julia(scoped))
+
+    leaked = _cvt_immediate_module("""
+        {
+            .reg .b32 %inner;
+            cvt.rs.f16x2.f32 %dst, 1.0, 2.0, %inner;
+        }
+        cvt.rs.f16x2.f32 %dst, 1.0, 2.0, %inner;
+        """; declarations = ".reg .b32 %dst;")
+    @test_throws ArgumentError PTX.ptx_to_julia(leaked)
+end
+
 @testset "ordinary cvt prefix policy preserves the canonical ABI boundary" begin
     # Prefix legality is intentionally deferred to ptxas, but canonical
     # terminal placement and the reviewed source carrier remain mandatory.
     accepted = PTX.ptx_to_julia(_cvt_immediate_module(
         "cvt.future_modifier.rn.f32.s32 %f0, 7;"))
     @test occursin(
-        "f0 = ptx\"cvt.future_modifier.rn.f32.s32\"((7) % Int32)",
+        "f0 = ptx\"cvt.future_modifier.rn.f32.s32\"(Int32(7))",
         accepted)
     @test_throws ArgumentError PTX.ptx_to_julia(_cvt_immediate_module(
         "cvt.f32.s32.future_modifier %f0, 7;"))

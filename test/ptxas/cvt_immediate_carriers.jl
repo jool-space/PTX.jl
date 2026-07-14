@@ -13,10 +13,14 @@ function _cvt_immediate_fundamental!(ints, floats)
         ints[6] = UInt64(ptx"cvt.s32.s16"(Int16(1025)))
         ints[7] = UInt64(ptx"cvt.s64.s32"(Int32(65537)))
         ints[8] = UInt64(ptx"cvt.s32.s64"(Int64(19)))
-        ints[9] = ptx"cvt.u16.u8"(256 % UInt8)
-        ints[10] = UInt64(ptx"cvt.s16.s8"(255 % Int8))
-        ints[11] = ptx"cvt.u32.u32"(-1 % UInt32)
-        ints[12] = ptx"cvt.u32.u32"(0x100000000 % UInt32)
+        ints[9] = ptx"cvt.u16.u8"(UInt8(0x00))
+        ints[10] = UInt64(ptx"cvt.s16.s8"(Int8(-1)))
+        ints[11] = ptx"cvt.u32.u32"(UInt32(0xffffffff))
+        ints[12] = ptx"cvt.u32.u32"(UInt32(0x00000000))
+        ints[13] = ptx"cvt.u64.u64"(UInt64(0xffffffff00000000))
+        ints[14] = ptx"cvt.u64.u64"(UInt64(0x0000000000000001))
+        ints[15] = reinterpret(
+            UInt64, ptx"cvt.s64.s64"(Int64(-9223372036854775808)))
 
         # PTX exact literals retain their spelling width, then convert to the
         # cvt source type at use. These are the two cross-width renderer cases.
@@ -59,6 +63,17 @@ function _cvt_immediate_stochastic!(out32, rbits::UInt32)
     return nothing
 end
 
+function _cvt_immediate_stochastic_b32!(out32, a::UInt32, b::UInt32,
+                                        e::UInt32, f::UInt32,
+                                        rbits::UInt32)
+    # PTX names the source interpretation `.f32`, but CUDA 13.3 ptxas accepts
+    # `.b32` registers for all four source elements. The `r` constraints here
+    # keep that carrier spelling visible through LLVM and ptxas.
+    @inbounds out32[1] = ptx"cvt.rs.satfinite.e4m3x4.f32"(
+        (a, b, e, f), rbits)
+    return nothing
+end
+
 function _cvt_immediate_scaled!(out32, packed::UInt16, scale::UInt16)
     @inbounds begin
         # Packed narrow source + a distinct b16 scale-factor role.
@@ -96,6 +111,8 @@ const _CVT_FUNDAMENTAL_TYPES =
     Tuple{CuDeviceVector{UInt64,1}, CuDeviceVector{Float64,1}}
 const _CVT_PACKED_OUT_TYPES = Tuple{CuDeviceVector{UInt32,1}}
 const _CVT_STOCHASTIC_TYPES = Tuple{CuDeviceVector{UInt32,1}, UInt32}
+const _CVT_STOCHASTIC_B32_TYPES =
+    Tuple{CuDeviceVector{UInt32,1}, UInt32, UInt32, UInt32, UInt32, UInt32}
 const _CVT_SCALED_TYPES =
     Tuple{CuDeviceVector{UInt32,1}, UInt16, UInt16}
 const _CVT_S2F6_DOWN_TYPES = Tuple{CuDeviceVector{UInt16,1}, UInt16}
@@ -128,6 +145,15 @@ const _CVT_S2F6_SYNTAX_TYPES = Tuple{UInt16}
     @test occursin(
         r"call i32 asm \"cvt\.u32\.u32 \$0, \$1;\", \"=r,r\"\(i32 0\)",
         narrow_llvm)
+    @test occursin(
+        r"call i64 asm \"cvt\.u64\.u64 \$0, \$1;\", \"=l,l\"\(i64 -4294967296\)",
+        narrow_llvm)
+    @test occursin(
+        r"call i64 asm \"cvt\.u64\.u64 \$0, \$1;\", \"=l,l\"\(i64 1\)",
+        narrow_llvm)
+    @test occursin(
+        r"call i64 asm \"cvt\.s64\.s64 \$0, \$1;\", \"=l,l\"\(i64 -9223372036854775808\)",
+        narrow_llvm)
 
     narrow_ptx = emit_ptx(_cvt_immediate_fundamental!,
                           _CVT_FUNDAMENTAL_TYPES; cap = v"7.5")
@@ -143,11 +169,21 @@ const _CVT_S2F6_SYNTAX_TYPES = Tuple{UInt16}
     @test occursin(
         r"mov\.b32\s+%r\d+, 0;\s+// begin inline asm\s+cvt\.u32\.u32",
         narrow_ptx)
+    @test occursin(
+        r"mov\.b64\s+%rd\d+, -4294967296;\s+// begin inline asm\s+cvt\.u64\.u64",
+        narrow_ptx)
+
+    b32_llvm = emit_llvm(
+        _cvt_immediate_stochastic_b32!, _CVT_STOCHASTIC_B32_TYPES;
+        cap = v"10.0", feature_set = :arch)
+    @test occursin("cvt.rs.satfinite.e4m3x4.f32", b32_llvm)
+    @test occursin("=r,r,r,r,r,r", b32_llvm)
 
     cases = (
         (_cvt_immediate_fundamental!, _CVT_FUNDAMENTAL_TYPES,
          v"7.5", :baseline, :normal,
-         ("cvt.u16.u8", "cvt.u64.u32", "cvt.f64.f32", "cvt.rn.f32.f64")),
+         ("cvt.u16.u8", "cvt.u64.u32", "cvt.u64.u64", "cvt.s64.s64",
+          "cvt.f64.f32", "cvt.rn.f32.f64")),
         (_cvt_immediate_pack2!, _CVT_PACKED_OUT_TYPES,
          v"8.0", :baseline, :normal,
          ("cvt.rn.f16x2.f32", "cvt.rn.bf16x2.f32")),
@@ -158,6 +194,9 @@ const _CVT_S2F6_SYNTAX_TYPES = Tuple{UInt16}
         (_cvt_immediate_stochastic!, _CVT_STOCHASTIC_TYPES,
          v"10.0", :arch, :normal,
          ("cvt.rs.f16x2.f32", "cvt.rs.satfinite.e4m3x4.f32")),
+        (_cvt_immediate_stochastic_b32!, _CVT_STOCHASTIC_B32_TYPES,
+         v"10.0", :arch, :normal,
+         ("cvt.rs.satfinite.e4m3x4.f32",)),
         (_cvt_immediate_scaled!, _CVT_SCALED_TYPES,
          v"12.0", :family, :normal,
          ("cvt.rn.scaled::n2::ue8m0.bf16x2.e4m3x2",

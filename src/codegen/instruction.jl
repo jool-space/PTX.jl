@@ -622,14 +622,10 @@ function _render_cvt_source(op::Operand, cg::CodeGenState, kind::Symbol,
     end
 
     if op isa ImmediateOperand && kind in _CVT_INTEGER_OPERAND_KINDS
-        # PTX integer constants start as s64/u64 and are converted modulo the
-        # instruction operand width at use (§4.5.1). Julia T(expr) conversion
-        # is checked and would throw for legal PTX such as a .u8 source of 256;
-        # expr % T is Julia's modular integer conversion and preserves both
-        # PTX truncation semantics and the wrapper's concrete carrier type.
-        rendered = render_operand(op, cg)
-        carrier = MODIFIER_TO_JULIA_TYPE[kind]
-        return "($rendered) % $carrier"
+        # Evaluate with PTX's fixed s64/u64 expression rules (§4.5.5), then
+        # reduce at the operand use site (§4.5.1). Never copy the raw expression
+        # into Julia: its literal widths, shifts, and overflow rules differ.
+        return _ptx_integer_carrier_expr(op.text, DTYPE_RETTYPE[kind])
     end
 
     _render_schema_source(op, cg, kind)
@@ -660,10 +656,11 @@ function _instruction_cvt_source_schema(cg::CodeGenState, inst::Instruction,
         for element in vector.elements
             decl = (element isa RegisterOperand || element isa LabelOperand) ?
                    _declared_register(cg, element) : nothing
-            decl !== nothing && decl.type === ScalarType.F32 ||
+            decl !== nothing && decl.type in (ScalarType.F32, ScalarType.B32) ||
                 throw(ArgumentError(
                     "PTX transpiler: stochastic packed-x4 cvt requires four " *
-                    "declared .f32 source registers; see $(schema.section)"))
+                    "declared .f32/.b32 source registers; see " *
+                    "$(schema.section)"))
         end
     end
 

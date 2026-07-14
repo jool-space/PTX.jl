@@ -16,7 +16,7 @@ using ..PTX: uses_implicit_cc, structured_result_schema,
              requires_scalar_result_schema, scalar_result_schema_miss,
              infer_rettype, ordinary_cvt_source_schema,
              ordinary_cvt_source_schema_miss,
-             mbarrier_form_schema, mbarrier_schema_miss
+             mbarrier_form_schema, mbarrier_schema_miss, DTYPE_RETTYPE
 
 include("state.jl")
 include("operands.jl")

@@ -239,19 +239,26 @@ their bit patterns and are converted to the declared source width, even when
 their spelling uses the other exact-literal width.
 
 Integer immediates use PTX's use-site conversion rule: the 64-bit integer
-constant is reduced modulo the operand width before the typed Julia call. Thus
-a `.u8` source of `256` carries `UInt8(0)`, while a `.s8` source of
-`255` carries `Int8(-1)`; legal PTX is not rejected by Julia's checked
-integer constructors. This guarantee covers the immediate tokens and constant
-expressions the current frontend already structures. PTX `U` suffixes,
-C-style octal tokens, and other lexer/expression gaps remain tracked under
-`FRONT-LEXER-001` and are not claimed here.
+constant is reduced modulo the operand width before the typed Julia call. A
+non-eval evaluator first applies PTX's fixed `.s64`/`.u64` expression rules,
+so `(0xffffffff << 32)` remains `0xffffffff00000000` rather than inheriting
+Julia's 32-bit hexadecimal-literal width. Thus a `.u8` source of `256`
+carries `UInt8(0)`, while a `.s8` source of `255` carries `Int8(-1)`;
+integer literals exceeding 64 bits fail loud.
+
+The evaluator covers the immediate tokens and expressions the current frontend
+already structures, including decimal, hexadecimal, C-style octal,
+`WARP_SZ`, unary operators, casts, arithmetic, shifts, comparisons, bitwise
+AND/OR, and logical AND/OR. PTX `U` suffixes, binary literals, XOR, ternary
+expressions, and other frontend gaps remain tracked under `FRONT-LEXER-001`
+and are not claimed here.
 
 PTX constants cannot directly carry `.f16`, `.bf16`, or packed alternate
 floating-point source formats, so those positions require registers rather than
 silently retyping a Julia number. Stochastic x4 forms additionally require a
-four-element vector of declared `.f32` registers and a declared 32-bit
-random-bits register; scaled forms use a separate `.b16` scale position.
+four-element vector of declared `.f32` or `.b32` registers and a declared
+32-bit random-bits register; `.u32`/`.s32` declarations do not satisfy the
+floating source role. Scaled forms use a separate `.b16` scale position.
 
 CUDA 13.3 ptxas currently reports internal error C7907 when a live
 `.s2f6x2` conversion result reaches code generation, including for minimal

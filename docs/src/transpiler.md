@@ -142,7 +142,9 @@ destination/source carrier pairs and the structural operand roles of stochastic
 and scaled forms, while leaving the full rounding/saturation prefix
 cross-product to ptxas. In particular, narrow and packed floating sources are
 not fabricated from Julia numeric literals, stochastic random bits must be a
-declared 32-bit register, and scaled forms type their scale operand separately.
+declared 32-bit register, stochastic x4 source elements must be declared
+`.f32`/`.b32` registers (not `.u32`/`.s32`), and scaled forms type their scale
+operand separately.
 See [Ordinary `cvt` constants](dsl.md#Ordinary-cvt-constants).
 
 ## Diff against the original PTX

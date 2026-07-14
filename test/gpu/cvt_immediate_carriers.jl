@@ -12,11 +12,12 @@ function _cvt_immediate_runtime!(uout, sout, fout)
         uout[3] = ptx"cvt.u64.u32"(UInt32(65539))
         sout[1] = ptx"cvt.s16.s8"(Int8(-11))
         sout[2] = ptx"cvt.s32.s16"(Int16(-1025))
-        # Exact Julia expressions emitted for PTX §4.5.1 use-site truncation.
-        uout[6] = ptx"cvt.u16.u8"(256 % UInt8)
-        sout[3] = ptx"cvt.s16.s8"(255 % Int8)
-        uout[7] = ptx"cvt.u32.u32"(-1 % UInt32)
-        uout[8] = ptx"cvt.u32.u32"(0x100000000 % UInt32)
+        # Exact typed literals emitted after PTX §4.5.5 evaluation and §4.5.1
+        # use-site truncation.
+        uout[6] = ptx"cvt.u16.u8"(UInt8(0x00))
+        sout[3] = ptx"cvt.s16.s8"(Int8(-1))
+        uout[7] = ptx"cvt.u32.u32"(UInt32(0xffffffff))
+        uout[8] = ptx"cvt.u32.u32"(UInt32(0x00000000))
 
         # These expressions are emitted for cross-width exact 0d/0f source
         # constants. PTX converts the literal to the declared source type at
