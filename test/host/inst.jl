@@ -346,7 +346,7 @@ end
     # source suggested shape/kind segments invalid at this position and
     # omitted `sync`. Pin the ISA-true continuation and the absence of
     # the leaked NVVM vocabulary.
-    @test propertynames(ptx"mma") == (:sp, :sync)
+    @test propertynames(ptx"mma") == (:sp, Symbol("sp::ordered_metadata"), :sync)
     @test propertynames(ptx"mma".sync) == (:aligned,)
     @test propertynames(ptx"mma".sp) == (:sync,)
     @test :m16n8k16 ∉ propertynames(ptx"mma")   # NVVM name segment, not ISA

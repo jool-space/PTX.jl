@@ -44,6 +44,7 @@ line in the loop.
 | `ldmatrix` | `wrappers/ldmatrix.jl` | `m8n8.{x1,x2,x4}[.trans].b16`; `m16n16.{x1,x2}.trans.b8`; and Blackwell optional decompression from `{b6x16_p32,b4x16_p64}` to `b8x16` for `m8n16.{x1,x2,x4}` and `m16n16.{x1,x2}.trans`, in `{shared,shared::cta}`. Returns one `UInt32` per `m8n16` matrix and two per `m16n16` matrix. Generic state-space addressing is not part of the typed wrapper surface. |
 | `mbarrier` | `wrappers/mbarrier.jl`, `mbarrier_forms.jl` | Closed PTX 9.3 form schema for lifecycle, tx-count, arrive/drop, waits, pending-count, layout, sem/scope, and CTA/cluster spaces; exact wrappers accelerate common forms while delegating to the same schema emitter. Results are explicit sink (`.sink` → PTX `_`), `UInt64` state, `Bool`, `UInt32` pending count, `(waitComplete, reportPredicate)`, or `(waitComplete, reportPredicate, reportValueCarrier::UInt16)`. The ISA's two noncanonical `arrive_drop` example heads are provenance-marked aliases and normalize on emission. PTX's 1-byte report value occupies the carrier's low byte because NVPTX has no i8 inline-asm constraint. Explicitly shared addresses use the NVPTX `r` constraint; every route carries `convergent nomerge`. |
 | `mma.sync.aligned` | `wrappers/mma.jl` | `mma.sync.aligned.<shape>.<layA>.<layB>.<d>.<a>.<b>.<c>` for bf16/f16/tf32/FP8, modern `m16n8` u8/s8 and u4/s4 integer forms, and `kind::f8f6f4` 5×5 sub-byte FP A/B (consumer Blackwell); floating A/B fragments use `NTuple{N, UInt32}` and C/D use `Float32\|Float64\|UInt32`; integer A/B fragments use `UInt32`, with `Int32` C/D and optional `.satfinite` |
+| `mma.sp[::ordered_metadata].sync.aligned` | `wrappers/mma.jl` | The same closed 12 sparse floating ABIs for base and ordered metadata: `m16n8k{16,32}` f16/bf16, `m16n8k{8,16}` tf32, and all four e4m3/e5m2 A/B pairs at `m16n8k64`. A/B fragments and metadata use `UInt32` carriers; C/D use `Float32` or packed-f16 `UInt32`. Ordered metadata requires increasing retained indices where a chunk encodes a pair, plus exact shape-dependent selectors (`0:3`, `0:1`, or `0`). |
 | `mma.sync.aligned.kind::mxf*` (block-scaled) | `wrappers/mma_scaled.jl` | Three Blackwell-introduced kinds: `mxf4`, `mxf4nvf4`, `mxf8f6f4`. Operand layout `(scale_data::UInt32, byte_id::UInt16, thread_id::UInt16)` per side per PTX 9.2 §9.7.14.3 |
 | `shfl.sync` | `wrappers/shfl.jl` | `up` / `down` / `bfly` / `idx` × `b32` × {data-only, data+pred} |
 | `stmatrix` | `wrappers/stmatrix.jl` | mirror of `ldmatrix` — `m8n8.b16` (sm_70+) and `m16n8.b8` (Hopper) |
@@ -104,6 +105,27 @@ the identical body at the matching `sm_100a`/`sm_100f` feature level, assert
 that only the `.target` directive changes, and invoke CUDA 13.3 ptxas directly
 on the `sm_110a`/`sm_110f` text.  No tcgen05 runtime claim is made for the
 available CC 12.1 GB10, which does not implement tcgen05.
+
+## Ordered sparse MMA metadata
+
+`mma.sp::ordered_metadata` is not a looser spelling of ordinary sparse MMA.
+For 2:4 f16/bf16/FP8 storage, each metadata nibble must list its two retained
+element indices in increasing order; other orderings have undefined behavior.
+(tf32 uses one retained index per 1:2 chunk.) PTX.jl cannot infer or repair
+that property from an opaque `UInt32` metadata word, so callers must establish
+it while pruning and packing. The runtime evidence in
+`test/gpu/ampere/gemm_sparse.jl` does this by sorting each retained pair before
+encoding the nibble.
+
+The typed surface deliberately mirrors only the 12 sparse MMA ABIs already
+supported by `mma.sp`. The ordered qualifier was introduced in PTX 8.5 and the
+classic f16/bf16/tf32 forms target `sm_80+`; the FP8 forms require `sm_89+`.
+Selector legality is enforced by exact `Val` dispatch: k16 16-bit and k8 tf32
+accept `Val(0)` through `Val(3)`, k32 16-bit and k16 tf32 accept `Val(0)` or
+`Val(1)`, and k64 FP8 accepts only `Val(0)`. A wrong selector, fragment width,
+or unreviewed shape/type combination fails before the generic scalar emitter.
+Like all `mma.sync` operations, these calls are warp-collective and carry
+`convergent nomerge`; they remain memory-free arithmetic operations.
 
 ## Extended-precision arithmetic
 

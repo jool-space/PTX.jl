@@ -319,9 +319,13 @@ end
 # All registered forms have tier-2 intrinsics at the pinned backend; a
 # form that loses its intrinsic on a backend bump lands in
 # MMA_SP_MISSING_INTRINSICS and fails the conformance count instead of
-# silently vanishing. `sp::ordered_metadata` (PTX 8.5+, faster decode on
-# sm_90+) is deliberately not registered yet — add it alongside when a
-# Hopper+ sparse kernel needs it.
+# silently vanishing. `sp::ordered_metadata` (PTX 8.5+, sm_80+) is exposed for
+# the same 12 shape/type ABIs as the base form. The ISA recommends it because
+# the unordered form may have substantially reduced performance on some
+# targets. Its metadata nibbles must encode retained indices in increasing order;
+# any other order has undefined behavior.  Ordered forms use exact `Val{sel}`
+# methods so the ISA's shape-dependent selector domain is a dispatch boundary,
+# not merely an LLVM immarg diagnostic.
 
 # (shape, ab_dtype, cd_dtype) → (n_a_regs, n_b_regs, n_cd_regs) per lane.
 const MMA_SP_FRAGS = Dict{Tuple{Symbol, Symbol, Symbol}, NTuple{3, Int}}(
@@ -338,8 +342,9 @@ const MMA_SP_FRAGS = Dict{Tuple{Symbol, Symbol, Symbol}, NTuple{3, Int}}(
 )
 
 function _mma_sp_intrinsic_name(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
-                                c_ty::Symbol)
-    base = "mma.sp.$shape.row.col"
+                                c_ty::Symbol; ordered::Bool = false)
+    prefix = ordered ? "mma.sp.ordered.metadata" : "mma.sp"
+    base = "$prefix.$shape.row.col"
     a_ty === :bf16 && return "$base.bf16"
     a_ty === :tf32 && return "$base.tf32"
     a_ty === :f16  && return c_ty === :f16 ? "$base.f16.f16" : "$base.f32.f32"
@@ -347,24 +352,38 @@ function _mma_sp_intrinsic_name(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
 end
 
 const MMA_SP_INTRINSIC_NAMES = String[]
+const MMA_SP_ORDERED_INTRINSIC_NAMES = String[]
 const MMA_SP_MISSING_INTRINSICS = String[]
 
+# PTX 9.3 §9.7.15.6: the selector identifies one thread, one thread pair, or
+# the whole four-thread group depending on the sparse A fragment layout.
+function _mma_sp_selectors(shape::Symbol, a_ty::Symbol)
+    shape === :m16n8k64 && return (0,)
+    (shape === :m16n8k32 ||
+     (shape === :m16n8k16 && a_ty === :tf32)) && return (0, 1)
+    return (0, 1, 2, 3)
+end
+
 function _mma_sp_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
-                          b_ty::Symbol, c_ty::Symbol)
+                          b_ty::Symbol, c_ty::Symbol; ordered::Bool = false)
     haskey(MMA_SP_FRAGS, (shape, a_ty, c_ty)) || return nothing
     n_a, n_b, n_cd = MMA_SP_FRAGS[(shape, a_ty, c_ty)]
 
-    mods = (:sp, :sync, :aligned, shape, :row, :col, d_ty, a_ty, b_ty, c_ty)
+    variant = ordered ? Symbol("sp::ordered_metadata") : :sp
+    mods = (variant, :sync, :aligned, shape, :row, :col,
+            d_ty, a_ty, b_ty, c_ty)
     cd_J = c_ty === :f32 ? :Float32 : :UInt32
 
-    full = "llvm.nvvm." * _mma_sp_intrinsic_name(shape, a_ty, b_ty, c_ty)
+    full = "llvm.nvvm." * _mma_sp_intrinsic_name(
+        shape, a_ty, b_ty, c_ty; ordered)
     if !NVVM.isintrinsic(full)
         # No asm fallback here (every registered form has an intrinsic at
         # the pinned backend) — record and let conformance fail loudly.
         full in MMA_SP_MISSING_INTRINSICS || push!(MMA_SP_MISSING_INTRINSICS, full)
         return nothing
     end
-    full in MMA_SP_INTRINSIC_NAMES || push!(MMA_SP_INTRINSIC_NAMES, full)
+    names = ordered ? MMA_SP_ORDERED_INTRINSIC_NAMES : MMA_SP_INTRINSIC_NAMES
+    full in names || push!(names, full)
     call = NVVM.IntrinsicCall{Symbol(full)}()
 
     ab_vec = a_ty === :f16
@@ -375,14 +394,18 @@ function _mma_sp_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
     c_in = [cd_vec ? :(_mma_u32_v2h(c[$i])) : :(c[$i]) for i in 1:n_cd]
     repack = cd_vec ? :(ntuple(i -> _mma_v2h_u32(d[i]), Val($n_cd))) : :d
 
-    @eval function (::Operation{:mma, $mods})(
-            a::NTuple{$n_a, UInt32},
-            b::NTuple{$n_b, UInt32},
-            c::NTuple{$n_cd, $cd_J},
-            e::UInt32, sel::Val)
-        Base.@inline
-        d = $call($(a_in...), $(b_in...), $(c_in...), e, sel)
-        $repack
+    selectors = ordered ? _mma_sp_selectors(shape, a_ty) : (nothing,)
+    for selector in selectors
+        sel_type = ordered ? :(Val{$selector}) : :Val
+        @eval function (::Operation{:mma, $mods})(
+                a::NTuple{$n_a, UInt32},
+                b::NTuple{$n_b, UInt32},
+                c::NTuple{$n_cd, $cd_J},
+                e::UInt32, sel::$sel_type)
+            Base.@inline
+            d = $call($(a_in...), $(b_in...), $(c_in...), e, sel)
+            $repack
+        end
     end
     nothing
 end
@@ -391,11 +414,16 @@ for shape in (:m16n8k16, :m16n8k32)
     _mma_sp_register(shape, :f32, :f16, :f16, :f32)
     _mma_sp_register(shape, :f16, :f16, :f16, :f16)
     _mma_sp_register(shape, :f32, :bf16, :bf16, :f32)
+    _mma_sp_register(shape, :f32, :f16, :f16, :f32; ordered = true)
+    _mma_sp_register(shape, :f16, :f16, :f16, :f16; ordered = true)
+    _mma_sp_register(shape, :f32, :bf16, :bf16, :f32; ordered = true)
 end
 for shape in (:m16n8k8, :m16n8k16)
     _mma_sp_register(shape, :f32, :tf32, :tf32, :f32)
+    _mma_sp_register(shape, :f32, :tf32, :tf32, :f32; ordered = true)
 end
 # Sparse FP8 (PTX 8.4+) — mixed e4m3/e5m2 A/B is legal.
 for a_ty in (:e4m3, :e5m2), b_ty in (:e4m3, :e5m2)
     _mma_sp_register(:m16n8k64, :f32, a_ty, b_ty, :f32)
+    _mma_sp_register(:m16n8k64, :f32, a_ty, b_ty, :f32; ordered = true)
 end

@@ -501,30 +501,39 @@ end
 
 # Sparse (mma.sp) sweep — replays the _mma_sp_register loops.
 const _MMA_SP_SWEPT = Set{String}()
-function _mma_sp_sweep!(shape, a, b, c)
-    name = "llvm.nvvm." * PTX._mma_sp_intrinsic_name(shape, a, b, c)
+const _MMA_SP_ORDERED_SWEPT = Set{String}()
+function _mma_sp_sweep!(shape, a, b, c; ordered = false)
+    name = "llvm.nvvm." * PTX._mma_sp_intrinsic_name(shape, a, b, c; ordered)
     NVVM.isintrinsic(name) || return   # would land in MMA_SP_MISSING_INTRINSICS
     n_a, n_b, n_cd = PTX.MMA_SP_FRAGS[(shape, a, c)]
     abT = a === :f16 ? V2H : UInt32
     cdT = c === :f32 ? Float32 : V2H
     args = (fill(abT, n_a + n_b)..., fill(cdT, n_cd)..., UInt32, Val{0})
     classic = a in (:bf16, :f16, :tf32)
-    mcpu, mattr = classic ? ("sm_90a", "+ptx80") : ("sm_90a", "+ptx88")
+    mcpu, mattr = ordered ?
+        (classic ? ("sm_80", "+ptx85") : ("sm_89", "+ptx85")) :
+        (classic ? ("sm_90a", "+ptx80") : ("sm_90a", "+ptx88"))
+    qualifier = ordered ? "sp::ordered_metadata" : "sp"
     push!(PROBES, (name, args, mcpu, mattr,
-        Regex("mma\\.sp\\.sync\\.aligned\\.$shape\\.row\\.col\\.$c\\.$a\\.$b\\.$c")))
-    push!(_MMA_SP_SWEPT, name)
+        Regex("mma\\.$qualifier\\.sync\\.aligned\\.$shape\\.row\\.col\\.$c\\.$a\\.$b\\.$c")))
+    push!(ordered ? _MMA_SP_ORDERED_SWEPT : _MMA_SP_SWEPT, name)
     nothing
 end
 for shape in (:m16n8k16, :m16n8k32)
     _mma_sp_sweep!(shape, :f16, :f16, :f32)
     _mma_sp_sweep!(shape, :f16, :f16, :f16)
     _mma_sp_sweep!(shape, :bf16, :bf16, :f32)
+    _mma_sp_sweep!(shape, :f16, :f16, :f32; ordered = true)
+    _mma_sp_sweep!(shape, :f16, :f16, :f16; ordered = true)
+    _mma_sp_sweep!(shape, :bf16, :bf16, :f32; ordered = true)
 end
 for shape in (:m16n8k8, :m16n8k16)
     _mma_sp_sweep!(shape, :tf32, :tf32, :f32)
+    _mma_sp_sweep!(shape, :tf32, :tf32, :f32; ordered = true)
 end
 for a in (:e4m3, :e5m2), b in (:e4m3, :e5m2)
     _mma_sp_sweep!(:m16n8k64, a, b, :f32)
+    _mma_sp_sweep!(:m16n8k64, a, b, :f32; ordered = true)
 end
 
 const _MMA_SCALED_SWEPT = Set{String}()
@@ -589,9 +598,11 @@ end
 @testset "mma generated families: full probe coverage" begin
     @test length(PTX.MMA_INTRINSIC_NAMES) == 102   # dense tier-2 forms
     @test length(PTX.MMA_SP_INTRINSIC_NAMES) == 12 # sparse tier-2 forms
+    @test length(PTX.MMA_SP_ORDERED_INTRINSIC_NAMES) == 12
     @test length(PTX.MMA_SCALED_INTRINSIC_NAMES) == 28
     @test _MMA_SWEPT == Set(PTX.MMA_INTRINSIC_NAMES)
     @test _MMA_SP_SWEPT == Set(PTX.MMA_SP_INTRINSIC_NAMES)
+    @test _MMA_SP_ORDERED_SWEPT == Set(PTX.MMA_SP_ORDERED_INTRINSIC_NAMES)
     @test _MMA_SCALED_SWEPT == Set(PTX.MMA_SCALED_INTRINSIC_NAMES)
     # every registered sp form found its intrinsic (no silent skips)
     @test isempty(PTX.MMA_SP_MISSING_INTRINSICS)
@@ -602,6 +613,7 @@ end
     # every per-class mma probe is one of the names the family stands on
     mma_probes = filter(p -> startswith(p[1], "llvm.nvvm.mma."), PROBES)
     @test all(p -> p[1] in _MMA_SWEPT || p[1] in _MMA_SP_SWEPT ||
+                   p[1] in _MMA_SP_ORDERED_SWEPT ||
                    p[1] in _MMA_SCALED_SWEPT, mma_probes)
 end
 
@@ -633,8 +645,9 @@ end
         :sp => 192, :xor => 3,
     )
     wrapped = Set(vcat(PTX.MMA_INTRINSIC_NAMES, PTX.MMA_SP_INTRINSIC_NAMES,
+                       PTX.MMA_SP_ORDERED_INTRINSIC_NAMES,
                        PTX.MMA_SCALED_INTRINSIC_NAMES))
-    @test length(wrapped) == 142
+    @test length(wrapped) == 154
     @test wrapped ⊆ Set(names)
     # the overlay must not leak beyond mma.*
     @test !NVVM.is_convergent(NVVM.intrinsic("llvm.nvvm.fence.proxy.async"))
