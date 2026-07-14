@@ -518,6 +518,10 @@ PTX sources transpile to the common carrier); it is not part of the original
 memory/query coverage claim. The scalar-to-vector unpack direction remains
 fail-loud because the singleton chain API has no result-shape selector.
 
+```@docs
+PTX.b128
+```
+
 ## Pointer bracketing
 
 Memory-op opcodes render pointer arguments as `[$N]`; non-memory ops
