@@ -519,9 +519,9 @@ end
 #
 # Shared by host/corpus.jl (curated tier, manifests) and the
 # host/corpus_external_* shards. The external corpus (~200 real-world files,
-# ~1.6 MB) dominated the suite's wall clock as a single test file; the
-# per-file evidence is embarrassingly parallel, so the shards slice one
-# sorted file list by index stride. Names are `*_SWEEP_*` because
+# roughly one megabyte) dominated the suite's wall clock as a single test
+# file; the per-file evidence is embarrassingly parallel, so the shards slice
+# one sorted file list by index stride. Names are `*_SWEEP_*` because
 # host/codegen.jl builds its own EXTERNAL_DIR/EXTERNAL_FILES view of the
 # same corpus in the same worker namespace.
 

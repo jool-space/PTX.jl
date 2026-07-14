@@ -150,11 +150,17 @@ end
     parse(source::AbstractString) -> IR.Module
 
 Parse PTX source text into a `Module`. Module-header (.version / .target /
-.address_size) is parsed structurally; everything between it and TokenKind.EOF is
-collected as a flat sequence of statements (blank lines / comments
-preserved). Function/body parsing is deferred — for now, function bodies
-arrive as an `Instruction` opening-brace placeholder followed by the body
-statements followed by a closing-brace placeholder.
+.address_size) and supported module/function/body statements are parsed into
+structured IR; blank lines and comments are preserved. Instructions do not
+require a known-opcode inventory. A post-header statement that fails the
+fault-tolerant statement parser is generally retained as an opaque `RawLine`,
+but lexical errors, invalid initial headers, malformed or misplaced
+`.version`/`.target`/`.address_size` directives, and target invariants still
+throw. `RawLine` preserves text only and is not a semantic parse.
+
+The original nonempty input is retained in `Module.raw_source`, so formatting
+an unmodified parsed module is byte-identical without exercising field-driven
+structural reconstruction.
 """
 function parse(source::AbstractString)
     tokens = tokenize(source)

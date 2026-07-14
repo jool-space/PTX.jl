@@ -43,11 +43,16 @@ Modules = [PTX.NVVM]
 ## Golden-harness IR
 
 The structural PTX comparison behind the golden tests: parsed modules are
-canonicalized (registers, labels, symbols renamed to a stable scheme) so
-goldens pin instruction structure, not register allocation accidents.
+normalized and canonicalized (registers, labels, and symbols renamed to a
+stable scheme) so goldens pin modeled instruction structure, not formatting or
+register-allocation accidents. Opaque `RawLine` nodes are not treated as
+structural coverage; strict goldens reject them recursively before comparison.
+Neither canonicalization nor an empty module diff is PTX ISA validation.
 
 ```@docs
+PTX.IR.normalize
 PTX.IR.canonicalize
+PTX.IR.diff
 PTX.IR._sym
 ```
 
