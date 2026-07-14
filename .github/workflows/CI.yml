@@ -24,10 +24,6 @@ jobs:
       actions: write
       contents: read
     strategy:
-      # All `blackwell` labels currently expose the same physical GB10. Run
-      # Julia versions serially so their test processes cannot exhaust its
-      # shared device memory; each job still keeps its intra-job test workers.
-      max-parallel: 1
       fail-fast: false
       matrix:
         include:
@@ -69,7 +65,7 @@ jobs:
     # skipped. This lane keeps the hosted x86_64 half of the matrix alive
     # independently of the self-hosted GB10 runner, and is the only CI
     # coverage of the x86_64 code paths at all.
-    name: Julia ${{ matrix.version }} - x86_64 - ubuntu (host + offline PTX)
+    name: Julia ${{ matrix.version }} - x64 - host
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
