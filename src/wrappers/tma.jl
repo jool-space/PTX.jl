@@ -22,8 +22,8 @@
 # Optional-operand scheme: the intrinsics carry every optional qualifier as
 # an (operand, i1 immarg flag) pair — multicast mask + flag, cache hint +
 # flag — plus an i32 `cta_group` immarg (0 = none, 1/2 = `.cta_group::<n>`,
-# sm_100a). A false flag drops the qualifier and ignores the operand. Cache
-# hints are not part of the notation surface today: every form passes
+# sm_100a). A false flag drops the qualifier and ignores the operand. Tile
+# prefetch exposes cache hints explicitly; load/store forms still pass
 # (UInt64(0), Val(false)).
 #
 # Notation is non-WYSIWYG in one spot: ISel renders `.cta_group::2` after
@@ -402,12 +402,96 @@ end
 # warming. This is the instruction CUTLASS's weight-prefetch mainloop
 # (examples/63) stands on: a dedicated warp walks the weight tensor's
 # K-tiles ahead of the TMA loads that will actually consume them.
+# PTX imposes no collective participation rule. The NVVM intrinsic records
+# are nevertheless `convergent`, so tier-2 emission preserves that conservative
+# optimizer boundary without claiming warp-cooperative semantics.
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("1d"), :L2, :global, :tile)})(
+        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer) where {S}
+    nvvm"cp.async.bulk.tensor.prefetch.tile.1d"(
+        _tma_tmap(tmap), Int32(c1), UInt64(0), Val(false))
+end
 
 @inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
         Symbol("2d"), :L2, :global, :tile)})(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer) where {S}
     nvvm"cp.async.bulk.tensor.prefetch.tile.2d"(
         _tma_tmap(tmap), Int32(c1), Int32(c2), UInt64(0), Val(false))
+end
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("3d"), :L2, :global, :tile)})(
+        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
+        c3::Integer) where {S}
+    nvvm"cp.async.bulk.tensor.prefetch.tile.3d"(
+        _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3),
+        UInt64(0), Val(false))
+end
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("4d"), :L2, :global, :tile)})(
+        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
+        c3::Integer, c4::Integer) where {S}
+    nvvm"cp.async.bulk.tensor.prefetch.tile.4d"(
+        _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
+        UInt64(0), Val(false))
+end
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("5d"), :L2, :global, :tile)})(
+        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
+        c3::Integer, c4::Integer, c5::Integer) where {S}
+    nvvm"cp.async.bulk.tensor.prefetch.tile.5d"(
+        _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
+        Int32(c5), UInt64(0), Val(false))
+end
+
+# PTX requires the qualifier and u64 cache-policy operand as a pair. The policy
+# is only a performance hint; it does not change weak-memory semantics.
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("1d"), :L2, :global, :tile, Symbol("L2::cache_hint"))})(
+        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer,
+        cache_policy::UInt64) where {S}
+    nvvm"cp.async.bulk.tensor.prefetch.tile.1d"(
+        _tma_tmap(tmap), Int32(c1), UInt64(cache_policy), Val(true))
+end
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("2d"), :L2, :global, :tile, Symbol("L2::cache_hint"))})(
+        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
+        cache_policy::UInt64) where {S}
+    nvvm"cp.async.bulk.tensor.prefetch.tile.2d"(
+        _tma_tmap(tmap), Int32(c1), Int32(c2),
+        UInt64(cache_policy), Val(true))
+end
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("3d"), :L2, :global, :tile, Symbol("L2::cache_hint"))})(
+        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
+        c3::Integer, cache_policy::UInt64) where {S}
+    nvvm"cp.async.bulk.tensor.prefetch.tile.3d"(
+        _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3),
+        UInt64(cache_policy), Val(true))
+end
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("4d"), :L2, :global, :tile, Symbol("L2::cache_hint"))})(
+        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
+        c3::Integer, c4::Integer, cache_policy::UInt64) where {S}
+    nvvm"cp.async.bulk.tensor.prefetch.tile.4d"(
+        _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
+        UInt64(cache_policy), Val(true))
+end
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("5d"), :L2, :global, :tile, Symbol("L2::cache_hint"))})(
+        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
+        c3::Integer, c4::Integer, c5::Integer,
+        cache_policy::UInt64) where {S}
+    nvvm"cp.async.bulk.tensor.prefetch.tile.5d"(
+        _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
+        Int32(c5), UInt64(cache_policy), Val(true))
 end
 
 # --- Residue: shared::cta × cta_group::2 (asm tier) ---------------------------

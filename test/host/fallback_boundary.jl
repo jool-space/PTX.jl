@@ -13,6 +13,7 @@ end
 const EXPECTED_TYPED_ONLY_RULES = Set([
     (:mma,      (),            nothing),
     (:ldmatrix, (),            nothing),
+    (:cp,       (:async, :bulk, :prefetch, :tensor), nothing),
     (:wgmma,    (:mma_async,), nothing),
     (:tcgen05,  (),            nothing),
     (:shfl,     (),            :pred),
@@ -21,7 +22,7 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
 @testset "typed-wrapper-only boundary: closed-world rule inventory" begin
     actual = Set((r.op, r.prefix, r.marker) for r in PTX.TYPED_WRAPPER_ONLY_RULES)
     @test actual == EXPECTED_TYPED_ONLY_RULES
-    @test length(PTX.TYPED_WRAPPER_ONLY_RULES) == 5
+    @test length(PTX.TYPED_WRAPPER_ONLY_RULES) == 6
 
     positives = (
         (:mma, (:sync, :aligned, :m16n8k16, :row, :col,
@@ -30,6 +31,8 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
                 :f32, :bf16, :bf16, :f32)),
         (:ldmatrix, (:sync, :aligned, :m8n16, :x1, :shared,
                      :b8x16, :b6x16_p32)),
+        (:cp, (:async, :bulk, :prefetch, :tensor, Symbol("2d"),
+               :L2, :global, :tile)),
         (:wgmma, (:mma_async, :sync, :aligned,
                   :m64n8k16, :f32, :bf16, :bf16)),
         (:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x2, :b32)),
@@ -48,6 +51,8 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
         (:shfl, (:sync, :idx, :b32, :predicate)),
         (:fabric, (:try_get, Symbol("mbarrier::report::fabric"))),
         (:tcgen050, (:ld, :sync, :aligned, :b32)),
+        (:cp, (:async, :bulk, :prefetchish, :tensor, Symbol("2d"),
+               :L2, :global, :tile)),
     )
         @test !PTX.requires_typed_wrapper(op, mods)
         @test PTX.typed_wrapper_only_rule(op, mods) === nothing
@@ -69,6 +74,11 @@ end
         (Operation{:ldmatrix, (:sync, :aligned, :m8n16, :x1, :shared,
                                :b8x16, :b6x16_p32)}(),
          (Int32,)),
+        # Rank-2 tensor prefetch cannot flatten a missing coordinate into a
+        # generic scalar chain.
+        (Operation{:cp, (:async, :bulk, :prefetch, :tensor, Symbol("2d"),
+                         :L2, :global, :tile)}(),
+         (PTX.TMADescriptorPtr, Int32)),
         # tcgen05.ld.x2 must return two registers, not a scalar b32.
         (Operation{:tcgen05, (:ld, :sync, :aligned,
                               Symbol("16x64b"), :x2, :b32)}(),
@@ -112,6 +122,9 @@ end
          (ntuple(_ -> 0.0f0, Val(4)), UInt64(0), UInt64(0), false)),
         (Operation{:tcgen05, (:ld, :sync, :aligned,
                               Symbol("16x64b"), :x2, :b32)}(), (Int32(0),)),
+        (Operation{:cp, (:async, :bulk, :prefetch, :tensor, Symbol("2d"),
+                         :L2, :global, :tile)}(),
+         (Int32(0), Int32(0))),
         (Operation{:shfl, (:sync, :idx, :b32, :pred)}(),
          (Int32(0), Int32(0), Int32(0), Int32(0))),
     )
@@ -149,6 +162,9 @@ end
         (Operation{:tcgen05, (Symbol("fence::before_thread_sync"),)}(), ()),
         (Operation{:shfl, (:sync, :idx, :b32, :pred)}(),
          (UInt32, UInt32, UInt32, UInt32)),
+        (Operation{:cp, (:async, :bulk, :prefetch, :tensor, Symbol("2d"),
+                         :L2, :global, :tile)}(),
+         (PTX.TMADescriptorPtr, Int32, Int32)),
         (Operation{:mbarrier, (:test_wait, :report,
                                Symbol("phase_type::primary"), :shared, :b64)}(),
          (pS, UInt64)),
