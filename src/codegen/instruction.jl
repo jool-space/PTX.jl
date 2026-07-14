@@ -120,8 +120,20 @@ end
 _mbarrier_register_decl(cg::CodeGenState, op::RegisterOperand) =
     _mbarrier_register_decl(cg, op.name)
 
+# PTX permits `.reg` declarations whose names omit `%`; the lexer necessarily
+# represents those instruction operands as LabelOperand. They are registers
+# only when the active declaration table proves it.
+_mbarrier_register_decl(cg::CodeGenState, op::LabelOperand) =
+    _mbarrier_register_decl(cg, op.name)
+
+function _mbarrier_is_declared_register(cg::CodeGenState, op::Operand)
+    (op isa RegisterOperand || op isa LabelOperand) || return false
+    _is_sink_operand(op) && return false
+    _mbarrier_register_decl(cg, op) !== nothing
+end
+
 function _mbarrier_require_register_type(cg::CodeGenState,
-                                         op::RegisterOperand,
+                                         op::Union{RegisterOperand, LabelOperand},
                                          accepted,
                                          role::AbstractString)
     decl = _mbarrier_register_decl(cg, op)
@@ -164,14 +176,17 @@ end
 
 function _validate_mbarrier_source_type!(cg::CodeGenState, kind::Symbol,
                                          op::Operand, index::Int)
-    if op isa RegisterOperand && kind in (:u32, :u64)
+    if (op isa RegisterOperand || op isa LabelOperand) &&
+            kind in (:u32, :u64) &&
+            (op isa RegisterOperand || _mbarrier_register_decl(cg, op) !== nothing)
         accepted = kind === :u32 ? _MBARRIER_REG32 : _MBARRIER_REG64
         _mbarrier_require_register_type(cg, op, accepted, "source $index")
-    elseif op isa AddressOperand && startswith(op.base, "%")
+    elseif op isa AddressOperand
         decl = _mbarrier_register_decl(cg, op.base)
-        decl === nothing && throw(ArgumentError(
+        startswith(op.base, "%") && decl === nothing && throw(ArgumentError(
             "PTX transpiler: mbarrier address register $(op.base) has no " *
             "preceding .reg declaration"))
+        decl === nothing && return
         decl.type in (_MBARRIER_REG32..., _MBARRIER_REG64...) ||
             throw(ArgumentError(
                 "PTX transpiler: mbarrier address register $(op.base) must " *
@@ -189,17 +204,21 @@ function _instruction_mbarrier_schema(cg::CodeGenState, inst::Instruction)
     if !isempty(operands) && operands[1] isa PipeOperand
         isempty(mods) && throw(mbarrier_schema_miss(mods))
         pipe = operands[1]::PipeOperand
-        pipe.left isa RegisterOperand && pipe.right isa RegisterOperand ||
+        _mbarrier_is_declared_register(cg, pipe.left) &&
+            _mbarrier_is_declared_register(cg, pipe.right) ||
             throw(ArgumentError(
                 "PTX transpiler: mbarrier primary report destination must be " *
-                "a predicate register pair waitComplete|reportPredicate"))
+                "a declared predicate register pair " *
+                "waitComplete|reportPredicate"))
         if length(operands) >= 2 && operands[2] isa AddressOperand
             selector = :report_pred
             append!(destination_operands, (pipe.left, pipe.right))
             source_start = 2
         elseif length(operands) >= 3 && operands[3] isa AddressOperand
-            operands[2] isa RegisterOperand || throw(ArgumentError(
-                "PTX transpiler: mbarrier reportValue destination must be a register"))
+            _mbarrier_is_declared_register(cg, operands[2]) ||
+                throw(ArgumentError(
+                    "PTX transpiler: mbarrier reportValue destination must " *
+                    "be a declared register"))
             selector = :report
             append!(destination_operands, (pipe.left, pipe.right, operands[2]))
             source_start = 3
@@ -232,15 +251,18 @@ function _instruction_mbarrier_schema(cg::CodeGenState, inst::Instruction)
         elseif schema.destination === :state
             isempty(operands) && throw(ArgumentError(
                 "PTX transpiler: mbarrier state form is missing its destination"))
-            operands[1] isa RegisterOperand && !_is_sink_operand(operands[1]) ||
+            _mbarrier_is_declared_register(cg, operands[1]) ||
                 throw(ArgumentError(
-                    "PTX transpiler: mbarrier state destination must be a register"))
+                    "PTX transpiler: mbarrier state destination must be a " *
+                    "declared register"))
             push!(destination_operands, operands[1])
             source_start = 2
         elseif schema.destination in (:predicate, :count)
-            !isempty(operands) && operands[1] isa RegisterOperand ||
+            !isempty(operands) &&
+                _mbarrier_is_declared_register(cg, operands[1]) ||
                 throw(ArgumentError(
-                    "PTX transpiler: mbarrier destination must be a register"))
+                    "PTX transpiler: mbarrier destination must be a declared " *
+                    "register"))
             push!(destination_operands, operands[1])
             source_start = 2
         else
@@ -276,8 +298,14 @@ function _emit_mbarrier!(cg::CodeGenState, inst::Instruction, checked)
                        Tuple("." * string(mod) for mod in schema.mods))
     args = String[]
     for (kind, operand) in zip(variant.operands, checked.sources)
-        push!(args, kind === :address ? render_operand(operand, cg) :
-              render_operand(operand, cg; type_hint = kind))
+        rendered_operand = if operand isa LabelOperand &&
+                _mbarrier_register_decl(cg, operand) !== nothing
+            RegisterOperand(operand.name)
+        else
+            operand
+        end
+        push!(args, kind === :address ? render_operand(rendered_operand, cg) :
+              render_operand(rendered_operand, cg; type_hint = kind))
     end
     call = chain * "(" * join(args, ", ") * ")"
 
@@ -288,7 +316,8 @@ function _emit_mbarrier!(cg::CodeGenState, inst::Instruction, checked)
     names = String[]
     rendered = String[]
     for operand in checked.destination_operands
-        dst, dst_names = render_dst(operand, cg)
+        dst, dst_names = operand isa LabelOperand ?
+            render_dst(RegisterOperand(operand.name), cg) : render_dst(operand, cg)
         push!(rendered, dst)
         append!(names, dst_names)
     end

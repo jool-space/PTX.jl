@@ -539,6 +539,10 @@ end
         mbarrier.arrive.noComplete.shared::cta.b64 _, [%r0], %r1;
         mbarrier.arrive_drop.shared::cta.release.cluster.b64 _, [%r0], %r1;
         mbarrier.arrive.shared::cluster.b64 _, [%r0];
+        {
+            .reg .pred complete;
+            mbarrier.try_wait.parity.shared.b64 complete, [%rd0], %r1;
+        }
         ret;
     }
     """
@@ -552,6 +556,7 @@ end
     @test occursin("ptx\"mbarrier.arrive.sink.noComplete.shared::cta.b64\"(r0, r1)", julia)
     @test occursin("ptx\"mbarrier.arrive_drop.sink.shared::cta.release.cluster.b64\"(r0, r1)", julia)
     @test occursin("ptx\"mbarrier.arrive.shared::cluster.b64\"(r0)", julia)
+    @test occursin("complete = ptx\"mbarrier.try_wait.parity.shared.b64\"(rd0, r1)", julia)
     @test !occursin("_ =", julia)
 
     for text in (
@@ -566,6 +571,16 @@ end
         replace(source,
                 "mbarrier.init.b64 [%rd0], 1;" =>
                 "mbarrier.init.b64 [%rd0, {%r1}], 1;"),
+    )
+        @test_throws ArgumentError PTX.ptx_to_julia(text)
+    end
+
+    for text in (
+        replace(source, ".reg .pred complete;" => ".reg .b32 complete;"),
+        replace(source, ".reg .pred complete;" => ""),
+        replace(source,
+                "mbarrier.try_wait.parity.shared.b64 complete," =>
+                "mbarrier.try_wait.parity.shared.b64 _,"),
     )
         @test_throws ArgumentError PTX.ptx_to_julia(text)
     end
