@@ -1,7 +1,0 @@
-id = "MATRIX-COVERAGE-001"
-status = "confirmed"
-severity = "medium"
-category = "coverage_gap"
-summary = "Classic/integer MMA, major mma.sp classes, mixed WGMMA controls, and most tcgen05 classes are absent from strict callable coverage."
-source_handoffs = ["wave2-matrix.md"]
-validation_tier = "ISA form-matrix and implementation audit"

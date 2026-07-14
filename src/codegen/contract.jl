@@ -376,7 +376,7 @@ function _validate_address!(state::_TranspileContractState,
     end
     op.offset === nothing || occursin(_TRANSPILE_INTEGER_LITERAL, op.offset) ||
         _transpile_reject(path,
-            "non-literal address offset $(repr(op.offset)) remains FRONT-OPERAND scope")
+            "non-literal address offset $(repr(op.offset)) is tracked in issue #47")
 end
 
 function _validate_generic_destination!(state::_TranspileContractState,
@@ -727,7 +727,7 @@ function _validate_instruction!(state::_TranspileContractState,
                                 inst::Instruction, scope::String, path::String)
     # Programmatically constructed `.file`/`.loc` Instruction nodes affect
     # debug information only. Source parsing currently represents those
-    # directives as RawLine, which the body visitor rejects until FRONT-DECL
+    # directives as RawLine, which the body visitor rejects until issue #48
     # gives them structural nodes. Predicating either would be nonsensical.
     if inst.opcode in (".file", ".loc")
         inst.predicate === nothing ||

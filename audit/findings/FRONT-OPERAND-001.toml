@@ -1,7 +1,0 @@
-id = "FRONT-OPERAND-001"
-status = "confirmed"
-severity = "medium"
-category = "coverage_gap"
-summary = "Immediate and array addresses plus texture multi-field operands remain unsupported or opaque to structural renaming."
-source_handoffs = ["wave6-frontend-tests.md", "wave4-data-movement.md"]
-validation_tier = "frontend source and targeted parse audit"

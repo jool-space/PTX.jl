@@ -1,7 +1,0 @@
-id = "MATRIX-AMBIG-EXP"
-status = "needs_experiment"
-severity = "medium"
-category = "spec_ambiguity"
-summary = "PTX text and accepted toolchains disagree on one f8f6f4 K shape, integer WGMMA upper N values, and residual modifier ordering."
-source_handoffs = ["wave2-matrix.md"]
-validation_tier = "ISA release diff and multi-toolkit ptxas matrix"

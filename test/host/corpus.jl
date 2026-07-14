@@ -11,7 +11,7 @@ CORPUS_FILES = sort(filter(p -> endswith(p, ".ptx"),
 
 # A byte-loss smoke is intentionally weaker than the structural and semantic
 # checks below. Most curated inputs must stay within the historical 3% limit.
-# Narrow audit debt (FRONT-DECL-001): `less_slow_sm90a` currently needs 3.1%
+# Tracked in issue #48: `less_slow_sm90a` currently needs 3.1%
 # after raw snapshots are removed. Header-inline comments, comma-packed
 # register declarations, and multiple statements on one physical line are not
 # all represented by the current IR. Keep this exception local and reviewable

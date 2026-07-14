@@ -1,7 +1,0 @@
-id = "FRONT-DECL-001"
-status = "confirmed"
-severity = "medium"
-category = "coverage_gap"
-summary = "Many directives, declaration shapes, arrays, and initializers are losslessly retained but not structurally modeled."
-source_handoffs = ["wave6-frontend-tests.md"]
-validation_tier = "frontend source and corpus audit"

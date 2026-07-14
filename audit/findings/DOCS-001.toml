@@ -1,7 +1,0 @@
-id = "DOCS-001"
-status = "confirmed"
-severity = "low"
-category = "documentation"
-summary = "Documentation overstates corpus count, RawLine recovery, structural reconstruction, module diff, and transpiler guarantees."
-source_handoffs = ["wave6-frontend-tests.md"]
-validation_tier = "documentation/source audit"

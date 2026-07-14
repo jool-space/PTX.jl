@@ -64,7 +64,8 @@ construction-only scopes reject. Comments and blank lines are nonsemantic.
 Programmatically constructed `.file`/`.loc` instruction nodes are also
 ignored as debug metadata, but source parsing currently represents those
 directives as `RawLine`; textual PTX containing them therefore rejects until
-FRONT-DECL gives them structural IR nodes.
+[issue #48](https://github.com/jool-space/PTX.jl/issues/48) gives them
+structural IR nodes.
 
 Instructions fall into two groups. Reviewed ABI islands (structured, vector,
 scalar, b128, `cvt`, mbarrier, and constant-only forms) use their exact schema.

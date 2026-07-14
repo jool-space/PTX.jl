@@ -1,7 +1,0 @@
-id = "BF16-PTR-EXP"
-status = "needs_experiment"
-severity = "medium"
-category = "lowering"
-summary = "The shared-element bf16-to-Float16 mapping is suspicious but no pointee-dependent mislowering has been established."
-source_handoffs = ["wave4-data-movement.md"]
-validation_tier = "emitted PTX and bit-exact runtime needed"

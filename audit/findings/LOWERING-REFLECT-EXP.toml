@@ -1,7 +1,0 @@
-id = "LOWERING-REFLECT-EXP"
-status = "needs_experiment"
-severity = "low"
-category = "tooling"
-summary = "PTX.lowering classifies paths through typed and stringified IR heuristics and is not yet an authoritative lowering ledger."
-source_handoffs = ["wave1-lowering.md", "wave6-frontend-tests.md"]
-validation_tier = "mechanical wrapper-to-emission reconciliation needed"
