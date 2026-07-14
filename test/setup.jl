@@ -401,7 +401,11 @@ function _touch_target(op::Symbol, mods)
     op === :mma     && (has("kind::") || :block_scale in mods) &&
         return (v"12.1", :arch)
     op === :mma     && return (v"9.0", :arch)
-    (op === :ldmatrix || op === :stmatrix) && :b8 in mods &&
+    # Blackwell ldmatrix uses `.b8` for ordinary 8-bit loads and `.b8x16`
+    # as the destination-format token for optional b4/b6 decompression.
+    # Both token families share the architecture-specific sm_100a floor.
+    (op === :ldmatrix || op === :stmatrix) &&
+        any(m -> m in (:b8, :b8x16), mods) &&
         return (v"10.0", :arch)
     # cta_group is a Blackwell cluster-pair feature; g2s with a nonzero
     # cta_group operand cannot ISel below sm_100 (ledger: validated sm_100a).

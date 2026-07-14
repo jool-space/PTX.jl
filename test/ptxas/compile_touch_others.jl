@@ -5,6 +5,16 @@
 # `!(op in (:wgmma, :tcgen05, :mma))`. Together the shards must cover every wrapper opcode exactly once.
 
 @testset "compile-touch (others): every wrapper method compiles" begin
+    # Optional-decompression ldmatrix has a Blackwell architecture-family
+    # floor. Pin the routing explicitly because backend versions differ in
+    # whether they reject these intrinsics immediately when given sm_90.
+    @test _touch_target(:ldmatrix,
+        (:sync, :aligned, :m8n16, :x1, :shared,
+         :b8x16, :b6x16_p32)) == (v"10.0", :arch)
+    @test _touch_target(:ldmatrix,
+        (:sync, :aligned, :m16n16, :x2, :trans, Symbol("shared::cta"),
+         :b8x16, :b4x16_p64)) == (v"10.0", :arch)
+
     result = compile_touch_sweep(op -> !(op in (:wgmma, :tcgen05, :mma)))
     isempty(result.failures) ||
         foreach(f -> println("TOUCH FAILURE: ", f), result.failures)
