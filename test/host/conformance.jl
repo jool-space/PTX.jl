@@ -430,6 +430,29 @@ append!(PROBES, [
         r"fence\.proxy\.async\.shared::cta;"),
     ("llvm.nvvm.fence.mbarrier_init.release.cluster", (), "sm_90a", "+ptx80",
         r"fence\.mbarrier_init\.release\.cluster;"),
+    # Tensor-map proxy fences (PTX 8.3, baseline sm_90): acquire carries a
+    # generic address plus the sole legal literal range size; release has no
+    # operands.  Scope is an exact four-way product for both directions.
+    ("llvm.nvvm.fence.proxy.tensormap_generic.acquire.cta", (p0, Val{128}),
+        "sm_90", "+ptx83",
+        r"fence\.proxy\.tensormap::generic\.acquire\.cta \s*\[%rd\d+\], (128|0x80);"),
+    ("llvm.nvvm.fence.proxy.tensormap_generic.acquire.cluster", (p0, Val{128}),
+        "sm_90", "+ptx83",
+        r"fence\.proxy\.tensormap::generic\.acquire\.cluster \s*\[%rd\d+\], (128|0x80);"),
+    ("llvm.nvvm.fence.proxy.tensormap_generic.acquire.gpu", (p0, Val{128}),
+        "sm_90", "+ptx83",
+        r"fence\.proxy\.tensormap::generic\.acquire\.gpu \s*\[%rd\d+\], (128|0x80);"),
+    ("llvm.nvvm.fence.proxy.tensormap_generic.acquire.sys", (p0, Val{128}),
+        "sm_90", "+ptx83",
+        r"fence\.proxy\.tensormap::generic\.acquire\.sys \s*\[%rd\d+\], (128|0x80);"),
+    ("llvm.nvvm.fence.proxy.tensormap_generic.release.cta", (),
+        "sm_90", "+ptx83", r"fence\.proxy\.tensormap::generic\.release\.cta;"),
+    ("llvm.nvvm.fence.proxy.tensormap_generic.release.cluster", (),
+        "sm_90", "+ptx83", r"fence\.proxy\.tensormap::generic\.release\.cluster;"),
+    ("llvm.nvvm.fence.proxy.tensormap_generic.release.gpu", (),
+        "sm_90", "+ptx83", r"fence\.proxy\.tensormap::generic\.release\.gpu;"),
+    ("llvm.nvvm.fence.proxy.tensormap_generic.release.sys", (),
+        "sm_90", "+ptx83", r"fence\.proxy\.tensormap::generic\.release\.sys;"),
 ])
 
 # Full generated-family sweep: one selection probe for EVERY name the mma
@@ -727,6 +750,9 @@ end
     cases = [
         # cluster barriers: sm_90 floor
         ("llvm.nvvm.barrier.cluster.arrive", (), "sm_80", "+ptx70"),
+        # tensor-map proxy fences: PTX 8.3 and baseline sm_90
+        ("llvm.nvvm.fence.proxy.tensormap_generic.acquire.gpu",
+            (p0, Val{128}), "sm_80", "+ptx83"),
         # tcgen05: datacenter-Blackwell only
         ("llvm.nvvm.tcgen05.alloc.shared.cg1", (pS8, UInt32), "sm_90a", "+ptx80"),
         # b8 matrix shapes: sm_100a family

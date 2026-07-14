@@ -50,6 +50,68 @@
 @inline (::Operation{:fence, (:mbarrier_init, :release, :cluster)})() =
     nvvm"fence.mbarrier_init.release.cluster"()
 
+# --- Tensor-map proxy fences (PTX 8.3, sm_90+) -----------------------------
+#
+# `fence.proxy.tensormap::generic` is uni-directional.  Release publishes
+# prior generic-proxy descriptor writes to the tensormap proxy and has no
+# operands.  Acquire makes prior tensormap-proxy accesses visible to later
+# generic-proxy accesses over exactly one 128-byte tensor-map descriptor:
+#
+#   fence.proxy.tensormap::generic.release.<scope>;
+#   fence.proxy.tensormap::generic.acquire.<scope> [addr], 128;
+#
+# PTX 9.3 §9.7.14.4 requires generic addressing for `addr`, requires the
+# address to resolve into global memory, and admits only the literal size
+# 128.  The typed boundary therefore accepts AS.Generic plus `Val{128}`;
+# callers holding an address-space-qualified global pointer must explicitly
+# construct/reinterpret the corresponding generic address first.  The four
+# scopes are baseline sm_90 features, not sm_90a architecture-specific.
+#
+# Proxy fences are ordering operations, not collective operations: no
+# `convergent` attribute.  The acquire intrinsics carry `argmemonly` and the
+# release intrinsics deliberately carry no permissive memory attribute, so
+# optimized LLVM retains every fence and cannot move memory through it.
+
+@inline function (::Operation{:fence,
+        (:proxy, Symbol("tensormap::generic"), :acquire, :cta)})(
+        addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
+    nvvm"fence.proxy.tensormap_generic.acquire.cta"(addr, Val(128))
+end
+
+@inline function (::Operation{:fence,
+        (:proxy, Symbol("tensormap::generic"), :acquire, :cluster)})(
+        addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
+    nvvm"fence.proxy.tensormap_generic.acquire.cluster"(addr, Val(128))
+end
+
+@inline function (::Operation{:fence,
+        (:proxy, Symbol("tensormap::generic"), :acquire, :gpu)})(
+        addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
+    nvvm"fence.proxy.tensormap_generic.acquire.gpu"(addr, Val(128))
+end
+
+@inline function (::Operation{:fence,
+        (:proxy, Symbol("tensormap::generic"), :acquire, :sys)})(
+        addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
+    nvvm"fence.proxy.tensormap_generic.acquire.sys"(addr, Val(128))
+end
+
+@inline (::Operation{:fence,
+    (:proxy, Symbol("tensormap::generic"), :release, :cta)})() =
+    nvvm"fence.proxy.tensormap_generic.release.cta"()
+
+@inline (::Operation{:fence,
+    (:proxy, Symbol("tensormap::generic"), :release, :cluster)})() =
+    nvvm"fence.proxy.tensormap_generic.release.cluster"()
+
+@inline (::Operation{:fence,
+    (:proxy, Symbol("tensormap::generic"), :release, :gpu)})() =
+    nvvm"fence.proxy.tensormap_generic.release.gpu"()
+
+@inline (::Operation{:fence,
+    (:proxy, Symbol("tensormap::generic"), :release, :sys)})() =
+    nvvm"fence.proxy.tensormap_generic.release.sys"()
+
 # --- generic memory fences (tier-1 core IR) ---------------------------------
 
 # PTX scope modifier → LLVM syncscope clause ("" is the system default).

@@ -538,9 +538,13 @@ Memory-op opcodes render pointer arguments as `[$N]`; non-memory ops
 - `ld`, `st`, `atom`, `red`, `cp`, `mbarrier`, `ldmatrix`, `stmatrix`,
   `prefetch`, `tcgen05`, `tensormap`, `fence`.
 
-`fence` only takes a pointer in the
-`fence.proxy.tensormap::generic.<acq|rel>.gpu [addr], size` form;
-argument-less `fence.sc.gpu` forms emit no bracketed operand either way.
+`fence` only takes a pointer in the acquire half of the tensor-map proxy
+family:
+`fence.proxy.tensormap::generic.acquire.{cta,cluster,gpu,sys} [addr], 128`.
+Its strict wrapper accepts a generic address (which must resolve to global
+memory) plus `Val(128)`, the only range size the ISA permits. The corresponding
+release forms take no operands. Argument-less `fence.sc.gpu` forms emit no
+bracketed operand either way.
 
 When an address is carried in an integer rather than an `LLVMPtr`, mark the
 operand explicitly with [`address`](@ref):

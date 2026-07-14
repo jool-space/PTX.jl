@@ -16,13 +16,15 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
     (:cp,       (:async, :bulk, :prefetch, :tensor), nothing),
     (:wgmma,    (:mma_async,), nothing),
     (:tcgen05,  (),            nothing),
+    (:fence,    (),            Symbol("tensormap::generic")),
+    (:fence,    (),            Symbol("generic::tensormap")),
     (:shfl,     (),            :pred),
 ])
 
 @testset "typed-wrapper-only boundary: closed-world rule inventory" begin
     actual = Set((r.op, r.prefix, r.marker) for r in PTX.TYPED_WRAPPER_ONLY_RULES)
     @test actual == EXPECTED_TYPED_ONLY_RULES
-    @test length(PTX.TYPED_WRAPPER_ONLY_RULES) == 6
+    @test length(PTX.TYPED_WRAPPER_ONLY_RULES) == 8
 
     positives = (
         (:mma, (:sync, :aligned, :m16n8k16, :row, :col,
@@ -36,6 +38,8 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
         (:wgmma, (:mma_async, :sync, :aligned,
                   :m64n8k16, :f32, :bf16, :bf16)),
         (:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x2, :b32)),
+        (:fence, (:proxy, Symbol("tensormap::generic"), :acquire, :gpu)),
+        (:fence, (:proxy, Symbol("generic::tensormap"), :acquire, :gpu)),
         (:shfl, (:sync, :idx, :b32, :pred)),
     )
     for (op, mods) in positives
@@ -50,6 +54,7 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
         (:setp, (:duality, :eq, :s32)),
         (:shfl, (:sync, :idx, :b32, :predicate)),
         (:fabric, (:try_get, Symbol("mbarrier::report::fabric"))),
+        (:fence, (:proxy, :tensormap_generic, :acquire, :gpu)),
         (:tcgen050, (:ld, :sync, :aligned, :b32)),
         (:cp, (:async, :bulk, :prefetchish, :tensor, Symbol("2d"),
                :L2, :global, :tile)),
@@ -83,6 +88,11 @@ end
         (Operation{:tcgen05, (:ld, :sync, :aligned,
                               Symbol("16x64b"), :x2, :b32)}(),
          (Int32,)),
+        # Tensor-map fences have asymmetric acquire/release ABIs. A wrong
+        # literal range must not fall into the scalar formatter.
+        (Operation{:fence, (:proxy, Symbol("tensormap::generic"),
+                            :acquire, :gpu)}(),
+         (Core.LLVMPtr{UInt8, PTX.AS.Generic}, Val{64})),
         # The marker token is an internal grouped-result selector, not a
         # modifier that the scalar formatter may print literally.
         (Operation{:shfl, (:sync, :idx, :b32, :pred)}(),
@@ -125,6 +135,10 @@ end
         (Operation{:cp, (:async, :bulk, :prefetch, :tensor, Symbol("2d"),
                          :L2, :global, :tile)}(),
          (Int32(0), Int32(0))),
+        (Operation{:fence, (:proxy, Symbol("tensormap::generic"),
+                            :acquire, :gpu)}(),
+         (reinterpret(Core.LLVMPtr{UInt8, PTX.AS.Generic}, UInt64(0)),
+          Val(64))),
         (Operation{:shfl, (:sync, :idx, :b32, :pred)}(),
          (Int32(0), Int32(0), Int32(0), Int32(0))),
     )
@@ -143,6 +157,7 @@ end
 
 @testset "typed-wrapper-only boundary: exact methods remain authoritative" begin
     pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
+    p0 = Core.LLVMPtr{UInt8, PTX.AS.Generic}
     exact = (
         (Operation{:mma, (:sync, :aligned, :m16n8k16, :row, :col,
                           :f32, :bf16, :bf16, :f32)}(),
@@ -160,6 +175,10 @@ end
                               Symbol("shared::cluster"), :b64)}(),
          (Core.LLVMPtr{UInt64, PTX.AS.Shared},)),
         (Operation{:tcgen05, (Symbol("fence::before_thread_sync"),)}(), ()),
+        (Operation{:fence, (:proxy, Symbol("tensormap::generic"),
+                            :acquire, :gpu)}(), (p0, Val{128})),
+        (Operation{:fence, (:proxy, Symbol("tensormap::generic"),
+                            :release, :gpu)}(), ()),
         (Operation{:shfl, (:sync, :idx, :b32, :pred)}(),
          (UInt32, UInt32, UInt32, UInt32)),
         (Operation{:cp, (:async, :bulk, :prefetch, :tensor, Symbol("2d"),
@@ -271,6 +290,8 @@ end
          (NTuple{4, Float32}, UInt64, UInt64, Bool)),
         (:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x2, :b32),
          (Int32,)),
+        (:fence, (:proxy, Symbol("tensormap::generic"), :acquire, :gpu),
+         (Core.LLVMPtr{UInt8, PTX.AS.Generic}, Val{64})),
         (:shfl, (:sync, :idx, :b32, :pred),
          (Int32, Int32, Int32, Int32)),
     )
