@@ -215,7 +215,6 @@ end
         (ptx"atom.global.add.v8.u32", (A64, NTuple{8, UInt32})),
         (ptx"red.global.add.v2.u32", (A64, NTuple{2, UInt32})),
         (ptx"multimem.ld_reduce.weak.gpu.global.add.v4.u32", (A64,)),
-        (ptx"ld.global.b128", (A64,)),
         (ptx"atom.global.exch.b128", (A64, NTuple{4, UInt32})),
         (ptx"ldmatrix.sync.aligned.m8n8.x2.shared.b16", (A32,)),
         (ptx"stmatrix.sync.aligned.m8n8.x2.shared.b16",
@@ -233,6 +232,13 @@ end
         @test_throws ArgumentError build_call(op_sym, mods, argtypes)
         @test_throws ArgumentError build_call(op_sym, mods, argtypes; raw = true)
     end
+
+    # Scalar b128 loads have their own audited carrier schema. The address
+    # marker is authoritative there just as it is for reviewed vector loads;
+    # only the unreviewed aggregate spelling above remains forbidden.
+    b128_ld = build_call(:ld, (:global, :b128), (A64,))
+    @test b128_ld.rettype === B128
+    @test PTX.lowering(ptx"ld.global.b128", (A64,)).tier === :chain_asm
 
     # An audited vector-result form is authoritative for its own address
     # operand: an integer Address routes through the vector schema (which

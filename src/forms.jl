@@ -159,6 +159,7 @@ const FORMS = Dict{Symbol, FormFamily}(
 
     # ── Memory ops (bracketed pointer operands) ──────────────────────────
     :ld       => FormFamily(_MEM),
+    :ldu      => FormFamily(_MEM),
     :st       => FormFamily(_MEMSINK),          # dtype tail = value written
     :atom     => FormFamily(_MEM),
     :red      => FormFamily(_MEMSINK),          # dtype tail = value written

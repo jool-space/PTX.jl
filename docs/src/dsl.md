@@ -501,6 +501,23 @@ multi-output families (`ldmatrix`, `mma`, `stmatrix`) emit braced
 operands and are covered by hand-written wrappers — see
 [Wrappers](wrappers.md).
 
+## Scalar `.b128` registers
+
+PTX.jl represents one PTX `.b128` register as `B128`, an alias for the
+low-word-first `NTuple{2,UInt64}` carrier. LLVM NVPTX has no 128-bit inline-asm
+register constraint, so the reviewed emitter bridges those two `l`-class
+operands through a block-local `.b128` register with the ISA's `mov.b128`
+pack/unpack operation. The closed surface covers scalar `ld`, `ld.global.nc`,
+`ldu`, `st`, `atom.{exch,cas}`, and the exact
+`clusterlaunchcontrol.query_cancel` result shapes. It rejects every nearby
+`.b128` spelling in direct, raw, lowering-introspection, and transpiler paths
+instead of treating `.b128` as a scalar Julia result type or a no-result tail.
+
+`mov.b128` pack is included as carrier glue (both two-`.b64` and four-`.b32`
+PTX sources transpile to the common carrier); it is not part of the original
+memory/query coverage claim. The scalar-to-vector unpack direction remains
+fail-loud because the singleton chain API has no result-shape selector.
+
 ## Pointer bracketing
 
 Memory-op opcodes render pointer arguments as `[$N]`; non-memory ops

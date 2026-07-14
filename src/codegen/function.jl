@@ -46,6 +46,7 @@ function emit_function!(cg::CodeGenState, func::Function,
     empty!(cg.reg_decls)
     empty!(cg.declared)
     empty!(cg.predicated_assigns)
+    empty!(cg.inferred_b128_regs)
     cg.param_names = [julia_var(p.name) for p in func.params]
 
     isempty(arch) || emit_metadata!(cg, func, arch, version)
