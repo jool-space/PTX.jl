@@ -158,8 +158,9 @@ end
 Reconstruct PTX text from a parsed `IR.Module`. Returns `mod.raw_source`
 verbatim when set (the lossless fast path used by parser-produced IR);
 otherwise emits the module structurally — header, leading prelude, then
-each directive — falling back per statement to `formatting.raw_line`
-when present and to field-driven reconstruction when not.
+each directive. A statement uses `formatting.raw_line` when present and
+field-driven reconstruction otherwise. An opaque `RawLine` is also emitted
+verbatim, but carries no reconstructed statement semantics.
 
 Per-statement `format(stmt)` methods (one per `IR.Statement` kind)
 implement the structural fallback and can be called individually.

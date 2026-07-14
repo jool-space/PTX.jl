@@ -18,13 +18,18 @@ julia_src = ptx_to_julia(source)
 println(julia_src)
 ```
 
-For the supported instruction-at-a-time subset, output is `Meta.parse`-valid:
-paste it into a Julia file (or `eval` it), add a `@cuda` launch, and the kernel
-runs. Unsupported semantic shapes throw instead of emitting plausible but
-unsafe Julia. In particular, `add.cc` / `addc`, `sub.cc` / `subc`, and
-`mad.cc` / `madc` communicate through implicit `CC.CF`; splitting them into
-independent calls would hide the dependency from LLVM. Write those operations
-with the explicit-Bool wrappers or fused helpers described in
+For source that passes the closed transpiler contract, the output is Julia
+function definitions containing `ptx"..."(...)` calls. Unsupported semantic
+shapes throw before any Julia is emitted instead of producing a plausible but
+unsafe partial program. Acceptance means that every emitted lowering has an
+explicit contract; it is not a claim that every accepted PTX program has been
+proved semantically equivalent end to end. Host, offline-compiler, and GPU
+runtime evidence are kept as separate test tiers.
+
+In particular, `add.cc` / `addc`, `sub.cc` / `subc`, and `mad.cc` / `madc`
+communicate through implicit `CC.CF`; splitting them into independent calls
+would hide the dependency from LLVM. Write those operations with the
+explicit-Bool wrappers or fused helpers described in
 [Extended precision and `CC.CF`](dsl.md#Extended-precision-and-CC.CF).
 
 ## Pipeline
@@ -39,8 +44,12 @@ Three independent stages, each usable on its own:
 
 - [`PTX.Parser.tokenize(source)`](@ref) — text → `Vector{Token}` with
   newline / comment tokens preserved for round-trip fidelity.
-- [`PTX.Parser.parse(source)`](@ref) — text → `IR.Module`. Opcode-agnostic;
-  unrecognized lines round-trip as `RawLine`.
+- [`PTX.Parser.parse(source)`](@ref) — text → `IR.Module`. Instructions are
+  parsed without an opcode inventory. Many post-header lines that the
+  statement parser cannot model are retained as opaque `RawLine` nodes;
+  lexical errors, invalid initial headers, malformed or misplaced
+  `.version`/`.target`/`.address_size` directives, and target invariants still
+  throw.
 - [`PTX.IR.format(mod)`](@ref) — `IR.Module` → text. Returns
   `raw_source` verbatim when set (the lossless fast path); otherwise
   falls back to structural emission, consulting per-statement
@@ -56,7 +65,9 @@ edge, and instruction operand role is explicit. Unsupported input raises
 identify the rejected IR node. It does not emit a plausible partial program or
 turn an unknown executable line into a comment.
 
-The current declaration subset is scalar `.reg`, scalar `.param`, and
+The current module subset requires 64-bit addressing, exactly one initial
+target token with no target options, and at least one function definition. The
+declaration subset is scalar `.reg`, scalar `.param`, and
 unaligned/uninitialized/unlinked scalar `.shared` storage. Module storage,
 pointer metadata, array parameters, vector declarations, function return
 parameters, later `.target` directives, pragmas, opaque `RawLine` nodes, and
@@ -77,6 +88,12 @@ operand arity, address positions, or result ABI. Extending the transpiler
 therefore requires an explicit form/role entry and evidence, not a fallback
 based on the last modifier.
 
+Labels and branches are accepted only when every target exists in the same
+PTX brace scope. Shared-symbol pointer alias absorption is deliberately
+straight-line: a function containing labels rejects an alias-producing
+`mov`/`add`/`sub` instead of guessing which alias reaches a later load or
+store.
+
 ## Lexical conformance
 
 The lexer enforces PTX's ASCII source boundary before tokenization. Integer
@@ -96,6 +113,12 @@ or function bodies. PTX.jl does not execute cpp or choose conditional branches;
 source whose structure depends on macro expansion must be preprocessed before
 semantic parsing or transpilation.
 
+`RawLine` is recovery of source text, not recovery of statement semantics. It
+is re-emitted verbatim, retained by normalization, compared by exact text in
+`PTX.IR.diff`, and rejected by the transpiler. A parse that contains one can
+still be lossless without providing structural or semantic coverage for that
+line.
+
 ## Round-trip fidelity
 
 The parser captures three layers of source text:
@@ -107,9 +130,10 @@ The parser captures three layers of source text:
   32-bit semantic default through `Module.address_size` while
   `Module.address_size_explicit == false` prevents structural formatting from
   manufacturing a directive.
-- **`FormattingInfo.raw_line`** per statement — the captured source
-  text for that single statement. Used when the structural emitter
-  reaches a node that hasn't been reconstructed.
+- **`FormattingInfo.raw_line`** per statement — a captured source line for a
+  modeled statement, when that statement exclusively owns the physical line.
+  Statement formatters consult this snapshot before reconstructing text from
+  fields. It is distinct from an opaque `RawLine` statement.
 
 Subsequent module-scope `.target` directives are represented as ordered
 `TargetDirective` statements. The parser validates the PTX 9.3 target ledger,
@@ -120,12 +144,33 @@ future architectures and options rather than claiming that the bundled ledger
 describes a future ISA. CUDA 12.9 and 13.3 `ptxas` independently confirm the
 version/target boundary by rejecting `.version 8.5` with `.target sm_100a`.
 
-Programmatically constructed IR (e.g. by transformations) falls through
-to structural emission. `format(parse(source))` is byte-identical for
-all 10 corpus kernels under `test/corpus/` (covering minimal /
-vector_add / predicates / branches / shared_memory / function_call /
-mbarrier_full / wgmma_simple / cluster_ops + a 579-line
-`less_slow_sm90a.ptx`).
+Programmatically constructed IR (for example, after a transformation) uses
+field-driven formatting for the PTX statement kinds that have a structural
+spelling. Construction-only `IntrinsicScope` nodes throw instead of being
+silently flattened into brace blocks.
+
+The corpus tests distinguish three different claims rather than assigning all
+of them to “round trip”:
+
+1. **Lossless acceptance.** For a successfully parsed nonempty source,
+   `format(parse(source))` returns `Module.raw_source` byte for byte. Every
+   curated input and every parseable (or minimally header-repaired) external
+   input exercises this path. This proves parsing completed; it does not prove
+   that statements were reconstructed from fields.
+2. **Deep structural reconstruction.** The test projection removes
+   `raw_source`, `raw_header`, and every nested `FormattingInfo.raw_line`, then
+   requires zero `RawLine` nodes and a parse/format fixed point. Every curated
+   input is in this tier. External inputs are included only when they are
+   fallback-free; the intentional fallback cases are pinned by a manifest
+   rather than presented as structural coverage.
+3. **Normalized module comparison.** The curated deep tier additionally
+   requires `PTX.IR.diff` to find no difference between the first and reparsed
+   structural trees. The wider external tier omits this more expensive check.
+
+A deep structural fixed point proves that the modeled IR reconstructs its own
+tree consistently. It does not promise byte identity with the original source,
+PTX legality, or runtime semantic equivalence; ptxas and device tests provide
+separate evidence for those properties.
 
 ### Vector declarations
 
@@ -267,9 +312,11 @@ the reviewed schema is rejected instead of falling back to a scalar result.
 
 ## Diff against the original PTX
 
-`PTX.IR.diff` compares two `IR.Module`s and returns a list of
-human-readable difference lines (cosmetic content like comments and
-blank lines is filtered on the fly):
+`PTX.IR.diff` normalizes two `IR.Module`s and returns human-readable difference
+lines. Normalization removes source/header snapshots, the leading prelude,
+comments, blank lines, and formatting metadata. It retains module headers,
+ordered module directives, function signatures and directives, lexical brace
+scopes, instructions, declarations, pragmas, and opaque `RawLine` text:
 
 ```julia
 m1 = PTX.Parser.parse(read("a.ptx", String))
@@ -278,9 +325,12 @@ diffs = PTX.IR.diff(m1, m2)
 isempty(diffs) || foreach(println, diffs)
 ```
 
-Pass `entry_only = true` to ignore non-entry `.func` helpers. Module-level
-directives still compare, since globals, pragmas, and opaque fallback lines
-can affect an `.entry` kernel.
+Pass `entry_only = true` to remove each non-entry `.func` directive in full,
+including its declaration, signature, linkage, directives, and body.
+Module-level directives still compare, since globals, pragmas, and opaque
+fallback lines can affect an `.entry` kernel. `diff` does not canonicalize
+register or label names, validate PTX against the ISA, or prove two programs
+semantically equivalent.
 
 See the [Reference](reference.md) page for full docstrings of
 [`ptx_to_julia`](@ref) and [`ir_to_julia`](@ref).

@@ -22,6 +22,15 @@ unraw(m::Module) = Module(
 # every directive/body position. Likewise, Block and IntrinsicScope preserve
 # lexical scope: flattening braces can erase declaration lifetime and name
 # reuse.
+"""
+    normalize(m::IR.Module) -> IR.Module
+
+Return the structural comparison form of `m`. Source/header snapshots, the
+leading prelude, comments, blank lines, and formatting metadata are removed.
+Semantic headers and ordered statements remain; opaque `RawLine` nodes remain
+and compare by their exact text, while `Block` and `IntrinsicScope` retain
+their lexical boundaries.
+"""
 normalize(m::Module) = Module(
     version      = m.version,
     target       = m.target,
@@ -113,14 +122,16 @@ _normalize_var_decl(v::VarDecl) = VarDecl(
     formatting  = nothing,
 )
 
-# Compares every semantic module node after normalizing cosmetic information.
-# `entry_only` excludes every non-entry `.func` Function directive in full—its
-# declaration, signature, linkage, function directives, and body—but keeps
-# other module directives: globals, opaque fallbacks, and pragmas can affect an
-# entry kernel.
-# Returns human-readable difference lines; empty ⇔ identical normalized IR
-# structure (with opaque RawLine text compared verbatim). This is not a
-# substitute for PTX ISA or ptxas semantic validation.
+"""
+    diff(a::IR.Module, b::IR.Module; entry_only=false) -> Vector{String}
+
+Compare all normalized module nodes and return human-readable differences.
+With `entry_only=true`, every non-entry `.func` directive is excluded in full
+(declaration, signature, linkage, function directives, and body), while other
+module directives remain. Empty output means identical normalized IR structure,
+with opaque `RawLine` text compared verbatim. It does not canonicalize names and
+is not a substitute for PTX ISA, ptxas, or runtime semantic validation.
+"""
 function diff(a::Module, b::Module; entry_only::Bool = false)
     a = normalize(a)
     b = normalize(b)

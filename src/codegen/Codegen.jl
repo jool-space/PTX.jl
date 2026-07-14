@@ -42,15 +42,22 @@ include("contract.jl")
     ptx_to_julia(source) -> String
 
 Parse PTX source text and emit Julia source code. Returns a string of one
-or more `function ... end` definitions calling the `ptx"..."` macro.
+or more `function ... end` definitions calling the `ptx"..."` macro after
+validating the complete module against the transpiler's deliberately closed
+subset. Lexical, parse, and transpiler-contract errors throw instead of
+returning a partial program. Acceptance is a lowering-contract guarantee, not
+a proof of semantic equivalence for every accepted PTX program.
 """
 ptx_to_julia(source::AbstractString) = ir_to_julia(parse_ptx(source))
 
 """
     ir_to_julia(mod::IR.Module) -> String
 
-Convert a parsed `IR.Module` into Julia source code. Each `Function` in
-the module becomes one Julia function definition.
+Validate a parsed `IR.Module` and convert it into Julia source code. Each
+accepted `Function` becomes one Julia function definition. Validation covers
+the complete module and finishes before emission, so an unsupported node,
+declaration, control-flow edge, or instruction form raises
+`TranspilerError` without returning partial Julia.
 """
 function ir_to_julia(mod::Module)
     validate_transpilable(mod)
