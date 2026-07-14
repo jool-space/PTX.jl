@@ -38,6 +38,8 @@ end
 const NO_DEST_OPCODES = Set{String}((
     "bar", "barrier",
     "ret", "exit", "trap", "brkpt",
+    # Their operands are ISA-required integer constants, never destinations.
+    "pmevent", "setmaxnreg",
 ))
 
 # Same idea, but the no-dest variant lives behind a leading modifier — the
@@ -74,6 +76,40 @@ function _instruction_scalar_result_schema(inst::Instruction)
         "scalar form with $(length(schema.operands)) source operands, got " *
         "$(max(length(inst.operands) - 1, 0)); see $(schema.section)"))
     schema
+end
+
+function _instruction_immediate_form_contract(inst::Instruction)
+    op = Symbol(inst.opcode)
+    requires_immediate_form_contract(op) || return nothing
+    mods = _schema_modifiers(inst.modifiers)
+    contract = immediate_form_contract(op, mods)
+    contract === nothing && throw(immediate_form_contract_miss(op, mods))
+    length(inst.operands) == 1 || throw(ArgumentError(
+        "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) requires " *
+        "exactly one immediate source operand, got $(length(inst.operands)); " *
+        "see $(contract.section)"))
+    source = only(inst.operands)
+    text = try
+        _ptx_integer_constant_text(source)
+    catch err
+        err isa ArgumentError || rethrow()
+        throw(ArgumentError(
+            "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) source " *
+            "must be an integer constant: $(sprint(showerror, err)); see " *
+            contract.section))
+    end
+    value = try
+        _ptx_integer_constant(text)
+    catch err
+        err isa ArgumentError || rethrow()
+        throw(ArgumentError(
+            "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) has an " *
+            "invalid integer constant $(repr(text)): $(sprint(showerror, err))"))
+    end
+    validate_immediate_value(
+        contract, value;
+        context = "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) source")
+    (; contract, value = Int(value))
 end
 
 function _structured_api_modifiers(inst::Instruction)
@@ -1182,6 +1218,18 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
         "implicit CC.CF flag; instruction-at-a-time lowering cannot preserve " *
         "that dependency. Use PTX.add_with_carry, PTX.sub_with_borrow, or " *
         "PTX.mul_wide in Julia source."))
+
+    # Validate constant-only, destinationless instructions before generic
+    # destination inference or pointer-alias absorption can reinterpret their
+    # sole source as a definition. Constant expressions are reduced to Val so
+    # reconstructed Julia retains the compile-time ISA contract.
+    immediate_checked = _instruction_immediate_form_contract(inst)
+    if immediate_checked !== nothing
+        chain = chain_expr(cg, inst.opcode, inst.modifiers)
+        call = chain * "(Val($(immediate_checked.value)))"
+        emit_with_predicate!(cg, call, inst.predicate, String[])
+        return
+    end
 
     mbarrier_schema = _instruction_mbarrier_schema(cg, inst)
     mbarrier_schema === nothing ||

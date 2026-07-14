@@ -166,9 +166,11 @@ logical operators, and parentheses, with PTX-style 64-bit range checks. The
 lexer recognizes binary literals, uppercase unsigned suffixes, XOR, and
 ternary punctuation, but this deliberately smaller evaluator rejects those
 shapes rather than silently treating them as runtime LUTs. The wider
-`IMMEDIATE-001` finding remains
-open for `setmaxnreg` and `pmevent`, while its `lop3` range/constness slice is
-closed by this schema.
+immediate contract also validates destinationless `setmaxnreg` and `pmevent`
+before ordinary destination inference or pointer-alias propagation.
+`setmaxnreg` requires a multiple of eight in `24:256`; `pmevent` requires an
+index in `0:15`, and `pmevent.mask` requires a 16-bit mask. Their reconstructed
+Julia calls always carry `Val(N)` and never fabricate a destination.
 
 Ordinary `cvt` sources are position-aware. The transpiler closes the reviewed
 destination/source carrier pairs and the structural operand roles of stochastic

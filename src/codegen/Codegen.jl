@@ -12,6 +12,8 @@ using ..IR: Module, Function, Instruction, Label, RegDecl, VarDecl, Param,
 using ..Parser: parse as parse_ptx, tokenize, TokenKind, LexError
 using ..PTX: uses_implicit_cc, structured_result_schema,
              requires_structured_result_schema, structured_result_schema_miss,
+             immediate_form_contract, requires_immediate_form_contract,
+             immediate_form_contract_miss, validate_immediate_value,
              scalar_result_schema,
              requires_scalar_result_schema, scalar_result_schema_miss,
              vector_result_schema, requires_vector_result_schema,
