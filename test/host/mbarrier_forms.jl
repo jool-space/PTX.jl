@@ -596,7 +596,7 @@ end
                 "mbarrier.init.b64 [%rd0], 1;" =>
                 "mbarrier.init.b64 [%rd0, {%r1}], 1;"),
     )
-        @test_throws ArgumentError PTX.ptx_to_julia(text)
+        @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(text)
     end
 
     for text in (
@@ -606,7 +606,7 @@ end
                 "mbarrier.try_wait.parity.shared.b64 complete," =>
                 "mbarrier.try_wait.parity.shared.b64 _,"),
     )
-        @test_throws ArgumentError PTX.ptx_to_julia(text)
+        @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(text)
     end
     # The output is real Julia syntax, not merely a plausible string: parse
     # and evaluate it in an isolated module so macro expansion and tuple

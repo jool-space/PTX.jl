@@ -34,7 +34,34 @@ const EXTERNAL_B128_RELPATHS = Set((
 const EXTERNAL_B128_FILES = Set(
     normpath(joinpath(EXTERNAL_DIR, split(rel, '/')...))
     for rel in EXTERNAL_B128_RELPATHS)
-const EXTERNAL_TRANSPILABLE_FILES = EXTERNAL_FILES
+
+# This is an acceptance boundary, not a coverage boast.  These compiler
+# fixtures are the complete external subset whose declarations, operands, and
+# instruction roles the transpiler currently preserves.  Every other fixture
+# must fail before emission; adding a file cannot silently widen the subset.
+const EXTERNAL_TRANSPILABLE_RELPATHS = Set((
+    "llvm/cluster-dim__kernel_func_clusterxyz.ptx",
+    "llvm/mbarrier__barrierarrive.ptx",
+    "llvm/mbarrier__barrierarrivedrop.ptx",
+    "llvm/mbarrier__barrierarrivedropnoComplete.ptx",
+    "llvm/mbarrier__barrierarrivedropnoCompleteshared.ptx",
+    "llvm/mbarrier__barrierarrivedropshared.ptx",
+    "llvm/mbarrier__barrierarrivenoComplete.ptx",
+    "llvm/mbarrier__barrierarrivenoCompleteshared.ptx",
+    "llvm/mbarrier__barrierarriveshared.ptx",
+    "llvm/mbarrier__barrierinit.ptx",
+    "llvm/mbarrier__barrierinitshared.ptx",
+    "llvm/mbarrier__barrierinval.ptx",
+    "llvm/mbarrier__barrierinvalshared.ptx",
+    "llvm/mbarrier__barrierpendingcount.ptx",
+    "llvm/mbarrier__barriertestwait.ptx",
+    "llvm/mbarrier__barriertestwaitshared.ptx",
+    "llvm/setmaxnreg-sm100a__test_set_maxn_reg_sm100a.ptx",
+    "llvm/setmaxnreg__test_set_maxn_reg.ptx",
+))
+const EXTERNAL_TRANSPILABLE_FILES = Set(
+    normpath(joinpath(EXTERNAL_DIR, split(rel, '/')...))
+    for rel in EXTERNAL_TRANSPILABLE_RELPATHS)
 
 # --- name-mangling unit tests ----------------------------------------------
 
@@ -130,7 +157,7 @@ end
         @test !(root in PTX.Codegen.SPECIAL_REGS)
         @test_throws ArgumentError render_operand(IR.RegisterOperand(root), cg)
     end
-    @test_throws ArgumentError ptx_to_julia(""".version 8.0
+    @test_throws PTX.Codegen.TranspilerError ptx_to_julia(""".version 8.0
     .target sm_80
     .address_size 64
     .visible .entry vector_sreg_probe()
@@ -141,10 +168,25 @@ end
     }
     """)
 
-    # Exercise parser -> IR -> Julia rendering across the scalar result types
-    # and target floors implicated by the old omissions. This is structural
-    # lowering coverage only; PM and reserved-SMEM runtime behavior is
-    # intentionally not executed (the ISA leaves it undefined/restricted).
+    # The inventory intentionally knows more names than the generic transpiler
+    # knows carrier types for.  Only the finite thread-index subset is admitted
+    # until each additional special register has an explicit role entry.
+    for reg in ("%tid.x", "%ntid.y", "%ctaid.z", "%nctaid.x", "%laneid")
+        src = """.version 8.1
+        .target sm_90
+        .address_size 64
+        .visible .entry sreg_probe()
+        {
+        .reg .u32 %r0;
+        mov.u32 %r0, $reg;
+        ret;
+        }
+        """
+        out = ptx_to_julia(src)
+        @test occursin("sreg\"$reg\"", out)
+        parsed = Meta.parseall(out)
+        @test !any(arg -> arg isa Expr && arg.head == :error, parsed.args)
+    end
     for (decl, dst, op, reg) in (
             (".reg .u32 %r0;", "%r0", "mov.u32", "%pm4"),
             (".reg .b32 %r0;", "%r0", "mov.b32", "%reserved_smem_offset_0"),
@@ -161,10 +203,15 @@ end
         ret;
         }
         """
-        out = ptx_to_julia(src)
-        @test occursin("sreg\"$reg\"", out)
-        parsed = Meta.parseall(out)
-        @test !any(arg -> arg isa Expr && arg.head == :error, parsed.args)
+        err = try
+            ptx_to_julia(src)
+            nothing
+        catch e
+            e
+        end
+        @test err isa PTX.Codegen.TranspilerError
+        @test err.category == :operand
+        @test occursin("has no reviewed", sprint(showerror, err))
     end
     for spelling in ("WARP_SZ", "%warpsize")
         src = """.version 8.1
@@ -182,9 +229,9 @@ end
         parsed = Meta.parseall(out)
         @test !any(arg -> arg isa Expr && arg.head == :error, parsed.args)
     end
-    # The parser retains parenthesized constant expressions as raw immediate
-    # text. Both PTX spellings must still become a Julia constant rather than
-    # an unbound `WARP_SZ`/`warpsize` identifier.
+    # Parenthesized expressions are opaque parser text. Token substitution is
+    # still unit-tested above, but the closed generic operand contract rejects
+    # the expression instead of copying PTX expression semantics into Julia.
     for spelling in ("WARP_SZ", "%warpsize")
         src = """.version 8.1
         .target sm_90
@@ -196,11 +243,7 @@ end
         ret;
         }
         """
-        out = ptx_to_julia(src)
-        @test occursin("UInt32((32 >> 1))", out)
-        @test !occursin(spelling, out)
-        parsed = Meta.parseall(out)
-        @test !any(arg -> arg isa Expr && arg.head == :error, parsed.args)
+        @test_throws PTX.Codegen.TranspilerError ptx_to_julia(src)
     end
 end
 
@@ -249,35 +292,58 @@ end
                                          IR.RegisterOperand("%p1")), cg) == "(p0, p1)"
 end
 
-# --- corpus syntactic-validity sweep ---------------------------------------
+# --- closed corpus acceptance boundary ------------------------------------
 
-@testset "ptx_to_julia: corpus emits valid Julia ($(basename(path)))" for path in CORPUS_FILES
-    src = read(path, String)
-    out = ptx_to_julia(src)
-    expr = Meta.parseall(out)
-    @test expr isa Expr
-    @test expr.head == :toplevel
-    # No bare `Meta.ParseError` Exprs in the AST.
-    @test !any(a -> a isa Expr && a.head == :error, expr.args)
+const CURATED_TRANSPILABLE_NAMES = Set((
+    "branches.ptx", "minimal.ptx", "predicates.ptx", "vector_add.ptx",
+))
+
+@testset "ptx_to_julia: curated accept/reject manifest" begin
+    for path in CORPUS_FILES
+        if basename(path) in CURATED_TRANSPILABLE_NAMES
+            expr = Meta.parseall(ptx_to_julia(read(path, String)))
+            @test expr isa Expr && expr.head == :toplevel
+            @test !any(a -> a isa Expr && a.head == :error, expr.args)
+        else
+            err = try
+                ptx_to_julia(read(path, String))
+                nothing
+            catch e
+                e
+            end
+            @test err isa PTX.Codegen.TranspilerError
+            @test err.category in (:unsupported, :schema, :operand)
+            @test occursin("PTX transpiler contract [", sprint(showerror, err))
+        end
+    end
 end
 
-# Same sweep over the external corpus (real-world compiler output). Wider
-# operand patterns, mangled names, edge cases the curated 10 don't cover.
-@testset "ptx_to_julia: external/$(relpath(path, EXTERNAL_DIR))" for path in EXTERNAL_TRANSPILABLE_FILES
-    # Keep provenance fixtures byte-identical on disk. LLVM's sm_100a cases
-    # carry a synthetic PTX 8.5 header that ptxas rejects; the header oracle
-    # covers that rejection, while this transpiler-body sweep uses the same
-    # derived in-memory minimum-version repair as the structural corpus tier.
-    src = _external_parser_source(read(path, String))
-    local out::String
-    @test (out = ptx_to_julia(src); true)
-    expr = Meta.parseall(out)
-    @test expr isa Expr && expr.head == :toplevel
-    @test !any(a -> a isa Expr && a.head == :error, expr.args)
+@testset "ptx_to_julia: external closed acceptance boundary" begin
+    actual = Set(relpath(path, EXTERNAL_DIR) for path in EXTERNAL_FILES)
+    @test EXTERNAL_TRANSPILABLE_RELPATHS ⊆ actual
+    for path in EXTERNAL_FILES
+        rel = relpath(path, EXTERNAL_DIR)
+        src = _external_parser_source(read(path, String))
+        if rel in EXTERNAL_TRANSPILABLE_RELPATHS
+            expr = Meta.parseall(ptx_to_julia(src))
+            @test expr isa Expr && expr.head == :toplevel
+            @test !any(a -> a isa Expr && a.head == :error, expr.args)
+        else
+            err = try
+                ptx_to_julia(src)
+                nothing
+            catch e
+                e
+            end
+            @test err isa PTX.Codegen.TranspilerError
+            @test err.category in (:unsupported, :schema, :operand)
+            @test occursin("PTX transpiler contract [", sprint(showerror, err))
+        end
+    end
 end
 
 
-@testset "ptx_to_julia: closed mov.b128 acceptance manifest" begin
+@testset "ptx_to_julia: compiler b128 fixtures reject undeclared ABI slots" begin
     # Derive the corpus inventory independently so a fifth opaque-handle file
     # cannot silently bypass the common carrier and query-result tier.
     corpus_b128 = Set(relpath(path, EXTERNAL_DIR) for path in EXTERNAL_FILES
@@ -286,11 +352,43 @@ end
     @test EXTERNAL_B128_FILES ⊆ Set(normpath.(EXTERNAL_FILES))
 
     for path in sort!(collect(EXTERNAL_B128_FILES))
-        julia = ptx_to_julia(_external_parser_source(read(path, String)))
-        @test occursin("ptx\"mov.b128\"", julia)
-        @test occursin("ptx\"clusterlaunchcontrol.query_cancel", julia)
-        @test Meta.parseall(julia) isa Expr
+        err = try
+            ptx_to_julia(_external_parser_source(read(path, String)))
+            nothing
+        catch e
+            e
+        end
+        @test err isa PTX.Codegen.TranspilerError
+        @test err.category == :unsupported
+        @test !isempty(err.path)
+        @test !isempty(err.detail)
     end
+end
+
+@testset "ptx_to_julia: valid declared mov.b128/query carrier" begin
+    source = """
+    .version 8.7
+    .target sm_100a
+    .address_size 64
+    .visible .entry declared_b128(
+        .param .u64 lo,
+        .param .u64 hi
+    )
+    {
+        .reg .b64 %rd<2>;
+        .reg .b128 %handle;
+        .reg .b32 %r;
+        ld.param.u64 %rd0, [lo];
+        ld.param.u64 %rd1, [hi];
+        mov.b128 %handle, {%rd0, %rd1};
+        clusterlaunchcontrol.query_cancel.get_first_ctaid::x.b32.b128 %r, %handle;
+        ret;
+    }
+    """
+    julia = ptx_to_julia(source)
+    @test occursin("handle = ptx\"mov.b128\"((rd0, rd1))", julia)
+    @test occursin("ptx\"clusterlaunchcontrol.query_cancel", julia)
+    @test Meta.parseall(julia) isa Expr
 end
 
 # --- golden files ----------------------------------------------------------
@@ -323,7 +421,7 @@ function vector_add(param0, param1, param2, param3)
     p0 = ptx"setp.ge.u32"(r4, r0)
     if p0; @goto DONE; end
     rd3 = ptx"cvt.u64.u32"(r4)
-    rd4 = ptx"shl.b64"(rd3, UInt64(2))
+    rd4 = ptx"shl.b64"(rd3, UInt32(2))
     rd5 = ptx"add.u64"(rd0, rd4)
     rd6 = ptx"add.u64"(rd1, rd4)
     rd7 = ptx"add.u64"(rd2, rd4)
@@ -364,24 +462,11 @@ function branch_test()
 end
 """
 
-const GOLDEN_SHARED_MEMORY = """\
-# @ptx_kernel arch=sm_90a version=8.5
-#   linking     = "visible"
-function smem_test()
-    smem = CuStaticSharedArray(UInt8, 49152)
-    r0 = ptx"ld.shared.b32"(address(pointer(smem)))
-    ptx"st.shared.b32"(address(pointer(smem) + 4), r0)
-    ptx"bar.sync"(0)
-    return nothing
-end
-"""
-
 @testset "golden: $name" for (name, expected) in [
         ("minimal.ptx",       GOLDEN_MINIMAL),
         ("vector_add.ptx",    GOLDEN_VECTOR_ADD),
         ("predicates.ptx",    GOLDEN_PREDICATES),
         ("branches.ptx",      GOLDEN_BRANCHES),
-        ("shared_memory.ptx", GOLDEN_SHARED_MEMORY),
     ]
     @test ptx_to_julia(read(joinpath(CORPUS_DIR, name), String)) == expected
 end

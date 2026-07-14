@@ -177,7 +177,15 @@ end
         "pmevent;",
     )
     for instruction in invalid
-        @test_throws ArgumentError _immediate_transpile(instruction)
+        err = try
+            _immediate_transpile(instruction)
+            nothing
+        catch caught
+            caught
+        end
+        @test err isa PTX.Codegen.TranspilerError
+        @test err.category == :schema
+        @test occursin("immediate_probe", err.path)
     end
 end
 

@@ -42,6 +42,7 @@ PTX.vector_load
 ```@docs
 ptx_to_julia
 ir_to_julia
+PTX.Codegen.TranspilerError
 ```
 
 ## Parser

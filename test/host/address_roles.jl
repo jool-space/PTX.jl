@@ -375,10 +375,10 @@ end
     end
 end
 
-@testset "transpiled aliases compile through typed wrappers" begin
+@testset "transpiled aliases compile through reviewed address roles" begin
     src = """
     .version 9.0
-    .target sm_100a
+    .target sm_90
     .address_size 64
     .visible .entry _address_alias_vec(.param .u64 p) {
         .reg .u64 %rd0;
@@ -387,94 +387,70 @@ end
         ld.global.v2.b32 {%r0, %r1}, [%rd0];
         ret;
     }
-    .visible .entry _address_alias_ldmatrix(.param .u64 p) {
-        .reg .u64 %rd0;
-        .reg .b32 %r<2>;
-        ld.param.u64 %rd0, [p];
-        ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%r0, %r1}, [%rd0];
-        ret;
-    }
     .visible .entry _address_alias_mbarrier(.param .u64 p) {
         .reg .u64 %rd0;
         ld.param.u64 %rd0, [p];
         mbarrier.init.shared.b64 [%rd0], 1;
         ret;
     }
-    .visible .entry _address_alias_tcgen_mx_shared(
-            .param .u32 d, .param .u64 ad, .param .u64 bd,
-            .param .u32 id, .param .u32 sa, .param .u32 sb) {
-        .reg .b32 %r<4>;
-        .reg .b64 %rd<2>;
-        .reg .pred %p;
-        ld.param.u32 %r0, [d];
-        ld.param.u64 %rd0, [ad];
-        ld.param.u64 %rd1, [bd];
-        ld.param.u32 %r1, [id];
-        ld.param.u32 %r2, [sa];
-        ld.param.u32 %r3, [sb];
-        setp.eq.u32 %p, %r1, 0;
-        tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale.scale_vec::1X [%r0], %rd0, %rd1, %r1, [%r2], [%r3], %p;
-        ret;
-    }
-    .visible .entry _address_alias_tcgen_mx_tmem(
-            .param .u32 d, .param .u32 a, .param .u64 bd,
-            .param .u32 id, .param .u32 sa, .param .u32 sb) {
-        .reg .b32 %r<5>;
-        .reg .b64 %rd0;
-        .reg .pred %p;
-        ld.param.u32 %r0, [d];
-        ld.param.u32 %r1, [a];
-        ld.param.u64 %rd0, [bd];
-        ld.param.u32 %r2, [id];
-        ld.param.u32 %r3, [sa];
-        ld.param.u32 %r4, [sb];
-        setp.eq.u32 %p, %r2, 0;
-        tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale.scale_vec::1X [%r0], [%r1], %rd0, %r2, [%r3], [%r4], %p;
-        ret;
-    }
     """
     julia = PTX.ptx_to_julia(src)
-    @test count("address(rd0)", julia) == 3
-    shared_asm = "tcgen05.mma.cta_group::1.kind::mxf8f6f4." *
-                 "block_scale.scale_vec::1X [\$0], \$1, \$2, \$3, " *
-                 "[\$4], [\$5], \$6;"
-    tmem_asm = "tcgen05.mma.cta_group::1.kind::mxf8f6f4." *
-               "block_scale.scale_vec::1X [\$0], [\$1], \$2, \$3, " *
-               "[\$4], [\$5], \$6;"
-    @test occursin(
-        "ptx\"tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale." *
-        "scale_vec::1X\"(address(r0), rd0, rd1, r1, address(r2), " *
-        "address(r3), p)", julia)
-    @test occursin(
-        "ptx\"tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale." *
-        "scale_vec::1X\"(address(r0), address(r1), rd0, r2, " *
-        "address(r3), address(r4), p)", julia)
+    @test count("address(rd0)", julia) == 2
     Core.eval(@__MODULE__, Meta.parseall(julia))
 
     cases = (
         (getfield(@__MODULE__, :_address_alias_vec),
-         Tuple{Core.LLVMPtr{UInt32, PTX.AS.Global}}, nothing),
-        (getfield(@__MODULE__, :_address_alias_ldmatrix),
-         Tuple{Core.LLVMPtr{UInt16, PTX.AS.Shared}}, nothing),
+         Tuple{Core.LLVMPtr{UInt32, PTX.AS.Global}}),
         (getfield(@__MODULE__, :_address_alias_mbarrier),
-         Tuple{Core.LLVMPtr{UInt64, PTX.AS.Shared}}, nothing),
-        (getfield(@__MODULE__, :_address_alias_tcgen_mx_shared),
-         Tuple{UInt32, UInt64, UInt64, UInt32, UInt32, UInt32}, shared_asm),
-        (getfield(@__MODULE__, :_address_alias_tcgen_mx_tmem),
-         Tuple{UInt32, UInt32, UInt64, UInt32, UInt32, UInt32}, tmem_asm),
+         Tuple{Core.LLVMPtr{UInt64, PTX.AS.Shared}}),
     )
-    for (f, argtypes, expected_asm) in cases
+    for (f, argtypes) in cases
         ci, rt = only(Base.code_typed(f, argtypes; optimize = true))
         @test rt === Nothing
         @test !occursin("PTX.Address", string(ci))
-        if expected_asm !== nothing
-            llvm = sprint() do io
-                code_llvm(io, f, argtypes; optimize = true, raw = true,
-                          debuginfo = :none, dump_module = true)
-            end
-            @test occursin(expected_asm, llvm)
-            @test !occursin("PTX.Address", llvm)
-        end
+    end
+
+    # The chain API has typed wrappers for these families, but the source
+    # transpiler deliberately rejects them until it has finite parser-side
+    # form and operand-role entries.  Do not infer address roles from operand
+    # position merely because a direct wrapper happens to exist.
+    unsupported = (
+        """
+        .version 9.0
+        .target sm_100a
+        .address_size 64
+        .visible .entry _address_alias_ldmatrix(.param .u64 p) {
+            .reg .u64 %rd0;
+            .reg .b32 %r<2>;
+            ld.param.u64 %rd0, [p];
+            ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%r0, %r1}, [%rd0];
+            ret;
+        }
+        """,
+        """
+        .version 9.0
+        .target sm_100a
+        .address_size 64
+        .visible .entry _address_alias_tcgen(
+                .param .u32 d, .param .u64 ad, .param .u64 bd,
+                .param .u32 id, .param .u32 sa, .param .u32 sb) {
+            .reg .b32 %r<4>;
+            .reg .b64 %rd<2>;
+            .reg .pred %p;
+            ld.param.u32 %r0, [d];
+            ld.param.u64 %rd0, [ad];
+            ld.param.u64 %rd1, [bd];
+            ld.param.u32 %r1, [id];
+            ld.param.u32 %r2, [sa];
+            ld.param.u32 %r3, [sb];
+            setp.eq.u32 %p, %r1, 0;
+            tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale.scale_vec::1X [%r0], %rd0, %rd1, %r1, [%r2], [%r3], %p;
+            ret;
+        }
+        """,
+    )
+    for source in unsupported
+        @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(source)
     end
 end
 
@@ -636,10 +612,10 @@ end
     # transpiler itself, before alias propagation or generated-call lowering.
     unbracketed = replace(src,
         "b128 [%r1], [%r2];" => "b128 %r1, [%r2];")
-    @test_throws ArgumentError PTX.ptx_to_julia(unbracketed)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(unbracketed)
     misspelled = replace(src,
         ".mbarrier::complete_tx::bytes.b128" => ".b128")
-    @test_throws ArgumentError PTX.ptx_to_julia(misspelled)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(misspelled)
 
     # Non-address labels and immediates retain their existing roles.
     cg = PTX.Codegen.CodeGenState()

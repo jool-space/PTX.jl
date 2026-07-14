@@ -299,9 +299,9 @@ end
     @test Meta.parseall(julia) isa Expr
 
     bad = replace(src, "{%rd0, %rd1}" => "{%r0, %r1}")
-    @test_throws ArgumentError PTX.ptx_to_julia(bad)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(bad)
     unpack = replace(src,
         "mov.b128 %handle, {%rd0, %rd1};" =>
         ".reg .b128 %handle;\nmov.b128 {%rd0, %rd1}, %handle;")
-    @test_throws ArgumentError PTX.ptx_to_julia(unpack)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(unpack)
 end

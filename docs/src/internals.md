@@ -50,3 +50,12 @@ goldens pin instruction structure, not register allocation accidents.
 PTX.IR.canonicalize
 PTX.IR._sym
 ```
+
+## Transpiler contract
+
+The transpiler validates the complete IR module against its deliberately
+narrow semantic boundary before emitting any Julia source.
+
+```@docs
+PTX.Codegen.validate_transpilable
+```

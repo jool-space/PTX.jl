@@ -141,10 +141,23 @@ emit_stmt!(cg::CodeGenState, s::RawLine) =
 
 # PTX `{ ... }` register-lifetime scope → Julia `let ... end`. Save/restore
 # declared-var set so registers defined inside the block don't leak out.
+function _declares_julia_register(decl::RegDecl, name::AbstractString)
+    base = julia_var(decl.name)
+    decl.count === nothing && return base == name
+    startswith(name, base) || return false
+    first_suffix = nextind(name, lastindex(base))
+    first_suffix <= lastindex(name) || return false
+    index = tryparse(Int, SubString(name, first_suffix))
+    index !== nothing && 0 <= index < decl.count
+end
+
 function emit_stmt!(cg::CodeGenState, s::Block)
     saved_declared = copy(cg.declared)
     saved_pred     = copy(cg.predicated_assigns)
     saved_reg_decls = copy(cg.reg_decls)
+    saved_shared_vars = copy(cg.shared_vars)
+    saved_aliases = copy(cg.pointer_aliases)
+    saved_b128 = copy(cg.inferred_b128_regs)
     emit!(cg, "let")
     indent!(cg)
     for sub in s.body
@@ -152,7 +165,16 @@ function emit_stmt!(cg::CodeGenState, s::Block)
     end
     dedent!(cg)
     emit!(cg, "end")
+    outer_aliases = copy(saved_aliases)
+    for (name, expression) in cg.pointer_aliases
+        any(decl -> _declares_julia_register(decl, name),
+            values(saved_reg_decls)) || continue
+        outer_aliases[name] = expression
+    end
     cg.declared = saved_declared
     cg.predicated_assigns = saved_pred
     cg.reg_decls = saved_reg_decls
+    cg.shared_vars = saved_shared_vars
+    cg.pointer_aliases = outer_aliases
+    cg.inferred_b128_regs = saved_b128
 end

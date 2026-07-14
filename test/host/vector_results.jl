@@ -313,17 +313,17 @@ end
     all_sink = replace(source,
         "ld.global.L2::evict_last.v8.u32 {%r0, _, %r2, %r3, %r4, %r5, %r6, %r7}, [%rd];" =>
         "ld.global.L2::evict_last.v8.u32 {_, _, _, _, _, _, _, _}, [%rd];")
-    @test_throws ArgumentError PTX.ptx_to_julia(all_sink)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(all_sink)
 
     malformed = replace(source,
         "L2::evict_last.v8.u32 {%r0, _, %r2, %r3, %r4, %r5, %r6, %r7}" =>
         "v4.u32 {%r0, %r1}")
-    @test_throws ArgumentError PTX.ptx_to_julia(malformed)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(malformed)
 
     missing_policy = replace(source,
         "ld.global.L2::evict_last.v8.u32 {%r0, _, %r2, %r3, %r4, %r5, %r6, %r7}, [%rd];" =>
         "ld.global.L2::cache_hint.v8.u32 {%r0, _, %r2, %r3, %r4, %r5, %r6, %r7}, [%rd];")
-    @test_throws ArgumentError PTX.ptx_to_julia(missing_policy)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(missing_policy)
 
     # PTX permits a wider integer/bit destination for ld and extends each
     # lane (§9.4.1). The exact tuple ABI cannot preserve that width yet, so it
@@ -335,21 +335,21 @@ end
     catch caught
         caught
     end
-    @test err isa ArgumentError
-    @test err isa ArgumentError &&
+    @test err isa PTX.Codegen.TranspilerError
+    @test err isa PTX.Codegen.TranspilerError &&
           occursin("does not lower wider", sprint(showerror, err))
 
     wrong_float = replace(source, ".reg .u32 %r<8>;" => ".reg .f32 %r<8>;")
-    @test_throws ArgumentError PTX.ptx_to_julia(wrong_float)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(wrong_float)
 
     wrong_address = replace(source, ".reg .b64 %rd;" => ".reg .b16 %rd;")
-    @test_throws ArgumentError PTX.ptx_to_julia(wrong_address)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(wrong_address)
 
     coordinate_address = replace(source, "[%rd];" => "[%rd, {%r0}];")
-    @test_throws ArgumentError PTX.ptx_to_julia(coordinate_address)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(coordinate_address)
 
     undeclared = replace(source, "%r0, _, %r2" => "%missing, _, %r2")
-    @test_throws ArgumentError PTX.ptx_to_julia(undeclared)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(undeclared)
 
     # General PTX same-size compatibility remains available: a bit-size load
     # may target a same-width fundamental floating-point register.
@@ -372,7 +372,7 @@ end
       ret;
     }
     """
-    @test_throws ArgumentError PTX.ptx_to_julia(atom)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(atom)
     atom = replace(atom, ".reg .u32 %a<2>;" => ".reg .b32 %a<2>;")
     @test occursin("(d0, d1) = ptx\"atom.global.add.v2.f32\"",
                    PTX.ptx_to_julia(atom))
@@ -408,7 +408,7 @@ end
                            (:f16x2, "{0, 0}"),
                            (:f16x2, "{1.0, 0f40000000}"),
                            (:f32, "{1, 2}"))
-        @test_throws ArgumentError PTX.ptx_to_julia(
+        @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(
             _vector_atom_immediate_source(kind, values))
     end
 
@@ -471,7 +471,7 @@ end
 
     # `_` replaces the complete atom result; it is not legal per-lane syntax.
     per_lane = replace(source, "_, [%rd]" => "{_, _}, [%rd]")
-    @test_throws ArgumentError PTX.ptx_to_julia(per_lane)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(per_lane)
 
     PtrG = Core.LLVMPtr{UInt8,PTX.AS.Global}
     args = (PtrG, NTuple{2,Float32})
@@ -504,7 +504,7 @@ end
     @test occursin("(d0, d1) = ptx\"atom.global.add.v2.f32\"",
                    PTX.ptx_to_julia(commented))
     spoofed = replace(commented, "{d0, d1}" => "{d0, fake}")
-    @test_throws ArgumentError PTX.ptx_to_julia(spoofed)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(spoofed)
 
     scoped = """
     .version 9.3
@@ -520,5 +520,5 @@ end
       ret;
     }
     """
-    @test_throws ArgumentError PTX.ptx_to_julia(scoped)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(scoped)
 end
