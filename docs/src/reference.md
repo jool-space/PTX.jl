@@ -31,6 +31,12 @@ PTX.sub_with_borrow
 PTX.mul_wide
 ```
 
+## Vector loads
+
+```@docs
+PTX.vector_load
+```
+
 ## Transpiler
 
 ```@docs

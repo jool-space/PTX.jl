@@ -207,6 +207,93 @@ The exceptions are:
   `tcgen05` sinks (`alloc`, `commit`, `relinquish_alloc_permit`) are handled by
   exact typed wrappers instead of terminal-type inference.
 
+### Vector-result ABI
+
+PTX vector destinations are a second exception to terminal-modifier inference:
+the final type names one lane, while the result is a brace-enclosed group. A
+closed PTX 9.3 ledger covers 210 canonical core cells—32 `ld`, 32 `atom`, and
+146 `multimem.ld_reduce`—and returns an exact homogeneous `NTuple` with one
+LLVM output per lane. Scalar FP8 lanes use `UInt8`; lowering bridges those
+outputs through block-local PTX `.b8` registers because NVPTX's smallest
+inline-asm output class otherwise selects an assembler-incompatible `.b16`
+register.
+
+```julia
+xy = ptx"ld.global.v2.u32"(ptr)                    # NTuple{2,UInt32}
+old = ptx"atom.global.add.v4.f32"(ptr, values)     # NTuple{4,Float32}
+reduced = ptx"multimem.ld_reduce.add.v4.e5m2"(ptr) # NTuple{4,UInt8}
+```
+
+The source ABI is checked too: only the address role is bracketed, atom input
+vectors must have the exact result width and lane carrier, and a cache policy
+is a 64-bit carrier. Although the ISA grammar prints `.L2::cache_hint` and its
+`cache_policy` operand as separately optional, CUDA 12.9 and 13.3 ptxas reject
+hinted scalar and vector `ld`/`atom` forms without the policy. PTX.jl therefore
+requires the qualifier and operand as a pair within this audited vector-result
+boundary and fails before emitting rejected PTX.
+
+When this PTX is transpiled back to Julia, each live destination and vector
+source register must have a preceding, exact-size compatible `.reg`
+declaration. PTX's legal wider-destination rule for integer/bit `ld` would add
+per-lane extension semantics that the homogeneous tuple does not encode, so
+those forms fail loud until a widened structured ABI exists. Comma-packed
+register declarations are recovered with lexer tokens (not raw-text regexes),
+and the active declaration inventory follows PTX brace scope. Atom immediate
+lanes fail loud for `.f16`, `.bf16`, and packed-half formats because current
+ptxas requires registers. `.f32` atom lanes accept only floating constants,
+which are explicitly converted to `Float32` at the use site. Cache-policy
+expressions are evaluated in PTX's s64/u64 constant domain rather than copied
+into Julia source.
+
+PTX permits `_` in place of the complete vector `atom` destination for a
+simple reduction. The transpiler emits the normal tuple-returning operation as
+an unused statement, preserving its side effect without inventing a synthetic
+modifier. Direct and raw Julia calls therefore retain the same exact tuple ABI;
+callers may simply ignore it. Per-lane atom sinks such as `{_, _}` remain
+invalid.
+
+PTX 9.3 also prints eight `atom` examples with `.vec.type` before
+`.op[.noftz]`, contrary to the syntax block. Those eight exact spellings are
+accepted with `provenance = :ptxas_compat`; nearby permutations are not. The
+ninth such example, `atom.global.v4.b16x2.min.noftz`, names a type absent from
+the grammar and is rejected by both PTX.jl and ptxas.
+
+Wide loads can suppress individual lanes without reading their corresponding
+memory locations:
+
+```julia
+live = PTX.vector_load(
+    ptx"ld.global.L2::evict_last.v8.u32", ptr,
+    Val((true, false, true, true, false, true, true, true)))
+# NTuple{6,UInt32}; false lanes emit `_`
+```
+
+Sink masks are limited to `ld.v8.{b32,u32,s32,f32}` and
+`ld.v4.{b64,u64,s64,f64}`. At least one lane must remain live. The ISA's
+per-lane wording does not settle the memory/synchronization semantics of an
+all-sink `ld`, and CUDA 12.9/13.3 ptxas cannot infer an element-register type
+for an all-`_` destination. PTX.jl rejects that case rather than deleting a
+possibly synchronizing operation or substituting a dummy load.
+
+The multimem ledger follows the ISA's independent operation/type and
+accumulation-precision tables. This admits 48 `min`/`max` forms with
+`.acc::f32` or `.acc::f16`; CUDA 12.9 and 13.3 ptxas reject all 48 even though
+the PTX 9.3 syntax and tables do not restrict `.acc_prec` to `.add`. They remain
+spec-derived API records rather than being silently deleted, with assembler
+rejection tracked separately. Accumulated `.add` forms assemble. FP8 multimem
+target metadata distinguishes exact `sm_100a`, `sm_110a`, `sm_120a`,
+`sm_121a` support from the `sm_100f` and `sm_110f` family targets introduced
+by the ISA's feature-target promotion.
+Runtime multimem semantics are intentionally unclaimed: the instruction needs
+a real multicast/multimem address, and substituting an ordinary global pointer
+would be undefined behavior. Its evidence in this repository stops at emitted
+PTX and ptxas.
+
+Exact vector forms keep their tuple ABI on `ptx"..."raw`; an in-island miss
+still fails because raw has no syntax for supplying a different result ABI.
+The six established `ld.global.v{2,4}.{f32,b32,b16}` typed fast paths remain
+preferred by dispatch, with the audited generic boundary covering the rest.
+
 ### Packed FP carriers
 
 PTX FP8 / FP6 / FP4 lanes have no native Julia primitive, so the chain

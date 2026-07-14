@@ -103,6 +103,8 @@ Mechanical mapping rules (v2.0):
 | `match.all.sync.b64 %r0\|%p0, %rd0, %r1;` | `(r0, p0) = ptx"match.all.sync.b64.pred"(rd0, r1)` |
 | `elect.sync _\|%p0, 0xffffffff;` | `(_, p0) = ptx"elect.sync"(UInt32(0xffffffff))` |
 | `shfl.sync.bfly.b32 %r\|%p, ...;` | `(r, p) = ptx"shfl.sync.bfly.b32.pred"(...)` |
+| `ld.global.v2.u32 {%r0, %r1}, [%rd];` | `(r0, r1) = ptx"ld.global.v2.u32"(rd)` |
+| wide `ld` with `_` destination lanes | live tuple assignment from `vector_load(..., Val(mask))` |
 | `{ ... }` register-lifetime block | `let ... end` |
 | `LBL:` label | `@label LBL` |
 
@@ -146,6 +148,27 @@ declared 32-bit register, stochastic x4 source elements must be declared
 `.f32`/`.b32` registers (not `.u32`/`.s32`), and scaled forms type their scale
 operand separately.
 See [Ordinary `cvt` constants](dsl.md#Ordinary-cvt-constants).
+
+Brace-enclosed destinations for the audited vector `ld`, `atom`, and
+`multimem.ld_reduce` forms remain structured through lowering. Destination
+width, homogeneous lane carriers, atom source-vector width, address placement,
+and optional cache-policy position are checked before register-alias
+propagation can erase a malformed definition. Partial sink destinations on the
+ISA's wide-load forms become `vector_load` masks and destructure only the live
+lanes. All-sink loads fail loud because current ptxas rejects them and deleting
+a possibly synchronizing load is not justified by the per-lane sink wording.
+Likewise, `.L2::cache_hint` requires the 64-bit cache-policy operand that
+CUDA 12.9/13.3 ptxas enforce. Register declarations must have an exact-size,
+PTX-compatible carrier; the ISA permits widened integer/bit `ld` destinations,
+but the transpiler rejects them until its tuple ABI can retain each extended
+lane's declared width. Atom source constants are format-aware: CUDA 12.9/13.3
+ptxas reject immediate lanes for `.f16`, `.bf16`, and packed-half forms, while
+`.f32` accepts floating constants but not integer constants. Accepted `.f32`
+constants are explicitly converted at their PTX use-site width; cache-policy
+integer expressions use PTX's fixed 64-bit semantics before reduction. A
+whole-result atom `_` becomes an unused, side-effecting tuple call rather than
+an assignment. A vector spelling inside an audited grammar island that misses
+the reviewed schema is rejected instead of falling back to a scalar result.
 
 ## Diff against the original PTX
 

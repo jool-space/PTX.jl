@@ -13,6 +13,7 @@ include("implicit_state.jl")
 include("structured_results.jl")
 include("scalar_results.jl")
 include("cvt_forms.jl")
+include("vector_results.jl")
 include("mbarrier_forms.jl")
 
 include("nvvm/NVVM.jl")
@@ -32,6 +33,7 @@ export ptx_to_julia, ir_to_julia
 
 include("inst.jl")
 export @ptx_str, @sreg_str
+export vector_load
 
 include("wrappers/barrier.jl")
 include("wrappers/barrier_cluster.jl")

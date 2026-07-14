@@ -467,6 +467,84 @@ function _build_mbarrier_call(schema::MBarrierFormSchema,
               passthrough_unwrap_address = Tuple(passthrough_unwrap))
 end
 
+function _build_vector_result_call(schema::VectorResultSchema,
+                                   @nospecialize(argtypes),
+                                   contract::FormContract;
+                                   sink_mask = nothing)
+    validate_vector_result_args(schema, argtypes)
+    n = schema.form.lanes
+    mask = sink_mask === nothing ? ntuple(_ -> true, n) :
+           validate_vector_result_mask(schema, sink_mask)
+    live = count(identity, mask)
+    lane_type = schema.form.lane_type
+    rettype = NTuple{live, lane_type}
+
+    output_operands = String[]
+    output_letters = String[]
+    output_slot = 0
+    b8_bridge = schema.form.op === :multimem &&
+                schema.form.lane_kind in (:e4m3, :e5m2)
+    bridge_index = 0
+    for keep in mask
+        if keep
+            push!(output_operands,
+                  b8_bridge ? "vector_result_lane" * string(bridge_index) :
+                              "\$" * string(output_slot))
+            push!(output_letters, "=" * constraint_letter(lane_type))
+            output_slot += 1
+        else
+            push!(output_operands, "_")
+        end
+        bridge_index += 1
+    end
+    destination = "{" * join(output_operands, ", ") * "}"
+
+    operand_strs = String[]
+    input_letters = String[]
+    passthrough = Type[]
+    passthrough_ix = Tuple{Int, Union{Nothing, Int}}[]
+    passthrough_unwrap = Bool[]
+    slot = live
+    roles = something(vector_result_operand_roles(schema, length(argtypes)))
+    for (i, (kind, T)) in enumerate(zip(roles, argtypes))
+        op_str, slots, slot = render_arg(T, slot, false)
+        # Address already renders its payload in brackets. LLVMPtr and the
+        # legacy bare integer carriers need the schema to supply brackets.
+        kind === :address && !(T <: Address) && (op_str = "[" * op_str * "]")
+        push!(operand_strs, op_str)
+        for (letter, atype, lane, unwrap_address) in slots
+            push!(input_letters, letter)
+            push!(passthrough, atype)
+            push!(passthrough_ix, (i, lane))
+            push!(passthrough_unwrap, unwrap_address)
+        end
+    end
+
+    head = build_head(schema.form.op, schema.mods)
+    asm = head * " " * join([destination; operand_strs], ", ") * ";"
+    if b8_bridge
+        # PTX FP8 scalar lanes require actual .b8 destination registers;
+        # ptxas rejects the .b16 registers selected by LLVM's smallest (`h`)
+        # inline-asm class. Keep the public Julia carrier UInt8, materialize
+        # each architectural lane in a block-local .b8 register, then bridge
+        # its low byte through a legal .b16 output exactly like report-value
+        # mbarrier lowering. LLVM truncates the low byte back to i8.
+        moves = ["mov.b16 \$$(i - 1), {vector_result_lane$(i - 1), 0};"
+                 for i in 1:n]
+        asm = "{ .reg .b8 vector_result_lane<$(n)>; " * asm * " " *
+              join(moves, " ") * " }"
+    end
+    # These three families are observable memory operations even when a caller
+    # passes a synthetic contract in a host rendering test. The clobber also
+    # prevents raw from pretending that the vector result is pure.
+    constraints = join([output_letters; input_letters; "~{memory}"], ",")
+    return (; asm, constraints, side_effects = true,
+              convergent = contract.convergent, rettype,
+              passthrough_argtypes = Tuple(passthrough),
+              passthrough_indices = Tuple(passthrough_ix),
+              passthrough_unwrap_address = Tuple(passthrough_unwrap))
+end
+
 # Pure: no LLVM, no GPU, no @asmcall. Used by both the runtime call site and
 # host-side golden tests. `contract` defaults to the registry lookup; pass one
 # explicitly for host-side rendering tests, or select the raw tier with the
@@ -494,6 +572,9 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
             throw(clc_try_cancel_schema_miss(mods))
         clc_schema === nothing || validate_clc_try_cancel_args(clc_schema, argtypes)
     end
+    vector = vector_result_schema(op, mods)
+    vector === nothing && requires_vector_result_schema(op, mods) &&
+        throw(vector_result_schema_miss(op, mods))
     schema = scalar_result_schema(op, mods)
     schema === nothing && requires_scalar_result_schema(op, mods) &&
         throw(scalar_result_schema_miss(op, mods))
@@ -521,7 +602,10 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
             "mbarrier is missing its reviewed form contract")
         return _build_mbarrier_call(mbarrier, argtypes, selected_contract)
     end
-    address_rule = has_integer_address(argtypes) ?
+    # The audited vector-result schema is likewise authoritative: it validates
+    # and brackets its address operand itself, so an integer Address routed to
+    # a reviewed vector form must not hit the exact-wrapper-only fallback rule.
+    address_rule = has_integer_address(argtypes) && vector === nothing ?
                    structured_address_fallback_rule(op, mods) : nothing
     address_rule === nothing ||
         throw(structured_address_fallback_error(op, mods, address_rule))
@@ -536,6 +620,8 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     structured === nothing ||
         return _build_structured_result_call(structured, argtypes,
                                              selected_contract)
+    vector === nothing ||
+        return _build_vector_result_call(vector, argtypes, selected_contract)
     has_explicit_address(argtypes) && !selected_contract.brackets &&
         throw(ArgumentError(
             "ptx\"$(build_head(op, mods))\" has no reviewed bracketed-address " *
@@ -711,6 +797,47 @@ end
 
 @generated function (::Operation{op, mods})(args::Vararg{Any,N}) where {op, mods, N}
     _chain_call_expr(build_call(op, mods, args))
+end
+
+"""
+    vector_load(ptx"ld....vN.type", address, Val(mask))
+
+Emit a wide PTX vector load with an explicit destination-lane mask. `true`
+returns that lane and `false` emits PTX's `_` sink, which guarantees the
+corresponding memory location is not read. Sink lanes are supported only for
+the ISA's wide `ld.v8.{b32,u32,s32,f32}` and
+`ld.v4.{b64,u64,s64,f64}` forms. The result is the homogeneous tuple of live
+lanes in source order. All-false masks are rejected: current ptxas cannot
+assemble an all-`_` destination, and eliding a load would require a separate
+memory-model audit.
+"""
+@generated function vector_load(::Operation{:ld, mods}, addr::A,
+                                ::Val{mask}) where {mods, A, mask}
+    schema = vector_result_schema(:ld, mods)
+    schema === nothing && throw(vector_result_schema_miss(:ld, mods))
+    spec = _build_vector_result_call(schema, (A,), form_contract(:ld, mods);
+                                     sink_mask = mask)
+    body = _chain_call_expr(spec)
+    quote
+        Base.@inline
+        args = (addr,)
+        $body
+    end
+end
+
+
+@generated function vector_load(::Operation{:ld, mods}, addr::A, policy::P,
+                                ::Val{mask}) where {mods, A, P, mask}
+    schema = vector_result_schema(:ld, mods)
+    schema === nothing && throw(vector_result_schema_miss(:ld, mods))
+    spec = _build_vector_result_call(schema, (A, P), form_contract(:ld, mods);
+                                     sink_mask = mask)
+    body = _chain_call_expr(spec)
+    quote
+        Base.@inline
+        args = (addr, policy)
+        $body
+    end
 end
 
 # --- The raw tier -------------------------------------------------------------
@@ -935,10 +1062,10 @@ Returns `(; tier, method, rettype, intrinsics, asm)`:
   registry: the call errors at the blessing boundary.
 - `tier = :forbidden` — the selected generic path is unsafe: a spelling
   accesses implicit architectural state that cannot cross the call boundary,
-  a typed-wrapper-only form missed its exact method, or a closed structured/
-  scalar-result grammar island missed its audited ABI. Explicit raw remains
-  available for the typed-wrapper structural case, but not hidden state or an
-  unknown result ABI.
+  a typed-wrapper-only form missed its exact method, or a closed structured-,
+  vector-, or scalar-result grammar island missed its audited ABI. Explicit
+  raw remains available for the typed-wrapper structural case, but not hidden
+  state or an unknown result ABI.
 
 Binding is not selectability: an `:intrinsic` form can still fail ISel below
 its capability floor — that gate lives in the backend, not the registry.
@@ -952,7 +1079,8 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
         has_invalid_address_marker(argts) &&
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
-        address_rule = has_integer_address(argts) ?
+        address_rule = has_integer_address(argts) &&
+                       vector_result_schema(op, mods) === nothing ?
                        structured_address_fallback_rule(op, mods) : nothing
         address_rule === nothing ||
             return (; tier = :forbidden, method = m, rettype = nothing,
@@ -980,6 +1108,20 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
         if structured !== nothing
             try
                 validate_structured_result_args(structured, argts)
+            catch err
+                err isa ArgumentError || rethrow()
+                return (; tier = :forbidden, method = m, rettype = nothing,
+                          intrinsics = String[], asm = nothing)
+            end
+        end
+        vector_result_schema(op, mods) === nothing &&
+            requires_vector_result_schema(op, mods) &&
+            return (; tier = :forbidden, method = m, rettype = nothing,
+                      intrinsics = String[], asm = nothing)
+        vector = vector_result_schema(op, mods)
+        if vector !== nothing
+            try
+                validate_vector_result_args(vector, argts)
             catch err
                 err isa ArgumentError || rethrow()
                 return (; tier = :forbidden, method = m, rettype = nothing,
