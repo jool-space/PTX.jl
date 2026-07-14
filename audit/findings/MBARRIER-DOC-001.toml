@@ -1,7 +1,17 @@
 id = "MBARRIER-DOC-001"
-status = "confirmed"
+status = "resolved"
 severity = "medium"
 category = "documentation"
 summary = "Synchronization comments conflate pending arrivals with transaction count and misdescribe fused/noinc accounting."
 source_handoffs = ["wave3-memory.md"]
 validation_tier = "ISA semantics and source audit"
+
+[resolution]
+pr = 30
+commit = "b8cf76c4f2afb9788a2f358971201f76eb167ac2"
+scope = "full"
+evidence = [
+  "cp.async.mbarrier.arrive documentation now distinguishes implicit arrival accounting from mbarrier transaction count",
+  "expect_tx documentation records both the tx-count update and the one-arrival contribution",
+  "noComplete, pending-arrival, conditional-phase, and layout-v1 report comments match PTX 9.3 section 9.7.14.16 semantics",
+]
