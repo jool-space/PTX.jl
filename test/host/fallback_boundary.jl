@@ -12,6 +12,7 @@ end
 # test review of the public fail-loud boundary.
 const EXPECTED_TYPED_ONLY_RULES = Set([
     (:mma,      (),            nothing),
+    (:ldmatrix, (),            nothing),
     (:wgmma,    (:mma_async,), nothing),
     (:tcgen05,  (),            nothing),
     (:shfl,     (),            :pred),
@@ -20,13 +21,15 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
 @testset "typed-wrapper-only boundary: closed-world rule inventory" begin
     actual = Set((r.op, r.prefix, r.marker) for r in PTX.TYPED_WRAPPER_ONLY_RULES)
     @test actual == EXPECTED_TYPED_ONLY_RULES
-    @test length(PTX.TYPED_WRAPPER_ONLY_RULES) == 4
+    @test length(PTX.TYPED_WRAPPER_ONLY_RULES) == 5
 
     positives = (
         (:mma, (:sync, :aligned, :m16n8k16, :row, :col,
                 :f32, :f16, :f16, :f32)),
         (:mma, (:sp, :sync, :aligned, :m16n8k32, :row, :col,
                 :f32, :bf16, :bf16, :f32)),
+        (:ldmatrix, (:sync, :aligned, :m8n16, :x1, :shared,
+                     :b8x16, :b6x16_p32)),
         (:wgmma, (:mma_async, :sync, :aligned,
                   :m64n8k16, :f32, :bf16, :bf16)),
         (:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x2, :b32)),
@@ -61,6 +64,11 @@ end
         (Operation{:wgmma, (:mma_async, :sync, :aligned,
                             :m64n7k16, :f32, :bf16, :bf16)}(),
          (NTuple{4, Float32}, UInt64, UInt64, Bool)),
+        # ldmatrix has shape-dependent grouped results and requires a
+        # reviewed shared-address carrier rather than scalar inference.
+        (Operation{:ldmatrix, (:sync, :aligned, :m8n16, :x1, :shared,
+                               :b8x16, :b6x16_p32)}(),
+         (Int32,)),
         # tcgen05.ld.x2 must return two registers, not a scalar b32.
         (Operation{:tcgen05, (:ld, :sync, :aligned,
                               Symbol("16x64b"), :x2, :b32)}(),
