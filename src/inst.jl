@@ -545,6 +545,81 @@ function _build_vector_result_call(schema::VectorResultSchema,
               passthrough_unwrap_address = Tuple(passthrough_unwrap))
 end
 
+function _build_b128_call(schema::B128FormSchema, @nospecialize(argtypes),
+                          contract::FormContract)
+    validate_b128_form_args(schema, argtypes)
+    output_types = schema.result === Nothing ? Type[] :
+                   schema.result === B128 ? Type[UInt64, UInt64] :
+                   schema.result <: Tuple ? Type[schema.result.parameters...] :
+                   Type[schema.result]
+    output_letters = ["=" * constraint_letter(T) for T in output_types]
+    slot = length(output_types)
+    operand_strs = String[]
+    input_letters = String[]
+    passthrough = Type[]
+    passthrough_ix = Tuple{Int, Union{Nothing, Int}}[]
+    passthrough_unwrap = Bool[]
+    for (i, (kind, T)) in enumerate(zip(schema.operands, argtypes))
+        op_str, slots, slot = render_arg(T, slot, false)
+        kind === :address && !(T <: Address) && (op_str = "[" * op_str * "]")
+        push!(operand_strs, op_str)
+        for (letter, atype, lane, unwrap_address) in slots
+            push!(input_letters, letter)
+            push!(passthrough, atype)
+            push!(passthrough_ix, (i, lane))
+            push!(passthrough_unwrap, unwrap_address)
+        end
+    end
+
+    head = build_head(schema.op, schema.mods)
+    b128_inputs = findall(==(:b128), schema.operands)
+    local_name(i) = "b128_value" * string(i)
+    declarations = String[]
+    setup = String[]
+    for (n, index) in enumerate(b128_inputs)
+        push!(declarations, ".reg .b128 " * local_name(n) * ";")
+        push!(setup, "mov.b128 " * local_name(n) * ", " * operand_strs[index] * ";")
+    end
+
+    instruction = if schema.kind === :mov
+        "mov.b128 b128_result, " * local_name(1) * ";"
+    elseif schema.kind === :load
+        head * " b128_result, " * join(operand_strs, ", ") * ";"
+    elseif schema.kind === :store
+        args = copy(operand_strs)
+        args[findfirst(==(:b128), schema.operands)] = local_name(1)
+        head * " " * join(args, ", ") * ";"
+    elseif schema.kind in (:exch, :cas)
+        args = copy(operand_strs)
+        for (n, index) in enumerate(b128_inputs)
+            args[index] = local_name(n)
+        end
+        head * " b128_result, " * join(args, ", ") * ";"
+    elseif schema.kind === :query_pred || schema.kind === :query_dim
+        head * " \$0, " * local_name(1) * ";"
+    elseif schema.kind === :query_v4
+        head * " {\$0, \$1, \$2, \$3}, " * local_name(1) * ";"
+    else
+        error("unknown b128 form kind: ", schema.kind)
+    end
+
+    teardown = String[]
+    if schema.result === B128
+        push!(declarations, ".reg .b128 b128_result;")
+        push!(teardown, "mov.b128 {\$0, \$1}, b128_result;")
+    end
+    asm = isempty(declarations) ? instruction :
+          "{ " * join([declarations; setup; instruction; teardown], " ") * " }"
+    nonpure = !contract.pure || has_special_reg(argtypes)
+    constraints = [output_letters; input_letters]
+    nonpure && push!(constraints, "~{memory}")
+    (; asm, constraints = join(constraints, ","), side_effects = nonpure,
+       convergent = contract.convergent, rettype = schema.result,
+       passthrough_argtypes = Tuple(passthrough),
+       passthrough_indices = Tuple(passthrough_ix),
+       passthrough_unwrap_address = Tuple(passthrough_unwrap))
+end
+
 # Pure: no LLVM, no GPU, no @asmcall. Used by both the runtime call site and
 # host-side golden tests. `contract` defaults to the registry lookup; pass one
 # explicitly for host-side rendering tests, or select the raw tier with the
@@ -578,6 +653,10 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     schema = scalar_result_schema(op, mods)
     schema === nothing && requires_scalar_result_schema(op, mods) &&
         throw(scalar_result_schema_miss(op, mods))
+    b128_schema = b128_form_schema(op, mods)
+    b128_schema === nothing && requires_b128_form_schema(op, mods) &&
+        throw(b128_form_schema_miss(op, mods))
+    b128_schema === nothing || validate_b128_form_args(b128_schema, argtypes)
     selected_contract = raw ? RAW_CONTRACT :
                         contract === missing ? form_contract(op, mods) : contract
     uses_implicit_cc(op, mods) && throw(ArgumentError(
@@ -602,6 +681,8 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
             "mbarrier is missing its reviewed form contract")
         return _build_mbarrier_call(mbarrier, argtypes, selected_contract)
     end
+    b128_schema === nothing ||
+        return _build_b128_call(b128_schema, argtypes, selected_contract)
     # The audited vector-result schema is likewise authoritative: it validates
     # and brackets its address operand itself, so an integer Address routed to
     # a reviewed vector form must not hit the exact-wrapper-only fallback rule.
@@ -1079,8 +1160,10 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
         has_invalid_address_marker(argts) &&
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
+        b128 = b128_form_schema(op, mods)
         address_rule = has_integer_address(argts) &&
-                       vector_result_schema(op, mods) === nothing ?
+                       vector_result_schema(op, mods) === nothing &&
+                       b128 === nothing ?
                        structured_address_fallback_rule(op, mods) : nothing
         address_rule === nothing ||
             return (; tier = :forbidden, method = m, rettype = nothing,
@@ -1128,6 +1211,18 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
                           intrinsics = String[], asm = nothing)
             end
         end
+        b128 === nothing && requires_b128_form_schema(op, mods) &&
+            return (; tier = :forbidden, method = m, rettype = nothing,
+                      intrinsics = String[], asm = nothing)
+        if b128 !== nothing
+            try
+                validate_b128_form_args(b128, argts)
+            catch err
+                err isa ArgumentError || rethrow()
+                return (; tier = :forbidden, method = m, rettype = nothing,
+                          intrinsics = String[], asm = nothing)
+            end
+        end
         !raw && requires_typed_wrapper(op, mods) &&
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
@@ -1168,7 +1263,7 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
         has_explicit_address(argts) && !contract.brackets &&
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
-        if _result_abi_error(op, mods) !== nothing
+        if b128 === nothing && _result_abi_error(op, mods) !== nothing
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
         end

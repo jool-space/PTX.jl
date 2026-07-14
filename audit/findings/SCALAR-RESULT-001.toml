@@ -17,5 +17,5 @@ evidence = [
   "CUDA 13.3 ptxas assembles every schema in four target partitions: 38 at retained sm_75, 11 at sm_90, 59 at sm_100, and 18 at family-specific sm_120f",
   "Ada CC 8.9 runtime validates popc/clz, mixed-sign dot products, all eight wide mul/mad ABIs, cvt.pack packing, and prmt semantics",
   "GB10 CC 12.1 runtime passes on Julia 1.10, 1.11, and 1.12 for mixed f32/f16/bf16 rounding and saturation plus family-specific packed lane arithmetic",
-  "external mov.b128 CLC corpus cases now have an exact fail-loud rejection manifest instead of silently becoming void; grouped b128 lowering remains separately tracked by B128-COVERAGE-001",
+  "the scalar-result fix originally quarantined external mov.b128 CLC corpus cases with an exact fail-loud rejection manifest; PR 38 supersedes that temporary boundary with the carrier policy recorded by resolved B128-COVERAGE-001",
 ]

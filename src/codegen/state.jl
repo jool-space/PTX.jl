@@ -15,6 +15,11 @@ mutable struct CodeGenState
     # the register flatten to the substituted expression and the defining
     # instruction is dropped entirely.
     pointer_aliases::Dict{String, String}
+    # Some compiler-emitted CLC PTX names a `.b128` destination only through
+    # exact `mov.b128 dst, {lo, hi}` without a separate `.reg` declaration.
+    # The instruction itself fixes the type; retain that proof for subsequent
+    # query-cancel uses instead of weakening declaration validation globally.
+    inferred_b128_regs::Set{String}
 end
 
 CodeGenState() = CodeGenState(
@@ -25,6 +30,7 @@ CodeGenState() = CodeGenState(
     String[],
     Set{String}(),
     Dict{String, String}(),
+    Set{String}(),
 )
 
 emit!(cg::CodeGenState, line::AbstractString) =

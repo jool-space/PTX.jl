@@ -14,6 +14,7 @@ include("structured_results.jl")
 include("scalar_results.jl")
 include("cvt_forms.jl")
 include("vector_results.jl")
+include("b128_forms.jl")
 include("mbarrier_forms.jl")
 
 include("nvvm/NVVM.jl")
@@ -22,6 +23,7 @@ using .NVVM: NVVM, @nvvm_str
 include("address_space.jl")
 include("address_operands.jl")
 export Address, address
+export B128, b128
 include("forms.jl")
 include("types.jl")
 

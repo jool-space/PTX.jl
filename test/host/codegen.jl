@@ -23,21 +23,18 @@ function _gather_external_ptx(dir)
 end
 const EXTERNAL_FILES = _gather_external_ptx(EXTERNAL_DIR)
 
-# Valid PTX, but not yet structurally representable by the scalar transpiler:
-# mov.b128 constructs an opaque CLC handle from two b64 registers. The old
-# terminal rule silently emitted a destination-less call; the pure-result ABI
-# guard now rejects it until B128-COVERAGE-001 adds a grouped/typed carrier.
-const EXTERNAL_B128_REJECTION_RELPATHS = Set((
+# Compiler-emitted CLC corpus files that exercise mov.b128 carrier glue and
+# the four exact query-cancel result shapes.
+const EXTERNAL_B128_RELPATHS = Set((
     "llvm/clusterlaunchcontrol__nvvm_clusterlaunchcontrol_query_cancel_get_first_ctaid_x.ptx",
     "llvm/clusterlaunchcontrol__nvvm_clusterlaunchcontrol_query_cancel_get_first_ctaid_y.ptx",
     "llvm/clusterlaunchcontrol__nvvm_clusterlaunchcontrol_query_cancel_get_first_ctaid_z.ptx",
     "llvm/clusterlaunchcontrol__nvvm_clusterlaunchcontrol_query_cancel_is_canceled.ptx",
 ))
-const EXTERNAL_B128_REJECTION_FILES = Set(
+const EXTERNAL_B128_FILES = Set(
     normpath(joinpath(EXTERNAL_DIR, split(rel, '/')...))
-    for rel in EXTERNAL_B128_REJECTION_RELPATHS)
-const EXTERNAL_TRANSPILABLE_FILES = filter(
-    path -> !(normpath(path) in EXTERNAL_B128_REJECTION_FILES), EXTERNAL_FILES)
+    for rel in EXTERNAL_B128_RELPATHS)
+const EXTERNAL_TRANSPILABLE_FILES = EXTERNAL_FILES
 
 # --- name-mangling unit tests ----------------------------------------------
 
@@ -280,26 +277,19 @@ end
 end
 
 
-@testset "ptx_to_julia: closed mov.b128 rejection manifest" begin
+@testset "ptx_to_julia: closed mov.b128 acceptance manifest" begin
     # Derive the corpus inventory independently so a fifth opaque-handle file
-    # cannot silently bypass either the acceptance sweep or this rejection tier.
+    # cannot silently bypass the common carrier and query-result tier.
     corpus_b128 = Set(relpath(path, EXTERNAL_DIR) for path in EXTERNAL_FILES
                       if occursin(r"\bmov\.b128\b", read(path, String)))
-    @test corpus_b128 == EXTERNAL_B128_REJECTION_RELPATHS
-    @test EXTERNAL_B128_REJECTION_FILES ⊆ Set(normpath.(EXTERNAL_FILES))
+    @test corpus_b128 == EXTERNAL_B128_RELPATHS
+    @test EXTERNAL_B128_FILES ⊆ Set(normpath.(EXTERNAL_FILES))
 
-    for path in sort!(collect(EXTERNAL_B128_REJECTION_FILES))
-        err = try
-            ptx_to_julia(_external_parser_source(read(path, String)))
-            nothing
-        catch ex
-            ex
-        end
-        @test err isa ArgumentError
-        message = sprint(showerror, err)
-        @test occursin("mov.b128", message)
-        @test occursin("reviewed pure-form registry", message)
-        @test occursin("known scalar result ABI", message)
+    for path in sort!(collect(EXTERNAL_B128_FILES))
+        julia = ptx_to_julia(_external_parser_source(read(path, String)))
+        @test occursin("ptx\"mov.b128\"", julia)
+        @test occursin("ptx\"clusterlaunchcontrol.query_cancel", julia)
+        @test Meta.parseall(julia) isa Expr
     end
 end
 
