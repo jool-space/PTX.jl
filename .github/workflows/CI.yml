@@ -24,6 +24,10 @@ jobs:
       actions: write
       contents: read
     strategy:
+      # All `blackwell` labels currently expose the same physical GB10. Run
+      # Julia versions serially so their test processes cannot exhaust its
+      # shared device memory; each job still keeps its intra-job test workers.
+      max-parallel: 1
       fail-fast: false
       matrix:
         include:

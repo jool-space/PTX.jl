@@ -70,11 +70,23 @@ The parser captures three layers of source text:
 
 - **`Module.raw_source`** — the entire input file. `format(mod)`
   returns it verbatim when set (the lossless escape valve).
-- **`Module.raw_header`** — the `.version` / `.target` /
-  `.address_size` block.
+- **`Module.raw_header`** — the required `.version` / initial `.target` and,
+  when present, optional `.address_size` block. Omission retains the ISA-defined
+  32-bit semantic default through `Module.address_size` while
+  `Module.address_size_explicit == false` prevents structural formatting from
+  manufacturing a directive.
 - **`FormattingInfo.raw_line`** per statement — the captured source
   text for that single statement. Used when the structural emitter
   reaches a node that hasn't been reconstructed.
+
+Subsequent module-scope `.target` directives are represented as ordered
+`TargetDirective` statements. The parser validates the PTX 9.3 target ledger,
+target and option introduction versions, duplicate options, and the
+module-wide texturing-mode invariant. For a declared PTX version newer than
+9.3 the parser retains the grammar invariants but accepts syntactically valid
+future architectures and options rather than claiming that the bundled ledger
+describes a future ISA. CUDA 12.9 and 13.3 `ptxas` independently confirm the
+version/target boundary by rejecting `.version 8.5` with `.target sm_100a`.
 
 Programmatically constructed IR (e.g. by transformations) falls through
 to structural emission. `format(parse(source))` is byte-identical for

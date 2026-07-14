@@ -267,7 +267,11 @@ end
 # Same sweep over the external corpus (real-world compiler output). Wider
 # operand patterns, mangled names, edge cases the curated 10 don't cover.
 @testset "ptx_to_julia: external/$(relpath(path, EXTERNAL_DIR))" for path in EXTERNAL_TRANSPILABLE_FILES
-    src = read(path, String)
+    # Keep provenance fixtures byte-identical on disk. LLVM's sm_100a cases
+    # carry a synthetic PTX 8.5 header that ptxas rejects; the header oracle
+    # covers that rejection, while this transpiler-body sweep uses the same
+    # derived in-memory minimum-version repair as the structural corpus tier.
+    src = _external_parser_source(read(path, String))
     local out::String
     @test (out = ptx_to_julia(src); true)
     expr = Meta.parseall(out)
@@ -286,7 +290,7 @@ end
 
     for path in sort!(collect(EXTERNAL_B128_REJECTION_FILES))
         err = try
-            ptx_to_julia(read(path, String))
+            ptx_to_julia(_external_parser_source(read(path, String)))
             nothing
         catch ex
             ex

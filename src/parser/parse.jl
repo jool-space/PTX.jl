@@ -2,7 +2,7 @@
 # Copyright 2026 Patrick Toulmé. Licensed under the Apache License, Version 2.0
 # (http://www.apache.org/licenses/LICENSE-2.0). Translated to Julia and adapted.
 
-using ..IR: Module, Version, Target, AddressSize, FormattingInfo,
+using ..IR: Module, Version, Target, AddressSize, TargetDirective, FormattingInfo,
             Instruction, Label, RegDecl, VarDecl, PragmaDirective,
             Comment, BlankLine, RawLine, Block, Statement,
             Operand, RegisterOperand, ImmediateOperand, LabelOperand,
@@ -179,14 +179,31 @@ function parse(source::AbstractString)
 
     version      = _parse_version!(s)
     _skip_inline_comment!(s); _skip_newlines_and_comments!(s)
-    target       = _parse_target!(s)
+    target       = _parse_target!(s, version)
     _skip_inline_comment!(s); _skip_newlines_and_comments!(s)
-    address_size = _parse_address_size!(s)
-    _skip_inline_comment!(s)
+    address_size_explicit = _peek_kind(s) == TokenKind.DIRECTIVE &&
+                            _peek(s).text == ".address_size"
+    address_size = if address_size_explicit
+        parsed = _parse_address_size!(s, version)
+        _skip_inline_comment!(s)
+        parsed
+    else
+        AddressSize(32)
+    end
 
-    raw_header = _find_raw_header(s)
+    raw_header = _find_raw_header(s, address_size_explicit)
 
+    # Comments skipped while probing for an optional `.address_size` belong to
+    # the header when it is present.  When it is omitted they are ordinary
+    # ordered module content and must survive structural (raw-free) emission.
     directives = Statement[]
+    if address_size_explicit
+        empty!(s.collected_comments)
+    else
+        for text in _take_comments!(s)
+            push!(directives, isempty(text) ? BlankLine() : Comment(text))
+        end
+    end
     prev_nl = false
     while _peek_kind(s) != TokenKind.EOF
         t = _peek(s)
@@ -209,21 +226,31 @@ function parse(source::AbstractString)
             continue
         end
         prev_nl = false
+        if t.kind == TokenKind.DIRECTIVE && t.text == ".target"
+            push!(directives, _parse_later_target!(s, version))
+            continue
+        elseif _is_module_header_directive(t)
+            throw(_err(s, "$(t.text) is not permitted after the module header"))
+        end
         saved_pos = s.pos
         try
             push!(directives, _parse_top_level_statement!(s))
         catch e
             e isa ParseError || rethrow()
+            _parse_error_points_to_module_directive(s, e) && rethrow()
             # Rewind so raw-line capture sees every token of the failed line.
             s.pos = saved_pos
             push!(directives, _capture_raw_line!(s, t.leading_whitespace))
         end
     end
 
+    _validate_module_target_options!(s, target, Tuple(directives))
+
     Module(
         version = version,
         target = target,
         address_size = address_size,
+        address_size_explicit = address_size_explicit,
         leading = Tuple(leading),
         directives = Tuple(directives),
         raw_header = raw_header,
@@ -279,24 +306,129 @@ function _parse_version!(s::ParserState)
     throw(_err(s, "Expected version number, got $(t.kind)"))
 end
 
-function _parse_target!(s::ParserState)
-    _expect!(s, TokenKind.DIRECTIVE, ".target")
+const _PTX_93 = Version(9, 3)
+
+const _TARGET_INTRODUCED = let entries = Pair{String,Version}[]
+    function add!(version::Version, names...)
+        append!(entries, (String(name) => version for name in names))
+    end
+    add!(Version(1, 0), "10", "11")
+    add!(Version(1, 2), "12", "13")
+    add!(Version(2, 0), "20")
+    add!(Version(3, 0), "30")
+    add!(Version(3, 1), "35")
+    add!(Version(4, 0), "32", "50")
+    add!(Version(4, 1), "37", "52")
+    add!(Version(4, 2), "53")
+    add!(Version(5, 0), "60", "61", "62")
+    add!(Version(6, 0), "70")
+    add!(Version(6, 1), "72")
+    add!(Version(6, 3), "75")
+    add!(Version(7, 0), "80")
+    add!(Version(7, 1), "86")
+    add!(Version(7, 4), "87")
+    add!(Version(7, 8), "89", "90")
+    add!(Version(8, 0), "90a")
+    add!(Version(8, 6), "100", "100a", "101", "101a")
+    add!(Version(8, 7), "120", "120a")
+    add!(Version(8, 8), "100f", "101f", "103", "103f", "103a",
+                           "120f", "121", "121f", "121a")
+    add!(Version(9, 0), "88", "110", "110f", "110a")
+    Dict(entries)
+end
+
+const _TARGET_OPTIONS = Set(("texmode_unified", "texmode_independent",
+                             "debug", "map_f64_to_f32"))
+const _TEXTURE_MODES = Set(("texmode_unified", "texmode_independent"))
+
+_version_tuple(v::Version) = (v.major, v.minor)
+_version_at_least(v::Version, floor::Version) = _version_tuple(v) >= _version_tuple(floor)
+_known_ptx_version(v::Version) = _version_tuple(v) <= _version_tuple(_PTX_93)
+_architecture_match(value::String) = match(r"^(sm|compute)_([0-9]+)([af]?)$", value)
+
+function _target_floor(value::String)
+    m = _architecture_match(value)
+    m === nothing && return nothing
+    suffix = String(m.captures[2]) * String(m.captures[3])
+    get(_TARGET_INTRODUCED, suffix, nothing)
+end
+
+function _validate_target!(s::ParserState, target::Target, version::Version)
+    values = target.targets
+    isempty(values) && throw(_err(s, ".target requires an architecture"))
+    arch = first(values)
+    _architecture_match(arch) === nothing &&
+        throw(_err(s, "first .target specifier must be an sm_XX or compute_XX architecture, got $(repr(arch))"))
+
+    floor = _target_floor(arch)
+    if floor === nothing
+        _known_ptx_version(version) &&
+            throw(_err(s, "target architecture $(repr(arch)) is not defined by PTX ISA 9.3"))
+    elseif !_version_at_least(version, floor)
+        throw(_err(s, "target architecture $(repr(arch)) requires PTX ISA $(floor.major).$(floor.minor) or later"))
+    end
+
+    options = values[2:end]
+    length(unique(options)) == length(options) ||
+        throw(_err(s, ".target contains duplicate platform options"))
+    for option in options
+        if option in _TARGET_OPTIONS
+            option == "debug" && !_version_at_least(version, Version(3, 0)) &&
+                throw(_err(s, ".target debug requires PTX ISA 3.0 or later"))
+            option in _TEXTURE_MODES && !_version_at_least(version, Version(1, 5)) &&
+                throw(_err(s, ".target texturing mode requires PTX ISA 1.5 or later"))
+        elseif _architecture_match(option) !== nothing
+            throw(_err(s, ".target specifies more than one architecture"))
+        elseif _known_ptx_version(version)
+            throw(_err(s, "unknown PTX 9.3 .target option $(repr(option))"))
+        end
+    end
+    count(in(_TEXTURE_MODES), options) <= 1 ||
+        throw(_err(s, ".target cannot select both texturing modes"))
+
+    # PTX 11.1.2 explicitly disallows this legacy mapping on sm_13.
+    base_arch = replace(arch, "compute_" => "sm_")
+    base_arch == "sm_13" && "map_f64_to_f32" in options &&
+        throw(_err(s, "map_f64_to_f32 is not allowed for sm_13"))
+    target
+end
+
+function _parse_target!(s::ParserState, version::Version)
+    directive = _expect!(s, TokenKind.DIRECTIVE, ".target")
     _skip_newlines_and_comments!(s)
     targets = String[_expect!(s, TokenKind.IDENTIFIER).text]
     while _match!(s, TokenKind.COMMA) !== nothing
         _skip_newlines_and_comments!(s)
         push!(targets, _expect!(s, TokenKind.IDENTIFIER).text)
     end
-    Target(Tuple(targets))
+    next = _peek(s)
+    if next.line == directive.line &&
+       next.kind ∉ (TokenKind.NEWLINE, TokenKind.COMMENT, TokenKind.EOF,
+                    TokenKind.DIRECTIVE)
+        throw(_err(s, ".target specifiers must be comma-separated"))
+    end
+    _validate_target!(s, Target(Tuple(targets)), version)
 end
 
-function _parse_address_size!(s::ParserState)
+function _parse_address_size!(s::ParserState, version::Version)
     _expect!(s, TokenKind.DIRECTIVE, ".address_size")
+    _version_at_least(version, Version(2, 3)) ||
+        throw(_err(s, ".address_size requires PTX ISA 2.3 or later"))
     _skip_newlines_and_comments!(s)
-    AddressSize(Base.parse(Int,_expect!(s, TokenKind.INTEGER).text))
+    tok = _expect!(s, TokenKind.INTEGER)
+    tok.text in ("32", "64") ||
+        throw(_err(s, ".address_size must be the decimal token 32 or 64, got $(repr(tok.text))"))
+    size = Base.parse(Int, tok.text)
+    next = _peek(s)
+    if next.line == tok.line &&
+       next.kind ∉ (TokenKind.NEWLINE, TokenKind.COMMENT, TokenKind.EOF,
+                    TokenKind.DIRECTIVE)
+        throw(_err(s, "unexpected token after .address_size"))
+    end
+    AddressSize(size)
 end
 
-function _find_raw_header(s::ParserState)
+function _find_raw_header(s::ParserState, address_size_explicit::Bool)
     isempty(s.source_lines) && return nothing
     header_start = 1
     for (i, line) in enumerate(s.source_lines)
@@ -305,12 +437,50 @@ function _find_raw_header(s::ParserState)
         break
     end
     header_end = header_start
+    # The first matching target is the required header target; later targets
+    # remain ordered statements in `directives`.
+    terminal = address_size_explicit ? ".address_size" : ".target"
     for i in header_start:length(s.source_lines)
-        startswith(strip(s.source_lines[i]), ".address_size") || continue
+        startswith(strip(s.source_lines[i]), terminal) || continue
         header_end = i
         break
     end
     join(view(s.source_lines, header_start:header_end), "\n")
+end
+
+_is_module_header_directive(t::Token) =
+    t.kind == TokenKind.DIRECTIVE && t.text in (".version", ".address_size")
+_is_module_directive(t::Token) =
+    t.kind == TokenKind.DIRECTIVE && t.text in (".version", ".target", ".address_size")
+_parse_error_points_to_module_directive(s::ParserState, e::ParseError) =
+    any(t -> t.line == e.line && t.col == e.col && _is_module_directive(t),
+        s.tokens)
+
+function _parse_later_target!(s::ParserState, version::Version)
+    start_line = _peek(s).line
+    prev_pos = s.pos
+    indent = _peek(s).leading_whitespace
+    target = _parse_target!(s, version)
+    trailing = _take_same_line_trailing_comment!(s, start_line)
+    raw_line = (isempty(s.source_lines) || !_owns_line(s, prev_pos, start_line, start_line)) ?
+               nothing : _extract_source(s, start_line, start_line)
+    TargetDirective(target = target,
+                    formatting = FormattingInfo(indent = indent,
+                                                trailing = trailing,
+                                                raw_line = raw_line))
+end
+
+function _validate_module_target_options!(s::ParserState, initial::Target,
+                                          directives::Tuple{Vararg{Statement}})
+    targets = Target[initial]
+    append!(targets, (d.target for d in directives if d isa TargetDirective))
+    texture_modes = String[]
+    for target in targets, option in target.targets[2:end]
+        option in _TEXTURE_MODES && push!(texture_modes, option)
+    end
+    length(unique(texture_modes)) <= 1 ||
+        throw(_err(s, "the module-wide .target texturing mode cannot be changed"))
+    nothing
 end
 
 const _VAR_DECL_DIRECTIVES = Set{String}((
@@ -336,6 +506,10 @@ end
 
 function _parse_statement!(s::ParserState, indent::String)
     t = _peek(s)
+    if t.kind == TokenKind.DIRECTIVE &&
+       t.text in (".version", ".target", ".address_size")
+        throw(_err(s, "module directive $(t.text) is not permitted in this scope"))
+    end
     if t.kind == TokenKind.AT
         return _parse_instruction!(s, indent)
     end
@@ -1013,6 +1187,7 @@ function _parse_body_until!(s::ParserState, end_kind::TokenKind.T)
             end
         catch e
             e isa ParseError || rethrow()
+            _is_module_directive(t) && rethrow()
             s.pos = saved_pos
             push!(statements, _capture_raw_line!(s, t.leading_whitespace))
         end

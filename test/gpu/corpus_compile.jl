@@ -168,7 +168,11 @@ end
 const _PTXAS_CORPUS = _ptxas_corpus_files()
 
 @testset "ptxas accepts source + structural re-emit ($(basename(path)))" for (path, arch) in _PTXAS_CORPUS
-    src = read(path, String)
+    # Preserve provenance fixtures on disk. The host header tier asserts the
+    # exact rejection of LLVM's PTX 8.5/sm_100a originals; this ptxas/body tier
+    # uses the mechanically derived minimum-version repair before both source
+    # assembly and structural parse/re-emission.
+    src = _external_parser_source(read(path, String))
     ok, err = _ptxas_accepts(src, arch)
     @test ok || (println(err); false)
     reformatted = format(IR.unraw(parse_ptx(src)))

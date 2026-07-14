@@ -152,10 +152,10 @@ end
 
 @testset "parser: target with multiple features" begin
     m = parse_ptx(""".version 8.0
-.target sm_90a, ptx80, debug
+.target sm_90a, debug
 .address_size 64
 """)
-    @test m.target.targets == ("sm_90a", "ptx80", "debug")
+    @test m.target.targets == ("sm_90a", "debug")
 end
 
 @testset "parser: simple instruction" begin
@@ -345,10 +345,12 @@ end
     @test_throws ParseError parse_ptx("")
     @test_throws ParseError parse_ptx("\n\n   \n")
 
-    # Missing one of the three required directives.
+    # Missing one of the two required directives. address_size is optional.
     @test_throws ParseError parse_ptx(".target sm_89\n.address_size 64\n")
     @test_throws ParseError parse_ptx(".version 8.0\n.address_size 64\n")
-    @test_throws ParseError parse_ptx(".version 8.0\n.target sm_89\n")
+    omitted = parse_ptx(".version 8.0\n.target sm_89\n")
+    @test omitted.address_size == AddressSize(32)
+    @test !omitted.address_size_explicit
 
     # Out-of-order header.
     @test_throws ParseError parse_ptx(".address_size 64\n.version 8.0\n.target sm_89\n")

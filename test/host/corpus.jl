@@ -190,12 +190,24 @@ end
 
 # --- external corpus (LLVM unit tests, Triton, compiler outputs) ---------
 #
-# Wider, real-world PTX. Every file remains in the lossless acceptance tier.
+# Wider, real-world PTX. Invalid synthetic LLVM headers remain byte-lossless at
+# the lexer tier and must reject for their exact version/target mismatch. Their
+# bodies stay in parser coverage through an in-memory minimum-version repair;
+# the committed provenance fixture is never rewritten.
 @testset "external lossless: $(relpath(path, EXTERNAL_DIR))" for path in EXTERNAL_FILES
     src = read(path, String)
+    if _external_header_requires_repair(src)
+        error = try parse_ptx(src); nothing catch caught; caught end
+        @test error isa PTX.Parser.ParseError
+        @test occursin("requires PTX ISA", sprint(showerror, error))
+        tokens = PTX.Parser.tokenize(src)
+        @test join(t.leading_whitespace * t.text for t in tokens
+                   if t.kind != PTX.Parser.TokenKind.EOF) == src
+    end
+    parser_src = _external_parser_source(src)
     local m::IR.Module
-    @test (m = parse_ptx(src); true)
-    @test format(m) == src
+    @test (m = parse_ptx(parser_src); true)
+    @test format(m) == parser_src
 end
 
 # The manifest makes exclusion from deep structural evidence auditable rather
@@ -203,7 +215,7 @@ end
 @testset "external RawLine fallback inventory" begin
     observed = Dict{String, Int}()
     for path in EXTERNAL_FILES
-        count = _rawline_count(parse_ptx(read(path, String)))
+        count = _rawline_count(parse_ptx(_external_parser_source(read(path, String))))
         count == 0 || (observed[relpath(path, EXTERNAL_DIR)] = count)
     end
     @test observed == EXTERNAL_RAWLINE_MANIFEST
@@ -213,7 +225,7 @@ end
 # fallback in this partition fails `_assert_no_rawlines` instead of silently
 # dropping to a weaker test tier.
 @testset "external deep structural: $(relpath(path, EXTERNAL_DIR))" for path in EXTERNAL_STRUCTURAL_FILES
-    _deep_structural_roundtrip(read(path, String),
+    _deep_structural_roundtrip(_external_parser_source(read(path, String)),
                                "external/$(relpath(path, EXTERNAL_DIR))";
                                semantic = false)
 end
