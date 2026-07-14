@@ -4,7 +4,10 @@
 constraint_letter(::Type{Float64}) = "d"
 constraint_letter(::Type{Float32}) = "f"
 constraint_letter(::Type{Float16}) = "h"
-constraint_letter(::Type{Int8})    = "h"   # NVPTX has no native i8 reg; use i16
+# LLVM keeps these operands as i8, but NVPTX's `h` constraint selects a
+# 16-bit PTX register and the backend legalizes the narrow SSA value into it.
+# The optimized-LLVM + ptxas tripwire lives in cvt_immediate_carriers.jl.
+constraint_letter(::Type{Int8})    = "h"
 constraint_letter(::Type{UInt8})   = "h"
 constraint_letter(::Type{Int16})   = "h"
 constraint_letter(::Type{UInt16})  = "h"

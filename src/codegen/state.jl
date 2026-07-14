@@ -107,10 +107,11 @@ const MODIFIER_TO_JULIA_TYPE = Dict{Symbol, String}(
     :pred => "Bool",
 )
 
-# Opcodes whose trailing modifier is the destination dtype, not the source —
-# wrapping immediates with it would be wrong.
+# Opcodes whose source operands need position-specific hints. Ordinary cvt is
+# handled by its reviewed source-ABI ledger in instruction.jl; returning one
+# broadcast hint here would mistype stochastic rbits and scaled operands.
 const NO_IMMEDIATE_TYPE_HINT_OPCODES = Set{String}((
-    "cvt",       # cvt.<dst>.<src>
+    "cvt",
 ))
 
 function operand_type_hint(opcode::AbstractString,

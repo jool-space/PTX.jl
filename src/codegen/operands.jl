@@ -59,14 +59,14 @@ function render_operand(op::ImmediateOperand, cg::CodeGenState;
     # token before turning the raw PTX expression into Julia source.
     text = _replace_predefined_immediate_tokens(op.text)
     # PTX f32 hex literal `0fXXXXXXXX` — decode bit-exactly.
-    if length(text) == 10 && startswith(text, "0f")
+    if length(text) == 10 && lowercase(text[1:2]) == "0f"
         bits = tryparse(UInt32, text[3:end], base = 16)
         bits !== nothing &&
             return "reinterpret(Float32, 0x" *
                    string(bits, base = 16, pad = 8) * ")"
     end
     # PTX f64 hex literal `0dXXXXXXXXXXXXXXXX`.
-    if length(text) == 18 && startswith(text, "0d")
+    if length(text) == 18 && lowercase(text[1:2]) == "0d"
         bits = tryparse(UInt64, text[3:end], base = 16)
         bits !== nothing &&
             return "reinterpret(Float64, 0x" *
