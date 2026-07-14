@@ -17,6 +17,17 @@ function _mbarrier_callsite_is_convergent(llvm::AbstractString,
     occursin(r"\bconvergent\b", attrs) && occursin(r"\bnomerge\b", attrs)
 end
 
+# Julia 1.10/1.11 use LLVM's typed-pointer IR, while newer LLVM prints opaque
+# pointers. Pin the address space without making the evidence dialect-specific.
+_mbarrier_has_as3_pointer(llvm::AbstractString) =
+    occursin(r"(?:ptr addrspace\(3\)|i8 addrspace\(3\)\*)", llvm)
+
+@testset "mbarrier LLVM AS3 pointer dialects" begin
+    @test _mbarrier_has_as3_pointer("ptr addrspace(3)")
+    @test _mbarrier_has_as3_pointer("i8 addrspace(3)*")
+    @test !_mbarrier_has_as3_pointer("ptr addrspace(1)")
+end
+
 function _mbarrier_schema_sm80!(out64::CuDeviceVector{UInt64, 1},
                                  out32::CuDeviceVector{UInt32, 1},
                                  mbar::Core.LLVMPtr{UInt64, PTX.AS.Shared})
@@ -60,7 +71,7 @@ end
     # The LLVM value remains addrspace(3), while the inline-asm constraint
     # deliberately selects the 32-bit shared-address PTX register class.
     llvm = emit_llvm(_mbarrier_schema_sm80!, types; cap = v"8.0")
-    @test occursin("ptr addrspace(3)", llvm)
+    @test _mbarrier_has_as3_pointer(llvm)
     @test occursin("mbarrier.init.shared::cta.b64", llvm)
     @test occursin("r,r,~{memory}", llvm)
     @test _mbarrier_callsite_is_convergent(
@@ -187,7 +198,7 @@ const _MBARRIER_RAW_REPORT_TYPES =
             occursin(".reg .b8 report_value; mbarrier.test_wait", line)
     end
     @test length(raw_sites) == 1
-    @test occursin("ptr addrspace(3)", only(raw_sites))
+    @test _mbarrier_has_as3_pointer(only(raw_sites))
     @test occursin("=b,=b,=h,r,l,~{memory}", only(raw_sites))
     @test _mbarrier_callsite_is_convergent(
         llvm, ".reg .b8 report_value; mbarrier.test_wait")
