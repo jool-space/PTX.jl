@@ -356,7 +356,9 @@ end
 
     # Malformed .version literal.
     @test_throws ParseError parse_ptx(".version oops\n.target sm_89\n.address_size 64\n")
-    @test_throws ParseError parse_ptx(".version 8.x\n.target sm_89\n.address_size 64\n")
+    # Numeric-token adjacency is rejected at the lexer boundary rather than
+    # being split into a plausible float and directive.
+    @test_throws LexError parse_ptx(".version 8.x\n.target sm_89\n.address_size 64\n")
     @test_throws ParseError parse_ptx(".version 8 .y\n.target sm_89\n.address_size 64\n")
     @test_throws ParseError parse_ptx(".version -8.0\n.target sm_89\n.address_size 64\n")
     @test_throws ParseError parse_ptx(".version\n.target sm_89\n.address_size 64\n")
@@ -419,18 +421,15 @@ end
     @test insts[1].opcode == "add"
 end
 
-@testset "lexer: rejection — only the truly malformed" begin
-    # The lexer is intentionally permissive (it will tokenize unicode,
-    # unclosed strings, oversize hex literals); the parser is responsible
-    # for semantic rejection. Only characters absent from the punctuation
-    # table trigger LexError.
-    @test_throws LexError tokenize("#")
-    @test_throws LexError tokenize("?")
+@testset "lexer: lexical boundaries" begin
+    # `#` owns a complete cpp line and `?` is ternary punctuation.
+    @test tokenize("#")[1].kind == TokenKind.PREPROCESSOR
+    @test tokenize("?")[1].kind == TokenKind.QUESTION
     @test_throws LexError tokenize("`")
-    # These previously surprised us — they all tokenize cleanly.
-    @test (tokenize("\"unterminated"); true)
+    @test_throws LexError tokenize("\"unterminated")
+    @test_throws LexError tokenize("αβγ")
+    # Literal range is a semantic/use-site concern, not a lexical one.
     @test (tokenize("0xDEADBEEFCAFEBABE"); true)
-    @test (tokenize("αβγ"); true)
 end
 
 # --- function-level parsing -----------------------------------------------

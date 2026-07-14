@@ -10,6 +10,7 @@ referenced as `TokenKind.IDENTIFIER`, `TokenKind.NEWLINE`, etc.
     INTEGER
     FLOAT
     STRING
+    PREPROCESSOR
 
     IDENTIFIER
     REGISTER
@@ -39,6 +40,9 @@ referenced as `TokenKind.IDENTIFIER`, `TokenKind.NEWLINE`, etc.
     SLASH
     TILDE
     AMPERSAND
+    CARET
+    QUESTION
+    PERCENT
 
     # Preserved for round-trip fidelity.
     NEWLINE

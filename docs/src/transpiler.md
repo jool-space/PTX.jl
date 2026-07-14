@@ -45,6 +45,25 @@ Three independent stages, each usable on its own:
   `raw_line` snapshots first.
 - [`ptx_to_julia(source)`](@ref) ≡ `ir_to_julia(parse(source))`.
 
+## Lexical conformance
+
+The lexer enforces PTX's ASCII source boundary before tokenization. Integer
+literals accept decimal, hexadecimal, octal, and binary notation with PTX's
+immediate uppercase `U` suffix; a leading sign remains a separate unary token.
+Decimal floating-point literals accept a decimal point and signed exponent
+independently (`.5`, `1.`, and `1e-2`), while exact `0f` and `0d` literals must
+carry exactly 8 and 16 hexadecimal digits. Malformed prefixes, suffixes,
+exponents, exact encodings, strings, and block comments raise `LexError` at
+the construct's starting line and column instead of splitting into plausible
+tokens or reaching `RawLine` fallback.
+
+Lines beginning in column one with `#` are retained as one opaque
+`PREPROCESSOR` token, including backslash-newline continuations. Parsing
+preserves those lines as `RawLine` nodes before the module header and in module
+or function bodies. PTX.jl does not execute cpp or choose conditional branches;
+source whose structure depends on macro expansion must be preprocessed before
+semantic parsing or transpilation.
+
 ## Round-trip fidelity
 
 The parser captures three layers of source text:
@@ -132,10 +151,10 @@ interpreter. It covers every constant-expression shape the current parser can
 represent: decimal/hex/octal integers, `WARP_SZ`, unary operators,
 `.s64`/`.u64` casts, arithmetic, shifts, comparisons, bitwise AND/OR,
 logical operators, and parentheses, with PTX-style 64-bit range checks. The
-remaining legal lexical forms—including binary literals, unsigned-suffix
-literals, XOR, and the ternary operator—remain parser work under
-`FRONT-LEXER-001`; they are not
-silently treated as runtime LUTs. The wider `IMMEDIATE-001` finding remains
+lexer recognizes binary literals, uppercase unsigned suffixes, XOR, and
+ternary punctuation, but this deliberately smaller evaluator rejects those
+shapes rather than silently treating them as runtime LUTs. The wider
+`IMMEDIATE-001` finding remains
 open for `setmaxnreg` and `pmevent`, while its `lop3` range/constness slice is
 closed by this schema.
 

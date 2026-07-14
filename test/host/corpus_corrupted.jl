@@ -1,4 +1,4 @@
-using PTX.Parser: parse as parse_ptx, ParseError
+using PTX.Parser: parse as parse_ptx, ParseError, LexError
 using PTX.IR: Module, Function, Instruction, RawLine, Block, IntrinsicScope, format
 
 # Ablation tests: each fixture in `test/corpus/corrupted/` is a single-mutation
@@ -7,6 +7,8 @@ using PTX.IR: Module, Function, Instruction, RawLine, Block, IntrinsicScope, for
 #
 #   - `:parse_error` — header-level malformations throw ParseError. No
 #                      RawLine fallback above the header line.
+#   - `:lex_error`   — malformed token adjacency fails before parsing, with
+#                      the offending token's source location.
 #   - `:rawline_top` — body-level structural failures (post-header) parse;
 #                      the broken line lands in a top-level RawLine and the
 #                      round-trip is byte-identical.
@@ -74,7 +76,7 @@ const _ABLATION_MANIFEST = [
      assert  = nothing),
 
     (file = "minimal__bad_version_minor.ptx",
-     outcome = :parse_error,
+     outcome = :lex_error,
      assert  = nothing),
 
     (file = "minimal__bad_address_size.ptx",
@@ -118,6 +120,17 @@ const _ABLATION_MANIFEST = [
 
     if case.outcome === :parse_error
         @test_throws ParseError parse_ptx(src)
+    elseif case.outcome === :lex_error
+        error = try
+            parse_ptx(src)
+            nothing
+        catch caught
+            caught
+        end
+        @test error isa LexError
+        @test error.line == 1
+        @test error.col == 10
+        @test occursin("trailing characters", error.msg)
     else
         m = parse_ptx(src)
         rl = _count_rawlines(m)

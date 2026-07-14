@@ -336,9 +336,9 @@ integer literals exceeding 64 bits fail loud.
 The evaluator covers the immediate tokens and expressions the current frontend
 already structures, including decimal, hexadecimal, C-style octal,
 `WARP_SZ`, unary operators, casts, arithmetic, shifts, comparisons, bitwise
-AND/OR, and logical AND/OR. PTX `U` suffixes, binary literals, XOR, ternary
-expressions, and other frontend gaps remain tracked under `FRONT-LEXER-001`
-and are not claimed here.
+AND/OR, and logical AND/OR. The lexer recognizes PTX `U` suffixes, binary
+literals, XOR, and ternary punctuation, but this evaluator does not yet claim
+those expression shapes and rejects them explicitly.
 
 PTX constants cannot directly carry `.f16`, `.bf16`, or packed alternate
 floating-point source formats, so those positions require registers rather than
