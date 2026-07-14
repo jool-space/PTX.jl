@@ -101,7 +101,11 @@ function _ordinary_cvt_special_pairs()
         error("ordinary cvt special-pair ledger must contain 39 forms")
     length(Set(pairs)) == length(pairs) ||
         error("duplicate ordinary cvt special destination/source pair")
-    Tuple(pairs)
+    # Deliberately a Vector, not Tuple(...): a several-hundred-element NTuple
+    # constant makes every downstream generator/Dict build specialize on the
+    # full tuple type. Those inference+codegen bombs tripled package
+    # precompile time (measured 30s -> 12s converting the ledgers back).
+    pairs
 end
 
 const _CVT_SPECIAL_PAIRS = _ordinary_cvt_special_pairs()
@@ -146,7 +150,11 @@ const ORDINARY_CVT_SOURCE_SCHEMAS = let schemas = OrdinaryCvtSourceSchema[]
                                   (:f32, :f32, :b32); stochastic = true)
         end
     end
-    Tuple(schemas)
+    # Deliberately a Vector, not Tuple(...): a several-hundred-element NTuple
+    # constant makes every downstream generator/Dict build specialize on the
+    # full tuple type. Those inference+codegen bombs tripled package
+    # precompile time (measured 30s -> 12s converting the ledgers back).
+    schemas
 end
 
 length(ORDINARY_CVT_SOURCE_SCHEMAS) == 193 ||

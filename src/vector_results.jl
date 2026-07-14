@@ -164,7 +164,11 @@ const VECTOR_RESULT_CORE_FORMS = let forms = VectorResultCoreForm[]
         end
     end
     length(forms) == 210 || error("vector-result core ledger drift: ", length(forms))
-    Tuple(forms)
+    # Deliberately a Vector, not Tuple(...): a several-hundred-element NTuple
+    # constant makes every downstream generator/Dict build specialize on the
+    # full tuple type. Those inference+codegen bombs tripled package
+    # precompile time (measured 30s -> 12s converting the ledgers back).
+    forms
 end
 
 const _VECTOR_RESULT_CORE_BY_FORM = Dict(

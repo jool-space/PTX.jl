@@ -289,7 +289,11 @@ const MBARRIER_FORM_SCHEMAS = let schemas = MBarrierFormSchema[]
                         (_mb_variant((:address,), sp, ss),), space_kind)
     end
 
-    Tuple(schemas)
+    # Deliberately a Vector, not Tuple(...): a several-hundred-element NTuple
+    # constant makes every downstream generator/Dict build specialize on the
+    # full tuple type. Those inference+codegen bombs tripled package
+    # precompile time (measured 30s -> 12s converting the ledgers back).
+    schemas
 end
 
 const _MBARRIER_SCHEMA_BY_FORM =
