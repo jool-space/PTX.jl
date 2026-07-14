@@ -9,13 +9,16 @@ using ..IR: Module, Function, Instruction, Label, RegDecl, VarDecl, Param,
             RegisterOperand, ImmediateOperand, LabelOperand, VectorOperand,
             AddressOperand, ParenthesizedOperand, NegatedOperand, PipeOperand,
             ScalarType, StateSpace, LinkingDirective, ptx
-using ..Parser: parse as parse_ptx
-using ..PTX: uses_implicit_cc, scalar_result_schema,
+using ..Parser: parse as parse_ptx, tokenize, TokenKind, LexError
+using ..PTX: uses_implicit_cc, structured_result_schema,
+             requires_structured_result_schema, structured_result_schema_miss,
+             scalar_result_schema,
              requires_scalar_result_schema, scalar_result_schema_miss,
              infer_rettype, mbarrier_form_schema, mbarrier_schema_miss
 
 include("state.jl")
 include("operands.jl")
+include("constants.jl")
 include("instruction.jl")
 include("statements.jl")
 include("function.jl")

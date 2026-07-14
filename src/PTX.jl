@@ -10,6 +10,7 @@ include("parser/Parser.jl")
 
 include("implicit_state.jl")
 
+include("structured_results.jl")
 include("scalar_results.jl")
 include("mbarrier_forms.jl")
 
@@ -20,8 +21,8 @@ include("address_space.jl")
 include("forms.jl")
 include("types.jl")
 
-# The transpiler shares the audited scalar/cvt and mbarrier ABI validators
-# above, so load it only after their definitions are available.
+# The transpiler shares the audited structured/scalar/cvt and mbarrier ABI
+# validators above, so load it only after their definitions are available.
 include("codegen/Codegen.jl")
 using .Codegen: ptx_to_julia, ir_to_julia
 export ptx_to_julia, ir_to_julia
@@ -41,7 +42,6 @@ include("wrappers/mapa.jl")
 include("wrappers/mbarrier.jl")
 include("wrappers/mma.jl")
 include("wrappers/mma_scaled.jl")
-include("wrappers/setp.jl")
 include("wrappers/shfl.jl")
 include("wrappers/stmatrix.jl")
 include("wrappers/tma.jl")

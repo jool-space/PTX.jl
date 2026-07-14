@@ -45,12 +45,29 @@ line in the loop.
 | `mbarrier` | `wrappers/mbarrier.jl`, `mbarrier_forms.jl` | Closed PTX 9.3 form schema for lifecycle, tx-count, arrive/drop, waits, pending-count, layout, sem/scope, and CTA/cluster spaces; exact wrappers accelerate common forms while delegating to the same schema emitter. Results are explicit sink (`.sink` → PTX `_`), `UInt64` state, `Bool`, `UInt32` pending count, `(waitComplete, reportPredicate)`, or `(waitComplete, reportPredicate, reportValueCarrier::UInt16)`. The ISA's two noncanonical `arrive_drop` example heads are provenance-marked aliases and normalize on emission. PTX's 1-byte report value occupies the carrier's low byte because NVPTX has no i8 inline-asm constraint. Explicitly shared addresses use the NVPTX `r` constraint; every route carries `convergent nomerge`. |
 | `mma.sync.aligned` | `wrappers/mma.jl` | `mma.sync.aligned.<shape>.<layA>.<layB>.<d>.<a>.<b>.<c>` for bf16/f16/tf32/FP8 (Ada) and `kind::f8f6f4` 5×5 sub-byte FP A/B (Blackwell sm_100a+); takes/returns `NTuple{N, UInt32}` for A/B and `NTuple{M, Float32\|UInt32}` for C/D |
 | `mma.sync.aligned.kind::mxf*` (block-scaled) | `wrappers/mma_scaled.jl` | Three Blackwell-introduced kinds: `mxf4`, `mxf4nvf4`, `mxf8f6f4`. Operand layout `(scale_data::UInt32, byte_id::UInt16, thread_id::UInt16)` per side per PTX 9.2 §9.7.14.3 |
-| `setp.dual` | `wrappers/setp.jl` | `setp.<cmp>.<dtype>` with `%p\|%q` dual-pred output — 6 cmps × 12 dtypes = 72 generated methods returning `Tuple{Bool, Bool}` |
 | `shfl.sync` | `wrappers/shfl.jl` | `up` / `down` / `bfly` / `idx` × `b32` × {data-only, data+pred} |
 | `stmatrix` | `wrappers/stmatrix.jl` | mirror of `ldmatrix` — `m8n8.b16` (sm_70+) and `m16n8.b8` (Hopper) |
 | `vec_ldst` | `wrappers/vec_ldst.jl` | `ld.global.v{2,4}.{f32,b32,b16}` / `st.global.v{2,4}.{f32,b32,b16}` — braced register-vector I/O for HBM-saturating bandwidth |
 | `wgmma.mma_async` (Hopper sm_90a) | `wrappers/wgmma.jl` | `wgmma.mma_async.sync.aligned.m64nNk{8,16,32}.<d>.<a>.<b>` — accumulator passed by value (tied operands). Floating forms use all 32 N values stepped by 8 through 256; integer forms use the ISA's 16-value grid `8,16,24,32,48:16:224`. The closed surface is 256 floating + 64 integer shape/type forms, each with SS runtime/constant `scale_d` and RF-A runtime variants. |
 | `tcgen05` (Blackwell sm_100a/sm_110a and family targets) | `wrappers/tcgen05.jl` | Exact lifecycle, fence/wait, TMEM address, load/store, dense-MMA, and MX block-scale forms. MX uses the complete seven-operand schema `(d, a_desc_or_tmem, b_desc, idesc, scale_a_tmem, scale_b_tmem, enable_input_d)` and all eight legal `kind × {scale_vec,block}` spellings; the former five-argument MX surface is rejected. `shift` / `dealloc` / `cp` / `ld` / `st` take a 32-bit TMEM address returned by `tcgen05.alloc`, while alloc/commit use reviewed shared-memory carriers. |
+
+## Schema-driven structured results
+
+`setp`, `lop3`, `match.sync`, and `elect.sync` no longer rely on a small set of
+hand-written dual-result methods. `src/structured_results.jl` expands the
+complete PTX 9.3 grammar into 1,114 reviewed schemas and the generic chain
+emitter consumes those schemas directly. This keeps scalar and grouped
+siblings in the same closed boundary: modifier legality, source carriers,
+result tuple shape, sink positions, and target metadata cannot drift between a
+wrapper and the fallback.
+
+General `setp` uses the Julia-only leading `.dual` selector for the optional
+compare/complement result. Packed `.f16x2` and `.bf16x2` always return the two
+lane predicates. BoolOp `lop3` returns `(UInt32, Bool)` and requires a
+`Val{N}` LUT with `N` in `0:255`; `match.all.sync.*.pred` selects the optional predicate, and
+`elect.sync` always returns `(UInt32, Bool)`. The two warp-collective families
+use the same `convergent nomerge` LLVM call-site path as the existing MMA and
+mbarrier wrappers.
 
 For the mbarrier full-report form, `reportValue` is a PTX `.b8`
 destination. This agrees with the CUDA Runtime API's description of

@@ -36,9 +36,6 @@ const DTYPE_RETTYPE = Dict{Symbol, Type}(
     :s2f6x2  => UInt16,
 )
 
-# `setp.eq.s32` returns Bool, not Int32 — trailing dtype is the input compare type.
-const PRED_RESULT_OPCODES = Set{Symbol}((:setp,))
-
 # Ordinary `cvt` grammar is `cvt.<modifiers...>.<dst>.<src>` — destination is
 # mods[end-1]. `cvt.pack` is instead covered by the fixed-u32 scalar-result
 # ledger before this fallback.
@@ -70,11 +67,14 @@ function _result_abi_error(op::Symbol, mods::Tuple{Vararg{Symbol}})
         schema = mbarrier_form_schema(op, mods)
         return schema === nothing ? mbarrier_schema_miss(mods) : nothing
     end
+    structured = structured_result_schema(op, mods)
+    if requires_structured_result_schema(op)
+        return structured === nothing ? structured_result_schema_miss(op, mods) : nothing
+    end
     schema = scalar_result_schema(op, mods)
     schema === nothing || return nothing
     requires_scalar_result_schema(op, mods) &&
         return scalar_result_schema_miss(op, mods)
-    op in PRED_RESULT_OPCODES && return nothing
     c = form_contract(op, mods)
     c !== nothing && !c.returns && return nothing
     op === :cvt && return _ordinary_cvt_result_abi_error(mods)
@@ -96,9 +96,10 @@ function infer_rettype(op::Symbol, mods::Tuple{Vararg{Symbol}})
     err === nothing || throw(err)
     mbarrier = mbarrier_form_schema(op, mods)
     mbarrier === nothing || return _mbarrier_rettype(mbarrier)
+    structured = structured_result_schema(op, mods)
+    structured === nothing || return structured_result_type(structured)
     schema = scalar_result_schema(op, mods)
     schema === nothing || return schema.rettype
-    op in PRED_RESULT_OPCODES && return Bool
     c = form_contract(op, mods)
     c !== nothing && !c.returns && return Nothing
     op === :cvt && return ordinary_cvt_result_type(mods)

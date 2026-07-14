@@ -75,7 +75,7 @@ const _COLLMEM   = FormContract(convergent = true, brackets = true)
 #   * mma and wgmma.mma_async use shape-dependent register groups;
 #   * tcgen05 spans address destinations, register vectors, sinks, fences, and
 #     matrix descriptors under one opcode; and
-#   * :dual/:pred are PTX.jl-only selectors for grouped destinations,
+#   * :pred is a PTX.jl-only selector for a grouped destination,
 #     not literal PTX modifiers.
 #
 # Keep this closed and declarative.  A new entry is an API decision: exact
@@ -90,8 +90,6 @@ const TYPED_WRAPPER_ONLY_RULES = (
      detail = "wgmma.mma_async has shape-dependent tied accumulator groups and descriptors"),
     (op = :tcgen05,  prefix = (),            marker = nothing,
      detail = "tcgen05 forms have instruction-specific address, vector, sink, and descriptor schemas"),
-    (op = :setp,     prefix = (),            marker = :dual,
-     detail = ":dual is an internal selector for PTX's p|q destination"),
     (op = :shfl,     prefix = (),            marker = :pred,
      detail = ":pred is an internal selector for PTX's d|p destination"),
 )
@@ -119,10 +117,11 @@ requires_typed_wrapper(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
 
 const FORMS = Dict{Symbol, FormFamily}(
     # ── Pure per-lane compute ────────────────────────────────────────────
-    # Value ops with no memory access and no cross-lane semantics; the
-    # Their result is either covered by the generic dtype convention or by the
+    # Value ops with no memory access and no cross-lane semantics. Their
+    # result is either covered by the generic dtype convention or by the
     # closed scalar-result ledger (scalar_results.jl). `cvt`'s ordinary
-    # dst-at-end-1 rule and setp's Bool exception live in infer_rettype.
+    # dst-at-end-1 rule lives in infer_rettype; setp's scalar/grouped ABI lives
+    # in structured_results.jl.
     # Deliberately curated, not the whole ISA: an op joins this list only
     # after checking purity AND that its result ABI is generic or audited (e.g.
     # `set.CmpOp.dtype.stype` and `testp` do NOT qualify — their tails name

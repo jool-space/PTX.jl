@@ -7,9 +7,9 @@ function render_dst(op::RegisterOperand, cg::CodeGenState)
 end
 
 function render_dst(op::PipeOperand, cg::CodeGenState)
-    l = render_operand(op.left, cg)
-    r = render_operand(op.right, cg)
-    ("(" * l * ", " * r * ")", [l, r])
+    l, lnames = render_dst(op.left, cg)
+    r, rnames = render_dst(op.right, cg)
+    ("(" * l * ", " * r * ")", [lnames; rnames])
 end
 
 function render_dst(op::VectorOperand, cg::CodeGenState)
@@ -76,6 +76,217 @@ function _instruction_scalar_result_schema(inst::Instruction)
     schema
 end
 
+function _structured_api_modifiers(inst::Instruction)
+    mods = _schema_modifiers(inst.modifiers)
+    isempty(inst.operands) && return mods
+    inst.operands[1] isa PipeOperand || return mods
+    if inst.opcode == "setp"
+        # Packed half types intrinsically require p|q. General scalar setp
+        # needs the PTX.jl-only :dual selector because the emitted spelling
+        # also admits a single destination. Scalar f16/bf16 + pipe becomes an
+        # intentional schema miss.
+        any(t -> t in (:f16x2, :bf16x2), mods) && return mods
+        return (:dual, mods...)
+    elseif inst.opcode == "match"
+        return (mods..., :pred)
+    end
+    mods
+end
+
+function _structured_decl_types(kind::Symbol)
+    kind === :pred && return (ScalarType.PRED,)
+    kind === :f16 && return (ScalarType.F16, ScalarType.B16)
+    kind === :bf16 && return (ScalarType.B16, ScalarType.BF16)
+    kind === :f32 && return (ScalarType.F32, ScalarType.B32)
+    kind === :f64 && return (ScalarType.F64, ScalarType.B64)
+    kind === :b16 && return (ScalarType.B16, ScalarType.U16,
+                             ScalarType.S16, ScalarType.F16,
+                             ScalarType.BF16)
+    kind === :b32 &&
+        return (ScalarType.B32, ScalarType.U32, ScalarType.S32,
+                ScalarType.F32, ScalarType.F16X2, ScalarType.BF16X2,
+                ScalarType.TF32)
+    kind in (:u32, :s32) &&
+        return (ScalarType.B32, ScalarType.U32, ScalarType.S32)
+    kind === :b64 &&
+        return (ScalarType.B64, ScalarType.U64, ScalarType.S64,
+                ScalarType.F64)
+    kind in (:u64, :s64) &&
+        return (ScalarType.B64, ScalarType.U64, ScalarType.S64)
+    kind in (:u16, :s16) &&
+        return (ScalarType.B16, ScalarType.U16, ScalarType.S16)
+    ()
+end
+
+function _structured_destinations(op::Operand)
+    op isa PipeOperand ? (op.left, op.right) : (op,)
+end
+
+function _validate_structured_decl!(cg::CodeGenState, op::Operand,
+                                    kind::Symbol, role::AbstractString)
+    _is_sink_operand(op) && return
+    (op isa RegisterOperand || op isa LabelOperand) || throw(ArgumentError(
+        "PTX transpiler: structured $role must be a register or `_`"))
+    decl = _declared_register(cg, op)
+    decl === nothing && throw(ArgumentError(
+        "PTX transpiler: structured $role register $(op.name) has no " *
+        "preceding .reg declaration"))
+    accepted = _structured_decl_types(kind)
+    decl.type in accepted || throw(ArgumentError(
+        "PTX transpiler: structured $role register $(op.name) must be " *
+        join(IR.ptx.(accepted), "/") * ", got $(IR.ptx(decl.type))"))
+end
+
+function _structured_source_base(op::Operand)
+    op isa NegatedOperand ? op.operand : op
+end
+
+const _STRUCTURED_INTEGER_SOURCE_KINDS =
+    (:b16, :b32, :b64, :u16, :u32, :u64, :s16, :s32, :s64)
+
+function _structured_integer_carrier_type(kind::Symbol)
+    kind in (:b16, :u16) && return UInt16
+    kind in (:b32, :u32) && return UInt32
+    kind in (:b64, :u64) && return UInt64
+    kind === :s16 && return Int16
+    kind === :s32 && return Int32
+    kind === :s64 && return Int64
+    error("unknown structured integer source role $kind")
+end
+
+function _structured_integer_text(op::Operand)
+    try
+        _ptx_integer_constant_text(op)
+    catch err
+        err isa ArgumentError || rethrow()
+        nothing
+    end
+end
+
+function _validate_structured_integer_constant(text::AbstractString,
+                                               kind::Symbol, index::Int)
+    try
+        _ptx_integer_constant(text)
+    catch err
+        err isa ArgumentError || rethrow()
+        throw(ArgumentError(
+            "PTX transpiler: structured source $index has invalid $kind " *
+            "integer constant: $(sprint(showerror, err))"))
+    end
+    nothing
+end
+
+function _validate_structured_source!(cg::CodeGenState, op::Operand,
+                                      kind::Symbol, index::Int)
+    if kind === :imm8
+        try
+            _lop3_lut_value(op)
+        catch err
+            err isa ArgumentError || rethrow()
+            throw(ArgumentError(
+                "PTX transpiler: structured source $index has invalid " *
+                "lop3 immLut: $(sprint(showerror, err))"))
+        end
+        return
+    end
+    integer_text = _structured_integer_text(op)
+    if kind in _STRUCTURED_INTEGER_SOURCE_KINDS && integer_text !== nothing
+        _validate_structured_integer_constant(integer_text, kind, index)
+        return
+    elseif kind === :pred && integer_text !== nothing
+        _validate_structured_integer_constant(integer_text, kind, index)
+        return
+    elseif kind in (:f16, :bf16) && integer_text !== nothing
+        # CUDA 13.3 ptxas rejects both integer and floating immediates in the
+        # half/bfloat setp source positions. Their schema carriers are
+        # therefore registers only.
+        throw(ArgumentError(
+            "PTX transpiler: structured source $index for $kind must be a " *
+            "register; ptxas rejects immediate operands for half setp"))
+    elseif kind in (:f32, :f64) && integer_text !== nothing
+        # Integer constants are not compatible with floating instruction
+        # types (PTX §6.1), and ptxas rejects them. A floating literal or
+        # expression does not parse through the integer evaluator and remains
+        # accepted by the ordinary floating renderer below.
+        integer_value = try
+            _ptx_integer_constant(integer_text)
+        catch err
+            err isa ArgumentError || rethrow()
+            nothing
+        end
+        integer_value === nothing || throw(ArgumentError(
+            "PTX transpiler: structured source $index for $kind cannot use " *
+            "the integer constant $(repr(integer_text)); use a floating " *
+            "constant or a compatible register"))
+        return
+    end
+    base = _structured_source_base(op)
+    base isa ImmediateOperand && throw(ArgumentError(
+        "PTX transpiler: structured source $index does not match the audited " *
+        "$kind operand role"))
+    if kind === :pred
+        (op isa NegatedOperand || op === base) || throw(ArgumentError(
+            "PTX transpiler: predicate source $index has invalid negation shape"))
+    end
+    (base isa RegisterOperand || base isa LabelOperand) || throw(ArgumentError(
+        "PTX transpiler: structured source $index does not match the audited " *
+        "$kind operand role"))
+    _validate_structured_decl!(cg, base, kind, "source $index")
+end
+
+function _instruction_structured_result_schema(cg::CodeGenState,
+                                               inst::Instruction)
+    op = Symbol(inst.opcode)
+    requires_structured_result_schema(op) || return nothing
+    mods = _structured_api_modifiers(inst)
+    schema = structured_result_schema(op, mods)
+    schema === nothing && throw(structured_result_schema_miss(op, mods))
+    isempty(inst.operands) && throw(ArgumentError(
+        "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) is missing " *
+        "its destination"))
+    destinations = _structured_destinations(inst.operands[1])
+    length(destinations) == length(schema.outputs) || throw(ArgumentError(
+        "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) requires " *
+        "$(length(schema.outputs)) destination(s), got $(length(destinations)); " *
+        "see $(schema.section)"))
+    length(inst.operands) == length(schema.operands) + 1 || throw(ArgumentError(
+        "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) requires " *
+        "$(length(schema.operands)) source operands, got " *
+        "$(max(length(inst.operands) - 1, 0)); see $(schema.section)"))
+    sink_count = count(_is_sink_operand, destinations)
+    sink_count <= schema.max_sinks || throw(ArgumentError(
+        "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) may discard " *
+        "at most $(schema.max_sinks) destination(s) with `_`; see " *
+        schema.section))
+    for (i, (dest, kind)) in enumerate(zip(destinations, schema.outputs))
+        if _is_sink_operand(dest)
+            schema.sinkable[i] || throw(ArgumentError(
+                "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) " *
+                "destination $i may not use `_`; see $(schema.section)"))
+            continue
+        end
+        _validate_structured_decl!(cg, dest, kind, "destination $i")
+    end
+    for (i, (source, kind)) in enumerate(zip(inst.operands[2:end],
+                                              schema.operands))
+        _validate_structured_source!(cg, source, kind, i)
+    end
+    (; schema, mods)
+end
+
+function _render_structured_dst(op::LabelOperand, cg::CodeGenState)
+    _declared_register(cg, op) === nothing ? render_dst(op, cg) :
+        render_dst(RegisterOperand(op.name), cg)
+end
+
+function _render_structured_dst(op::PipeOperand, cg::CodeGenState)
+    left, left_names = _render_structured_dst(op.left, cg)
+    right, right_names = _render_structured_dst(op.right, cg)
+    ("(" * left * ", " * right * ")", [left_names; right_names])
+end
+
+_render_structured_dst(op::Operand, cg::CodeGenState) = render_dst(op, cg)
+
 _is_sink_operand(op::LabelOperand) = op.name == "_"
 _is_sink_operand(op::RegisterOperand) = op.name == "_"
 _is_sink_operand(::Operand) = false
@@ -100,10 +311,7 @@ function _mbarrier_sink_selector_mods(mods::Tuple{Vararg{Symbol}})
     (first(mods), :sink, Base.tail(mods)...)
 end
 
-# Resolve the PTX operand-overloaded primary-report head into an explicit Julia
-# selector, then validate the exact destination/source structure before shared
-# pointer aliasing or generic destination heuristics can erase it.
-function _mbarrier_register_decl(cg::CodeGenState, name::AbstractString)
+function _declared_register(cg::CodeGenState, name::AbstractString)
     decl = get(cg.reg_decls, String(name), nothing)
     decl === nothing || return decl
     for candidate in values(cg.reg_decls)
@@ -117,26 +325,26 @@ function _mbarrier_register_decl(cg::CodeGenState, name::AbstractString)
     nothing
 end
 
-_mbarrier_register_decl(cg::CodeGenState, op::RegisterOperand) =
-    _mbarrier_register_decl(cg, op.name)
+_declared_register(cg::CodeGenState, op::RegisterOperand) =
+    _declared_register(cg, op.name)
 
 # PTX permits `.reg` declarations whose names omit `%`; the lexer necessarily
 # represents those instruction operands as LabelOperand. They are registers
 # only when the active declaration table proves it.
-_mbarrier_register_decl(cg::CodeGenState, op::LabelOperand) =
-    _mbarrier_register_decl(cg, op.name)
+_declared_register(cg::CodeGenState, op::LabelOperand) =
+    _declared_register(cg, op.name)
 
 function _mbarrier_is_declared_register(cg::CodeGenState, op::Operand)
     (op isa RegisterOperand || op isa LabelOperand) || return false
     _is_sink_operand(op) && return false
-    _mbarrier_register_decl(cg, op) !== nothing
+    _declared_register(cg, op) !== nothing
 end
 
 function _mbarrier_require_register_type(cg::CodeGenState,
                                          op::Union{RegisterOperand, LabelOperand},
                                          accepted,
                                          role::AbstractString)
-    decl = _mbarrier_register_decl(cg, op)
+    decl = _declared_register(cg, op)
     decl === nothing && throw(ArgumentError(
         "PTX transpiler: mbarrier $role register $(op.name) has no preceding " *
         ".reg declaration"))
@@ -178,11 +386,11 @@ function _validate_mbarrier_source_type!(cg::CodeGenState, kind::Symbol,
                                          op::Operand, index::Int)
     if (op isa RegisterOperand || op isa LabelOperand) &&
             kind in (:u32, :u64) &&
-            (op isa RegisterOperand || _mbarrier_register_decl(cg, op) !== nothing)
+            (op isa RegisterOperand || _declared_register(cg, op) !== nothing)
         accepted = kind === :u32 ? _MBARRIER_REG32 : _MBARRIER_REG64
         _mbarrier_require_register_type(cg, op, accepted, "source $index")
     elseif op isa AddressOperand
-        decl = _mbarrier_register_decl(cg, op.base)
+        decl = _declared_register(cg, op.base)
         startswith(op.base, "%") && decl === nothing && throw(ArgumentError(
             "PTX transpiler: mbarrier address register $(op.base) has no " *
             "preceding .reg declaration"))
@@ -299,7 +507,7 @@ function _emit_mbarrier!(cg::CodeGenState, inst::Instruction, checked)
     args = String[]
     for (kind, operand) in zip(variant.operands, checked.sources)
         rendered_operand = if operand isa LabelOperand &&
-                _mbarrier_register_decl(cg, operand) !== nothing
+                _declared_register(cg, operand) !== nothing
             RegisterOperand(operand.name)
         else
             operand
@@ -332,6 +540,20 @@ function _render_schema_source(op::Operand, cg::CodeGenState, kind::Symbol)
     render_operand(op, cg; type_hint = _schema_operand_hint(kind))
 end
 
+function _render_structured_source(op::Operand, cg::CodeGenState, kind::Symbol)
+    if kind === :imm8
+        return "Val($(_lop3_lut_value(op)))"
+    end
+    integer_text = _structured_integer_text(op)
+    if kind in _STRUCTURED_INTEGER_SOURCE_KINDS && integer_text !== nothing
+        carrier = _structured_integer_carrier_type(kind)
+        return _ptx_integer_carrier_expr(integer_text, carrier)
+    elseif kind === :pred && integer_text !== nothing
+        return _ptx_predicate_constant(integer_text) ? "true" : "false"
+    end
+    _render_schema_source(op, cg, kind)
+end
+
 function emit_instruction!(cg::CodeGenState, inst::Instruction)
     # Drop debug directives.
     (inst.opcode == ".loc" || inst.opcode == ".file") && return
@@ -351,11 +573,14 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     mbarrier_schema === nothing ||
         return _emit_mbarrier!(cg, inst, mbarrier_schema)
 
+    structured_checked = _instruction_structured_result_schema(cg, inst)
+
     # Close fixed-result grammar islands before any instruction can be erased
     # by pointer-alias absorption. The schema also provides a distinct type
     # hint for every source operand; one terminal hint is wrong for mixed
     # precision, mixed-sign dot products, widened arithmetic, and cvt.pack.
-    scalar_schema = _instruction_scalar_result_schema(inst)
+    scalar_schema = structured_checked === nothing ?
+                    _instruction_scalar_result_schema(inst) : nothing
 
     if inst.opcode == "ret" && isempty(inst.operands)
         if inst.predicate === nothing
@@ -396,16 +621,17 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     # register from a translated shared symbol or an existing alias, record
     # the alias and emit nothing. Use sites of the dst register are
     # substituted via `pointer_aliases` in `render_operand`.
-    scalar_schema === nothing && inst.predicate === nothing &&
+    structured_checked === nothing && scalar_schema === nothing &&
+        inst.predicate === nothing &&
         _try_alias_def!(cg, inst) && return
 
-    # PipeOperand destination needs an extra modifier — `.dual` for setp,
-    # `.pred` for shfl — so the wrapped multi-output method dispatches.
-    modifiers = inst.modifiers
-    if !isempty(inst.operands) && inst.operands[1] isa PipeOperand
-        if inst.opcode == "setp"
-            modifiers = (".dual", modifiers...)
-        elseif inst.opcode == "shfl"
+    # Structured-result schemas choose their reviewed API modifiers. Shfl's
+    # existing intrinsic wrapper retains its trailing `.pred` selector.
+    modifiers = structured_checked === nothing ? inst.modifiers :
+                Tuple("." * string(mod) for mod in structured_checked.mods)
+    if structured_checked === nothing && !isempty(inst.operands) &&
+            inst.operands[1] isa PipeOperand
+        if inst.opcode == "shfl"
             modifiers = (modifiers..., ".pred")
         end
     end
@@ -437,8 +663,14 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
         return
     end
 
-    dst_expr, dst_names = render_dst(inst.operands[1], cg)
-    src_strs = if scalar_schema === nothing
+    dst_expr, dst_names = structured_checked === nothing ?
+                          render_dst(inst.operands[1], cg) :
+                          _render_structured_dst(inst.operands[1], cg)
+    src_strs = if structured_checked !== nothing
+        [_render_structured_source(op, cg, kind)
+         for (op, kind) in zip(inst.operands[2:end],
+                               structured_checked.schema.operands)]
+    elseif scalar_schema === nothing
         [render_operand(op, cg; type_hint) for op in inst.operands[2:end]]
     else
         [_render_schema_source(op, cg, kind)
