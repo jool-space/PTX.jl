@@ -155,6 +155,9 @@ function _cvt_immediate_module(instructions;
                                .reg .b16 %b16<8>;
                                .reg .b32 %r<16>;
                                .reg .b64 %rd<8>;
+                               .reg .u16 %u16<8>;
+                               .reg .s16 %s16<8>;
+                               .reg .u32 %u32<8>;
                                """)
     """
     .version 9.3
@@ -180,6 +183,10 @@ end
         cvt.rn.f32.s32 %f0, -7;
         cvt.rn.f32.u8 %f1, 255;
         cvt.u64.u32 %rd0, 17;
+        cvt.u16.u8 %u160, 256;
+        cvt.s16.s8 %s160, 255;
+        cvt.u32.u32 %u320, -1;
+        cvt.u32.u32 %u321, 0x100000000;
         cvt.rn.f16.f32 %h0, 1.25;
         cvt.rn.f16.f32 %h1, 0F3fc00000;
         cvt.rn.f16.f32 %h2, 0D3ff8000000000000;
@@ -196,9 +203,13 @@ end
     out = PTX.ptx_to_julia(source)
     _assert_parseable_julia(out)
     for line in (
-        "f0 = ptx\"cvt.rn.f32.s32\"(Int32(-7))",
-        "f1 = ptx\"cvt.rn.f32.u8\"(UInt8(255))",
-        "rd0 = ptx\"cvt.u64.u32\"(UInt32(17))",
+        "f0 = ptx\"cvt.rn.f32.s32\"((-7) % Int32)",
+        "f1 = ptx\"cvt.rn.f32.u8\"((255) % UInt8)",
+        "rd0 = ptx\"cvt.u64.u32\"((17) % UInt32)",
+        "u160 = ptx\"cvt.u16.u8\"((256) % UInt8)",
+        "s160 = ptx\"cvt.s16.s8\"((255) % Int8)",
+        "u320 = ptx\"cvt.u32.u32\"((-1) % UInt32)",
+        "u321 = ptx\"cvt.u32.u32\"((0x100000000) % UInt32)",
         "h0 = ptx\"cvt.rn.f16.f32\"(Float32(1.25))",
         "h1 = ptx\"cvt.rn.f16.f32\"(Float32(reinterpret(Float32, 0x3fc00000)))",
         "h2 = ptx\"cvt.rn.f16.f32\"(Float32(reinterpret(Float64, 0x3ff8000000000000)))",
@@ -206,8 +217,8 @@ end
         "fd0 = ptx\"cvt.f64.f32\"(Float32(reinterpret(Float64, 0x3ff0000000000000)))",
         "b160 = ptx\"cvt.rn.satfinite.e4m3x2.f32\"(Float32(1.0), Float32(2.0))",
         "f3 = ptx\"cvt.rn.f32.u32\"(Val(32))",
-        "f4 = ptx\"cvt.rn.f32.u32\"(UInt32((32 >> 1)))",
-        "r0 = ptx\"cvt.rn.scaled::n2::ue8m0.bf16x2.e4m3x2\"(b161, UInt16(0x7f7f))",
+        "f4 = ptx\"cvt.rn.f32.u32\"(((32 >> 1)) % UInt32)",
+        "r0 = ptx\"cvt.rn.scaled::n2::ue8m0.bf16x2.e4m3x2\"(b161, (0x7f7f) % UInt16)",
         "r2 = ptx\"cvt.rs.f16x2.f32\"(Float32(3.0), Float32(4.0), r1)",
         "r3 = ptx\"cvt.rs.satfinite.e4m3x4.f32\"((f5, f6, f7, f8), r4)",
         "r5 = ptx\"cvt.pack.sat.u8.s32.b32\"(Int32(1), Int32(2), UInt32(3))",
@@ -279,7 +290,7 @@ end
     accepted = PTX.ptx_to_julia(_cvt_immediate_module(
         "cvt.future_modifier.rn.f32.s32 %f0, 7;"))
     @test occursin(
-        "f0 = ptx\"cvt.future_modifier.rn.f32.s32\"(Int32(7))",
+        "f0 = ptx\"cvt.future_modifier.rn.f32.s32\"((7) % Int32)",
         accepted)
     @test_throws ArgumentError PTX.ptx_to_julia(_cvt_immediate_module(
         "cvt.f32.s32.future_modifier %f0, 7;"))

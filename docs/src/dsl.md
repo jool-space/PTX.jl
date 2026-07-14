@@ -238,6 +238,15 @@ literals for `.f32` and `.f64`. Exact `0f...` and `0d...` literals keep
 their bit patterns and are converted to the declared source width, even when
 their spelling uses the other exact-literal width.
 
+Integer immediates use PTX's use-site conversion rule: the 64-bit integer
+constant is reduced modulo the operand width before the typed Julia call. Thus
+a `.u8` source of `256` carries `UInt8(0)`, while a `.s8` source of
+`255` carries `Int8(-1)`; legal PTX is not rejected by Julia's checked
+integer constructors. This guarantee covers the immediate tokens and constant
+expressions the current frontend already structures. PTX `U` suffixes,
+C-style octal tokens, and other lexer/expression gaps remain tracked under
+`FRONT-LEXER-001` and are not claimed here.
+
 PTX constants cannot directly carry `.f16`, `.bf16`, or packed alternate
 floating-point source formats, so those positions require registers rather than
 silently retyping a Julia number. Stochastic x4 forms additionally require a

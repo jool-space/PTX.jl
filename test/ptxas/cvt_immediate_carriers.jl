@@ -13,6 +13,10 @@ function _cvt_immediate_fundamental!(ints, floats)
         ints[6] = UInt64(ptx"cvt.s32.s16"(Int16(1025)))
         ints[7] = UInt64(ptx"cvt.s64.s32"(Int32(65537)))
         ints[8] = UInt64(ptx"cvt.s32.s64"(Int64(19)))
+        ints[9] = ptx"cvt.u16.u8"(256 % UInt8)
+        ints[10] = UInt64(ptx"cvt.s16.s8"(255 % Int8))
+        ints[11] = ptx"cvt.u32.u32"(-1 % UInt32)
+        ints[12] = ptx"cvt.u32.u32"(0x100000000 % UInt32)
 
         # PTX exact literals retain their spelling width, then convert to the
         # cvt source type at use. These are the two cross-width renderer cases.
@@ -112,6 +116,33 @@ const _CVT_S2F6_SYNTAX_TYPES = Tuple{UInt16}
     @test occursin(
         r"call i16 asm \"cvt\.s16\.s8 \$0, \$1;\", \"=h,h\"\(i8 11\)",
         narrow_llvm)
+    @test occursin(
+        r"call i16 asm \"cvt\.u16\.u8 \$0, \$1;\", \"=h,h\"\(i8 0\)",
+        narrow_llvm)
+    @test occursin(
+        r"call i16 asm \"cvt\.s16\.s8 \$0, \$1;\", \"=h,h\"\(i8 -1\)",
+        narrow_llvm)
+    @test occursin(
+        r"call i32 asm \"cvt\.u32\.u32 \$0, \$1;\", \"=r,r\"\(i32 -1\)",
+        narrow_llvm)
+    @test occursin(
+        r"call i32 asm \"cvt\.u32\.u32 \$0, \$1;\", \"=r,r\"\(i32 0\)",
+        narrow_llvm)
+
+    narrow_ptx = emit_ptx(_cvt_immediate_fundamental!,
+                          _CVT_FUNDAMENTAL_TYPES; cap = v"7.5")
+    @test occursin(
+        r"mov\.b16\s+%rs\d+, 0;\s+// begin inline asm\s+cvt\.u16\.u8",
+        narrow_ptx)
+    @test occursin(
+        r"mov\.b16\s+%rs\d+, 255;\s+// begin inline asm\s+cvt\.s16\.s8",
+        narrow_ptx)
+    @test occursin(
+        r"mov\.b32\s+%r\d+, -1;\s+// begin inline asm\s+cvt\.u32\.u32",
+        narrow_ptx)
+    @test occursin(
+        r"mov\.b32\s+%r\d+, 0;\s+// begin inline asm\s+cvt\.u32\.u32",
+        narrow_ptx)
 
     cases = (
         (_cvt_immediate_fundamental!, _CVT_FUNDAMENTAL_TYPES,

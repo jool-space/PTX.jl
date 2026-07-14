@@ -556,6 +556,9 @@ end
 
 const _CVT_IMMEDIATE_DATA_SOURCES =
     Set((:u8, :u16, :u32, :u64, :s8, :s16, :s32, :s64, :f32, :f64))
+const _CVT_INTEGER_OPERAND_KINDS =
+    Set((:u8, :u16, :u32, :u64, :s8, :s16, :s32, :s64,
+         :b8, :b16, :b32, :b64))
 const _PTX_EXACT_FLOAT_LITERAL = r"^0[fF][0-9a-fA-F]{8}$|^0[dD][0-9a-fA-F]{16}$"
 const _PTX_DECIMAL_FLOAT_LITERAL =
     r"^-?(?:(?:[0-9]+\.[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|[0-9]+[eE][+-]?[0-9]+)$"
@@ -616,6 +619,17 @@ function _render_cvt_source(op::Operand, cg::CodeGenState, kind::Symbol,
         return exact ? string(_schema_operand_hint(kind) === :f32 ? "Float32" :
                               "Float64", "(", rendered, ")") :
                        render_operand(op, cg; type_hint = kind)
+    end
+
+    if op isa ImmediateOperand && kind in _CVT_INTEGER_OPERAND_KINDS
+        # PTX integer constants start as s64/u64 and are converted modulo the
+        # instruction operand width at use (§4.5.1). Julia T(expr) conversion
+        # is checked and would throw for legal PTX such as a .u8 source of 256;
+        # expr % T is Julia's modular integer conversion and preserves both
+        # PTX truncation semantics and the wrapper's concrete carrier type.
+        rendered = render_operand(op, cg)
+        carrier = MODIFIER_TO_JULIA_TYPE[kind]
+        return "($rendered) % $carrier"
     end
 
     _render_schema_source(op, cg, kind)

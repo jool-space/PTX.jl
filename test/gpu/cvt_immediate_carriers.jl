@@ -1,4 +1,4 @@
-# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=7.5
+# TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=8
 #
 # Semantic representatives for the exact Julia carriers emitted by the
 # ordinary-cvt transpiler. Host tests prove source-position selection; offline
@@ -12,6 +12,11 @@ function _cvt_immediate_runtime!(uout, sout, fout)
         uout[3] = ptx"cvt.u64.u32"(UInt32(65539))
         sout[1] = ptx"cvt.s16.s8"(Int8(-11))
         sout[2] = ptx"cvt.s32.s16"(Int16(-1025))
+        # Exact Julia expressions emitted for PTX §4.5.1 use-site truncation.
+        uout[6] = ptx"cvt.u16.u8"(256 % UInt8)
+        sout[3] = ptx"cvt.s16.s8"(255 % Int8)
+        uout[7] = ptx"cvt.u32.u32"(-1 % UInt32)
+        uout[8] = ptx"cvt.u32.u32"(0x100000000 % UInt32)
 
         # These expressions are emitted for cross-width exact 0d/0f source
         # constants. PTX converts the literal to the declared source type at
@@ -28,8 +33,8 @@ function _cvt_immediate_runtime!(uout, sout, fout)
 end
 
 @testset "ordinary cvt transpiler carriers execute with ISA semantics" begin
-    uout = CUDACore.zeros(UInt64, 5)
-    sout = CUDACore.zeros(Int64, 2)
+    uout = CUDACore.zeros(UInt64, 8)
+    sout = CUDACore.zeros(Int64, 3)
     fout = CUDACore.zeros(Float64, 2)
     @cuda threads=1 _cvt_immediate_runtime!(uout, sout, fout)
     CUDACore.synchronize()
@@ -40,7 +45,10 @@ end
         65539,
         0x3c004000, # a=1.0 in upper f16 lane, b=2.0 in lower lane
         0x40404080, # a=3.0 in upper bf16 lane, b=4.0 in lower lane
+        0,
+        0xffffffff,
+        0,
     ]
-    @test Array(sout) == Int64[-11, -1025]
+    @test Array(sout) == Int64[-11, -1025, -1]
     @test Array(fout) == Float64[1.5, 2.5]
 end
