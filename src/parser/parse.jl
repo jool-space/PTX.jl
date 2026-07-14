@@ -81,7 +81,8 @@ end
 function _skip_newlines_and_comments!(s::ParserState)
     blank_lines = 0
     prev_was_newline = false
-    while _peek_kind(s) in (TokenKind.NEWLINE, TokenKind.COMMENT)
+    while _peek_kind(s) in (TokenKind.NEWLINE, TokenKind.COMMENT,
+                            TokenKind.PREPROCESSOR)
         t = _peek(s)
         if t.kind == TokenKind.NEWLINE
             if prev_was_newline
@@ -159,13 +160,18 @@ function parse(source::AbstractString)
 
     leading = Statement[]
     prev_nl = false
-    while _peek_kind(s) in (TokenKind.NEWLINE, TokenKind.COMMENT)
+    while _peek_kind(s) in (TokenKind.NEWLINE, TokenKind.COMMENT, TokenKind.PREPROCESSOR)
         t = _peek(s)
         if t.kind == TokenKind.NEWLINE
             prev_nl && push!(leading, BlankLine())
             prev_nl = true
-        else
+        elseif t.kind == TokenKind.COMMENT
             push!(leading, Comment(t.leading_whitespace * t.text))
+            prev_nl = false
+        else
+            # cpp owns the line; retain it without pretending it is a PTX
+            # comment or interpreting its replacement-list tokens.
+            push!(leading, RawLine(t.leading_whitespace * t.text))
             prev_nl = false
         end
         _advance!(s)
@@ -192,6 +198,12 @@ function parse(source::AbstractString)
         end
         if t.kind == TokenKind.COMMENT
             push!(directives, Comment(t.leading_whitespace * t.text))
+            _advance!(s)
+            prev_nl = false
+            continue
+        end
+        if t.kind == TokenKind.PREPROCESSOR
+            push!(directives, RawLine(t.leading_whitespace * t.text))
             _advance!(s)
             prev_nl = false
             continue
@@ -965,6 +977,13 @@ function _parse_body_until!(s::ParserState, end_kind::TokenKind.T)
 
         if t.kind == TokenKind.COMMENT
             push!(statements, Comment(t.leading_whitespace * t.text))
+            _advance!(s)
+            prev_nl = false
+            continue
+        end
+
+        if t.kind == TokenKind.PREPROCESSOR
+            push!(statements, RawLine(t.leading_whitespace * t.text))
             _advance!(s)
             prev_nl = false
             continue

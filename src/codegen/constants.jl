@@ -6,9 +6,9 @@
 # This covers every integer-literal/operator shape the current PTX parser can
 # represent structurally: decimal/hex/octal literals, WARP_SZ, unary operators,
 # signed/unsigned casts, arithmetic, shifts, comparisons, bitwise AND/OR, and
-# logical AND/OR. Binary literals, U suffixes, XOR, and ternary expressions are
-# still rejected by the lexer and remain tracked by FRONT-LEXER-001 rather than
-# being silently broadened here.
+# logical AND/OR. The lexer accepts binary literals, U suffixes, XOR, and
+# ternary punctuation, but this deliberately smaller evaluator still rejects
+# shapes it does not implement rather than copying them into Julia code.
 
 struct _PTXIntValue
     bits::UInt64

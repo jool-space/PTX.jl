@@ -1,4 +1,5 @@
 using .PTX: Operation, RawOperation, build_call, format_call
+using .PTX.Parser: LexError
 
 const _STRUCTURED_GENERAL_SECTION =
     "ptx/9-instruction-set/9.7.6.2-comparison-and-selection-instructions-setp.md"
@@ -375,10 +376,23 @@ end
     end
 
     for bad in ("-1", "256", "(1 << 8)", "WARP_SZ_limit", "%r4",
-                "((1 / 0) << 0)", "09", "18446744073709551616")
+                "((1 / 0) << 0)", "0b1", "1U", "18446744073709551616")
         @test_throws ArgumentError _structured_transpile(
             "lop3.b32 %r0, %r1, %r2, %r3, $bad;")
     end
+
+    # Invalid C-style octal is a malformed PTX token, not a downstream
+    # constant-evaluator policy failure.
+    error = try
+        _structured_transpile("lop3.b32 %r0, %r1, %r2, %r3, 09;")
+        nothing
+    catch caught
+        caught
+    end
+    @test error isa LexError
+    @test error.line == 12
+    @test error.col == 30
+    @test occursin("octal integer literal", error.msg)
 end
 
 @testset "PTX 64-bit integer constant semantics" begin
