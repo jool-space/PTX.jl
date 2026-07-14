@@ -1,7 +1,21 @@
 id = "B128-COVERAGE-001"
-status = "confirmed"
+status = "resolved"
 severity = "high"
 category = "coverage_gap"
 summary = "Query-cancel and b128 ld/st/atom forms lack a common result and inline-assembly carrier policy."
 source_handoffs = ["wave1-lowering.md", "wave4-data-movement.md"]
-validation_tier = "host construction failure"
+validation_tier = "closed ISA form ledger, host ABI and transpiler oracles, offline ptxas target partitions, and Ada runtime"
+
+[resolution]
+pr = 38
+commit = "217e2bfbabc605cd1124e6f7cf1f3b9b3d7d497a"
+scope = "full"
+evidence = [
+  "PTX ISA 9.3 sections 5.1.1, 5.2.1, 5.4.2, and 6.4.1 establish scalar b128 registers, the legal v2.b64/v4.b32 bridge shapes, and the independent 32/64-bit address carriers; sections 9.7.9.4, 9.7.9.8-9.7.9.11, 9.7.14.5, and 9.7.14.19 define the reviewed instruction families",
+  "a materialized 2382-form ledger closes exact scalar-b128 grammar across 1528 ld, 546 st, 300 atom, two ldu, five query-cancel, and one mov bridge spelling; nearby unsupported b128 forms fail loud in direct, raw, lowering-introspection, and transpiler paths",
+  "the public low-word-first B128 carrier uses block-local PTX .b128 temporaries and mov.b128 packing/unpacking so no unsupported 128-bit LLVM inline-assembly constraint crosses the ABI boundary",
+  "focused B128 plus parser/IR validation passes 10140/10140 assertions, and the impacted address-role, codegen, instruction, and audit smoke passes 3270/3270 after rebasing onto PR 37",
+  "CUDA 13.3 ptxas passes 24/24 probes across retained sm_75, sm_80, sm_90, and sm_100 targets; sm_75 is the earliest compiler-retained evidence target while the ledger preserves the ISA's sm_70 semantic floor",
+  "RTX 6000 Ada CC 8.9 runtime passes 5/5 scalar b128 load/store round-trip assertions; sm_90 atom and sm_100 query-cancel paths are supported by exact host ABI and offline ptxas evidence rather than overstated Ada runtime coverage",
+  "all four external clusterlaunchcontrol mov.b128 corpus files now pass structural transpilation instead of relying on a destination-less rejection carve-out",
+]
