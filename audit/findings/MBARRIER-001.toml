@@ -8,7 +8,7 @@ validation_tier = "host assembly shape; sm80/sm90 ptxas pending"
 
 [resolution]
 pr = 30
-commit = "b8cf76c4f2afb9788a2f358971201f76eb167ac2"
+commit = "35ee26e766eedeefd1ac3a201448da43be33125f"
 scope = "full"
 evidence = [
   "closed PTX 9.3 ledger covers 480 canonical, sink-selected, grouped-report, and quarantined compatibility forms without terminal-b64 result inference",

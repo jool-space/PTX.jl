@@ -8,7 +8,7 @@ validation_tier = "ISA semantics and source audit"
 
 [resolution]
 pr = 30
-commit = "b8cf76c4f2afb9788a2f358971201f76eb167ac2"
+commit = "35ee26e766eedeefd1ac3a201448da43be33125f"
 scope = "full"
 evidence = [
   "cp.async.mbarrier.arrive documentation now distinguishes implicit arrival accounting from mbarrier transaction count",
