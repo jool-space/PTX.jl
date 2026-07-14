@@ -95,6 +95,33 @@ vector_add / predicates / branches / shared_memory / function_call /
 mbarrier_full / wgmma_simple / cluster_ops + a 579-line
 `less_slow_sm90a.ptx`).
 
+### Vector declarations
+
+Declaration vector shape is modeled independently from scalar element type on
+`IR.RegDecl` and `IR.VarDecl`. The accepted matrix is the closed PTX 9.3
+§5.4.2 grammar, rather than a storage-width heuristic:
+
+| shape | fundamental element types |
+|---|---|
+| `.v2` | `.b8/.b16/.b32/.b64`, `.u8/.u16/.u32/.u64`, `.s8/.s16/.s32/.s64`, `.f16/.f16x2/.f32/.f64` |
+| `.v4` | `.b8/.b16/.b32`, `.u8/.u16/.u32`, `.s8/.s16/.s32`, `.f16/.f16x2/.f32` |
+
+These shapes are accepted for `.reg`, `.global`, `.const`, `.local`, and
+`.shared` declarations. Predicate and `.b128` elements, `.v4` 64-bit
+elements, vector `.param` declarations, and declaration spellings using
+`.shared::cta` or `.shared::cluster` are rejected structurally. Alternate
+floating-point formats such as `.bf16` and `.tf32` are also excluded: PTX
+§5.2.3 does not classify them as fundamental types, even when their storage
+width would fit the 128-bit vector limit.
+
+Explicit `.align` and array dimensions remain in declaration order through
+parse/format and structural comparison. An omitted alignment stays omitted;
+the formatter does not manufacture PTX's default alignment to the vector's
+overall size. Invalid vector declaration lines enter the normal `RawLine`
+recovery path, so one unsupported declaration does not abort parsing the rest
+of a function or module. Aggregate-layout lowering in the PTX-to-Julia
+transpiler is a separate support boundary from this lossless IR model.
+
 ## Transpiler output
 
 Each Julia function carries a `# @ptx_kernel` metadata header that

@@ -1,7 +1,20 @@
 id = "FRONT-VECTOR-001"
-status = "confirmed"
+status = "resolved"
 severity = "high"
 category = "parser"
 summary = "Legal v2/v4 declarations throw ArgumentError outside the advertised RawLine recovery path."
 source_handoffs = ["wave6-frontend-tests.md"]
-validation_tier = "direct parser probes"
+validation_tier = "closed PTX 9.3 declaration ledger; host parser/IR; offline ptxas"
+
+[resolution]
+pr = 42
+commit = "17da7f6f91e643cca872f75b6f7c56e143bcfe90"
+scope = "full"
+evidence = [
+  "PTX ISA 9.3 sections 5.2.1, 5.2.3, 5.4.2, 5.4.3, and 5.4.5 establish the explicit 28-cell fundamental-type matrix, vector array behavior, and overall-size default alignment; the state-space rules and direct ptxas evidence close the five modeled declaration spaces",
+  "IR.RegDecl and IR.VarDecl carry vector shape independently from scalar element type through parsing, structural formatting, normalization, canonicalization, and diff; whole roots and x/y/z/w/r/g/b/a component aliases canonicalize together",
+  "illegal vector types and state spaces become line-local RawLine recovery instead of escaping ArgumentError, while programmatic construction fails loud at the IR boundary",
+  "1232 focused host assertions exhaustively cover the independent shape/type/state ledger, legal structural round trips, modifier order, alignment, arrays, recovery, construction, and collision-sensitive comparison",
+  "CUDA 13.3 ptxas accepts all 140 legal state-by-shape/type cells at sm_75 plus an explicitly aligned vector array, and rejects six nearby non-fundamental, over-width, predicate, and illegal-state forms",
+  "existing IR, parser, transpiler, and external-corpus regressions pass with the new declaration field",
+]

@@ -70,6 +70,66 @@ function state_space_from_ptx(text::AbstractString)
     STATE_SPACE_FROM_PTX[String(raw)]
 end
 
+# PTX ISA 9.3 §5.4.2 defines declaration vectors as an independent shape
+# modifier, not as part of the scalar element type.  Keep the reviewed matrix
+# explicit: alternate floating-point formats are deliberately absent because
+# §5.2.3 says they are not fundamental types, even when their storage width
+# would fit the vector-size limit.
+@enumx VectorShape begin
+    V2; V4
+end
+
+const VECTOR_SHAPE_NAMES = Dict{VectorShape.T, String}(
+    VectorShape.V2 => "v2",
+    VectorShape.V4 => "v4",
+)
+const VECTOR_SHAPE_FROM_PTX =
+    Dict{String, VectorShape.T}(v => k for (k, v) in VECTOR_SHAPE_NAMES)
+
+ptx(s::VectorShape.T) = "." * VECTOR_SHAPE_NAMES[s]
+
+function vector_shape_from_ptx(text::AbstractString)
+    raw = startswith(text, ".") ? SubString(text, 2) : text
+    haskey(VECTOR_SHAPE_FROM_PTX, String(raw)) ||
+        throw(ArgumentError("unknown vector shape: $text"))
+    VECTOR_SHAPE_FROM_PTX[String(raw)]
+end
+
+const VECTOR_DECLARATION_TYPES = Dict{VectorShape.T, Tuple}(
+    VectorShape.V2 => (
+        ScalarType.B8, ScalarType.B16, ScalarType.B32, ScalarType.B64,
+        ScalarType.U8, ScalarType.U16, ScalarType.U32, ScalarType.U64,
+        ScalarType.S8, ScalarType.S16, ScalarType.S32, ScalarType.S64,
+        ScalarType.F16, ScalarType.F16X2, ScalarType.F32, ScalarType.F64,
+    ),
+    VectorShape.V4 => (
+        ScalarType.B8, ScalarType.B16, ScalarType.B32,
+        ScalarType.U8, ScalarType.U16, ScalarType.U32,
+        ScalarType.S8, ScalarType.S16, ScalarType.S32,
+        ScalarType.F16, ScalarType.F16X2, ScalarType.F32,
+    ),
+)
+
+const VECTOR_DECLARATION_STATE_SPACES = (
+    StateSpace.REG, StateSpace.GLOBAL, StateSpace.CONST,
+    StateSpace.LOCAL, StateSpace.SHARED,
+)
+
+vector_declaration_legal(shape::VectorShape.T, type::ScalarType.T,
+                         state_space::StateSpace.T) =
+    type in VECTOR_DECLARATION_TYPES[shape] &&
+    state_space in VECTOR_DECLARATION_STATE_SPACES
+
+function validate_vector_declaration(shape::VectorShape.T,
+                                     type::ScalarType.T,
+                                     state_space::StateSpace.T)
+    vector_declaration_legal(shape, type, state_space) && return nothing
+    throw(ArgumentError("illegal PTX vector declaration $(ptx(state_space)) " *
+                        "$(ptx(shape)) $(ptx(type)); PTX ISA 9.3 §5.4.2 " *
+                        "requires v2/v4 fundamental non-predicate elements, " *
+                        "at most 128 bits overall, in a declaration state space"))
+end
+
 @enumx LinkingDirective begin
     VISIBLE; EXTERN; WEAK; COMMON
 end

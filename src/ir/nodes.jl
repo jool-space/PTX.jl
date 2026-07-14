@@ -130,12 +130,20 @@ Base.@kwdef struct Label <: Statement
 end
 Label(name::AbstractString) = Label(; name = String(name))
 
-# `.reg .type name<count>;`. `count = nothing` for a single-register decl.
+# `.reg [.v2|.v4] .type name<count>;`. `count = nothing` for a
+# single-register declaration; `vector_shape = nothing` is scalar.
 Base.@kwdef struct RegDecl <: Statement
     type::ScalarType.T
     name::String
     count::Union{Int, Nothing} = nothing
+    vector_shape::Union{VectorShape.T, Nothing} = nothing
     formatting::Union{FormattingInfo, Nothing} = nothing
+
+    function RegDecl(type, name, count, vector_shape, formatting)
+        vector_shape === nothing ||
+            validate_vector_declaration(vector_shape, type, StateSpace.REG)
+        new(type, name, count, vector_shape, formatting)
+    end
 end
 
 # Variable declaration; covers both function-body and module-level
@@ -148,7 +156,16 @@ Base.@kwdef struct VarDecl <: Statement
     alignment::Union{Int, Nothing} = nothing
     initializer::Union{Tuple{Vararg{String}}, Nothing} = nothing
     linking::Union{LinkingDirective.T, Nothing} = nothing
+    vector_shape::Union{VectorShape.T, Nothing} = nothing
     formatting::Union{FormattingInfo, Nothing} = nothing
+
+    function VarDecl(state_space, type, name, array_size, alignment,
+                     initializer, linking, vector_shape, formatting)
+        vector_shape === nothing ||
+            validate_vector_declaration(vector_shape, type, state_space)
+        new(state_space, type, name, array_size, alignment, initializer,
+            linking, vector_shape, formatting)
+    end
 end
 
 Base.@kwdef struct PragmaDirective <: Statement

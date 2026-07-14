@@ -70,7 +70,8 @@ function _normalize_statements(statements::Tuple{Vararg{Statement}})
             # Legacy module-scoped registers are still semantic PTX. They are
             # uncommon under the ABI, but formatting must not make their
             # comparison noisy.
-            push!(out, RegDecl(type = s.type, name = s.name, count = s.count))
+            push!(out, RegDecl(type = s.type, name = s.name, count = s.count,
+                               vector_shape = s.vector_shape))
         elseif s isa VarDecl
             push!(out, _normalize_var_decl(s))
         elseif s isa Label
@@ -108,6 +109,7 @@ _normalize_var_decl(v::VarDecl) = VarDecl(
     alignment   = v.alignment,
     initializer = v.initializer,
     linking     = v.linking,
+    vector_shape = v.vector_shape,
     formatting  = nothing,
 )
 
@@ -214,8 +216,8 @@ function _diff_function!(diffs::Vector{String}, af::Function, bf::Function,
 end
 
 _stmt_summary(s::Instruction) = s.opcode * join(s.modifiers)
-_stmt_summary(s::RegDecl)     = ".reg $(s.type) $(s.name)$(s.count === nothing ? "" : "<$(s.count)>")"
-_stmt_summary(s::VarDecl)     = "VarDecl($(s.name))"
+_stmt_summary(s::RegDecl)     = ".reg $(s.vector_shape === nothing ? "" : "$(s.vector_shape) ")$(s.type) $(s.name)$(s.count === nothing ? "" : "<$(s.count)>")"
+_stmt_summary(s::VarDecl)     = "VarDecl($(s.vector_shape === nothing ? "" : "$(s.vector_shape) ")$(s.name))"
 _stmt_summary(s::Label)       = "$(s.name):"
 _stmt_summary(s::RawLine)     = "RawLine($(repr(s.text)))"
 _stmt_summary(s::Block)       = "Block($(length(s.body)) statements)"

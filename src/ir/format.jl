@@ -58,7 +58,8 @@ function format(rd::RegDecl)
     raw = _raw_line(rd.formatting)
     raw !== nothing && return raw
     suffix = rd.count === nothing ? "" : "<$(rd.count)>"
-    _indent(rd.formatting) * ".reg " * ptx(rd.type) * " " * rd.name * suffix * ";"
+    shape = rd.vector_shape === nothing ? "" : ptx(rd.vector_shape) * " "
+    _indent(rd.formatting) * ".reg " * shape * ptx(rd.type) * " " * rd.name * suffix * ";"
 end
 
 function format(vd::VarDecl)
@@ -68,6 +69,7 @@ function format(vd::VarDecl)
     vd.linking === nothing || push!(parts, ptx(vd.linking))
     push!(parts, ptx(vd.state_space))
     vd.alignment === nothing || push!(parts, ".align $(vd.alignment)")
+    vd.vector_shape === nothing || push!(parts, ptx(vd.vector_shape))
     push!(parts, ptx(vd.type))
     name = vd.array_size === nothing ? vd.name : "$(vd.name)[$(vd.array_size)]"
     push!(parts, name)
