@@ -75,6 +75,8 @@ struct Predicate
 end
 Predicate(register::AbstractString) = Predicate(String(register), false)
 
+abstract type Statement end
+
 struct Version
     major::Int
     minor::Int
@@ -86,9 +88,21 @@ end
 
 struct AddressSize
     size::Int
+    function AddressSize(size::Int)
+        size in (32, 64) ||
+            throw(ArgumentError("PTX address size must be 32 or 64, got $size"))
+        new(size)
+    end
 end
 
-abstract type Statement end
+# A `.target` after the required module-header target changes the feature set
+# allowed while parsing subsequent PTX.  It is a statement (rather than a
+# second field on `Module`) because its position relative to declarations and
+# functions is semantic and must survive structural round trips.
+Base.@kwdef struct TargetDirective <: Statement
+    target::Target
+    formatting::Union{FormattingInfo, Nothing} = nothing
+end
 
 # `opcode`: base opcode (`"mov"`, `"ld"`, `"wgmma"`, `"bra"`)
 # `modifiers`: dot-prefixed strings in declaration order (`(".global", ".nc", ".b32")`)
@@ -204,6 +218,10 @@ Base.@kwdef struct Module
     version::Version
     target::Target
     address_size::AddressSize
+    # Omission is semantically AddressSize(32), per PTX ISA 11.1.3, but must
+    # remain distinguishable so structural formatting does not invent a
+    # directive that was absent from the source.
+    address_size_explicit::Bool = true
     leading::Tuple{Vararg{Statement}} = ()
     directives::Tuple{Vararg{Statement}} = ()
     raw_header::Union{String, Nothing} = nothing

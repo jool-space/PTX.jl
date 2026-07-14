@@ -204,5 +204,7 @@ function canonicalize(m::Module)
         end
     end
     Module(version = m.version, target = m.target,
-           address_size = m.address_size, directives = Tuple(dirs))
+           address_size = m.address_size,
+           address_size_explicit = m.address_size_explicit,
+           directives = Tuple(dirs))
 end

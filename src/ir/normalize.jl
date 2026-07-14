@@ -9,6 +9,7 @@ unraw(m::Module) = Module(
     version      = m.version,
     target       = m.target,
     address_size = m.address_size,
+    address_size_explicit = m.address_size_explicit,
     leading      = m.leading,
     directives   = m.directives,
     raw_header   = m.raw_header,
@@ -25,6 +26,7 @@ normalize(m::Module) = Module(
     version      = m.version,
     target       = m.target,
     address_size = m.address_size,
+    address_size_explicit = m.address_size_explicit,
     leading      = (),
     directives   = _normalize_directives(m.directives),
     raw_header   = nothing,
@@ -81,6 +83,8 @@ function _normalize_statements(statements::Tuple{Vararg{Statement}})
                                       formatting = nothing))
         elseif s isa PragmaDirective
             push!(out, PragmaDirective(value = s.value))
+        elseif s isa TargetDirective
+            push!(out, TargetDirective(target = s.target, formatting = nothing))
         else
             throw(ArgumentError("normalize does not handle statement type $(typeof(s)); add an explicit structural normalization case"))
         end
@@ -123,6 +127,8 @@ function diff(a::Module, b::Module; entry_only::Bool = false)
     a.version       == b.version       || push!(diffs, "version: $(a.version) vs $(b.version)")
     a.target        == b.target        || push!(diffs, "target: $(a.target) vs $(b.target)")
     a.address_size  == b.address_size  || push!(diffs, "address_size: $(a.address_size) vs $(b.address_size)")
+    a.address_size_explicit == b.address_size_explicit ||
+        push!(diffs, "address_size_explicit: $(a.address_size_explicit) vs $(b.address_size_explicit)")
 
     a_directives = _comparison_directives(a.directives, entry_only)
     b_directives = _comparison_directives(b.directives, entry_only)

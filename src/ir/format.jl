@@ -83,6 +83,13 @@ function format(p::PragmaDirective)
     _indent(p.formatting) * ".pragma \"" * p.value * "\";"
 end
 
+function format(t::TargetDirective)
+    raw = _raw_line(t.formatting)
+    raw !== nothing && return raw
+    _indent(t.formatting) * ".target " * join(t.target.targets, ", ") *
+        _trailing(t.formatting)
+end
+
 format(c::Comment)   = c.text
 format(::BlankLine)  = ""
 format(r::RawLine)   = r.text
@@ -169,7 +176,8 @@ function format(m::Module)
     else
         push!(parts, ".version $(m.version.major).$(m.version.minor)")
         push!(parts, ".target " * join(m.target.targets, ", "))
-        push!(parts, ".address_size $(m.address_size.size)")
+        m.address_size_explicit &&
+            push!(parts, ".address_size $(m.address_size.size)")
     end
     for stmt in m.directives
         push!(parts, format(stmt))

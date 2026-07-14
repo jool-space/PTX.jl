@@ -20,6 +20,53 @@ using CUDACore
 using CUDATools
 using CUDACore.GPUCompiler: methodinstance, CompilerJob
 
+# Independent transcription of PTX ISA 9.3 section 11.1.2's target-string
+# introduction notes. Besides the direct header oracle, this identifies
+# provenance-preserving external LLVM fixtures whose synthetic header selects
+# a target newer than their declared language dialect. Those originals must
+# reject, while an in-memory header repair keeps their bodies in structural
+# parser coverage.
+const TEST_HEADER_TARGET_FLOORS = (
+    v"1.0" => ("10", "11"), v"1.2" => ("12", "13"),
+    v"2.0" => ("20",), v"3.0" => ("30",), v"3.1" => ("35",),
+    v"4.0" => ("32", "50"), v"4.1" => ("37", "52"), v"4.2" => ("53",),
+    v"5.0" => ("60", "61", "62"), v"6.0" => ("70",),
+    v"6.1" => ("72",), v"6.3" => ("75",), v"7.0" => ("80",),
+    v"7.1" => ("86",), v"7.4" => ("87",), v"7.8" => ("89", "90"),
+    v"8.0" => ("90a",), v"8.6" => ("100", "100a", "101", "101a"),
+    v"8.7" => ("120", "120a"),
+    v"8.8" => ("100f", "101f", "103", "103f", "103a",
+                "120f", "121", "121f", "121a"),
+    v"9.0" => ("88", "110", "110f", "110a"),
+)
+const TEST_HEADER_TARGET_FLOOR = Dict(
+    suffix => floor for (floor, suffixes) in TEST_HEADER_TARGET_FLOORS
+                    for suffix in suffixes
+)
+
+function _external_header_versions(source::String)
+    version_match = match(r"(?m)^[ \t]*\.version[ \t]+(\d+)\.(\d+)", source)
+    target_match = match(r"(?m)^[ \t]*\.target[ \t]+(?:sm|compute)_([0-9]+[af]?)", source)
+    (version_match === nothing || target_match === nothing) && return nothing
+    declared = VersionNumber(parse(Int, version_match.captures[1]),
+                             parse(Int, version_match.captures[2]))
+    floor = get(TEST_HEADER_TARGET_FLOOR, target_match.captures[1], nothing)
+    floor === nothing && return nothing
+    (; declared, floor)
+end
+
+function _external_header_requires_repair(source::String)
+    versions = _external_header_versions(source)
+    versions !== nothing && versions.declared < versions.floor
+end
+
+function _external_parser_source(source::String)
+    versions = _external_header_versions(source)
+    (versions === nothing || versions.declared >= versions.floor) && return source
+    replacement = ".version $(versions.floor.major).$(versions.floor.minor)"
+    replace(source, r"(?m)^[ \t]*\.version[ \t]+\d+\.\d+" => replacement; count = 1)
+end
+
 isdefined(@__MODULE__, :TestTargets) ||
     include(joinpath(@__DIR__, "target_requirements.jl"))
 
