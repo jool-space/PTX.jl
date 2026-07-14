@@ -217,6 +217,59 @@ const PARAM_ATTRS = Dict(:nocapture => "nocapture", :noalias => "noalias",
 paramattrs(i::Intrinsic, pos::Int)::String =
     join((PARAM_ATTRS[a] for (p, a) in i.argattrs if p == pos), " ")
 
+# Return-position properties use a different LLVM grammar from ordinary
+# parameter attributes: they precede the result type on both declarations and
+# calls. Keep the accepted registry vocabulary closed so a backend bump cannot
+# silently drop a newly introduced return contract.
+const RETURN_ATTRS = Dict(:noundef => "noundef")
+
+function _stored_return_attrs(i::Intrinsic)::Vector{String}
+    attrs = String[]
+    for (pos, attr) in i.argattrs
+        pos == 0 || continue
+        spelling = get(RETURN_ATTRS, attr, nothing)
+        spelling === nothing && error(
+            "$(i.name): unsupported stored return attribute :$attr")
+        push!(attrs, spelling)
+    end
+    unique!(attrs)
+end
+
+# Julia 1.10--1.12 use LLVM 15/16/18, where a stored return range is legally
+# represented as !range metadata on the call result. This spelling remains
+# supported by newer LLVMs as well, while the range(...) return attribute was
+# introduced only in LLVM 19. Use the one cross-version encoding rather than
+# emitting untested conditional declaration grammar.
+const MIN_RETURN_RANGE_LLVM = v"15"
+
+function _return_contract(i::Intrinsic, callret::String;
+                          llvm_version::VersionNumber=Base.libllvm_version)
+    attrs = _stored_return_attrs(i)
+    ranges = [(lo, hi) for (pos, lo, hi) in i.ranges if pos == 0]
+
+    if !isempty(attrs) && callret == "void"
+        error("$(i.name): stored return attributes are illegal on a void return")
+    end
+    isempty(ranges) && return (
+        attrs = join(attrs, " "), call_suffix = "", metadata = "")
+
+    llvm_version >= MIN_RETURN_RANGE_LLVM || error(
+        "$(i.name): stored return ranges require LLVM " *
+        "$(MIN_RETURN_RANGE_LLVM.major)+, got $llvm_version")
+    length(ranges) == 1 || error(
+        "$(i.name): multiple stored return ranges need an explicit union encoding")
+    length(i.ret) == 1 && occursin(r"^i[0-9]+$", callret) || error(
+        "$(i.name): stored return range requires one scalar integer result, got $callret")
+
+    lo, hi = only(ranges)
+    lo != hi || error("$(i.name): stored return range must not be empty")
+    return (
+        attrs = join(attrs, " "),
+        call_suffix = ", !range !0",
+        metadata = "!0 = !{ $callret $lo, $callret $hi }",
+    )
+end
+
 # --- Typed-pointer compatibility ----------------------------------------------
 #
 # All pointer types are spelled typed with an `i8` pointee (see
@@ -381,13 +434,17 @@ function synthesize(name::String, argtypes)
     callret = isempty(irts) ? "void" :
               length(irts) == 1 ? irts[1] : "{ " * join(irts, ", ") * " }"
 
+    retcontract = _return_contract(i, callret)
+    retprefix = isempty(retcontract.attrs) ? "" : retcontract.attrs * " "
+
     # Attribute-group layout is fixed within synthesized modules:
     #   #0 intrinsic declaration; #1 always-inlined @entry; #2 call site.
     # Group #2 exists only for convergent calls.
     callattrs = callsiteattrs(i)
     callattrref = isempty(callattrs) ? "" : " #2"
-    intrinsic_call = "call $callret @\"$mangled\"($(join(callargs, ", ")))" *
-                     callattrref
+    intrinsic_call = "call $retprefix$callret @\"$mangled\"(" *
+                     join(callargs, ", ") * ")" * callattrref *
+                     retcontract.call_suffix
 
     body = copy(glue)
     if isempty(jts)
@@ -430,13 +487,14 @@ function synthesize(name::String, argtypes)
     callattrdef = isempty(callattrs) ? "" :
                   "attributes #2 = { $callattrs }"
     ir = """
-        declare $callret @"$mangled"($(join(decl, ", "))) #0
+        declare $retprefix$callret @"$mangled"($(join(decl, ", "))) #0
         define $entryret @entry($(join(entry, ", "))) #1 {
         $(join(body, "\n"))
         }
         attributes #0 = { $(fnattrs(i)) }
         attributes #1 = { $(entryattrs(i)) }
         $callattrdef
+        $(retcontract.metadata)
         """
 
     return (; ir, rettype, tupletype=Tuple{argtypes[runtime]...}, runtime)
