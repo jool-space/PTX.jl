@@ -116,7 +116,13 @@ function render_operand(op::AddressOperand, cg::CodeGenState;
         jb = julia_var(op.base)
         get(cg.pointer_aliases, jb, jb)
     end
-    op.offset === nothing && return base_expr
+    # Preserve brackets as a first-class Julia-side role. `address` marks an
+    # integer `%r`/`%rd`, but is identity for LLVMPtr expressions so an
+    # address-space-specific typed wrapper still receives its exact pointer
+    # type. Structured integer forms without a reviewed Address method fail
+    # before the scalar fallback can guess their ABI.
+    op.coords === nothing || return base_expr
+    op.offset === nothing && return "address(" * base_expr * ")"
     off = String(op.offset)
     # TMA tensor-coord form: `[%rd, {%c0, %c1, ...}]` → render as a Julia
     # tuple `(rd, (c0, c1, ...))` so the output parses.
@@ -126,7 +132,7 @@ function render_operand(op::AddressOperand, cg::CodeGenState;
         coords = [julia_var(strip(c)) for c in eachsplit(inner, ',')]
         return "(" * base_expr * ", (" * join(coords, ", ") * "))"
     end
-    base_expr * " + " * off
+    "address(" * base_expr * " + " * off * ")"
 end
 
 function render_operand(op::ParenthesizedOperand, cg::CodeGenState;

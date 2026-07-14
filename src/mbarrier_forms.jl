@@ -329,6 +329,12 @@ function _mbarrier_operand_accepts(schema::MBarrierFormSchema,
             as = T.parameters[2]
             return schema.space === :generic ? as == 0 : as == 3
         end
+        if T <: Address
+            # `Address` is the explicit bracket-role carrier used by direct
+            # integer calls and the transpiler. Its payload still has to be a
+            # legal PTX 32-/64-bit integer address carrier.
+            return is_ptx_address_integer_type(T.parameters[1])
+        end
         # Transpiled PTX register addresses remain integer carriers until a
         # separately translated symbol/alias supplies LLVMPtr evidence.
         return T === UInt32 || T === Int32 || T === UInt64 || T === Int64
@@ -342,8 +348,8 @@ end
 
 function _mbarrier_operand_description(schema::MBarrierFormSchema, kind::Symbol)
     kind === :address && return schema.space === :generic ?
-        "an address-space-0 LLVMPtr or a 32/64-bit integer address carrier" :
-        "an address-space-3 LLVMPtr or a 32/64-bit integer address carrier"
+        "an address-space-0 LLVMPtr, PTX.Address, or a 32/64-bit integer address carrier" :
+        "an address-space-3 LLVMPtr, PTX.Address, or a 32/64-bit integer address carrier"
     kind === :u32 && return "a 32-bit integer or integer Val immediate"
     kind === :u64 && return "a 64-bit integer or integer Val immediate"
     string(kind)

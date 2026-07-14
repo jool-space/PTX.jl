@@ -311,11 +311,22 @@ end
 
 # (constraint_letter, argtype, lane) — `lane` is set for tuple args that emit
 # a braced register-vector group (one slot per lane).
-const InputSlot = Tuple{String, Type, Union{Nothing, Int}}
+const InputSlot = Tuple{String, Type, Union{Nothing, Int}, Bool}
 
 function render_arg(::Type{P}, slot::Int, bracket::Bool) where {P <: Core.LLVMPtr}
     op_str = bracket ? "[\$" * string(slot) * "]" : "\$" * string(slot)
-    op_str, InputSlot[("l", P, nothing)], slot + 1
+    op_str, InputSlot[("l", P, nothing, false)], slot + 1
+end
+
+function render_arg(::Type{Address{T}}, slot::Int, ::Bool) where {T}
+    is_ptx_address_integer_type(T) || throw(ArgumentError(
+        "PTX.Address{$T} is invalid: Address is reserved for 32-/64-bit " *
+        "integer carriers; Core.LLVMPtr values remain unwrapped"))
+    # An explicit role marker always brackets, independently of the opcode's
+    # legacy pointer-wide contract.  Pass the payload type/constraint to LLVM;
+    # `_chain_call_expr` unwraps `.value` before the asm call.
+    letter = constraint_letter(T)
+    "[\$$(slot)]", InputSlot[(letter, T, nothing, true)], slot + 1
 end
 
 function render_arg(::Type{SpecialReg{S}}, slot::Int, ::Bool) where {S}
@@ -340,13 +351,13 @@ function render_arg(::Type{T}, slot::Int, ::Bool) where {T <: Tuple}
         error("PTX: heterogeneous tuple args not supported (got $T)")
     letter = constraint_letter(et)
     op_str = "{" * join(("\$" * string(slot + i - 1) for i in 1:n), ", ") * "}"
-    slots = InputSlot[(letter, et, i) for i in 1:n]
+    slots = InputSlot[(letter, et, i, false) for i in 1:n]
     op_str, slots, slot + n
 end
 
 function render_arg(::Type{T}, slot::Int, ::Bool) where {T}
     op_str = "\$" * string(slot)
-    op_str, InputSlot[(constraint_letter(T), T, nothing)], slot + 1
+    op_str, InputSlot[(constraint_letter(T), T, nothing, false)], slot + 1
 end
 
 build_head(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
@@ -366,6 +377,7 @@ function _build_structured_result_call(schema::StructuredResultSchema,
     input_letters = String[]
     passthrough = Type[]
     passthrough_ix = Tuple{Int, Union{Nothing, Int}}[]
+    passthrough_unwrap = Bool[]
     slot = length(output_types)
     for (i, T) in enumerate(argtypes)
         # The closed schema knows these are register/immediate operands.
@@ -373,10 +385,11 @@ function _build_structured_result_call(schema::StructuredResultSchema,
         # otherwise exact raw setp/lop3/match/elect call into invalid PTX.
         op_str, slots, slot = render_arg(T, slot, false)
         push!(operand_strs, op_str)
-        for (letter, atype, lane) in slots
+        for (letter, atype, lane, unwrap_address) in slots
             push!(input_letters, letter)
             push!(passthrough, atype)
             push!(passthrough_ix, (i, lane))
+            push!(passthrough_unwrap, unwrap_address)
         end
     end
 
@@ -388,7 +401,8 @@ function _build_structured_result_call(schema::StructuredResultSchema,
     return (; asm, constraints = join(cparts, ","), side_effects = nonpure,
               convergent = contract.convergent, rettype,
               passthrough_argtypes = Tuple(passthrough),
-              passthrough_indices = Tuple(passthrough_ix))
+              passthrough_indices = Tuple(passthrough_ix),
+              passthrough_unwrap_address = Tuple(passthrough_unwrap))
 end
 
 function _build_mbarrier_call(schema::MBarrierFormSchema,
@@ -412,11 +426,15 @@ function _build_mbarrier_call(schema::MBarrierFormSchema,
     input_letters = String[]
     passthrough = Type[]
     passthrough_ix = Tuple{Int, Union{Nothing, Int}}[]
+    passthrough_unwrap = Bool[]
     for (i, (kind, T)) in enumerate(zip(variant.operands, argtypes))
         op_str, slots, slot = render_arg(T, slot, false)
-        kind === :address && (op_str = "[" * op_str * "]")
+        # Address already renders its payload in brackets. LLVMPtr and the
+        # legacy bare integer carriers need the schema to supply brackets.
+        kind === :address && !(T <: Address) &&
+            (op_str = "[" * op_str * "]")
         push!(operand_strs, op_str)
-        for (letter, atype, lane) in slots
+        for (letter, atype, lane, unwrap_address) in slots
             # LLVM retains the addrspace(3) pointer value, while NVPTX's `r`
             # inline-asm constraint selects the 32-bit PTX register required
             # for an explicitly shared address. This is the same intentional
@@ -427,6 +445,7 @@ function _build_mbarrier_call(schema::MBarrierFormSchema,
             push!(input_letters, letter)
             push!(passthrough, atype)
             push!(passthrough_ix, (i, lane))
+            push!(passthrough_unwrap, unwrap_address)
         end
     end
 
@@ -444,7 +463,8 @@ function _build_mbarrier_call(schema::MBarrierFormSchema,
     return (; asm, constraints, side_effects = true,
               convergent = contract.convergent, rettype,
               passthrough_argtypes = Tuple(passthrough),
-              passthrough_indices = Tuple(passthrough_ix))
+              passthrough_indices = Tuple(passthrough_ix),
+              passthrough_unwrap_address = Tuple(passthrough_unwrap))
 end
 
 # Pure: no LLVM, no GPU, no @asmcall. Used by both the runtime call site and
@@ -463,6 +483,17 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     structured = structured_result_schema(op, mods)
     requires_structured_result_schema(op) && structured === nothing &&
         throw(structured_result_schema_miss(op, mods))
+    has_invalid_address_marker(argtypes) && throw(ArgumentError(
+        "PTX.Address is reserved for Int32, UInt32, Int64, and UInt64; " *
+        "Core.LLVMPtr already preserves its address role and exact typed " *
+        "dispatch, so call address(pointer) instead of constructing " *
+        "Address{<:Core.LLVMPtr}"))
+    clc_schema = clc_try_cancel_schema(mods)
+    if op === :clusterlaunchcontrol
+        clc_schema === nothing && requires_clc_try_cancel_schema(op, mods) &&
+            throw(clc_try_cancel_schema_miss(mods))
+        clc_schema === nothing || validate_clc_try_cancel_args(clc_schema, argtypes)
+    end
     schema = scalar_result_schema(op, mods)
     schema === nothing && requires_scalar_result_schema(op, mods) &&
         throw(scalar_result_schema_miss(op, mods))
@@ -482,6 +513,18 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
         "modifier spelling, arity, tuple widths, and carrier types, or use " *
         "ptx\"$(build_head(op, mods))\"raw for an explicit conservative " *
         "textual escape hatch."))
+    # The closed mbarrier schema is authoritative for its result and operand
+    # roles. Only non-mbarrier chain fallbacks reach the generic structured-
+    # address and contract checks below.
+    if mbarrier !== nothing
+        selected_contract === nothing && error(
+            "mbarrier is missing its reviewed form contract")
+        return _build_mbarrier_call(mbarrier, argtypes, selected_contract)
+    end
+    address_rule = has_integer_address(argtypes) ?
+                   structured_address_fallback_rule(op, mods) : nothing
+    address_rule === nothing ||
+        throw(structured_address_fallback_error(op, mods, address_rule))
     selected_contract === nothing && error(
         "ptx\"$(build_head(op, mods))\": opcode :$op is not in the form registry " *
         "(src/forms.jl). The chain default makes optimizer promises (purity, " *
@@ -493,6 +536,11 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     structured === nothing ||
         return _build_structured_result_call(structured, argtypes,
                                              selected_contract)
+    has_explicit_address(argtypes) && !selected_contract.brackets &&
+        throw(ArgumentError(
+            "ptx\"$(build_head(op, mods))\" has no reviewed bracketed-address " *
+             "operand role; PTX.address(...) is only accepted by memory/address " *
+             "forms. Passing it here would emit invalid square brackets."))
     schema === nothing || validate_scalar_result_args(schema, argtypes)
     rettype = selected_contract.returns ? infer_rettype(op, mods) : Nothing
     nonpure = !selected_contract.pure || has_special_reg(argtypes)
@@ -503,15 +551,17 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     input_letters  = String[]
     passthrough    = Type[]
     passthrough_ix = Tuple{Int, Union{Nothing, Int}}[]
+    passthrough_unwrap = Bool[]
     slot = (rettype === Nothing) ? 0 : 1     # `$0` reserved for output
 
     for (i, T) in enumerate(argtypes)
         op_str, slots, slot = render_arg(T, slot, bracket)
         push!(operand_strs, op_str)
-        for (letter, atype, lane) in slots
+        for (letter, atype, lane, unwrap_address) in slots
             push!(input_letters, letter)
             push!(passthrough, atype)
             push!(passthrough_ix, (i, lane))
+            push!(passthrough_unwrap, unwrap_address)
         end
     end
 
@@ -527,7 +577,8 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     return (; asm, constraints, side_effects = nonpure,
               convergent = selected_contract.convergent, rettype,
               passthrough_argtypes = Tuple(passthrough),
-              passthrough_indices  = Tuple(passthrough_ix))
+              passthrough_indices  = Tuple(passthrough_ix),
+              passthrough_unwrap_address = Tuple(passthrough_unwrap))
 end
 
 # --- convergent inline asm ---------------------------------------------------
@@ -633,8 +684,10 @@ end
 
 function _chain_call_expr(spec)
     arg_exprs = (
+        unwrap_address ? :(getfield(args[$i], :value)) :
         lane === nothing ? :(args[$i]) : :(args[$i][$lane])
-        for (i, lane) in spec.passthrough_indices
+        for ((i, lane), unwrap_address) in
+            zip(spec.passthrough_indices, spec.passthrough_unwrap_address)
     )
     if spec.convergent
         ir = convergent_asm_ir(spec.asm, spec.constraints, spec.rettype,
@@ -896,6 +949,14 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
     m = which(o, Tuple{argts...})
     if m === _CHAIN_METHOD || m === _RAW_CHAIN_METHOD
         raw = m === _RAW_CHAIN_METHOD
+        has_invalid_address_marker(argts) &&
+            return (; tier = :forbidden, method = m, rettype = nothing,
+                      intrinsics = String[], asm = nothing)
+        address_rule = has_integer_address(argts) ?
+                       structured_address_fallback_rule(op, mods) : nothing
+        address_rule === nothing ||
+            return (; tier = :forbidden, method = m, rettype = nothing,
+                      intrinsics = String[], asm = nothing)
         uses_implicit_cc(op, mods) &&
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
@@ -932,6 +993,22 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
             requires_scalar_result_schema(op, mods) &&
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
+        clc_schema = op === :clusterlaunchcontrol ?
+                     clc_try_cancel_schema(mods) : nothing
+        if op === :clusterlaunchcontrol
+            clc_schema === nothing && requires_clc_try_cancel_schema(op, mods) &&
+                return (; tier = :forbidden, method = m, rettype = nothing,
+                          intrinsics = String[], asm = nothing)
+            if clc_schema !== nothing
+                try
+                    validate_clc_try_cancel_args(clc_schema, argts)
+                catch err
+                    err isa ArgumentError || rethrow()
+                    return (; tier = :forbidden, method = m, rettype = nothing,
+                              intrinsics = String[], asm = nothing)
+                end
+            end
+        end
         schema = scalar_result_schema(op, mods)
         if schema !== nothing
             try
@@ -945,6 +1022,9 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
         contract = raw ? RAW_CONTRACT : form_contract(op, mods)
         contract === nothing &&
             return (; tier = :unregistered, method = m, rettype = nothing,
+                      intrinsics = String[], asm = nothing)
+        has_explicit_address(argts) && !contract.brackets &&
+            return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
         if _result_abi_error(op, mods) !== nothing
             return (; tier = :forbidden, method = m, rettype = nothing,

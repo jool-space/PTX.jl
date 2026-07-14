@@ -245,8 +245,8 @@ end
     @test render_operand(IR.LabelOperand("DONE"), cg) == "DONE"
     @test render_operand(IR.VectorOperand((IR.RegisterOperand("%r0"),
                                             IR.RegisterOperand("%r1"))), cg) == "(r0, r1)"
-    @test render_operand(IR.AddressOperand("%rd0", nothing), cg) == "rd0"
-    @test render_operand(IR.AddressOperand("%rd0", "16"), cg) == "rd0 + 16"
+    @test render_operand(IR.AddressOperand("%rd0", nothing), cg) == "address(rd0)"
+    @test render_operand(IR.AddressOperand("%rd0", "16"), cg) == "address(rd0 + 16)"
     @test render_operand(IR.NegatedOperand(IR.RegisterOperand("%p0")), cg) == "!p0"
     @test render_operand(IR.PipeOperand(IR.RegisterOperand("%p0"),
                                          IR.RegisterOperand("%p1")), cg) == "(p0, p1)"
@@ -333,10 +333,10 @@ function vector_add(param0, param1, param2, param3)
     rd5 = ptx"add.u64"(rd0, rd4)
     rd6 = ptx"add.u64"(rd1, rd4)
     rd7 = ptx"add.u64"(rd2, rd4)
-    r5 = ptx"ld.global.f32"(rd5)
-    r6 = ptx"ld.global.f32"(rd6)
+    r5 = ptx"ld.global.f32"(address(rd5))
+    r6 = ptx"ld.global.f32"(address(rd6))
     r7 = ptx"add.f32"(r5, r6)
-    ptx"st.global.f32"(rd7, r7)
+    ptx"st.global.f32"(address(rd7), r7)
     @label DONE
     return nothing
 end
@@ -375,8 +375,8 @@ const GOLDEN_SHARED_MEMORY = """\
 #   linking     = "visible"
 function smem_test()
     smem = CuStaticSharedArray(UInt8, 49152)
-    r0 = ptx"ld.shared.b32"(pointer(smem))
-    ptx"st.shared.b32"(pointer(smem) + 4, r0)
+    r0 = ptx"ld.shared.b32"(address(pointer(smem)))
+    ptx"st.shared.b32"(address(pointer(smem) + 4), r0)
     ptx"bar.sync"(0)
     return nothing
 end
@@ -416,7 +416,7 @@ end
     #   linking     = "visible"
     function add_alias()
         buf = CuStaticSharedArray(UInt32, 16)
-        r0 = ptx"ld.shared.b32"((pointer(buf)) + UInt64(8))
+        r0 = ptx"ld.shared.b32"(address((pointer(buf)) + UInt64(8)))
         return nothing
     end
     """

@@ -426,5 +426,32 @@ Memory-op opcodes render pointer arguments as `[$N]`; non-memory ops
 `fence.proxy.tensormap::generic.<acq|rel>.gpu [addr], size` form;
 argument-less `fence.sc.gpu` forms emit no bracketed operand either way.
 
+When an address is carried in an integer rather than an `LLVMPtr`, mark the
+operand explicitly with [`address`](@ref):
+
+```julia
+ptx"ld.global.u32"(address(raw_addr))
+ptx"clusterlaunchcontrol.try_cancel.async.shared::cta.mbarrier::complete_tx::bytes.b128"(
+    address(response_smem), address(mbarrier_smem))
+```
+
+For a 32-/64-bit integer, `address(x)` is an isbits role marker, not a
+conversion: it preserves the carrier and causes that operand to render as
+`[$N]` on a reviewed scalar memory/address form. For `Core.LLVMPtr`, it is
+identity—the pointer already preserves its address role, address space, and
+exact typed-wrapper dispatch. Value-only forms reject integer markers instead
+of emitting invalid brackets. Structured forms whose result or operand ABI is
+not scalar (vector `ld`/`st`, `ldmatrix`/`stmatrix`, tensor bulk
+copies, `tcgen05`, and fabric handles) reject an integer-Address dispatch miss
+because the generic/raw scalar chain cannot express their ABI; only exact
+reviewed Address methods may unwrap one, including the closed tcgen05 adapters.
+Those tcgen05 adapters follow each instruction's operand grammar rather than a
+family-wide rule: `dealloc` keeps its `taddr` bare, while MX block-scale MMA
+marks `[d]`, `[scale-a]`, `[scale-b]`, and `[a]` only for the tensor-memory-A
+alternative.
+The transpiler inserts it for every simple bracketed PTX address, including
+after shared-symbol alias substitution and byte-offset reconstruction.
+
 See the [Reference](reference.md) page for full docstrings of
-[`@ptx_str`](@ref) and [`@sreg_str`](@ref).
+[`Address`](@ref), [`address`](@ref), [`@ptx_str`](@ref), and
+[`@sreg_str`](@ref).

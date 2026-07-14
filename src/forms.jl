@@ -140,7 +140,12 @@ const FORMS = Dict{Symbol, FormFamily}(
     # ── Non-collective side effects, no memory operand ───────────────────
     :membar            => FormFamily(_SIDEFX),
     :griddepcontrol    => FormFamily(_SIDEFX),
-    :clusterlaunchcontrol => FormFamily(_SIDEFX),
+    :clusterlaunchcontrol => FormFamily(_SIDEFX, [
+        # PTX 9.3 §9.7.14.18: both [addr] and [mbar] are mandatory
+        # address operands and the asynchronous request has no register
+        # result.  The separate CLC schema closes modifier/arity/type misses.
+        (:try_cancel,) => _MEMSINK,
+    ]),
     :exit              => FormFamily(_SIDEFX),
     :ret               => FormFamily(_SIDEFX),
     :trap              => FormFamily(_SIDEFX),

@@ -9,6 +9,60 @@
 # ptxas/hopper.jl and ptxas/blackwell.jl, since it's gated to sm_90+.
 
 
+# --- explicit integer address roles at sm_75 -------------------------------
+# PTX 9.3 §6.4.1 permits 32- or 64-bit integer/bit registers to carry byte
+# addresses. Exercise every public scalar carrier through LLVM and ptxas so
+# `Address` cannot grow an unvalidated constraint class.
+
+function _baseline_address_s32!(addr::Int32)
+    ptx"ld.shared.u32"(address(addr))
+    return nothing
+end
+
+function _baseline_address_u32!(addr::UInt32)
+    ptx"ld.shared.u32"(address(addr))
+    return nothing
+end
+
+function _baseline_address_s64!(addr::Int64)
+    ptx"ld.global.u32"(address(addr))
+    return nothing
+end
+
+function _baseline_address_u64!(addr::UInt64)
+    ptx"ld.global.u32"(address(addr))
+    return nothing
+end
+
+function _baseline_address_cp_async!(dst::UInt32, src::UInt64)
+    ptx"cp.async.ca.shared.global"(address(dst), address(src), Val(16))
+    return nothing
+end
+
+@testset "explicit integer address carriers at sm_75" begin
+    cases = (
+        (_baseline_address_s32!, Tuple{Int32}, r"ld\.shared\.u32 %r\d+, \[%r\d+\]"),
+        (_baseline_address_u32!, Tuple{UInt32}, r"ld\.shared\.u32 %r\d+, \[%r\d+\]"),
+        (_baseline_address_s64!, Tuple{Int64}, r"ld\.global\.u32 %r\d+, \[%rd\d+\]"),
+        (_baseline_address_u64!, Tuple{UInt64}, r"ld\.global\.u32 %r\d+, \[%rd\d+\]"),
+    )
+    for (f, tt, pattern) in cases
+        @test ptxas_compiles(f, tt; cap = v"7.5")
+        ptx = emit_ptx(f, tt; cap = v"7.5")
+        @test occursin(pattern, ptx)
+    end
+end
+
+
+@testset "classic cp.async integer address roles at sm_80" begin
+    types = Tuple{UInt32, UInt64}
+    @test ptxas_compiles(_baseline_address_cp_async!, types; cap = v"8.0")
+    ptx = emit_ptx(_baseline_address_cp_async!, types; cap = v"8.0")
+    @test occursin(
+        r"cp\.async\.ca\.shared\.global \[%r\d+\], \[%rd\d+\], 16",
+        ptx)
+end
+
 # --- f32 ALU at sm_75 (Turing baseline) -----------------------------------
 
 function _baseline_alu_f32!(out, a::Float32, b::Float32, c::Float32)
