@@ -531,15 +531,16 @@ end
 
 # tensormap.cp_fenceproxy + fence.proxy.tensormap::generic.acquire — the
 # release/acquire pair that publishes the patched descriptor to TMA-engine-
-# visible memory. Both take a [global-ptr] (the live descriptor) and an
-# immediate size (128 = sizeof tensormap). cp_fenceproxy also takes the
-# [shared-ptr] of the patched copy as source.
+# visible memory. The acquire takes the live descriptor as a generic address
+# and the ISA-fixed immediate size 128. cp_fenceproxy takes the destination
+# global pointer, the shared source of the patched copy, and the same size.
 
 function _hopper_tensormap_publish!(live::Core.LLVMPtr{UInt8, PTX.AS.Global},
                                      scratch::Core.LLVMPtr{UInt8, PTX.AS.Shared})
     ptx"tensormap.cp_fenceproxy.global.shared::cta.tensormap::generic.release.gpu.sync.aligned"(
         live, scratch, Val(128))
-    ptx"fence.proxy.tensormap::generic.acquire.gpu"(live, Val(128))
+    generic_live = PTX.reinterpret_addrspace(Val(PTX.AS.Generic), live)
+    ptx"fence.proxy.tensormap::generic.acquire.gpu"(generic_live, Val(128))
     return nothing
 end
 

@@ -79,6 +79,8 @@ const _COLLMEM   = FormContract(convergent = true, brackets = true)
 #     cache-policy operand paired with a qualifier;
 #   * tcgen05 spans address destinations, register vectors, sinks, fences, and
 #     matrix descriptors under one opcode; and
+#   * tensormap proxy fences split into an address-bearing acquire ABI and a
+#     no-operand release ABI, with an ISA-fixed 128-byte range; and
 #   * :pred is a PTX.jl-only selector for a grouped destination,
 #     not literal PTX modifiers.
 #
@@ -99,6 +101,12 @@ const TYPED_WRAPPER_ONLY_RULES = (
      detail = "wgmma.mma_async has shape-dependent tied accumulator groups and descriptors"),
     (op = :tcgen05,  prefix = (),            marker = nothing,
      detail = "tcgen05 forms have instruction-specific address, vector, sink, and descriptor schemas"),
+    (op = :fence, prefix = (),
+     marker = Symbol("tensormap::generic"),
+     detail = "tensormap proxy fences have direction-specific acquire/release ABIs, an exact scope set, and a fixed 128-byte acquire range"),
+    (op = :fence, prefix = (),
+     marker = Symbol("generic::tensormap"),
+     detail = "the ISA defines only the tensormap::generic proxy direction, with direction-specific acquire/release ABIs"),
     (op = :shfl,     prefix = (),            marker = :pred,
      detail = ":pred is an internal selector for PTX's d|p destination"),
 )

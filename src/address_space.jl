@@ -25,8 +25,8 @@ end # module AS
 
 Reinterpret a pointer's raw 64-bit value in another address space — a
 `ptrtoint`/`inttoptr` pair, deliberately NOT an `addrspacecast`. NVPTX
-lowers addrspacecast to `cvta` window translation, which is wrong for the
-two retypes the tier-2 wrappers need:
+lowers addrspacecast to `cvta` window translation, which is wrong for several
+raw retypes that tier-2 wrappers need:
 
 - `Shared → SharedCluster`: the ISA defines `shared::cta` addresses as
   valid `shared::cluster` addresses (own-CTA window), so the raw value is
@@ -36,6 +36,10 @@ two retypes the tier-2 wrappers need:
   *global* memory and is typed `AS.Const` by convention (TMADescriptorPtr),
   so its raw value is already a generic address — `cvta.const` would
   translate it as if it were a const-window offset and corrupt it.
+- `Global → Generic` for a live tensor-map descriptor: global and generic
+  use the same full virtual address for global storage. The tensor-map acquire
+  intrinsic requires the latter carrier even when the preceding descriptor
+  update correctly uses an explicitly global operand.
 """
 @generated function reinterpret_addrspace(::Val{To},
         p::Core.LLVMPtr{T, From}) where {To, T, From}
