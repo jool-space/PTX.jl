@@ -20,20 +20,25 @@ end
 function _mbarrier_schema_sm80!(out64::CuDeviceVector{UInt64, 1},
                                  out32::CuDeviceVector{UInt32, 1},
                                  mbar::Core.LLVMPtr{UInt64, PTX.AS.Shared})
-    ptx"mbarrier.init.shared::cta.b64"(mbar, UInt32(2))
-    ptx"mbarrier.arrive.sink.noComplete.shared::cta.b64"(
-        mbar, UInt32(1))
-    state = ptx"mbarrier.arrive.noComplete.release.cta.shared::cta.b64"(
-        mbar, UInt32(1))
-    pending = ptx"mbarrier.pending_count.b64"(state)
-    final_state = ptx"mbarrier.arrive.release.cta.shared::cta.b64"(mbar)
-    complete = ptx"mbarrier.test_wait.acquire.cta.shared::cta.b64"(
-        mbar, final_state)
-    @inbounds out64[1] = state
-    @inbounds out64[2] = final_state
-    @inbounds out32[1] = pending
-    @inbounds out32[2] = complete ? UInt32(1) : UInt32(0)
-    ptx"mbarrier.inval.shared::cta.b64"(mbar)
+    tid = ptx"mov.u32"(sreg"tid.x")
+    if tid == UInt32(0)
+        # Both noComplete arrivals leave the phase open; the final ordinary
+        # arrival is the only operation that completes it.
+        ptx"mbarrier.init.shared::cta.b64"(mbar, UInt32(3))
+        ptx"mbarrier.arrive.sink.noComplete.shared::cta.b64"(
+            mbar, UInt32(1))
+        state = ptx"mbarrier.arrive.noComplete.release.cta.shared::cta.b64"(
+            mbar, UInt32(1))
+        pending = ptx"mbarrier.pending_count.b64"(state)
+        final_state = ptx"mbarrier.arrive.release.cta.shared::cta.b64"(mbar)
+        complete = ptx"mbarrier.test_wait.acquire.cta.shared::cta.b64"(
+            mbar, final_state)
+        @inbounds out64[1] = state
+        @inbounds out64[2] = final_state
+        @inbounds out32[1] = pending
+        @inbounds out32[2] = complete ? UInt32(1) : UInt32(0)
+        ptx"mbarrier.inval.shared::cta.b64"(mbar)
+    end
     return nothing
 end
 

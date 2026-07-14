@@ -148,21 +148,22 @@ function _baseline_mbarrier_lifecycle!(out::CuDeviceVector{UInt64, 1},
     mbar = pointer(smem)
     tid  = ptx"mov.u32"(sreg"tid.x")
     if tid == UInt32(0)
-        ptx"mbarrier.init.shared.b64"(mbar, UInt32(1))
+        ptx"mbarrier.init.shared.b64"(mbar, UInt32(2))
     end
     ptx"bar.sync"(Val(0))
 
-    # Both forms produce a u64 state token. A noComplete count must leave the
-    # phase incomplete; causing completion would be undefined behavior.
-    s1 = ptx"mbarrier.arrive.shared.b64"(mbar)
-    s2 = ptx"mbarrier.arrive.noComplete.shared.b64"(mbar, UInt32(1))
-
-    # Token form returns `Bool`; phase form takes a 0/1 parity bit and also
-    # returns Bool. Stash both as 0/1 to keep the result alive.
-    p1 = ptx"mbarrier.test_wait.shared.b64"(mbar, s1)
-    p2 = ptx"mbarrier.test_wait.parity.shared.b64"(mbar, UInt32(0))
-
+    # Keep the compile probe semantically executable too: one elected thread
+    # performs noComplete while the count is 2 (leaving 1), then the ordinary
+    # arrival completes the phase. Both forms produce a u64 state token.
     if tid == UInt32(0)
+        s2 = ptx"mbarrier.arrive.noComplete.shared.b64"(mbar, UInt32(1))
+        s1 = ptx"mbarrier.arrive.shared.b64"(mbar)
+
+        # Token form returns `Bool`; phase form takes a 0/1 parity bit and also
+        # returns Bool. Stash both as 0/1 to keep the result alive.
+        p1 = ptx"mbarrier.test_wait.shared.b64"(mbar, s1)
+        p2 = ptx"mbarrier.test_wait.parity.shared.b64"(mbar, UInt32(0))
+
         @inbounds out[1]  = s1
         @inbounds out[2]  = s2
         @inbounds outp[1] = p1 ? UInt32(1) : UInt32(0)
