@@ -13,8 +13,9 @@
 #   - labels (`$L__BB0_3`) renamed in first-appearance order
 #   - function names, parameters, and variable declarations renamed
 #     positionally (they embed gensym counters and kernel-name mangles)
-#   - `.reg` declarations dropped entirely — register counts are allocator
-#     output, exactly the noise "modulo naming" must ignore
+#   - scalar `.reg` declarations dropped — register counts are allocator
+#     output. Vector declarations are retained because their shape and element
+#     type are semantic, while their roots are canonicalized like operands.
 #
 # For parser-produced PTX IR, the result still `format`s to readable
 # PTX-shaped text, including lexical brace scopes. Construction-time
@@ -40,6 +41,7 @@ _Renamer(names::Dict{String,String}, namecount::Int) =
 # so semantic changes are never allocator-renamed away.
 
 const _VREG = r"^%([a-z]+)(\d+)$"
+const _VREG_COMPONENT = r"^(%[a-z]+\d+)(\.[xyzwrgba])$"
 
 function _reg(rn::_Renamer, name::String)
     r = get(rn.regs, name, nothing)
@@ -63,6 +65,10 @@ function _sym(rn::_Renamer, s::String)
     # register shape so `%envreg0`-class sregs never enter the renamer.
     s in SPECIAL_REGS && return s
     Base.match(_VREG, s) !== nothing && return _reg(rn, s)
+    component = Base.match(_VREG_COMPONENT, s)
+    component === nothing ||
+        return _reg(rn, String(component.captures[1])) *
+               String(component.captures[2])
     startswith(s, "\$L") && return _label(rn, s)
     return s
 end
@@ -97,7 +103,10 @@ function _canon_body(rn::_Renamer, body::Tuple{Vararg{Statement}})
     out = Statement[]
     for s in body
         if s isa RegDecl
-            continue
+            s.vector_shape === nothing && continue
+            push!(out, RegDecl(type = s.type, name = _sym(rn, s.name),
+                               count = s.count,
+                               vector_shape = s.vector_shape))
         elseif s isa Instruction
             push!(out, Instruction(
                 opcode    = s.opcode,
@@ -111,7 +120,8 @@ function _canon_body(rn::_Renamer, body::Tuple{Vararg{Statement}})
                 state_space = s.state_space, type = s.type,
                 name = _newname(rn, s.name, "var"),
                 array_size = s.array_size, alignment = s.alignment,
-                initializer = s.initializer, linking = s.linking))
+                initializer = s.initializer, linking = s.linking,
+                vector_shape = s.vector_shape))
         elseif s isa Block
             # Braces carry lexical declaration/lifetime scope. Keep the node
             # while canonicalizing the names nested inside it.
@@ -163,8 +173,9 @@ end
 
 Canonical form for comparing PTX *structure*: `normalize`d, with virtual
 registers, labels, parameters, declared variables, and function names
-renamed to position-stable canonical names, and `.reg` declarations
-dropped. Lexical scope nodes remain, with their nested operands renamed.
+renamed to position-stable canonical names. Scalar `.reg` declarations are
+dropped, while semantic vector declarations remain with canonicalized roots.
+Lexical scope nodes remain, with their nested operands renamed.
 For parser-produced PTX IR, format-identical canonical results have the same
 structure modulo allocator-style naming — the golden-harness equivalence.
 Construction-time `IntrinsicScope` nodes retain metadata but intentionally
@@ -195,7 +206,8 @@ function canonicalize(m::Module)
                 state_space = d.state_space, type = d.type,
                 name = names[d.name],
                 array_size = d.array_size, alignment = d.alignment,
-                initializer = d.initializer, linking = d.linking))
+                initializer = d.initializer, linking = d.linking,
+                vector_shape = d.vector_shape))
         else
             # Top-level parsing permits instructions, labels, and `.reg`;
             # retained programmatic scopes recurse too. RawLine/pragma remain

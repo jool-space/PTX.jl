@@ -9,8 +9,10 @@ using ..IR: Module, Version, Target, AddressSize, TargetDirective, FormattingInf
             VectorOperand, AddressOperand, ParenthesizedOperand,
             NegatedOperand, PipeOperand, Predicate,
             Param, FunctionDirective, Function,
-            ScalarType, StateSpace, LinkingDirective,
-            scalar_type_from_ptx, state_space_from_ptx, linking_from_ptx
+            ScalarType, StateSpace, VectorShape, LinkingDirective,
+            scalar_type_from_ptx, vector_shape_from_ptx,
+            validate_vector_declaration,
+            state_space_from_ptx, linking_from_ptx
 
 """
     ParseError
@@ -812,8 +814,7 @@ function _parse_reg_decl!(s::ParserState, indent::String)
     _advance!(s)   # .reg
     _skip_newlines_and_comments!(s)
 
-    type_tok = _expect!(s, TokenKind.DIRECTIVE)
-    scalar_type = scalar_type_from_ptx(type_tok.text)
+    scalar_type, vector_shape = _parse_declaration_type!(s, StateSpace.REG)
     _skip_newlines_and_comments!(s)
 
     t = _peek(s)
@@ -856,6 +857,7 @@ function _parse_reg_decl!(s::ParserState, indent::String)
         type = scalar_type,
         name = name,
         count = count,
+        vector_shape = vector_shape,
         formatting = FormattingInfo(indent = indent,
                                      preceding_comments = preceding,
                                      raw_line = raw_line),
@@ -877,8 +879,7 @@ function _parse_var_decl!(s::ParserState, indent::String)
         _skip_newlines_and_comments!(s)
     end
 
-    type_tok = _expect!(s, TokenKind.DIRECTIVE)
-    scalar_type = scalar_type_from_ptx(type_tok.text)
+    scalar_type, vector_shape = _parse_declaration_type!(s, state_space)
     _skip_newlines_and_comments!(s)
 
     name_tok = _expect!(s, TokenKind.IDENTIFIER)
@@ -943,10 +944,42 @@ function _parse_var_decl!(s::ParserState, indent::String)
         array_size = array_size,
         alignment = alignment,
         initializer = initializer,
+        vector_shape = vector_shape,
         formatting = FormattingInfo(indent = indent,
                                      preceding_comments = preceding,
                                      raw_line = raw_line),
     )
+end
+
+function _parse_scalar_type!(s::ParserState)
+    type_tok = _expect!(s, TokenKind.DIRECTIVE)
+    try
+        scalar_type_from_ptx(type_tok.text)
+    catch err
+        err isa ArgumentError || rethrow()
+        throw(ParseError(string(err.msg), type_tok.line, type_tok.col))
+    end
+end
+
+function _parse_declaration_type!(s::ParserState, state_space::StateSpace.T)
+    vector_shape::Union{VectorShape.T, Nothing} = nothing
+    if _peek_kind(s) == TokenKind.DIRECTIVE &&
+       _peek(s).text in (".v2", ".v4")
+        shape_tok = _advance!(s)
+        vector_shape = vector_shape_from_ptx(shape_tok.text)
+        _skip_newlines_and_comments!(s)
+    end
+    scalar_type = _parse_scalar_type!(s)
+    if vector_shape !== nothing
+        try
+            validate_vector_declaration(vector_shape, scalar_type, state_space)
+        catch err
+            err isa ArgumentError || rethrow()
+            type_tok = s.tokens[s.pos - 1]
+            throw(ParseError(string(err.msg), type_tok.line, type_tok.col))
+        end
+    end
+    scalar_type, vector_shape
 end
 
 function _parse_pragma!(s::ParserState, indent::String)
@@ -987,6 +1020,7 @@ function _parse_function_or_global_with_linking!(s::ParserState)
             alignment = vd.alignment,
             initializer = vd.initializer,
             linking = linking,
+            vector_shape = vd.vector_shape,
             formatting = vd.formatting,
         )
     end
@@ -1075,8 +1109,7 @@ function _parse_param!(s::ParserState)
         _skip_newlines_and_comments!(s)
     end
 
-    type_tok = _expect!(s, TokenKind.DIRECTIVE)
-    scalar_type = scalar_type_from_ptx(type_tok.text)
+    scalar_type = _parse_scalar_type!(s)
     _skip_newlines_and_comments!(s)
 
     ptr_state_space::Union{StateSpace.T, Nothing} = nothing
