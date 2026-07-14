@@ -11,6 +11,7 @@ include("parser/Parser.jl")
 include("implicit_state.jl")
 
 include("structured_results.jl")
+include("immediate_forms.jl")
 include("scalar_results.jl")
 include("cvt_forms.jl")
 include("vector_results.jl")

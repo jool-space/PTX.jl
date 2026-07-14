@@ -150,7 +150,7 @@ const FORMS = Dict{Symbol, FormFamily}(
     :ret               => FormFamily(_SIDEFX),
     :trap              => FormFamily(_SIDEFX),
     :brkpt             => FormFamily(_SIDEFX),
-    :pmevent           => FormFamily(_SIDEFX),
+    :pmevent           => FormFamily(_SINK),
     :nanosleep         => FormFamily(_SINK),    # `.u32` names the duration operand
     # sm_90 cluster address queries: observable cross-CTA visibility.
     :mapa              => FormFamily(_SIDEFX),

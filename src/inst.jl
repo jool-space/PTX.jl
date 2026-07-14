@@ -630,6 +630,11 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     raw && contract !== missing && throw(ArgumentError(
         "PTX.build_call: raw=true selects RAW_CONTRACT internally; " *
         "do not also pass contract=" * repr(contract)))
+    immediate = immediate_form_contract(op, mods)
+    requires_immediate_form_contract(op) && immediate === nothing &&
+        throw(immediate_form_contract_miss(op, mods))
+    immediate === nothing || immediate.delegated ||
+        validate_immediate_form_args(immediate, argtypes)
     mbarrier = mbarrier_form_schema(op, mods)
     requires_mbarrier_schema(op) && mbarrier === nothing &&
         throw(mbarrier_schema_miss(mods))
@@ -709,7 +714,10 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
              "operand role; PTX.address(...) is only accepted by memory/address " *
              "forms. Passing it here would emit invalid square brackets."))
     schema === nothing || validate_scalar_result_args(schema, argtypes)
-    rettype = selected_contract.returns ? infer_rettype(op, mods) : Nothing
+    # Immediate side-effect forms have no PTX destination even on the raw
+    # tier, whose generic contract otherwise assumes a scalar result.
+    rettype = immediate !== nothing && !immediate.returns ? Nothing :
+              selected_contract.returns ? infer_rettype(op, mods) : Nothing
     nonpure = !selected_contract.pure || has_special_reg(argtypes)
     bracket = selected_contract.brackets
     head = build_head(op, mods)
@@ -1144,9 +1152,10 @@ Returns `(; tier, method, rettype, intrinsics, asm)`:
 - `tier = :forbidden` — the selected generic path is unsafe: a spelling
   accesses implicit architectural state that cannot cross the call boundary,
   a typed-wrapper-only form missed its exact method, or a closed structured-,
-  vector-, or scalar-result grammar island missed its audited ABI. Explicit
-  raw remains available for the typed-wrapper structural case, but not hidden
-  state or an unknown result ABI.
+  vector-, scalar-result, or immediate grammar island missed its audited ABI
+  or constant domain. Explicit raw remains available for the typed-wrapper
+  structural case, but not hidden state, an unknown result ABI, or an invalid
+  ISA-required immediate.
 
 Binding is not selectability: an `:intrinsic` form can still fail ISel below
 its capability floor — that gate lives in the backend, not the registry.
@@ -1171,6 +1180,19 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
         uses_implicit_cc(op, mods) &&
             return (; tier = :forbidden, method = m, rettype = nothing,
                       intrinsics = String[], asm = nothing)
+        immediate = immediate_form_contract(op, mods)
+        immediate === nothing && requires_immediate_form_contract(op) &&
+            return (; tier = :forbidden, method = m, rettype = nothing,
+                      intrinsics = String[], asm = nothing)
+        if immediate !== nothing && !immediate.delegated
+            try
+                validate_immediate_form_args(immediate, argts)
+            catch err
+                err isa ArgumentError || rethrow()
+                return (; tier = :forbidden, method = m, rettype = nothing,
+                          intrinsics = String[], asm = nothing)
+            end
+        end
         if requires_mbarrier_schema(op)
             mbarrier = mbarrier_form_schema(op, mods)
             mbarrier === nothing &&

@@ -289,6 +289,20 @@ function synthesize(name::String, argtypes)
                 err("$label is an immediate operand: pass Val(x), got $T")
             v = T.parameters[1]
             v isa Union{Bool,Integer} || err("$label: Val($v) is not an integer")
+            # IntrinsicsNVVM.td records only setmaxnreg's inclusive 24:256
+            # bounds. PTX additionally requires a multiple of eight, so keep
+            # this narrow semantic overlay beside registry range validation.
+            # Reject Bool as well: it is an Integer subtype in Julia but not a
+            # meaningful register-count literal.
+            if name in ("llvm.nvvm.setmaxnreg.dec.sync.aligned.u32",
+                        "llvm.nvvm.setmaxnreg.inc.sync.aligned.u32")
+                v isa Integer && !(v isa Bool) ||
+                    err("$label: Val($v) must contain a non-Bool integer")
+                24 <= v <= 256 ||
+                    err("$label: $v is outside the legal range [24, 256]")
+                v % 8 == 0 ||
+                    err("$label: $v must be a multiple of 8")
+            end
             for (p, lo, hi) in i.ranges
                 p == pos && !(lo <= Int(v) < hi) &&
                     err("$label: $v is outside the legal range [$lo, $(hi-1)]")

@@ -182,6 +182,12 @@ The exceptions are:
   `Tuple{UInt32,Bool}` and take the predicate source last. The LUT is a
   compile-time `Val{N}` with `N` in `0:255`, so a runtime or out-of-range LUT
   cannot leak into inline assembly.
+- **Constant-only side effects** — `setmaxnreg.{inc,dec}.sync.aligned.u32`
+  accepts exactly one `Val{N}`, where `N` is a multiple of eight in `24:256`.
+  `pmevent` accepts `Val{N}` in `0:15`; `pmevent.mask` accepts a 16-bit mask in
+  `0:65535`. All are destinationless even through `ptx"..."raw`. Misspelled
+  modifiers, runtime values, `Bool`, and out-of-domain constants fail during
+  lowering rather than reaching ptxas.
 - **`match.sync` / `elect.sync`** — every match mask and elected lane is
   `UInt32`, including `match.*.b64`; trailing `.pred` adds `match.all`'s
   predicate. `elect.sync` always returns `Tuple{UInt32,Bool}`.
@@ -200,9 +206,11 @@ The exceptions are:
 - **Packed integer arithmetic** — reviewed `add`/`sub`/`neg`/`min`/`max`
   `.u16x2`/`.s16x2`/`.u8x4`/`.s8x4` forms use `UInt32` bit carriers for packed
   operands and results. The `.relu.s32` min/max forms instead return `Int32`.
-- **No-return families** — `setmaxnreg.{inc,dec}.sync.aligned.u32` and
+- **No-return families** — `setmaxnreg.{inc,dec}.sync.aligned.u32`, `pmevent`,
+  `pmevent.mask`, and
   `tensormap.replace.tile.<field>...b{32,64}` carry a trailing width modifier
-  that describes an *input* operand. Their contracts treat them as void;
+  or a constant-only source but have no destination. Their contracts treat
+  them as void;
   otherwise ptxas would reject with "Arguments mismatch". The analogous
   `tcgen05` sinks (`alloc`, `commit`, `relinquish_alloc_permit`) are handled by
   exact typed wrappers instead of terminal-type inference.
