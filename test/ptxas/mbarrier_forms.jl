@@ -1,10 +1,28 @@
 # Exact-target compiler evidence for the schema-only mbarrier surface. These
 # kernels stop after ptxas and never require a live matching GPU.
 
+function _mbarrier_callsite_is_convergent(llvm::AbstractString,
+                                           needle::AbstractString)
+    groups = Dict{String,String}()
+    for line in eachline(IOBuffer(llvm))
+        m = match(r"^attributes #([0-9]+) = \{([^}]*)\}", strip(line))
+        m === nothing || (groups[m.captures[1]] = m.captures[2])
+    end
+    calls = [String(line) for line in eachline(IOBuffer(llvm))
+             if occursin(" call ", line) && occursin(needle, line)]
+    length(calls) == 1 || return false
+    m = match(r" #([0-9]+)(?:,|$)", strip(only(calls)))
+    m === nothing && return false
+    attrs = get(groups, m.captures[1], "")
+    occursin(r"\bconvergent\b", attrs) && occursin(r"\bnomerge\b", attrs)
+end
+
 function _mbarrier_schema_sm80!(out64::CuDeviceVector{UInt64, 1},
                                  out32::CuDeviceVector{UInt32, 1},
                                  mbar::Core.LLVMPtr{UInt64, PTX.AS.Shared})
     ptx"mbarrier.init.shared::cta.b64"(mbar, UInt32(2))
+    ptx"mbarrier.arrive.sink.noComplete.shared::cta.b64"(
+        mbar, UInt32(1))
     state = ptx"mbarrier.arrive.noComplete.release.cta.shared::cta.b64"(
         mbar, UInt32(1))
     pending = ptx"mbarrier.pending_count.b64"(state)
@@ -26,6 +44,8 @@ end
     ptx = emit_ptx(_mbarrier_schema_sm80!, types; cap = v"8.0")
     @test occursin(".target sm_80", ptx)
     @test occursin("mbarrier.init.shared::cta.b64", ptx)
+    @test occursin(r"mbarrier\.arrive\.noComplete\.shared::cta\.b64\s+_,",
+                   ptx)
     @test occursin("mbarrier.arrive.noComplete.release.cta.shared::cta.b64", ptx)
     @test occursin("mbarrier.pending_count.b64", ptx)
     @test occursin("mbarrier.arrive.release.cta.shared::cta.b64", ptx)
@@ -38,6 +58,38 @@ end
     @test occursin("ptr addrspace(3)", llvm)
     @test occursin("mbarrier.init.shared::cta.b64", llvm)
     @test occursin("r,r,~{memory}", llvm)
+    @test _mbarrier_callsite_is_convergent(
+        llvm, "mbarrier.init.shared::cta.b64")
+end
+
+@noinline function _mbarrier_intrinsic_convergence_probe(
+        mbar::Core.LLVMPtr{UInt64, PTX.AS.Shared})
+    ptx"mbarrier.init.shared.b64"(mbar, UInt32(1))
+    return nothing
+end
+
+@testset "mbarrier intrinsic call-site convergence at sm_80" begin
+    types = Tuple{Core.LLVMPtr{UInt64, PTX.AS.Shared}}
+    llvm = emit_llvm(_mbarrier_intrinsic_convergence_probe, types;
+                     cap = v"8.0")
+    @test _mbarrier_callsite_is_convergent(
+        llvm, "llvm.nvvm.mbarrier.init.shared")
+    @test ptxas_compiles(_mbarrier_intrinsic_convergence_probe, types;
+                         cap = v"8.0")
+end
+
+@noinline function _mbarrier_generic_remote_sink_probe(remote::UInt64)
+    ptx"mbarrier.arrive.sink.release.cluster.b64"(remote)
+    return nothing
+end
+
+@testset "mbarrier generic-address remote sink at sm_90" begin
+    types = Tuple{UInt64}
+    @test ptxas_compiles(_mbarrier_generic_remote_sink_probe, types;
+                         cap = v"9.0")
+    ptx = emit_ptx(_mbarrier_generic_remote_sink_probe, types; cap = v"9.0")
+    @test occursin(r"mbarrier\.arrive\.release\.cluster\.b64\s+_,\s*\[%rd",
+                   ptx)
 end
 
 function _mbarrier_schema_sm90!(out16::CuDeviceVector{UInt16, 1},
@@ -49,6 +101,12 @@ function _mbarrier_schema_sm90!(out16::CuDeviceVector{UInt16, 1},
     layout = ptx"mbarrier.check_layout.layout::v1.shared::cta.b64"(mbar)
     ptx"mbarrier.expect_tx.relaxed.cta.shared::cta.b64"(mbar, UInt32(16))
     ptx"mbarrier.complete_tx.relaxed.cta.shared::cta.b64"(mbar, UInt32(16))
+    # PTX 9.3 prints these two space-before-sem/scope heads as examples.
+    # The Julia aliases ingest them but emit the syntax-block canonical order.
+    ptx"mbarrier.arrive_drop.sink.shared::cta.release.cluster.b64"(
+        mbar, UInt32(1))
+    ptx"mbarrier.arrive_drop.sink.expect_tx.shared::cta.relaxed.cluster.b64"(
+        mbar, UInt32(0))
     wait_complete, report_pred =
         ptx"mbarrier.test_wait.report_pred.phase_type::primary.shared::cta.b64"(
             mbar, state)
@@ -100,6 +158,12 @@ const _MBARRIER_RAW_REPORT_TYPES =
         @test occursin("mbarrier.check_layout.layout::v1.shared::cta.b64", ptx)
         @test occursin("mbarrier.expect_tx.relaxed.cta.shared::cta.b64", ptx)
         @test occursin("mbarrier.complete_tx.relaxed.cta.shared::cta.b64", ptx)
+        @test occursin(r"mbarrier\.arrive_drop\.release\.cluster\.shared::cta\.b64\s+_,",
+                       ptx)
+        @test occursin(r"mbarrier\.arrive_drop\.expect_tx\.relaxed\.cluster\.shared::cta\.b64\s+_,",
+                       ptx)
+        @test !occursin("mbarrier.arrive_drop.shared::cta.release.cluster", ptx)
+        @test !occursin("mbarrier.arrive_drop.expect_tx.shared::cta.relaxed.cluster", ptx)
         @test occursin(r"mbarrier\.test_wait\.phase_type::primary\.shared::cta\.b64\s+%p\d+\|%p\d+",
                        ptx)
         @test occursin(r"mbarrier\.try_wait\.parity\.phase_type::primary\.relaxed\.cta\.shared::cta\.b64\s+%p\d+\|%p\d+,\s*report_value",
@@ -120,7 +184,8 @@ const _MBARRIER_RAW_REPORT_TYPES =
     @test length(raw_sites) == 1
     @test occursin("ptr addrspace(3)", only(raw_sites))
     @test occursin("=b,=b,=h,r,l,~{memory}", only(raw_sites))
-    @test occursin(r"attributes #\d+ = \{[^}]*convergent[^}]*nomerge", llvm)
+    @test _mbarrier_callsite_is_convergent(
+        llvm, ".reg .b8 report_value; mbarrier.test_wait")
     @test ptxas_compiles(_mbarrier_raw_report!, _MBARRIER_RAW_REPORT_TYPES;
                          cap = v"9.0")
 end

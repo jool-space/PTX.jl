@@ -140,7 +140,14 @@ const MBARRIER_FORM_SCHEMAS = let schemas = MBarrierFormSchema[]
         _mbarrier_form!(schemas, mods, mods, destination, variants, space_kind)
         if space_kind !== :cluster
             sinkmods = (subop, :sink, sem..., space..., :b64)
-            _mbarrier_form!(schemas, sinkmods, mods, :sink, variants, space_kind)
+            # `_` on mbarrier.arrive was added in PTX 7.1; arrive_drop had a
+            # sink from its original PTX 7.0 introduction.
+            sinkvariants = subop === :arrive ?
+                Tuple(_mb_variant(v.operands,
+                                  _mb_max_version(v.ptx_version, v"7.1"),
+                                  v.min_sm) for v in variants) : variants
+            _mbarrier_form!(schemas, sinkmods, mods, :sink,
+                            sinkvariants, space_kind)
         end
     end
     for subop in (:arrive, :arrive_drop),
@@ -167,8 +174,9 @@ const MBARRIER_FORM_SCHEMAS = let schemas = MBarrierFormSchema[]
         _mbarrier_form!(schemas, mods, mods, :state,
                         (_mb_variant((:address, :u32), pv, sm),), space_kind)
         sinkmods = (subop, :sink, :noComplete, sem..., space..., :b64)
+        sinkp = subop === :arrive ? _mb_max_version(pv, v"7.1") : pv
         _mbarrier_form!(schemas, sinkmods, mods, :sink,
-                        (_mb_variant((:address, :u32), pv, sm),), space_kind)
+                        (_mb_variant((:address, :u32), sinkp, sm),), space_kind)
     end
 
     # §9.7.14.16.17 prints exactly two arrive_drop examples with the state

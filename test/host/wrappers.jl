@@ -600,7 +600,7 @@ end
         ((:try_wait, :report, :parity, Symbol("phase_type::primary"), :shared, :b64),
             (pS, UInt32), Tuple{Bool, Bool, UInt16},
             "mbarrier.try_wait.parity.phase_type::primary.shared.b64 "),
-        # conditional-phase parity waits (layout::v1 only; single output)
+        # conditional-phase parity waits (both layouts; single output)
         ((:test_wait, :parity, Symbol("phase_type::conditional"), :shared, :b64),
             (pS, UInt32), Bool,
             "mbarrier.test_wait.parity.phase_type::conditional.shared.b64 "),

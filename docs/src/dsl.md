@@ -51,12 +51,19 @@ path. A rejection usually means the modifier spelling, arity, tuple width, or
 Julia carrier type does not match a reviewed wrapper.
 
 `mbarrier` uses a separate closed form schema rather than a family-wide result
-guess. Every generic or raw chain must match an exact canonical modifier form
-and operand role. The audited synthetic selectors `.report_pred` and `.report`
-choose `waitComplete|reportPredicate` without or with the optional
-`reportValue`; only the emitted instruction head drops that selector. PTX's
-opaque report value is one byte. Because NVPTX has no i8 inline-asm constraint,
-the full-result call carries it in the low byte of a zero-extended `UInt16`.
+guess. Every generic or raw chain must match an exact reviewed modifier form
+and operand role. The audited synthetic selector `.sink` preserves a PTX `_`
+arrival destination; this is mandatory when a generic address names a remote
+cluster mbarrier. `.report_pred` and `.report` choose
+`waitComplete|reportPredicate` without or with the optional `reportValue`.
+Only the emitted instruction head drops these selectors. The two
+space-before-sem/scope `arrive_drop` heads printed by the ISA are accepted as
+provenance-marked aliases and normalized to canonical emitted PTX. Ordinary
+mbarrier addresses accept base-plus-constant-offset syntax, but reject TMA
+coordinate lists. PTX's opaque report value is one byte. Because NVPTX has no
+i8 inline-asm constraint, the full-result call carries it in the low byte of a
+zero-extended `UInt16`. Every mbarrier lowering route also carries a call-site
+`convergent nomerge` barrier, matching the complete NVVM mbarrier surface.
 
 `ptx"..."raw` is an explicit opt-out for these structural boundaries. It emits
 the requested text under the maximally conservative contract, but generally

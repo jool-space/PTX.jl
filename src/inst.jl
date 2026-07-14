@@ -631,24 +631,25 @@ function format_call(::Operation{op, mods}, @nospecialize(argtypes::Type{<:Tuple
     build_call(op, mods, Tuple(argtypes.parameters)).asm
 end
 
-# --- convergent inline asm (warp-collective asm-tier forms) ------------------
+# --- convergent inline asm ---------------------------------------------------
 #
 # `@asmcall` cannot attach call-site attributes, and `sideeffect` alone does
 # NOT forbid duplicating a call site across a divergent branch (jump
 # threading, tail duplication) — only `convergent` does. For warp-/warpgroup-
-# collective instructions (wgmma.mma_async, the mma.sync asm fallbacks) a
-# split call site means different lanes execute different copies of a
-# collective op: the `active_mask` class of miscompile the convergence spike
-# reproduced on hardware. The attribute binds in the in-process middle end
-# only — llc neither checks nor needs it — so it is asserted by tests on the
-# emitted llvmcall IR, not by ptxas acceptance.
+# collective instructions (wgmma.mma_async and mma.sync fallbacks), a split
+# call site means different lanes execute different copies: the `active_mask`
+# class of miscompile reproduced on hardware. Mbarrier asm uses this path too,
+# matching the convergence contract on the complete llvm.nvvm.mbarrier.*
+# surface regardless of dispatch tier. The attribute binds in the in-process
+# middle end only — llc neither checks nor needs it — so tests assert emitted
+# llvmcall IR rather than ptxas acceptance.
 #
 # Mechanism validated by spikes/raw_asm_attrs.jl: a `convergent` attribute
 # group on an inline-asm call site parses through Base.llvmcall and survives
 # the optimized module. This helper builds the same shape `@asmcall` would —
 # asm callee returns a scalar or literal struct, entry returns Julia's
 # homogeneous-tuple `[N x T]` via extract/insertvalue, Bool passes as i8 —
-# plus `#0 = { convergent nounwind }` on the call.
+# plus `#0 = { convergent nomerge nounwind }` on the call.
 
 _asm_lltype(T::Type) =
     T === Float32 ? "float" :

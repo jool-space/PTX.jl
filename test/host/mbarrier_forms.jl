@@ -172,6 +172,68 @@ function _mb_output(destination)
     error("bad destination $destination")
 end
 
+# Independently derive each history floor from feature-introduction statements
+# in §9.7.14.16. This deliberately does not consume production constructor
+# tables, cross-product loops, or history helpers: the closed grammar oracle
+# above and this feature oracle fail independently.
+function _isa_mbarrier_floor(schema, variant)
+    mods = schema.ptxmods
+    op = first(mods)
+
+    ptx, sm = if op in (:init, :inval, :arrive, :arrive_drop,
+                        :test_wait, :pending_count)
+        (v"7.0", v"8.0")
+    elseif op === :try_wait
+        (v"7.8", v"9.0")
+    elseif op in (:expect_tx, :complete_tx)
+        (v"8.0", v"9.0")
+    elseif op === :check_layout
+        (v"9.3", v"9.0")
+    else
+        error("unreviewed mbarrier operation: $op")
+    end
+
+    advance!(p, s = sm) = (ptx = max(ptx, p); sm = max(sm, s))
+
+    # PTX 7.1 independently introduced result discard for mbarrier.arrive
+    # and phase-parity waits. arrive_drop admitted `_` at its PTX 7.0
+    # introduction (also confirmed with CUDA 13.3 ptxas at version 7.0).
+    schema.destination === :sink && op === :arrive && advance!(v"7.1")
+    :parity in mods && advance!(v"7.1")
+
+    Symbol("shared::cta") in mods && advance!(v"7.8")
+
+    # The optional count on ordinary arrive/arrive_drop is distinct from the
+    # mandatory count of noComplete and txCount of expect_tx.
+    if op in (:arrive, :arrive_drop) &&
+       !(:noComplete in mods) && !(:expect_tx in mods) &&
+       variant.operands == (:address, :u32)
+        advance!(v"7.8", v"9.0")
+    end
+
+    (:expect_tx in mods || op in (:expect_tx, :complete_tx)) &&
+        advance!(v"8.0", v"9.0")
+    Symbol("shared::cluster") in mods && advance!(v"8.0", v"9.0")
+
+    # Bare :cta/:cluster are synchronization scopes; state-space
+    # subqualifiers are distinct Symbols containing `shared::`.
+    (:cta in mods || :cluster in mods) && advance!(v"8.0")
+    :cluster in mods && advance!(v"8.0", v"9.0")
+    # expect_tx/complete_tx were born in 8.0 with `.relaxed`; `.relaxed` was
+    # added to arrive/drop/wait later, in 8.6.
+    (:relaxed in mods && !(op in (:expect_tx, :complete_tx))) &&
+        advance!(v"8.6", v"9.0")
+
+    any(m -> startswith(String(m), "layout::"), mods) &&
+        advance!(v"9.3", v"9.0")
+    any(m -> startswith(String(m), "phase_type::"), mods) &&
+        advance!(v"9.3", v"9.0")
+    schema.destination in (:report_pred, :report) &&
+        advance!(v"9.3", v"9.0")
+
+    (; ptx, sm)
+end
+
 @testset "closed mbarrier grammar and ABI ledger" begin
     expected = _expected_mbarrier_forms()
     actual = Dict(schema.mods => schema for schema in PTX.MBARRIER_FORM_SCHEMAS)
@@ -241,12 +303,101 @@ end
     @test variant((:init, Symbol("layout::v1"), :shared, :b64)).min_sm == v"9.0"
     @test variant((:arrive, :shared, :b64), 1).min_sm == v"8.0"
     @test variant((:arrive, :shared, :b64), 2).min_sm == v"9.0"
+    @test variant((:arrive, :sink, :b64), 1).ptx_version == v"7.1"
+    @test variant((:arrive_drop, :sink, :b64), 1).ptx_version == v"7.0"
     @test variant((:arrive, :noComplete, :shared, :b64)).min_sm == v"8.0"
+    @test variant((:arrive, :sink, :noComplete, :shared, :b64)).ptx_version == v"7.1"
     @test variant((:try_wait, :shared, :b64)).ptx_version == v"7.8"
     @test variant((:try_wait, :shared, :b64)).min_sm == v"9.0"
     @test variant((:test_wait, :report,
                    Symbol("phase_type::primary"), :shared, :b64)).ptx_version == v"9.3"
     @test variant((:pending_count, Symbol("layout::v0"), :b64)).min_sm == v"9.0"
+end
+
+@testset "independent exhaustive mbarrier history floors" begin
+    @test length(PTX.MBARRIER_FORM_SCHEMAS) == 480
+    @test sum(length(s.variants) for s in PTX.MBARRIER_FORM_SCHEMAS) == 687
+    for schema in PTX.MBARRIER_FORM_SCHEMAS, variant in schema.variants
+        want = _isa_mbarrier_floor(schema, variant)
+        label = "mbarrier.$(join(schema.mods, '.')) $(variant.operands)"
+        @testset "$label" begin
+            @test variant.ptx_version == want.ptx
+            @test variant.min_sm == want.sm
+        end
+    end
+end
+
+@testset "every exact mbarrier wrapper is schema-backed and convergent" begin
+    layout0 = Symbol("layout::v0")
+    layout1 = Symbol("layout::v1")
+    primary = Symbol("phase_type::primary")
+    conditional = Symbol("phase_type::conditional")
+    cluster = Symbol("shared::cluster")
+    cta = Symbol("shared::cta")
+    expected = Set((
+        (:init, :shared, :b64),
+        (:inval, :shared, :b64),
+        (:arrive, :shared, :b64),
+        (:arrive, :noComplete, :shared, :b64),
+        (:arrive, :expect_tx, :shared, :b64),
+        (:expect_tx, :shared, :b64),
+        (:test_wait, :shared, :b64),
+        (:test_wait, :parity, :shared, :b64),
+        (:try_wait, :shared, :b64),
+        (:try_wait, :parity, :shared, :b64),
+        (:arrive, cluster, :b64),
+        (:arrive, :expect_tx, cluster, :b64),
+        (:init, layout0, :shared, :b64),
+        (:init, layout1, :shared, :b64),
+        (:check_layout, layout0, cta, :b64),
+        (:check_layout, layout1, cta, :b64),
+        (:test_wait, :report, primary, :shared, :b64),
+        (:test_wait, :report, :parity, primary, :shared, :b64),
+        (:try_wait, :report, primary, :shared, :b64),
+        (:try_wait, :report, :parity, primary, :shared, :b64),
+        (:test_wait, :parity, conditional, :shared, :b64),
+        (:try_wait, :parity, conditional, :shared, :b64),
+    ))
+    actual = Set{Tuple}()
+    PTX._visit_operation_methods() do _, op, mods
+        op === :mbarrier && push!(actual, mods)
+    end
+    @test length(expected) == 22
+    @test actual == expected
+    for mods in actual
+        @test PTX.mbarrier_form_schema(:mbarrier, mods) !== nothing
+    end
+
+    # These twelve wrappers have no NVVM spelling. Their convenience methods
+    # normalize Integer inputs, then delegate back to the schema emitter. Pin
+    # the actual typed body so a future hand-written @asmcall cannot silently
+    # lose the call-site optimizer barrier again.
+    pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
+    asm_wrappers = (
+        ((:arrive, cluster, :b64), (pS,)),
+        ((:arrive, :expect_tx, cluster, :b64), (pS, UInt32)),
+        ((:init, layout0, :shared, :b64), (pS, UInt32)),
+        ((:init, layout1, :shared, :b64), (pS, Int)),
+        ((:check_layout, layout0, cta, :b64), (pS,)),
+        ((:check_layout, layout1, cta, :b64), (pS,)),
+        ((:test_wait, :report, primary, :shared, :b64), (pS, UInt64)),
+        ((:test_wait, :report, :parity, primary, :shared, :b64),
+         (pS, UInt32)),
+        ((:try_wait, :report, primary, :shared, :b64), (pS, Int)),
+        ((:try_wait, :report, :parity, primary, :shared, :b64),
+         (pS, UInt32)),
+        ((:test_wait, :parity, conditional, :shared, :b64), (pS, UInt32)),
+        ((:try_wait, :parity, conditional, :shared, :b64), (pS, Int)),
+    )
+    @test length(asm_wrappers) == 12
+    for (mods, argtypes) in asm_wrappers
+        ci, rettype = first(Base.code_typed(Operation{:mbarrier, mods}(),
+                                            argtypes))
+        schema = PTX.mbarrier_form_schema(:mbarrier, mods)
+        @test rettype === _mb_rettype(schema.destination)
+        @test occursin("asm sideeffect", string(ci))
+        @test occursin("convergent nomerge", string(ci))
+    end
 end
 
 @testset "mbarrier representative result shapes and exact raw" begin
