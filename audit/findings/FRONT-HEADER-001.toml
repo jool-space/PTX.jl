@@ -8,7 +8,7 @@ validation_tier = "host parser/IR/corpus; CUDA 12.9 and 13.3 ptxas"
 
 [resolution]
 pr = 36
-commit = "58d54f05d934973dd31e4249642dd76051249d79"
+commit = "e200d78d19546ff1f8ab11d0dbceaf3448abf941"
 scope = "full"
 evidence = [
   "omitted .address_size now retains the ISA-defined AddressSize(32) semantic default while address_size_explicit=false prevents normalize, canonicalize, diff, and structural format from manufacturing syntax; programmatic AddressSize accepts only 32 or 64",
