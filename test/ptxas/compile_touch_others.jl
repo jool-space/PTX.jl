@@ -18,5 +18,4 @@
     # Regression floor: the sweep must actually be sweeping. Update when
     # the wrapper surface grows or shrinks deliberately.
     @test result.touched >= 190
-    println("compile-touch others: $(result.touched) wrapper methods compiled")
 end

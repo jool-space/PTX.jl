@@ -738,6 +738,6 @@ end
     @test ok
     @test occursin("clusterlaunchcontrol.query_cancel.get_first_ctaid::x.b32.b128", ptx)
 
-    @info "registry token `Metadata` is left uncompiled (no SSA callsite): " *
-          "only llvm.nvvm.texsurf.handle uses it; no wrapper does"
+    # Registry token `Metadata` is deliberately left uncompiled (no SSA
+    # callsite): only llvm.nvvm.texsurf.handle uses it, and no wrapper does.
 end

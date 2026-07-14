@@ -514,3 +514,97 @@ function compile_touch_sweep(want; batch::Int = 16)
     end
     (; touched, failures, unsynthesized)
 end
+
+# --- external-corpus sweep support -------------------------------------------
+#
+# Shared by host/corpus.jl (curated tier, manifests) and the
+# host/corpus_external_* shards. The external corpus (~200 real-world files,
+# ~1.6 MB) dominated the suite's wall clock as a single test file; the
+# per-file evidence is embarrassingly parallel, so the shards slice one
+# sorted file list by index stride. Names are `*_SWEEP_*` because
+# host/codegen.jl builds its own EXTERNAL_DIR/EXTERNAL_FILES view of the
+# same corpus in the same worker namespace.
+
+function _gather_corpus_ptx(dir)
+    files = String[]
+    isdir(dir) || return files
+    for entry in readdir(dir; join = true)
+        if isdir(entry)
+            append!(files, _gather_corpus_ptx(entry))
+        elseif endswith(entry, ".ptx")
+            push!(files, entry)
+        end
+    end
+    sort(files)
+end
+
+const CORPUS_SWEEP_DIR = joinpath(@__DIR__, "corpus")
+const EXTERNAL_SWEEP_DIR = joinpath(CORPUS_SWEEP_DIR, "external")
+const EXTERNAL_SWEEP_FILES = _gather_corpus_ptx(EXTERNAL_SWEEP_DIR)
+
+# Number of host/corpus_external_* shard files. The shards must partition
+# EXTERNAL_SWEEP_FILES exactly; host/corpus.jl asserts the partition.
+# Deterministic greedy bin-packing by byte size (largest first, into the
+# currently lightest shard). Per-file cost is strongly size-correlated and
+# superlinear for the largest compiler outputs — one ~50 KB kernel costs
+# ~58s of deep-structural evidence on its own, so it must sit alone; a
+# plain alphabetical stride measured 106s vs 16s across shards.
+const EXTERNAL_SWEEP_SHARDS = 6
+const _EXTERNAL_SWEEP_ASSIGNMENT = let
+    bins = [String[] for _ in 1:EXTERNAL_SWEEP_SHARDS]
+    load = zeros(Int, EXTERNAL_SWEEP_SHARDS)
+    for path in sort(EXTERNAL_SWEEP_FILES; by = p -> (-filesize(p), p))
+        i = argmin(load)
+        push!(bins[i], path)
+        load[i] += filesize(path)
+    end
+    map(sort, bins)
+end
+external_corpus_shard(shard::Int) = _EXTERNAL_SWEEP_ASSIGNMENT[shard]
+
+# These external Triton kernels currently exercise the intentional RawLine
+# fallback. Keep them in the acceptance/lossless corpus, but do not present
+# their raw-text re-emission as structural coverage. The inventory is a
+# deliberate review point: parser progress (or a regression) changes it only
+# with an explicit manifest update.
+const EXTERNAL_SWEEP_RAWLINE_MANIFEST = Dict(
+    "triton/fa_ws_pingpong_sm90a.ptx" => 494,
+    "triton/matmul_tma_sm120a.ptx" => 233,
+    "triton/matmul_tma_v33_sm90a.ptx" => 240,
+    "triton/matmul_tma_v34_sm90a.ptx" => 241,
+    "triton/matmul_tma_v35_sm90a.ptx" => 244,
+    "triton/matmul_wgmma_v32_sm90a.ptx" => 245,
+)
+
+function _deep_structural_roundtrip(src::String, name::String;
+                                    semantic::Bool = true,
+                                    byte_loss_limit::Union{Nothing, Float64} = nothing)
+    parsed = PTX.Parser.parse(src)
+    _assert_no_rawlines(parsed, name)
+
+    first_ir = _deep_unraw(parsed)
+    @test first_ir.raw_source === nothing
+    @test first_ir.raw_header === nothing
+    @test isempty(_raw_snapshot_paths(first_ir))
+    first_text = PTX.IR.format(first_ir)
+
+    reparsed = PTX.Parser.parse(first_text)
+    _assert_no_rawlines(reparsed, "$name after deep structural re-emit")
+    second_ir = _deep_unraw(reparsed)
+    @test isempty(_raw_snapshot_paths(second_ir))
+    second_text = PTX.IR.format(second_ir)
+
+    # Fixed-point checks formatting. The curated tier also runs the more
+    # expensive semantic module diff; the broad external tier is a structural
+    # stress suite and would turn that O(n) IR walk into an impractical
+    # repeated-normalization cost for large compiler outputs.
+    @test first_text == second_text
+    if byte_loss_limit !== nothing
+        byte_loss = abs(length(first_text) - length(src)) / length(src)
+        @test byte_loss < byte_loss_limit
+    end
+    if semantic
+        @test isempty(PTX.IR.diff(first_ir, second_ir))
+    end
+    first_text
+end

@@ -18,5 +18,4 @@
     # Regression floor: the sweep must actually be sweeping. Update when
     # the wrapper surface grows or shrinks deliberately.
     @test result.touched >= 1600
-    println("compile-touch wgmma: $(result.touched) wrapper methods compiled")
 end

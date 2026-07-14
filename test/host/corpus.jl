@@ -30,71 +30,6 @@ end
 # emission, and other compilers. Larger (~200 files, ~22K LOC). Stress-
 # tests the parser on operand patterns the hand-curated set doesn't cover.
 EXTERNAL_DIR = joinpath(CORPUS_DIR, "external")
-function _gather_ptx_files(dir)
-    files = String[]
-    isdir(dir) || return files
-    for entry in readdir(dir; join = true)
-        if isdir(entry)
-            append!(files, _gather_ptx_files(entry))
-        elseif endswith(entry, ".ptx")
-            push!(files, entry)
-        end
-    end
-    sort(files)
-end
-EXTERNAL_FILES = _gather_ptx_files(EXTERNAL_DIR)
-
-# These external Triton kernels currently exercise the intentional RawLine
-# fallback. Keep them in the acceptance/lossless corpus, but do not present
-# their raw-text re-emission as structural coverage. The inventory is a
-# deliberate review point: parser progress (or a regression) changes it only
-# with an explicit manifest update.
-const EXTERNAL_RAWLINE_MANIFEST = Dict(
-    "triton/fa_ws_pingpong_sm90a.ptx" => 494,
-    "triton/matmul_tma_sm120a.ptx" => 233,
-    "triton/matmul_tma_v33_sm90a.ptx" => 240,
-    "triton/matmul_tma_v34_sm90a.ptx" => 241,
-    "triton/matmul_tma_v35_sm90a.ptx" => 244,
-    "triton/matmul_wgmma_v32_sm90a.ptx" => 245,
-)
-
-const EXTERNAL_STRUCTURAL_FILES = filter(EXTERNAL_FILES) do path
-    !haskey(EXTERNAL_RAWLINE_MANIFEST, relpath(path, EXTERNAL_DIR))
-end
-
-function _deep_structural_roundtrip(src::String, name::String;
-                                    semantic::Bool = true,
-                                    byte_loss_limit::Union{Nothing, Float64} = nothing)
-    parsed = parse_ptx(src)
-    _assert_no_rawlines(parsed, name)
-
-    first_ir = _deep_unraw(parsed)
-    @test first_ir.raw_source === nothing
-    @test first_ir.raw_header === nothing
-    @test isempty(_raw_snapshot_paths(first_ir))
-    first_text = format(first_ir)
-
-    reparsed = parse_ptx(first_text)
-    _assert_no_rawlines(reparsed, "$name after deep structural re-emit")
-    second_ir = _deep_unraw(reparsed)
-    @test isempty(_raw_snapshot_paths(second_ir))
-    second_text = format(second_ir)
-
-    # Fixed-point checks formatting. The curated tier also runs the more
-    # expensive semantic module diff; the broad external tier is a structural
-    # stress suite and would turn that O(n) IR walk into an impractical
-    # repeated-normalization cost for large compiler outputs.
-    @test first_text == second_text
-    if byte_loss_limit !== nothing
-        byte_loss = abs(length(first_text) - length(src)) / length(src)
-        @test byte_loss < byte_loss_limit
-    end
-    if semantic
-        @test isempty(IR.diff(first_ir, second_ir))
-    end
-    first_text
-end
-
 # Tier 1 — lossless byte-identical round-trip via raw_source.
 # The parser always populates raw_source; format() returns it verbatim.
 # Certifies that the parser accepts the input — the round-trip is trivial
@@ -194,38 +129,16 @@ end
 # the lexer tier and must reject for their exact version/target mismatch. Their
 # bodies stay in parser coverage through an in-memory minimum-version repair;
 # the committed provenance fixture is never rewritten.
-@testset "external lossless: $(relpath(path, EXTERNAL_DIR))" for path in EXTERNAL_FILES
-    src = read(path, String)
-    if _external_header_requires_repair(src)
-        error = try parse_ptx(src); nothing catch caught; caught end
-        @test error isa PTX.Parser.ParseError
-        @test occursin("requires PTX ISA", sprint(showerror, error))
-        tokens = PTX.Parser.tokenize(src)
-        @test join(t.leading_whitespace * t.text for t in tokens
-                   if t.kind != PTX.Parser.TokenKind.EOF) == src
-    end
-    parser_src = _external_parser_source(src)
-    local m::IR.Module
-    @test (m = parse_ptx(parser_src); true)
-    @test format(m) == parser_src
-end
-
-# The manifest makes exclusion from deep structural evidence auditable rather
-# than allowing a broad external testset to quietly inherit raw snapshots.
-@testset "external RawLine fallback inventory" begin
-    observed = Dict{String, Int}()
-    for path in EXTERNAL_FILES
-        count = _rawline_count(parse_ptx(_external_parser_source(read(path, String))))
-        count == 0 || (observed[relpath(path, EXTERNAL_DIR)] = count)
-    end
-    @test observed == EXTERNAL_RAWLINE_MANIFEST
-end
-
-# Only fallback-free external inputs provide deep structural evidence. A new
-# fallback in this partition fails `_assert_no_rawlines` instead of silently
-# dropping to a weaker test tier.
-@testset "external deep structural: $(relpath(path, EXTERNAL_DIR))" for path in EXTERNAL_STRUCTURAL_FILES
-    _deep_structural_roundtrip(_external_parser_source(read(path, String)),
-                               "external/$(relpath(path, EXTERNAL_DIR))";
-                               semantic = false)
+# The external per-file evidence lives in host/corpus_external_* (see
+# test/setup.jl, external-corpus sweep support). Pin here, once, that the
+# sweep exists, that the shard slices partition it exactly, and that the
+# RawLine manifest names real files — so a shard-count edit or a corpus
+# rename cannot silently drop coverage.
+@testset "external corpus shard partition is exact" begin
+    @test !isempty(EXTERNAL_SWEEP_FILES)
+    sharded = sort(reduce(vcat, [external_corpus_shard(i)
+                                 for i in 1:EXTERNAL_SWEEP_SHARDS]))
+    @test sharded == EXTERNAL_SWEEP_FILES
+    rels = Set(relpath(path, EXTERNAL_SWEEP_DIR) for path in EXTERNAL_SWEEP_FILES)
+    @test all(name -> name in rels, keys(EXTERNAL_SWEEP_RAWLINE_MANIFEST))
 end
