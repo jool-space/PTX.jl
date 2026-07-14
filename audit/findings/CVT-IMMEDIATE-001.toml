@@ -1,7 +1,20 @@
 id = "CVT-IMMEDIATE-001"
-status = "confirmed"
+status = "resolved"
 severity = "high"
 category = "correctness"
 summary = "The transpiler disables ordinary cvt source-type hints, so immediate operands can receive the wrong Julia register carrier."
 source_handoffs = ["wave4-data-movement.md", "wave6-frontend-tests.md"]
 validation_tier = "host transpilation; ptxas pending"
+
+[resolution]
+pr = 32
+commit = "6581e4a83e54f46a510887a26b45e27a7123a984"
+scope = "full"
+evidence = [
+  "independent 21-format source-carrier ledger and 193-schema ordinary-cvt ABI inventory",
+  "non-eval PTX s64/u64 constant evaluator applies fixed-width expression semantics and modular use-site carrier conversion",
+  "lexer-token declaration inventory covers comma-packed, comment-spoof, and brace-scope boundaries while stochastic x4 accepts only f32/b32 carriers",
+  "final host carrier and transpiler suite passes 671/671 assertions",
+  "CUDA 13.3 LLVM, emitted-PTX, and ptxas suite passes 44/44 assertions with the live-s2f6 compiler limitation pinned separately",
+  "independent final review approved the fixed source-carrier, constant, declaration, and stochastic-vector boundaries",
+]

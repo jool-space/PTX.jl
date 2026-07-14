@@ -163,9 +163,13 @@ The exceptions are:
 
 - **Ordinary `cvt`** — grammar is `cvt.<modifiers...>.<dst>.<src>`, so the
   destination is `parts[end-1]`. Both terminal tokens must be recognized dtypes
-  in that canonical order; `cvt.rn.f16.f32` returns `Float16`. Contradictory
-  reversed/postfix examples remain unsupported under `CVT-IMMEDIATE-001`
-  rather than being assigned a plausible but wrong ABI.
+  in that canonical order; `cvt.rn.f16.f32` returns `Float16`. A reviewed
+  schema closes 193 destination/source/operand shapes over 21 source formats.
+  It validates the result/source carriers and the extra operand positions of
+  stochastic and scaled forms; ptxas remains authoritative for the complete
+  rounding/saturation prefix cross-product. Contradictory reversed/postfix
+  examples remain unsupported rather than being assigned a plausible but wrong
+  ABI.
 - **`cvt.pack`** — every reviewed pack form returns `UInt32`; its conversion,
   source, and optional carry-in width tokens all describe inputs.
 - **`setp`** — general `setp.<cmp>[.<boolop>][.ftz].<dtype>` returns `Bool`;
@@ -223,6 +227,44 @@ end
 A 16-bit primitive lowers to LLVM `i16`, fitting the same `h` constraint
 as `UInt16`. `reinterpret` between the carrier and the semantic type is
 zero-cost.
+
+### Ordinary `cvt` constants
+
+PTX integer and floating-point constants acquire their effective type from the
+instruction operand position. Ordinary `cvt` lowering therefore uses the
+reviewed source schema instead of applying the destination type to every source:
+integer immediates are accepted for `.u8` through `.s64`, and floating
+literals for `.f32` and `.f64`. Exact `0f...` and `0d...` literals keep
+their bit patterns and are converted to the declared source width, even when
+their spelling uses the other exact-literal width.
+
+Integer immediates use PTX's use-site conversion rule: the 64-bit integer
+constant is reduced modulo the operand width before the typed Julia call. A
+non-eval evaluator first applies PTX's fixed `.s64`/`.u64` expression rules,
+so `(0xffffffff << 32)` remains `0xffffffff00000000` rather than inheriting
+Julia's 32-bit hexadecimal-literal width. Thus a `.u8` source of `256`
+carries `UInt8(0)`, while a `.s8` source of `255` carries `Int8(-1)`;
+integer literals exceeding 64 bits fail loud.
+
+The evaluator covers the immediate tokens and expressions the current frontend
+already structures, including decimal, hexadecimal, C-style octal,
+`WARP_SZ`, unary operators, casts, arithmetic, shifts, comparisons, bitwise
+AND/OR, and logical AND/OR. PTX `U` suffixes, binary literals, XOR, ternary
+expressions, and other frontend gaps remain tracked under `FRONT-LEXER-001`
+and are not claimed here.
+
+PTX constants cannot directly carry `.f16`, `.bf16`, or packed alternate
+floating-point source formats, so those positions require registers rather than
+silently retyping a Julia number. Stochastic x4 forms additionally require a
+four-element vector of declared `.f32` or `.b32` registers and a declared
+32-bit random-bits register; `.u32`/`.s32` declarations do not satisfy the
+floating source role. Scaled forms use a separate `.b16` scale position.
+
+CUDA 13.3 ptxas currently reports internal error C7907 when a live
+`.s2f6x2` conversion result reaches code generation, including for minimal
+PTX without debug metadata. The offline evidence suite therefore pins live
+`sm_121a` PTX emission and separately assembles a dead-result syntax/target
+probe; it makes no runtime claim for the `.s2f6x2` forms.
 
 ## Extended precision and `CC.CF`
 

@@ -94,6 +94,8 @@ Mechanical mapping rules (v2.0):
 | `bra DONE;` | `@goto DONE` |
 | `@p bra DONE;` | `if p; @goto DONE; end` |
 | `@p mov.b32 %r1, 1;` | `if p; r1 = ptx"mov.b32"(UInt32(1)); end` |
+| `cvt.rn.f32.u8 %f1, 17;` | `f1 = ptx"cvt.rn.f32.u8"(UInt8(17))` |
+| `cvt.rs.satfinite.e4m3x2.f32 %h1, {%f0, ...}, %r0;` | `h1 = ptx"cvt.rs.satfinite.e4m3x2.f32"(...)` |
 | `ld.param.u64 %rd0, [param0];` | `rd0 = param0` |
 | `setp.lt.f32 %p0\|%p1, %f0, %f1;` | `(p0, p1) = ptx"setp.dual.lt.f32"(f0, f1)` |
 | `setp.eq.f16x2 %p0\|_, %r0, %r1;` | `(p0, _) = ptx"setp.eq.f16x2"(r0, r1)` |
@@ -134,6 +136,16 @@ literals, XOR, and the ternary operator—remain parser work under
 silently treated as runtime LUTs. The wider `IMMEDIATE-001` finding remains
 open for `setmaxnreg` and `pmevent`, while its `lop3` range/constness slice is
 closed by this schema.
+
+Ordinary `cvt` sources are position-aware. The transpiler closes the reviewed
+destination/source carrier pairs and the structural operand roles of stochastic
+and scaled forms, while leaving the full rounding/saturation prefix
+cross-product to ptxas. In particular, narrow and packed floating sources are
+not fabricated from Julia numeric literals, stochastic random bits must be a
+declared 32-bit register, stochastic x4 source elements must be declared
+`.f32`/`.b32` registers (not `.u32`/`.s32`), and scaled forms type their scale
+operand separately.
+See [Ordinary `cvt` constants](dsl.md#Ordinary-cvt-constants).
 
 ## Diff against the original PTX
 

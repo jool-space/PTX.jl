@@ -12,6 +12,7 @@ include("implicit_state.jl")
 
 include("structured_results.jl")
 include("scalar_results.jl")
+include("cvt_forms.jl")
 include("mbarrier_forms.jl")
 
 include("nvvm/NVVM.jl")
