@@ -245,7 +245,7 @@ end
             sprint(showerror, ex)
         end
         @test occursin("CC.CF", err)
-        @test occursin("cannot preserve", err)
+        @test occursin("cannot cross", err)
     end
 
     # Keep the guard ahead of shared-pointer alias propagation. If it moves
@@ -270,5 +270,5 @@ end
         sprint(showerror, ex)
     end
     @test occursin("CC.CF", alias_err)
-    @test occursin("cannot preserve", alias_err)
+    @test occursin("cannot cross", alias_err)
 end

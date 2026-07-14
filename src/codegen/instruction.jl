@@ -6,6 +6,12 @@ function render_dst(op::RegisterOperand, cg::CodeGenState)
     (name, [name])
 end
 
+function render_dst(op::LabelOperand, cg::CodeGenState)
+    _declared_register(cg, op) === nothing &&
+        return (render_operand(op, cg), String[])
+    render_dst(RegisterOperand(op.name), cg)
+end
+
 function render_dst(op::PipeOperand, cg::CodeGenState)
     l, lnames = render_dst(op.left, cg)
     r, rnames = render_dst(op.right, cg)
@@ -31,27 +37,6 @@ function chain_expr(::CodeGenState, opcode::AbstractString,
                     @nospecialize(modifiers::Tuple{Vararg{String}}))
     "ptx\"" * opcode * join(modifiers) * "\""
 end
-
-# Opcodes that have no destination operand even when they take inputs (the
-# first operand is a barrier id, group count, etc.). Memory-sink ops with
-# `AddressOperand` first arg are caught separately.
-const NO_DEST_OPCODES = Set{String}((
-    "bar", "barrier",
-    "ret", "exit", "trap", "brkpt",
-    # Their operands are ISA-required integer constants, never destinations.
-    "pmevent", "setmaxnreg",
-))
-
-# Same idea, but the no-dest variant lives behind a leading modifier — the
-# rest of the family (e.g. `wgmma.mma_async`) keeps a destination.
-const NO_DEST_OPCODE_MODIFIERS = Set{Tuple{String, String}}((
-    ("wgmma", ".wait_group"),
-))
-
-_is_no_dest(inst::Instruction) =
-    inst.opcode in NO_DEST_OPCODES ||
-    (!isempty(inst.modifiers) &&
-     (inst.opcode, inst.modifiers[1]) in NO_DEST_OPCODE_MODIFIERS)
 
 _schema_modifiers(modifiers::Tuple{Vararg{String}}) =
     Tuple(Symbol(lstrip(modifier, '.')) for modifier in modifiers)
@@ -135,6 +120,9 @@ function _structured_decl_types(kind::Symbol)
     kind === :bf16 && return (ScalarType.B16, ScalarType.BF16)
     kind === :f32 && return (ScalarType.F32, ScalarType.B32)
     kind === :f64 && return (ScalarType.F64, ScalarType.B64)
+    kind === :b8 && return (ScalarType.B8, ScalarType.U8, ScalarType.S8)
+    kind in (:u8, :s8) &&
+        return (ScalarType.B8, ScalarType.U8, ScalarType.S8)
     kind === :b16 && return (ScalarType.B16, ScalarType.U16,
                              ScalarType.S16, ScalarType.F16,
                              ScalarType.BF16)
@@ -1250,7 +1238,7 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     scalar_schema = structured_checked === nothing ?
                     _instruction_scalar_result_schema(inst) : nothing
     cvt_schema = _instruction_cvt_source_schema(cg, inst, scalar_schema)
-    _instruction_clc_try_cancel_schema(inst)
+    clc_schema = _instruction_clc_try_cancel_schema(inst)
 
     if inst.opcode == "ret" && isempty(inst.operands)
         if inst.predicate === nothing
@@ -1273,20 +1261,6 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
         return
     end
 
-    # PTX `ld.param.<type> %rd, [paramN]` → `rd = paramN`. Julia kernel args
-    # ARE the values; rebinding suffices.
-    if inst.opcode == "ld" && any(==(".param"), inst.modifiers) &&
-            length(inst.operands) == 2 &&
-            inst.operands[2] isa AddressOperand
-        addr = inst.operands[2]::AddressOperand
-        if !startswith(addr.base, "%") && addr.offset === nothing
-            dst_expr, dst_names = render_dst(inst.operands[1], cg)
-            line = dst_expr * " = " * julia_var(addr.base)
-            emit_with_predicate!(cg, line, inst.predicate, dst_names)
-            return
-        end
-    end
-
     # Shared-pointer alias propagation: if this `mov`/`add`/`sub` defines a
     # register from a translated shared symbol or an existing alias, record
     # the alias and emit nothing. Use sites of the dst register are
@@ -1294,6 +1268,22 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     structured_checked === nothing && scalar_schema === nothing &&
         inst.predicate === nothing &&
         _try_alias_def!(cg, inst) && return
+
+    if clc_schema !== nothing
+        chain = chain_expr(cg, inst.opcode, inst.modifiers)
+        args = join((render_operand(op, cg) for op in inst.operands), ", ")
+        emit_with_predicate!(cg, chain * "(" * args * ")",
+                             inst.predicate, String[])
+        return
+    end
+
+    # Exact-schema islands above retain their specialized emission. Every
+    # remaining instruction is emitted from the same finite form/role ledger
+    # used by the module preflight; do not reintroduce address/result guesses.
+    if structured_checked === nothing && scalar_schema === nothing &&
+            cvt_schema === nothing
+        return _emit_transpile_form!(cg, inst)
+    end
 
     # Structured-result schemas choose their reviewed API modifiers. Shfl's
     # existing intrinsic wrapper retains its trailing `.pred` selector.
@@ -1307,32 +1297,6 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     end
     chain = chain_expr(cg, inst.opcode, modifiers)
 
-    if isempty(inst.operands)
-        emit_with_predicate!(cg, chain * "()", inst.predicate, String[])
-        return
-    end
-
-    type_hint = operand_type_hint(inst.opcode, inst.modifiers)
-
-    if _is_no_dest(inst)
-        all_args = join((render_operand(op, cg; type_hint) for op in inst.operands), ", ")
-        emit_with_predicate!(cg, chain * "(" * all_args * ")",
-                             inst.predicate, String[])
-        return
-    end
-
-    # Memory-sink ops (st.*, red.*, atom.* with address-as-dst). The address
-    # is u64 — don't wrap with the trailing-modifier dtype hint — but value
-    # operands that follow do get it.
-    if inst.operands[1] isa AddressOperand
-        first_arg = render_operand(inst.operands[1], cg)
-        rest = (render_operand(op, cg; type_hint) for op in inst.operands[2:end])
-        all_args = join(Iterators.flatten(((first_arg,), rest)), ", ")
-        emit_with_predicate!(cg, chain * "(" * all_args * ")",
-                             inst.predicate, String[])
-        return
-    end
-
     dst_expr, dst_names = structured_checked === nothing ?
                           render_dst(inst.operands[1], cg) :
                           _render_structured_dst(inst.operands[1], cg)
@@ -1344,8 +1308,6 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
         [_render_cvt_source(op, cg, kind, cvt_schema, index)
          for (index, (op, kind)) in
              enumerate(zip(inst.operands[2:end], cvt_schema.operands))]
-    elseif scalar_schema === nothing
-        [render_operand(op, cg; type_hint) for op in inst.operands[2:end]]
     else
         [_render_schema_source(op, cg, kind)
          for (op, kind) in zip(inst.operands[2:end], scalar_schema.operands)]

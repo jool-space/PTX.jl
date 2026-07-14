@@ -276,7 +276,7 @@ end
         "cvt.f64.bf16.rp %fd0, %b160;",
     )
     for instruction in bad_instructions
-        @test_throws ArgumentError PTX.ptx_to_julia(
+        @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(
             _cvt_immediate_module(instruction))
     end
 
@@ -313,7 +313,7 @@ end
         .reg .f32 random_bits;
         .reg .b32 %r<2>;
         """)
-    @test_throws ArgumentError PTX.ptx_to_julia(wrong_named)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(wrong_named)
 end
 
 @testset "cvt register inventory is token-safe and scope-local" begin
@@ -336,7 +336,7 @@ end
             .reg .b32 %dst, %rbits;
             .reg $dtype %a, %b, %e, %f;
             """)
-        @test_throws ArgumentError PTX.ptx_to_julia(wrong_integer)
+        @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(wrong_integer)
     end
 
     # Commas and semicolons inside comments are one COMMENT token. They must
@@ -352,7 +352,7 @@ end
     fake = _cvt_immediate_module(
         "cvt.rs.satfinite.e4m3x4.f32 %dst, {%a, %b, %e, %fake}, %rbits;";
         declarations = commented_decls)
-    @test_throws ArgumentError PTX.ptx_to_julia(fake)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(fake)
 
     scoped = _cvt_immediate_module("""
         {
@@ -371,7 +371,7 @@ end
         }
         cvt.rs.f16x2.f32 %dst, 1.0, 2.0, %inner;
         """; declarations = ".reg .b32 %dst;")
-    @test_throws ArgumentError PTX.ptx_to_julia(leaked)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(leaked)
 end
 
 @testset "ordinary cvt prefix policy preserves the canonical ABI boundary" begin
@@ -382,6 +382,6 @@ end
     @test occursin(
         "f0 = ptx\"cvt.future_modifier.rn.f32.s32\"(Int32(7))",
         accepted)
-    @test_throws ArgumentError PTX.ptx_to_julia(_cvt_immediate_module(
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(_cvt_immediate_module(
         "cvt.f32.s32.future_modifier %f0, 7;"))
 end

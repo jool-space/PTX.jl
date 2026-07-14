@@ -496,8 +496,8 @@ end
 
 @testset "transpiler consumes scalar schemas before alias lowering" begin
     source = _scalar_transpile_module("""
-        add.rz.f32.f16 %f0, 1, 2;
-        add.rz.f32.bf16 %f1, 3, 4;
+        add.rz.f32.f16 %f0, 1.0, 2.0;
+        add.rz.f32.bf16 %f1, 3, 4.0;
         dp4a.s32.u32 %r0, 1, 2, 3;
         mad.wide.u32 %rd0, 4, 5, 6;
         cvt.pack.sat.u8.s32.b32 %r1, 7, 8, 0;
@@ -510,8 +510,8 @@ end
     @test parsed isa Expr && parsed.head == :toplevel
     @test !any(arg -> arg isa Expr && arg.head == :error, parsed.args)
     for line in (
-        "f0 = ptx\"add.rz.f32.f16\"(Float16(1), Float32(2))",
-        "f1 = ptx\"add.rz.f32.bf16\"(UInt16(3), Float32(4))",
+        "f0 = ptx\"add.rz.f32.f16\"(Float16(1.0), Float32(2.0))",
+        "f1 = ptx\"add.rz.f32.bf16\"(UInt16(3), Float32(4.0))",
         "r0 = ptx\"dp4a.s32.u32\"(Int32(1), UInt32(2), Int32(3))",
         "rd0 = ptx\"mad.wide.u32\"(UInt32(4), UInt32(5), UInt64(6))",
         "r1 = ptx\"cvt.pack.sat.u8.s32.b32\"(Int32(7), Int32(8), UInt32(0))",
@@ -524,9 +524,9 @@ end
 
     # Schema grammar and arity are rejected while still in IR, not deferred to
     # evaluating the generated Julia source.
-    @test_throws ArgumentError PTX.ptx_to_julia(_scalar_transpile_module(
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(_scalar_transpile_module(
         "add.rn.f32.f16.sat %f0, %h0, %f1;"))
-    @test_throws ArgumentError PTX.ptx_to_julia(_scalar_transpile_module(
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(_scalar_transpile_module(
         "popc.b64 %r0, %rd0, %rd1;"))
 
     # Keep grammar validation ahead of shared-pointer alias absorption. If it
@@ -539,7 +539,7 @@ end
         .reg .b64 %rd<2>;
         .shared .b8 smem[16];
     """)
-    @test_throws ArgumentError PTX.ptx_to_julia(pointer_source)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(pointer_source)
 
     pure_pointer_source = _scalar_transpile_module("""
         mov.u64 %rd0, smem;
@@ -548,10 +548,10 @@ end
         .reg .b64 %rd<2>;
         .shared .b8 smem[16];
     """)
-    @test_throws ArgumentError PTX.ptx_to_julia(pure_pointer_source)
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(pure_pointer_source)
 
     # Ordinary cvt's noncanonical postfix examples would otherwise choose a
     # plausible but wrong result type in the transpiler as well.
-    @test_throws ArgumentError PTX.ptx_to_julia(_scalar_transpile_module(
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(_scalar_transpile_module(
         "cvt.f64.bf16.rp %rd0, %h0;"))
 end

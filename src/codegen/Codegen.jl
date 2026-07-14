@@ -5,7 +5,7 @@ using Republic: @public
 using ..IR
 using ..IR: Module, Function, Instruction, Label, RegDecl, VarDecl, Param,
             FunctionDirective, PragmaDirective, Comment, BlankLine, RawLine,
-            Block, Statement, Operand, Predicate,
+            Block, IntrinsicScope, TargetDirective, Statement, Operand, Predicate,
             RegisterOperand, ImmediateOperand, LabelOperand, VectorOperand,
             AddressOperand, ParenthesizedOperand, NegatedOperand, PipeOperand,
             ScalarType, StateSpace, LinkingDirective, ptx
@@ -21,6 +21,7 @@ using ..PTX: uses_implicit_cc, structured_result_schema,
              vector_result_operand_roles,
              B128, b128_form_schema, requires_b128_form_schema,
              b128_form_schema_miss, validate_b128_form_args,
+             form_contract, requires_typed_wrapper,
              infer_rettype, ordinary_cvt_source_schema,
              ordinary_cvt_source_schema_miss,
              mbarrier_form_schema, mbarrier_schema_miss, DTYPE_RETTYPE,
@@ -33,8 +34,9 @@ include("constants.jl")
 include("instruction.jl")
 include("statements.jl")
 include("function.jl")
+include("contract.jl")
 
-@public ptx_to_julia, ir_to_julia
+@public ptx_to_julia, ir_to_julia, TranspilerError
 
 """
     ptx_to_julia(source) -> String
@@ -51,6 +53,7 @@ Convert a parsed `IR.Module` into Julia source code. Each `Function` in
 the module becomes one Julia function definition.
 """
 function ir_to_julia(mod::Module)
+    validate_transpilable(mod)
     cg = CodeGenState()
     arch    = isempty(mod.target.targets) ? "" : mod.target.targets[1]
     version = (mod.version.major, mod.version.minor)

@@ -95,6 +95,11 @@ function render_operand(op::LabelOperand, cg::CodeGenState;
     # cannot shadow a user-defined symbol.
     predefined = _predefined_immediate_expr(op.name)
     predefined !== nothing && return predefined
+    # The lexer represents legal bare-name registers as LabelOperand. Once a
+    # preceding declaration proves that namespace, use the register renderer
+    # everywhere so source operands cannot turn into @label spellings.
+    _declared_register(cg, op) === nothing ||
+        return render_operand(RegisterOperand(op.name), cg; type_hint)
     # State-space symbols (e.g. a `.shared` decl referenced by name) come
     # through as LabelOperand. If we've translated the symbol, substitute.
     jname = julia_var(op.name)

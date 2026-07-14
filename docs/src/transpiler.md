@@ -4,9 +4,11 @@ CurrentModule = PTX
 
 # Transpiler
 
-The transpiler turns existing PTX source — from `nvcc -ptx`, Triton,
-CUTLASS, NVIDIA samples — into idiomatic Julia where each register is a
-variable and each instruction is a `ptx"..."(...)` call.
+The transpiler turns a deliberately closed subset of existing PTX source into
+Julia where each register is a variable and each instruction is a
+`ptx"..."(...)` call. The parser and formatter accept much broader compiler
+output from `nvcc -ptx`, Triton, CUTLASS, and NVIDIA samples; successful
+parsing alone is not a claim that the source is semantically transpilable.
 
 ```julia
 using PTX
@@ -44,6 +46,35 @@ Three independent stages, each usable on its own:
   falls back to structural emission, consulting per-statement
   `raw_line` snapshots first.
 - [`ptx_to_julia(source)`](@ref) ≡ `ir_to_julia(parse(source))`.
+
+## Semantic boundary
+
+`ir_to_julia` validates the complete module before writing the first output
+line. Every accepted module, function, declaration, body node, control-flow
+edge, and instruction operand role is explicit. Unsupported input raises
+[`PTX.Codegen.TranspilerError`](@ref), whose `path`, `category`, and `detail`
+identify the rejected IR node. It does not emit a plausible partial program or
+turn an unknown executable line into a comment.
+
+The current declaration subset is scalar `.reg`, scalar `.param`, and
+unaligned/uninitialized/unlinked scalar `.shared` storage. Module storage,
+pointer metadata, array parameters, vector declarations, function return
+parameters, later `.target` directives, pragmas, opaque `RawLine` nodes, and
+construction-only scopes reject. Comments and blank lines are nonsemantic.
+Programmatically constructed `.file`/`.loc` instruction nodes are also
+ignored as debug metadata, but source parsing currently represents those
+directives as `RawLine`; textual PTX containing them therefore rejects until
+FRONT-DECL gives them structural IR nodes.
+
+Instructions fall into two groups. Reviewed ABI islands (structured, vector,
+scalar, b128, `cvt`, mbarrier, and constant-only forms) use their exact schema.
+The remaining scalar subset uses a finite table keyed by the complete opcode
+and modifier sequence; that same table drives both preflight and emission,
+including result-versus-sink classification and every source carrier. A
+general `FormContract` is not enough because optimizer attributes do not prove
+operand arity, address positions, or result ABI. Extending the transpiler
+therefore requires an explicit form/role entry and evidence, not a fallback
+based on the last modifier.
 
 ## Lexical conformance
 
@@ -129,19 +160,18 @@ preserves the original `.param` ABI:
 
 ```julia
 # @ptx_kernel arch=sm_89 version=8.5
-#   raw_params  = [("u64.ptr.global.palign16", "param_0"), ("u64.ptr.global.palign16", "param_1"), ("u64.ptr.global.palign16", "param_2")]
+#   raw_params  = [("u64", "param_0"), ("u64", "param_1"), ("u32", "count")]
 #   directives  = []
-function vector_add(param_0, param_1, param_2)
+function vector_add(param_0, param_1, count)
     # ... body
 end
 ```
 
-The `raw_params` strings carry the lossless `.param` declarations in a
-dot-separated form — `.param .u64 .ptr .global .align 16 param_0` ↔
-`"u64.ptr.global.palign16"`. A future v2.1 sugar pass will use these to
-emit typed pointer parameters (`param_0::Core.LLVMPtr{Float32,
-AS.Global}`), but v2.0 keeps them untyped — Julia kernel arguments ARE
-the values, no `ld.param` rebinding is needed.
+The `raw_params` strings carry the accepted scalar `.param` declarations in a
+dot-separated form. Pointer state-space/alignment metadata is not merely
+decorative ABI information, so the transpiler rejects it until emitted Julia
+signatures can preserve it. Julia kernel arguments are already parameter
+values; accepted scalar `ld.param` instructions become local rebinding.
 
 Mechanical mapping rules (v2.0):
 
@@ -161,7 +191,8 @@ Mechanical mapping rules (v2.0):
 | `match.all.sync.b64 %r0\|%p0, %rd0, %r1;` | `(r0, p0) = ptx"match.all.sync.b64.pred"(rd0, r1)` |
 | `elect.sync _\|%p0, 0xffffffff;` | `(_, p0) = ptx"elect.sync"(UInt32(0xffffffff))` |
 | `shfl.sync.bfly.b32 %r\|%p, ...;` | `(r, p) = ptx"shfl.sync.bfly.b32.pred"(...)` |
-| `ld.global.v2.u32 {%r0, %r1}, [%rd];` | `(r0, r1) = ptx"ld.global.v2.u32"(rd)` |
+| `shl.b64 %rd1, %rd0, 2;` | `rd1 = ptx"shl.b64"(rd0, UInt32(2))` |
+| `ld.global.v2.u32 {%r0, %r1}, [%rd];` | `(r0, r1) = ptx"ld.global.v2.u32"(address(rd))` |
 | wide `ld` with `_` destination lanes | live tuple assignment from `vector_load(..., Val(mask))` |
 | `{ ... }` register-lifetime block | `let ... end` |
 | `LBL:` label | `@label LBL` |
@@ -172,9 +203,12 @@ visible after the `if`-block. Special registers are emitted as
 the 0-vs-1-based off-by-one trap. The scalar PTX 9.3 inventory includes
 vector-component aliases such as `%tid.w` and `%tid.r`; whole `.v4`
 special-register values such as `%tid` are rejected until vector-valued
-IR/lowering is implemented. A standalone PTX predefined immediate `WARP_SZ`
-lowers to `Val(32)`; its token becomes `32` inside a parsed PTX constant
-expression.
+IR/lowering is implemented. The generic ledger admits only thread-index
+components with an explicit `.u32` carrier; inventory membership does not
+guess the type of other special registers. A standalone PTX predefined
+immediate `WARP_SZ` lowers to `Val(32)`. Generic opaque constant expressions
+reject; only reviewed constant-expression consumers use the PTX integer
+interpreter.
 
 Structured destinations are validated against the same closed PTX 9.3 schema
 used by direct calls. The transpiler proves each named destination's declared

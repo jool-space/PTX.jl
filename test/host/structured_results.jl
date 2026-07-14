@@ -296,7 +296,7 @@ end
         declarations =
             ".reg .pred p0, /* fake, ; */ p1;\n.reg .u32 r0, r1;")
     @test occursin("p1 = ptx\"setp.eq.u32\"(r0, r1)", commented)
-    @test_throws ArgumentError _structured_transpile(
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
         "setp.eq.u32 fake, r0, r1;";
         declarations =
             ".reg .pred p0, /* fake, ; */ p1;\n.reg .u32 r0, r1;")
@@ -304,7 +304,7 @@ end
     # A declaration inside a PTX brace scope must leave the active register
     # table with that scope. Otherwise schema validation could accept an
     # out-of-scope register and emit plausible Julia for invalid PTX.
-    @test_throws ArgumentError _structured_transpile("""
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile("""
         {
             .reg .pred inner;
             setp.eq.u32 inner, r0, r1;
@@ -377,7 +377,7 @@ end
 
     for bad in ("-1", "256", "(1 << 8)", "WARP_SZ_limit", "%r4",
                 "((1 / 0) << 0)", "0b1", "1U", "18446744073709551616")
-        @test_throws ArgumentError _structured_transpile(
+        @test_throws PTX.Codegen.TranspilerError _structured_transpile(
             "lop3.b32 %r0, %r1, %r2, %r3, $bad;")
     end
 
@@ -437,23 +437,23 @@ end
         "setp.eq.u32 _|_, %r0, %r1;",
     )
     for instruction in invalid
-        @test_throws ArgumentError _structured_transpile(instruction)
+        @test_throws PTX.Codegen.TranspilerError _structured_transpile(instruction)
     end
 
-    @test_throws ArgumentError _structured_transpile(
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
         "setp.eq.u32 %r0, %r1, %r2;")
-    @test_throws ArgumentError _structured_transpile(
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
         "match.all.sync.b64 %r0|%r1, %rd0, %r2;")
-    @test_throws ArgumentError _structured_transpile(
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
         "setp.eq.u32 %p0, %r0, %r1;";
         declarations = ".reg .pred %p0;\n.reg .b16 %r<2>;")
-    @test_throws ArgumentError _structured_transpile(
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
         "setp.eq.u32 %p0, %f0, %f1;";
         declarations = ".reg .pred %p0;\n.reg .f32 %f<2>;")
-    @test_throws ArgumentError _structured_transpile(
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
         "setp.eq.f32 %p0, %f0, 0;")
-    @test_throws ArgumentError _structured_transpile(
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
         "setp.eq.f16 %p0, %h0, 0.0;")
-    @test_throws ArgumentError _structured_transpile(
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
         "setp.eq.bf16 %p0, %h0, 0.0;")
 end
