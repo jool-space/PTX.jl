@@ -73,6 +73,8 @@ const _COLLMEM   = FormContract(convergent = true, brackets = true)
 # scalar trailing-type rule:
 #
 #   * mma and wgmma.mma_async use shape-dependent register groups;
+#   * ldmatrix has shape/count-dependent grouped results (including two
+#     registers per matrix for m16n16);
 #   * tcgen05 spans address destinations, register vectors, sinks, fences, and
 #     matrix descriptors under one opcode; and
 #   * :pred is a PTX.jl-only selector for a grouped destination,
@@ -86,6 +88,8 @@ const _COLLMEM   = FormContract(convergent = true, brackets = true)
 const TYPED_WRAPPER_ONLY_RULES = (
     (op = :mma,      prefix = (),            marker = nothing,
      detail = "mma has shape-dependent grouped fragment operands and results"),
+    (op = :ldmatrix, prefix = (),            marker = nothing,
+     detail = "ldmatrix has shape/count-dependent grouped results and format-specific arity"),
     (op = :wgmma,    prefix = (:mma_async,), marker = nothing,
      detail = "wgmma.mma_async has shape-dependent tied accumulator groups and descriptors"),
     (op = :tcgen05,  prefix = (),            marker = nothing,
