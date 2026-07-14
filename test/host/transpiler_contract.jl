@@ -121,6 +121,11 @@ end
         IR.VarDecl(state_space = IR.StateSpace.SHARED,
                    type = IR.ScalarType.B32, name = "sv", array_size = 2,
                    vector_shape = IR.VectorShape.V2),
+        # Alternate formats are instruction types, not legal declaration
+        # element types; bf16 storage must use the `.b16` carrier.
+        IR.VarDecl(state_space = IR.StateSpace.SHARED,
+                   type = IR.ScalarType.BF16, name = "bf16_storage",
+                   array_size = 2),
         IR.VarDecl(state_space = IR.StateSpace.GLOBAL,
                    type = IR.ScalarType.B32, name = "global_storage"),
         IR.VarDecl(state_space = IR.StateSpace.LOCAL,
@@ -145,6 +150,20 @@ end
             _contract_function((declaration, _CONTRACT_RET))));
             category = :unsupported)
     end
+
+    # The lower-level type lookups remain carrier-correct even though the
+    # contract above deliberately makes their BF16 declaration entry
+    # unreachable. This prevents a future contract expansion from silently
+    # allocating Float16 shared storage for BF16 bit patterns.
+    @test PTX.Codegen.scalar_to_julia(IR.ScalarType.BF16) === :UInt16
+    @test PTX.Codegen.MODIFIER_TO_JULIA_TYPE[:bf16] == "UInt16"
+
+    b16_storage = IR.VarDecl(state_space = IR.StateSpace.SHARED,
+                             type = IR.ScalarType.B16,
+                             name = "bf16_bits", array_size = 2)
+    julia = ir_to_julia(_contract_module(
+        _contract_function((b16_storage, _CONTRACT_RET))))
+    @test occursin("bf16_bits = CuStaticSharedArray(UInt16, 2)", julia)
 end
 
 @testset "transpiler contract: declaration namespaces and block scope" begin

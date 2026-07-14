@@ -92,7 +92,11 @@ sreg_val_expr(name::AbstractString) = "sreg\"" * name * "\""
 
 const SCALAR_TO_JULIA = Dict{ScalarType.T, Symbol}(
     ScalarType.F64  => :Float64, ScalarType.F32  => :Float32, ScalarType.F16  => :Float16,
-    ScalarType.BF16 => :Float16,
+    # `.bf16` is an alternate instruction format, not a fundamental variable
+    # type (PTX ISA 9.3 §5.2.3).  The closed transpiler contract therefore
+    # rejects BF16 declarations, but keep this lower-level lookup carrier-
+    # correct for direct IR consumers and any future reviewed expansion.
+    ScalarType.BF16 => :UInt16,
     ScalarType.U8   => :UInt8,   ScalarType.U16  => :UInt16,
     ScalarType.U32  => :UInt32,  ScalarType.U64  => :UInt64,
     ScalarType.S8   => :Int8,    ScalarType.S16  => :Int16,
@@ -106,7 +110,7 @@ scalar_to_julia(t::ScalarType.T) = get(SCALAR_TO_JULIA, t, :UInt32)
 
 const MODIFIER_TO_JULIA_TYPE = Dict{Symbol, String}(
     :f64  => "Float64", :f32  => "Float32", :f16  => "Float16",
-    :bf16 => "Float16",
+    :bf16 => "UInt16",
     :u8   => "UInt8",   :u16  => "UInt16",  :u32  => "UInt32", :u64 => "UInt64",
     :s8   => "Int8",    :s16  => "Int16",   :s32  => "Int32",  :s64 => "Int64",
     :b8   => "UInt8",   :b16  => "UInt16",  :b32  => "UInt32", :b64 => "UInt64",
