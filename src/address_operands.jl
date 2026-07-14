@@ -1,9 +1,7 @@
-const PTX_ADDRESS_INTEGER_TYPES = (
-    Int32, UInt32, Int64, UInt64,
-)
+const PTXAddressInteger = Union{Int32, UInt32, Int64, UInt64}
 
 is_ptx_address_integer_type(@nospecialize(T::Type)) =
-    T in PTX_ADDRESS_INTEGER_TYPES
+    T <: PTXAddressInteger && T !== Union{}
 
 """
     Address{T}
@@ -17,13 +15,16 @@ preserves the address role, address space, and exact typed-wrapper dispatch.
 """
 struct Address{T}
     value::T
-    function Address(value::T) where {T}
-        is_ptx_address_integer_type(T) || throw(ArgumentError(
-            "PTX.address: $T is not an integer address carrier; expected " *
-            "Int32, UInt32, Int64, or UInt64 (Core.LLVMPtr is already " *
-            "address-typed and is returned unchanged)"))
-        new{T}(value)
-    end
+    # Carrier validation is by dispatch, not a runtime type test: under the
+    # GPU compiler's overlay method table on Julia 1.10, `T in (...)` (a
+    # `jl_types_equal` ccall) is not concretely evaluated, so the check and
+    # its error-string interpolation would survive into kernel IR and fail
+    # GPUCompiler's IR validation.
+    Address(value::PTXAddressInteger) = new{typeof(value)}(value)
+    Address(@nospecialize(value)) = throw(ArgumentError(
+        "PTX.address: $(typeof(value)) is not an integer address carrier; " *
+        "expected Int32, UInt32, Int64, or UInt64 (Core.LLVMPtr is already " *
+        "address-typed and is returned unchanged)"))
 end
 
 """
