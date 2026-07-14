@@ -277,11 +277,40 @@ const PROBES = Tuple{String, Tuple, String, String, Regex}[
     ("llvm.nvvm.cp.async.bulk.tensor.s2g.tile.5d",
         (pS8, p0, Int32, Int32, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
         r"cp\.async\.bulk\.tensor\.5d\.global\.shared::cta\.tile\.bulk_group \["),
-    # L2 tensor prefetch (no destination — fire-and-forget L2 warming;
-    # the weight-prefetch brick from cutlass examples/63)
+    # L2 tensor prefetch (no destination — fire-and-forget L2 warming).
+    # Every rank is probed both without and with the cache-policy flag; this
+    # pins the optional operand/qualifier pair rather than just intrinsic
+    # name selection.
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.1d",
+        (p0, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.1d\.L2\.global\.tile \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.1d",
+        (p0, Int32, UInt64, Val{true}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.1d\.L2\.global\.tile\.L2::cache_hint \["),
     ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.2d",
         (p0, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
         r"cp\.async\.bulk\.prefetch\.tensor\.2d\.L2\.global\.tile \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.2d",
+        (p0, Int32, Int32, UInt64, Val{true}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.2d\.L2\.global\.tile\.L2::cache_hint \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.3d",
+        (p0, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.3d\.L2\.global\.tile \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.3d",
+        (p0, Int32, Int32, Int32, UInt64, Val{true}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.3d\.L2\.global\.tile\.L2::cache_hint \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.4d",
+        (p0, Int32, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.4d\.L2\.global\.tile \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.4d",
+        (p0, Int32, Int32, Int32, Int32, UInt64, Val{true}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.4d\.L2\.global\.tile\.L2::cache_hint \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.5d",
+        (p0, Int32, Int32, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.5d\.L2\.global\.tile \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.5d",
+        (p0, Int32, Int32, Int32, Int32, Int32, UInt64, Val{true}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.5d\.L2\.global\.tile\.L2::cache_hint \["),
 ]
 
 # tcgen05 (wrappers/tcgen05.jl) — datacenter Blackwell only (consumer
