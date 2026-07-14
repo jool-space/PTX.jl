@@ -1378,37 +1378,6 @@ end
     @test_throws ErrorException build_call(:fakeop, (), (Tuple{},); contract = fake)
 end
 
-@testset "setp dual-pred hand-written wrapper" begin
-    # `setp.<cmp>.<dt> $0|$1, $2, $3;` produces (Bool, Bool). The `$0|$1`
-    # pipe form is distinct from single-pred (which flows through the chain).
-
-    spec = PTX.setp_dual_spec(:eq, :s32, Int32)
-    @test spec.asm == "setp.eq.s32 \$0|\$1, \$2, \$3;"
-    @test spec.constraints == "=b,=b,r,r"
-    @test spec.rettype === Tuple{Bool, Bool}
-
-    # Float compare — `f` constraint letter on inputs.
-    spec = PTX.setp_dual_spec(:lt, :f32, Float32)
-    @test spec.asm == "setp.lt.f32 \$0|\$1, \$2, \$3;"
-    @test spec.constraints == "=b,=b,f,f"
-
-    # 16-bit dtype — `h` constraint.
-    spec = PTX.setp_dual_spec(:ne, :u16, UInt16)
-    @test spec.constraints == "=b,=b,h,h"
-
-    # 64-bit float — `d` constraint.
-    spec = PTX.setp_dual_spec(:ge, :f64, Float64)
-    @test spec.constraints == "=b,=b,d,d"
-
-    # Methods registered on chain singletons for representative variants.
-    @test which(Operation{:setp, (:dual, :eq, :s32)}(),
-                (Int32, Int32)).module == PTX
-    @test which(Operation{:setp, (:dual, :lt, :f32)}(),
-                (Float32, Float32)).module == PTX
-    @test which(Operation{:setp, (:dual, :ge, :u64)}(),
-                (UInt64, UInt64)).module == PTX
-end
-
 @testset "cp.async data hand-written wrapper" begin
     # cp.async.ca.shared.global accepts size 4/8/16; cp.async.cg requires 16.
     # Shared destination uses `r` (32-bit) constraint, not `l` — see comment
@@ -1851,15 +1820,6 @@ end
 
     # (tcgen05 migrated to tier-2 literal methods — no register helpers
     # left; dispatch is asserted in its own testset above)
-
-    # ---- _setp_dual_register ----
-    silent() do
-        PTX._setp_dual_register(:eq, :s32, Int32)
-        PTX._setp_dual_register(:lt, :f32, Float32)
-        PTX._setp_dual_register(:ne, :u16, UInt16)
-    end
-    @test which(Operation{:setp, (:dual, :eq, :s32)}(),
-                (Int32, Int32)).module == PTX
 
     # ---- shfl: no _register helper since the tier-2 migration (methods
     # come from a top-level loop in wrappers/shfl.jl); dispatch sanity only

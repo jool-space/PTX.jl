@@ -41,7 +41,7 @@ hand-written wrappers register typed methods on the same
 
 Some structured surfaces are **typed-wrapper-only**. All `mma.*`,
 `wgmma.mma_async*`, and all `tcgen05.*` forms, plus the internal
-multi-result selectors `setp.dual` and `shfl.*.pred`,
+multi-result selector `shfl.*.pred`,
 reject a dispatch miss before generic asm is rendered. Result groups, tuple
 widths, tied accumulators, address roles, or synthetic selector tokens cannot
 be recovered by the scalar trailing-type rule. The established `tcgen05`
@@ -65,15 +65,45 @@ i8 inline-asm constraint, the full-result call carries it in the low byte of a
 zero-extended `UInt16`. Every mbarrier lowering route also carries a call-site
 `convergent nomerge` barrier, matching the complete NVVM mbarrier surface.
 
-`ptx"..."raw` is an explicit opt-out for these structural boundaries. It emits
-the requested text under the maximally conservative contract, but generally
-does not validate modifier grammar, operand grouping, PTX version, or target
-support. The audited fixed-scalar-result ledger remains enforced on raw calls:
-an exact form has the same result ABI and carrier checks as the registered
-chain, while an in-island miss is rejected because raw has no syntax for
-declaring an alternative result ABI. Raw does not turn a malformed scalar
-rendering into a valid matrix or grouped-result instruction. The
-implicit-`CC.CF` family is stricter still: its hidden dependency makes even a
+`setp`, `lop3`, `match.sync`, and `elect.sync` use a second closed schema
+boundary for structured results. The PTX 9.3 ledger contains 1,114 exact API
+forms: 768 general `setp`, 336 half/bfloat `setp`, three `lop3`, six
+`match.sync`, and one `elect.sync`. It records emitted modifier order, result
+grouping, source carriers, legal `_` positions, PTX version, target floor, and
+ISA section. A spelling anywhere in one of these opcode islands must match the
+ledger even on the raw tier; a misspelled grouped form cannot fall back to a
+plausible scalar ABI.
+
+Synthetic Julia-only modifiers select optional PTX destinations without
+changing emitted text. A leading `.dual` requests general `setp`'s
+compare/complement pair, and a trailing `.pred` requests `match.all`'s
+optional predicate. Packed `.f16x2`/`.bf16x2` comparisons, BoolOp `lop3`, and
+`elect.sync` are intrinsically grouped and need no selector. Direct calls
+materialize every result; transpilation preserves a legal PTX `_` as `_` in
+tuple destructuring. CUDA 13 ptxas rejects `_ |_`, so at most one result may
+be discarded. The collective `match.sync` and `elect.sync` calls carry
+call-site `convergent nomerge` in addition to their conservative memory
+clobber.
+
+```julia
+p, q = ptx"setp.dual.lt.and.f32"(a, b, gate)
+lane0, lane1 = ptx"setp.eq.f16x2"(packed_a, packed_b)
+d, p = ptx"lop3.or.b32"(a, b, c, Val(0x96), gate)
+matching = ptx"match.any.sync.b64"(value, UInt32(0xffffffff))
+all_mask, all_p = ptx"match.all.sync.b64.pred"(value, UInt32(0xffffffff))
+leader, elected = ptx"elect.sync"(UInt32(0xffffffff))
+```
+
+`ptx"..."raw` is an explicit opt-out from the reviewed form registry and most
+typed-wrapper boundaries, not from audited result ABIs. It emits the requested
+text under the maximally conservative contract, but generally does not
+validate modifier grammar, operand grouping, PTX version, or target support.
+The audited fixed-scalar and structured-result ledgers remain
+enforced on raw calls: an exact form has the same result ABI and carrier checks
+as the registered chain, while an in-island miss is rejected because raw has
+no syntax for declaring an alternative result ABI. Raw does not turn a
+malformed scalar rendering into a valid matrix or grouped-result instruction.
+The implicit-`CC.CF` family is stricter still: its hidden dependency makes even a
 standalone raw call unsafe, so raw extended-precision forms remain forbidden.
 Likewise, a reviewed pure value operation whose spelling would infer `Nothing`,
 or a noncanonical ordinary `cvt`, fails on both normal and raw paths instead of
@@ -138,8 +168,19 @@ The exceptions are:
   rather than being assigned a plausible but wrong ABI.
 - **`cvt.pack`** — every reviewed pack form returns `UInt32`; its conversion,
   source, and optional carry-in width tokens all describe inputs.
-- **`setp`** — `setp.<cmp>.<dtype>` always returns `Bool`. The trailing
-  modifier describes the *input* compare type, not the output.
+- **`setp`** — general `setp.<cmp>[.<boolop>][.ftz].<dtype>` returns `Bool`;
+  the leading Julia-only `.dual` selector returns `(compare, complement)` as
+  `Tuple{Bool,Bool}`. Scalar `.f16`/`.bf16` also return `Bool`, while packed
+  `.f16x2`/`.bf16x2` always return the independent low/high lane predicates as
+  `Tuple{Bool,Bool}`. The trailing modifier describes the *input* compare
+  type, not the output.
+- **`lop3`** — `lop3.b32` returns `UInt32`; `.or.b32` and `.and.b32` return
+  `Tuple{UInt32,Bool}` and take the predicate source last. The LUT is a
+  compile-time `Val{N}` with `N` in `0:255`, so a runtime or out-of-range LUT
+  cannot leak into inline assembly.
+- **`match.sync` / `elect.sync`** — every match mask and elected lane is
+  `UInt32`, including `match.*.b64`; trailing `.pred` adds `match.all`'s
+  predicate. `elect.sync` always returns `Tuple{UInt32,Bool}`.
 - **Mixed-precision `add` / `sub` / `fma`** — the reviewed
   `.f32.{f16,bf16}` forms return `Float32`; the final token describes their
   narrow multiplicand carrier.

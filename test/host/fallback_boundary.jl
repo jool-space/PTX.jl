@@ -14,14 +14,13 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
     (:mma,      (),            nothing),
     (:wgmma,    (:mma_async,), nothing),
     (:tcgen05,  (),            nothing),
-    (:setp,     (),            :dual),
     (:shfl,     (),            :pred),
 ])
 
 @testset "typed-wrapper-only boundary: closed-world rule inventory" begin
     actual = Set((r.op, r.prefix, r.marker) for r in PTX.TYPED_WRAPPER_ONLY_RULES)
     @test actual == EXPECTED_TYPED_ONLY_RULES
-    @test length(PTX.TYPED_WRAPPER_ONLY_RULES) == 5
+    @test length(PTX.TYPED_WRAPPER_ONLY_RULES) == 4
 
     positives = (
         (:mma, (:sync, :aligned, :m16n8k16, :row, :col,
@@ -31,7 +30,6 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
         (:wgmma, (:mma_async, :sync, :aligned,
                   :m64n8k16, :f32, :bf16, :bf16)),
         (:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x2, :b32)),
-        (:setp, (:dual, :eq, :s32)),
         (:shfl, (:sync, :idx, :b32, :pred)),
     )
     for (op, mods) in positives
@@ -67,9 +65,8 @@ end
         (Operation{:tcgen05, (:ld, :sync, :aligned,
                               Symbol("16x64b"), :x2, :b32)}(),
          (Int32,)),
-        # The three marker tokens are internal grouped-result selectors, not
-        # modifiers that the scalar formatter may print literally.
-        (Operation{:setp, (:dual, :eq, :s32)}(), (UInt32, UInt32)),
+        # The marker token is an internal grouped-result selector, not a
+        # modifier that the scalar formatter may print literally.
         (Operation{:shfl, (:sync, :idx, :b32, :pred)}(),
          (Int32, Int32, Int32, Int32)),
     )
@@ -107,7 +104,6 @@ end
          (ntuple(_ -> 0.0f0, Val(4)), UInt64(0), UInt64(0), false)),
         (Operation{:tcgen05, (:ld, :sync, :aligned,
                               Symbol("16x64b"), :x2, :b32)}(), (Int32(0),)),
-        (Operation{:setp, (:dual, :eq, :s32)}(), (UInt32(0), UInt32(0))),
         (Operation{:shfl, (:sync, :idx, :b32, :pred)}(),
          (Int32(0), Int32(0), Int32(0), Int32(0))),
     )
@@ -143,7 +139,6 @@ end
                               Symbol("shared::cluster"), :b64)}(),
          (Core.LLVMPtr{UInt64, PTX.AS.Shared},)),
         (Operation{:tcgen05, (Symbol("fence::before_thread_sync"),)}(), ()),
-        (Operation{:setp, (:dual, :eq, :s32)}(), (Int32, Int32)),
         (Operation{:shfl, (:sync, :idx, :b32, :pred)}(),
          (UInt32, UInt32, UInt32, UInt32)),
         (Operation{:mbarrier, (:test_wait, :report,
@@ -252,7 +247,6 @@ end
          (NTuple{4, Float32}, UInt64, UInt64, Bool)),
         (:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x2, :b32),
          (Int32,)),
-        (:setp, (:dual, :eq, :s32), (UInt32, UInt32)),
         (:shfl, (:sync, :idx, :b32, :pred),
          (Int32, Int32, Int32, Int32)),
     )

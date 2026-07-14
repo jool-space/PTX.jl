@@ -96,6 +96,10 @@ Mechanical mapping rules (v2.0):
 | `@p mov.b32 %r1, 1;` | `if p; r1 = ptx"mov.b32"(UInt32(1)); end` |
 | `ld.param.u64 %rd0, [param0];` | `rd0 = param0` |
 | `setp.lt.f32 %p0\|%p1, %f0, %f1;` | `(p0, p1) = ptx"setp.dual.lt.f32"(f0, f1)` |
+| `setp.eq.f16x2 %p0\|_, %r0, %r1;` | `(p0, _) = ptx"setp.eq.f16x2"(r0, r1)` |
+| `lop3.or.b32 _\|%p0, %r0, %r1, %r2, ((1 << 4) \| 3), %p1;` | `(_, p0) = ptx"lop3.or.b32"(r0, r1, r2, Val(19), p1)` |
+| `match.all.sync.b64 %r0\|%p0, %rd0, %r1;` | `(r0, p0) = ptx"match.all.sync.b64.pred"(rd0, r1)` |
+| `elect.sync _\|%p0, 0xffffffff;` | `(_, p0) = ptx"elect.sync"(UInt32(0xffffffff))` |
 | `shfl.sync.bfly.b32 %r\|%p, ...;` | `(r, p) = ptx"shfl.sync.bfly.b32.pred"(...)` |
 | `{ ... }` register-lifetime block | `let ... end` |
 | `LBL:` label | `@label LBL` |
@@ -109,6 +113,27 @@ special-register values such as `%tid` are rejected until vector-valued
 IR/lowering is implemented. A standalone PTX predefined immediate `WARP_SZ`
 lowers to `Val(32)`; its token becomes `32` inside a parsed PTX constant
 expression.
+
+Structured destinations are validated against the same closed PTX 9.3 schema
+used by direct calls. The transpiler proves each named destination's declared
+register type before emitting Julia, preserves one legal PTX sink `_` as tuple
+destructuring, and rejects `_ |_`, an undeclared destination, or an
+incompatible carrier before alias propagation can erase the bad definition.
+General `setp`'s optional complement uses the synthetic leading `.dual` token;
+`match.all`'s optional predicate uses trailing `.pred`. Neither selector is
+printed in the reconstructed PTX instruction head.
+
+`lop3` LUTs are normalized to `Val(N)` by a non-evaluating PTX integer-constant
+interpreter. It covers every constant-expression shape the current parser can
+represent: decimal/hex/octal integers, `WARP_SZ`, unary operators,
+`.s64`/`.u64` casts, arithmetic, shifts, comparisons, bitwise AND/OR,
+logical operators, and parentheses, with PTX-style 64-bit range checks. The
+remaining legal lexical forms—including binary literals, unsigned-suffix
+literals, XOR, and the ternary operator—remain parser work under
+`FRONT-LEXER-001`; they are not
+silently treated as runtime LUTs. The wider `IMMEDIATE-001` finding remains
+open for `setmaxnreg` and `pmevent`, while its `lop3` range/constness slice is
+closed by this schema.
 
 ## Diff against the original PTX
 

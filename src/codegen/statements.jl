@@ -3,10 +3,87 @@ emit_stmt!(cg::CodeGenState, s::Instruction) = emit_instruction!(cg, s)
 emit_stmt!(cg::CodeGenState, s::Label) =
     emit!(cg, "@label " * julia_label(s.name))
 
-# Julia introduces vars on assignment — track the decl (used by the
-# predicated-assignment hoist) and emit nothing.
+# RegDecl structurally carries only the first name in a comma-packed
+# declaration. Recover the complete declaration once, when it enters the
+# active register table, from lexer tokens rather than regexing raw source.
+# COMMENT tokens keep commas/semicolons inside comments from manufacturing or
+# truncating declarations. If a manually constructed FormattingInfo snapshot
+# is inconsistent, retain only the trusted structural declaration.
+function _reg_declarators(s::RegDecl)
+    formatting = s.formatting
+    formatting === nothing && return (s,)
+    raw = formatting.raw_line
+    raw === nothing && return (s,)
+
+    tokens = try
+        tokenize(raw)
+    catch err
+        err isa LexError || rethrow()
+        return (s,)
+    end
+    i = 1
+    function next_token()
+        while i <= length(tokens) &&
+                tokens[i].kind in (TokenKind.COMMENT, TokenKind.NEWLINE)
+            i += 1
+        end
+        i <= length(tokens) ? tokens[i] : nothing
+    end
+    function consume(kind)
+        token = next_token()
+        token !== nothing && token.kind == kind || return nothing
+        i += 1
+        token
+    end
+
+    directive = consume(TokenKind.DIRECTIVE)
+    directive !== nothing && directive.text == ".reg" || return (s,)
+    dtype = consume(TokenKind.DIRECTIVE)
+    dtype !== nothing && dtype.text == ptx(s.type) || return (s,)
+
+    declarations = RegDecl[]
+    while true
+        token = next_token()
+        token !== nothing &&
+            token.kind in (TokenKind.REGISTER, TokenKind.IDENTIFIER) ||
+            return (s,)
+        i += 1
+        name = token.text
+        count = nothing
+        token = next_token()
+        if token !== nothing && token.kind == TokenKind.LESS
+            i += 1
+            count_token = consume(TokenKind.INTEGER)
+            count_token === nothing && return (s,)
+            count = tryparse(Int, count_token.text)
+            count === nothing && return (s,)
+            consume(TokenKind.GREATER) === nothing && return (s,)
+        end
+        push!(declarations,
+              RegDecl(type = s.type, name = name, count = count))
+
+        token = next_token()
+        token === nothing && return (s,)
+        if token.kind == TokenKind.COMMA
+            i += 1
+            continue
+        elseif token.kind == TokenKind.SEMICOLON
+            first_decl = first(declarations)
+            first_decl.name == s.name && first_decl.count == s.count ||
+                return (s,)
+            return Tuple(declarations)
+        end
+        return (s,)
+    end
+end
+
+# Julia introduces vars on assignment — track every declarator (used by the
+# predicated-assignment hoist and reviewed operand-schema validation) and emit
+# nothing.
 function emit_stmt!(cg::CodeGenState, s::RegDecl)
-    cg.reg_decls[s.name] = s
+    for declaration in _reg_declarators(s)
+        cg.reg_decls[declaration.name] = declaration
+    end
     nothing
 end
 
@@ -67,6 +144,7 @@ emit_stmt!(cg::CodeGenState, s::RawLine) =
 function emit_stmt!(cg::CodeGenState, s::Block)
     saved_declared = copy(cg.declared)
     saved_pred     = copy(cg.predicated_assigns)
+    saved_reg_decls = copy(cg.reg_decls)
     emit!(cg, "let")
     indent!(cg)
     for sub in s.body
@@ -76,4 +154,5 @@ function emit_stmt!(cg::CodeGenState, s::Block)
     emit!(cg, "end")
     cg.declared = saved_declared
     cg.predicated_assigns = saved_pred
+    cg.reg_decls = saved_reg_decls
 end
