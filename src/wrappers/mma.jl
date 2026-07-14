@@ -12,7 +12,7 @@
 # produce, plus one selection probe per structural class (see
 # test/host/conformance.jl, "mma generated-family coverage").
 #
-# Three data-type conventions, all hidden behind one notation surface
+# Four data-type conventions, all hidden behind one notation surface
 # (A/B and f16-accumulator C/D are packed `UInt32` fragments, matching the
 # asm tier and pyptx):
 #   - bf16 / tf32 / fp8 / kind::f8f6f4 inputs → intrinsic takes `i32` A/B;
@@ -21,6 +21,9 @@
 #     takes `<2 x half>` A/B; each UInt32 is bitcast (free).
 #   - C/D: f32 accumulator → `f32` (Float32 passes through); f16
 #     accumulator → `<2 x half>`, bitcast to/from the packed UInt32.
+#   - integer A/B fragments are packed `.b32` (`UInt32`); the `.s32`
+#     accumulator and result are `Int32`.  The wrapper reinterprets the
+#     intrinsic's canonical unsigned i32 return without changing bits.
 #
 # Layout: only `.row.col` exists (the sole layout modern m16n8k* shapes
 # support — ptxas rejects the others, and the registry has no intrinsic
@@ -86,6 +89,16 @@ const MMA_SYNC_FRAGS = Dict{Tuple{Symbol, Symbol, Symbol}, NTuple{3, Int}}(
     (:m16n8k32, :e3m2, :f16) => (4, 2, 2),
     (:m16n8k32, :e2m3, :f16) => (4, 2, 2),
     (:m16n8k32, :e2m1, :f16) => (4, 2, 2),
+    # PTX 9.3 §9.7.15.5.9–.11, Figures 84–96.  Signedness changes
+    # element interpretation, not the packed .b32 fragment carrier.
+    (:m16n8k16, :u8,   :s32) => (2, 1, 4),
+    (:m16n8k16, :s8,   :s32) => (2, 1, 4),
+    (:m16n8k32, :u8,   :s32) => (4, 2, 4),
+    (:m16n8k32, :s8,   :s32) => (4, 2, 4),
+    (:m16n8k32, :u4,   :s32) => (2, 1, 4),
+    (:m16n8k32, :s4,   :s32) => (2, 1, 4),
+    (:m16n8k64, :u4,   :s32) => (4, 2, 4),
+    (:m16n8k64, :s4,   :s32) => (4, 2, 4),
 )
 
 # The intrinsic-name irregularity (LLVM IntrinsicsNVVM.td): bf16/tf32 carry
@@ -100,6 +113,16 @@ function _mma_intrinsic_name(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
     a_ty === :f64  && return "$base.f64"
     a_ty === :f16  && return c_ty === :f16 ? "$base.f16.f16" : "$base.f32.f32"
     return "$base.$c_ty.$a_ty.$b_ty.$c_ty"   # fp8 (e4m3/e5m2)
+end
+
+# Integer intrinsic names omit B's type when A and B match; `.satfinite`
+# precedes the input type(s).  This is LLVM's IntrinsicsNVVM.td vocabulary,
+# distinct from the complete PTX spelling exposed by Operation below.
+function _mma_int_intrinsic_name(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
+                                 satfinite::Bool)
+    base = "mma.$shape.row.col" * (satfinite ? ".satfinite" : "")
+    base *= ".$a_ty"
+    a_ty === b_ty ? base : base * ".$b_ty"
 end
 
 # Every name the generator routed to tier 2 — for the conformance
@@ -151,6 +174,50 @@ function _mma_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
         Base.@inline
         d = $call($(a_in...), $(b_in...), $(c_in...))
         $repack
+    end
+    nothing
+end
+
+
+# --- modern dense integer mma (PTX 7.0, sm_80+) ----------------------------
+#
+# PTX 9.3 §9.7.15.5.14 defines two independent products:
+#   u8/s8: m16n8k16, m16n8k32
+#   u4/s4: m16n8k32, m16n8k64
+# Each permits every A×B signedness pair and optional `.satfinite`, for 32
+# exact forms.  All use `.s32` accumulators/results and `.row.col`; b1 and
+# older m8n8 forms are intentionally outside this first coverage slice.
+const MMA_INT_VARIANTS = (
+    (:m16n8k16, :u8, :s8),
+    (:m16n8k32, :u8, :s8),
+    (:m16n8k32, :u4, :s4),
+    (:m16n8k64, :u4, :s4),
+)
+
+function _mma_int_register(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
+                           satfinite::Bool)
+    n_a, n_b, n_cd = MMA_SYNC_FRAGS[(shape, a_ty, :s32)]
+    satmod = satfinite ? (:satfinite,) : ()
+    mods = (:sync, :aligned, shape, :row, :col, satmod...,
+            :s32, a_ty, b_ty, :s32)
+
+    full = "llvm.nvvm." *
+           _mma_int_intrinsic_name(shape, a_ty, b_ty, satfinite)
+    NVVM.isintrinsic(full) ||
+        error("integer mma intrinsic missing from pinned registry: $full")
+    full in MMA_INTRINSIC_NAMES || push!(MMA_INTRINSIC_NAMES, full)
+    call = NVVM.IntrinsicCall{Symbol(full)}()
+
+    a_in = [:(a[$i]) for i in 1:n_a]
+    b_in = [:(b[$i]) for i in 1:n_b]
+    c_in = [:(c[$i]) for i in 1:n_cd]
+    @eval function (::Operation{:mma, $mods})(
+            a::NTuple{$n_a, UInt32},
+            b::NTuple{$n_b, UInt32},
+            c::NTuple{$n_cd, Int32})
+        Base.@inline
+        d = $call($(a_in...), $(b_in...), $(c_in...))
+        ntuple(i -> reinterpret(Int32, d[i]), Val($n_cd))
     end
     nothing
 end
@@ -219,6 +286,12 @@ let f8f6f4 = (:e4m3, :e5m2, :e3m2, :e2m3, :e2m1)
         c_ty in (:f32, :f16)
         _mma_register(shape, c_ty, a_ty, b_ty, c_ty; kind = :f8f6f4)
     end
+end
+
+for (shape, u_ty, s_ty) in MMA_INT_VARIANTS,
+        a_ty in (u_ty, s_ty), b_ty in (u_ty, s_ty),
+        satfinite in (false, true)
+    _mma_int_register(shape, a_ty, b_ty, satfinite)
 end
 
 # --- mma.sp — 2:4 structured-sparse mma (sm_80+, PTX 7.1+) -------------------

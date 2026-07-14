@@ -1761,6 +1761,7 @@ end
         PTX._mma_register(:m16n8k32, :f32, :e4m3, :e4m3, :f32; kind = :f8f6f4)
         # Asm-tier fallback path: kind::f8f6f4 has no intrinsic at m16n8k16.
         PTX._mma_register(:m16n8k16, :f32, :e4m3, :e4m3, :f32; kind = :f8f6f4)
+        PTX._mma_int_register(:m16n8k16, :s8, :u8, true)
         # Early-return path: shape/dtype not in MMA_SYNC_FRAGS.
         @test PTX._mma_register(:m99n99k99, :f32, :bf16, :bf16, :f32) === nothing
     end
@@ -1771,6 +1772,10 @@ end
             (:sync, :aligned, Symbol("kind::f8f6f4"),
              :m16n8k32, :row, :col, :f32, :e4m3, :e4m3, :f32)}(),
         (NTuple{4, UInt32}, NTuple{2, UInt32}, NTuple{4, Float32})).module == PTX
+    @test which(Operation{:mma,
+            (:sync, :aligned, :m16n8k16, :row, :col, :satfinite,
+             :s32, :s8, :u8, :s32)}(),
+        (NTuple{2, UInt32}, NTuple{1, UInt32}, NTuple{4, Int32})).module == PTX
     # f64 convention: Float64 A/B/C/D fragments.
     @test which(Operation{:mma,
             (:sync, :aligned, :m8n8k4, :row, :col, :f64, :f64, :f64, :f64)}(),
