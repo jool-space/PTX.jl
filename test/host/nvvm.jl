@@ -47,6 +47,52 @@ const SIDE_EFFECTING_NOMEM_EXPECTED = (
     return nothing
 end
 
+# Host-only optimizer probe for return-position registry metadata. Cluster
+# nctaid is deliberately newer than the in-process LLVM carried by the oldest
+# supported Julia, so the synthesized declaration/call contract remains
+# load-bearing instead of relying on intrinsic canonicalization.
+@noinline _nvvm_return_contract_probe() =
+    nvvm"read.ptx.sreg.cluster.nctaid.x"()
+
+const RETURN_RANGE_EXPECTED = let
+    names = String[]
+    for family in ("cluster.ctaid", "cluster.nctaid", "clusterid", "ctaid",
+                   "nclusterid", "nctaid", "ntid", "tid"),
+        component in ("w", "x", "y", "z")
+        push!(names, "llvm.nvvm.read.ptx.sreg.$family.$component")
+    end
+    append!(names, ("llvm.nvvm.read.ptx.sreg.laneid",
+                    "llvm.nvvm.read.ptx.sreg.warpsize"))
+    Set(names)
+end
+
+const RETURN_NOUNDEF_EXPECTED = let
+    names = collect(RETURN_RANGE_EXPECTED)
+    append!(names, (
+        "llvm.nvvm.internal.addrspace.wrap",
+        "llvm.nvvm.is_explicit_cluster",
+        "llvm.nvvm.read.ptx.sreg.aggr_smem_size",
+        "llvm.nvvm.read.ptx.sreg.clock",
+        "llvm.nvvm.read.ptx.sreg.clock64",
+        "llvm.nvvm.read.ptx.sreg.cluster.ctarank",
+        "llvm.nvvm.read.ptx.sreg.cluster.nctarank",
+        "llvm.nvvm.read.ptx.sreg.dynamic_smem_size",
+        "llvm.nvvm.read.ptx.sreg.globaltimer",
+        "llvm.nvvm.read.ptx.sreg.globaltimer.lo",
+        "llvm.nvvm.read.ptx.sreg.gridid",
+        "llvm.nvvm.read.ptx.sreg.nsmid",
+        "llvm.nvvm.read.ptx.sreg.nwarpid",
+        "llvm.nvvm.read.ptx.sreg.smid",
+        "llvm.nvvm.read.ptx.sreg.total_smem_size",
+        "llvm.nvvm.read.ptx.sreg.warpid",
+    ))
+    append!(names, ("llvm.nvvm.read.ptx.sreg.envreg$i" for i in 0:31))
+    append!(names, ("llvm.nvvm.read.ptx.sreg.lanemask.$suffix"
+                    for suffix in ("eq", "ge", "gt", "le", "lt")))
+    append!(names, ("llvm.nvvm.read.ptx.sreg.pm$i" for i in 0:3))
+    Set(names)
+end
+
 # The registry's contract: the committed table
 # is the backend's intrinsic surface, queryable, with no silent gaps. The
 # extraction itself is conformance-checked against the llc binary's name
@@ -61,6 +107,27 @@ end
     @test length(TABLE) == 2569
     @test NVVM.BACKEND_LLVM_VERSION == v"22.1.7"
     @test all(k == i.name for (k, i) in TABLE)
+end
+
+@testset "return range and noundef inventory is closed" begin
+    ranged = Set(i.name for i in values(TABLE)
+                 if any(entry -> entry[1] == 0, i.ranges))
+    noundef = Set(i.name for i in values(TABLE)
+                  if (0, :noundef) in i.argattrs)
+
+    @test ranged == RETURN_RANGE_EXPECTED
+    @test noundef == RETURN_NOUNDEF_EXPECTED
+    @test length(ranged) == 34
+    @test length(noundef) == 91
+    @test ranged ⊆ noundef
+
+    # Every current range is one scalar-i32 interval. The emitter deliberately
+    # fails closed if a future backend introduces another return shape.
+    for name in ranged
+        i = intrinsic(name)
+        @test i.ret == (:i32,)
+        @test count(entry -> entry[1] == 0, i.ranges) == 1
+    end
 end
 
 @testset "side-effecting no-memory inventory is closed" begin
@@ -206,6 +273,99 @@ end
     @test s.rettype == UInt64
     @test s.tupletype == Tuple{Core.LLVMPtr{Int64,3}, UInt32}
     @test s.runtime == [1, 2]
+end
+
+@testset "synthesize: stored return contracts" begin
+    ranged = intrinsic("llvm.nvvm.read.ptx.sreg.tid.x")
+    s = synthesize(ranged.name, ())
+    @test occursin(
+        "declare noundef i32 @\"llvm.nvvm.read.ptx.sreg.tid.x\"() #0", s.ir)
+    @test occursin(
+        "call noundef i32 @\"llvm.nvvm.read.ptx.sreg.tid.x\"(), !range !0", s.ir)
+    @test occursin("!0 = !{ i32 0, i32 1024 }", s.ir)
+
+    # A noundef-only return gets the inline return attribute without inventing
+    # range metadata. A result with neither property remains untouched.
+    noundef_only = synthesize("llvm.nvvm.read.ptx.sreg.aggr_smem_size", ())
+    @test occursin("declare noundef i32", noundef_only.ir)
+    @test occursin("call noundef i32", noundef_only.ir)
+    @test !occursin("!range", noundef_only.ir)
+
+    control = synthesize("llvm.nvvm.activemask", ())
+    @test !occursin("declare noundef", control.ir)
+    @test !occursin("call noundef", control.ir)
+    @test !occursin("!range", control.ir)
+
+    # Exhaust every callable inventory member, not just representatives. The
+    # sole exception has a return-only overload slot and is already rejected
+    # by the tier-2 ABI before any declaration can be generated.
+    for name in setdiff(RETURN_NOUNDEF_EXPECTED,
+                        Set(("llvm.nvvm.internal.addrspace.wrap",)))
+        member = intrinsic(name)
+        emitted = synthesize(name, ()).ir
+        @test occursin("declare noundef ", emitted)
+        @test occursin("call noundef ", emitted)
+        if name in RETURN_RANGE_EXPECTED
+            _, lo, hi = only(entry for entry in member.ranges
+                             if entry[1] == 0)
+            @test occursin("!range !0", emitted)
+            @test occursin("!0 = !{ i32 $lo, i32 $hi }", emitted)
+        else
+            @test !occursin("!range", emitted)
+        end
+    end
+    wrap_error = try
+        synthesize("llvm.nvvm.internal.addrspace.wrap",
+                   (Core.LLVMPtr{UInt8,0},))
+        ""
+    catch err
+        sprint(showerror, err)
+    end
+    @test occursin("appears only in the return type", wrap_error)
+
+    # Version and registry-shape negatives exercise the fail-closed helper
+    # without requiring unsupported LLVM parsers in CI.
+    contract = NVVM._return_contract(ranged, "i32"; llvm_version=v"18")
+    @test contract.call_suffix == ", !range !0"
+    @test contract.metadata == "!0 = !{ i32 0, i32 1024 }"
+    @test_throws ErrorException NVVM._return_contract(
+        ranged, "i32"; llvm_version=v"14")
+
+    void_noundef = Intrinsic("test.void.noundef", (), (), (), (), (), (),
+                             ((0, :noundef),))
+    @test_throws ErrorException NVVM._return_contract(void_noundef, "void")
+    unknown_attr = Intrinsic("test.unknown.return.attr", (:i32,), (), (), (),
+                             (), (), ((0, :readonly),))
+    @test_throws ErrorException NVVM._return_contract(unknown_attr, "i32")
+    float_range = Intrinsic("test.float.range", (:f32,), (), (), (),
+                            ((0, 0, 1),), (), ())
+    @test_throws ErrorException NVVM._return_contract(float_range, "float")
+    split_range = Intrinsic("test.split.range", (:i32,), (), (), (),
+                            ((0, 0, 2), (0, 4, 6)), (), ())
+    @test_throws ErrorException NVVM._return_contract(split_range, "i32")
+end
+
+@testset "optimized host LLVM retains stored return contracts" begin
+    llvm = sprint() do io
+        code_llvm(io, _nvvm_return_contract_probe, Tuple{};
+                  optimize=true, raw=true, debuginfo=:none, dump_module=true)
+    end
+    name = "@llvm.nvvm.read.ptx.sreg.cluster.nctaid.x"
+    calls = [String(line) for line in eachline(IOBuffer(llvm))
+             if occursin(" call ", line) && occursin(name, line)]
+    @test length(calls) == 1
+    if length(calls) == 1
+        call = only(calls)
+        @test occursin(r"\bcall\s+noundef\s+i32\b", call)
+        range_ref = match(r"!range !([0-9]+)", call)
+        @test range_ref !== nothing
+        if range_ref !== nothing
+            node = "!$(range_ref.captures[1]) = !{i32 1, i32 -2147483648}"
+            # LLVM prints i32 2^31 canonically as its signed spelling.
+            @test any(line -> strip(line) == node,
+                      eachline(IOBuffer(llvm)))
+        end
+    end
 end
 
 @testset "synthesize: WMMA convergence is a call-site contract" begin
