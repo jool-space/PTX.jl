@@ -401,7 +401,12 @@ end
 
 # Sweep every wrapper method with `want(op) == true`. Returns
 # (; touched, failures, unsynthesized); the caller owns the @test layer.
-function compile_touch_sweep(want::Function; batch::Int = 16)
+# `want` is deliberately unannotated: setup.jl is evaluated in every test
+# module before the test file's own imports, and spelling `Function` here
+# would resolve that name to Base.Function and silently break test files
+# that later import PTX.IR.Function (Julia 1.10/1.11 ignore the conflicting
+# import with only a warning).
+function compile_touch_sweep(want; batch::Int = 16)
     entries = Tuple{Method, Symbol, Any, Vector{Any}, String}[]
     failures = String[]
     unsynthesized = String[]
