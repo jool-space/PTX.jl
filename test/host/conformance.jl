@@ -416,6 +416,30 @@ let f8f6f4 = (:e4m3, :e5m2, :e3m2, :e2m3, :e2m1)
     end
 end
 
+# Modern dense integer MMA (PTX 7.0, sm_80).  A/B are packed .b32
+# fragments; C is the semantic .s32 carrier.  PTX always prints both input
+# types even though LLVM contracts equal-type intrinsic names.
+function _mma_integer_sweep!(shape, a, b, satfinite)
+    name = "llvm.nvvm." *
+           PTX._mma_int_intrinsic_name(shape, a, b, satfinite)
+    n_a, n_b, n_cd = PTX.MMA_SYNC_FRAGS[(shape, a, :s32)]
+    args = (fill(UInt32, n_a + n_b)..., fill(Int32, n_cd)...)
+    sat = satfinite ? "satfinite\\." : ""
+    push!(PROBES, (name, args, "sm_80", "+ptx70",
+        Regex("mma\\.sync\\.aligned\\.$shape\\.row\\.col\\.$sat" *
+              "s32\\.$a\\.$b\\.s32")))
+    push!(_MMA_SWEPT, name)
+    nothing
+end
+for (shape, u, s) in (
+        (:m16n8k16, :u8, :s8),
+        (:m16n8k32, :u8, :s8),
+        (:m16n8k32, :u4, :s4),
+        (:m16n8k64, :u4, :s4)),
+        a in (u, s), b in (u, s), satfinite in (false, true)
+    _mma_integer_sweep!(shape, a, b, satfinite)
+end
+
 # Sparse (mma.sp) sweep — replays the _mma_sp_register loops.
 const _MMA_SP_SWEPT = Set{String}()
 function _mma_sp_sweep!(shape, a, b, c)
@@ -504,7 +528,7 @@ end
 # bump surfaces as a red test naming the family, and a wrapper loop edit
 # without a matching sweep edit is equally loud.
 @testset "mma generated families: full probe coverage" begin
-    @test length(PTX.MMA_INTRINSIC_NAMES) == 70    # dense tier-2 forms
+    @test length(PTX.MMA_INTRINSIC_NAMES) == 102   # dense tier-2 forms
     @test length(PTX.MMA_SP_INTRINSIC_NAMES) == 12 # sparse tier-2 forms
     @test length(PTX.MMA_SCALED_INTRINSIC_NAMES) == 28
     @test _MMA_SWEPT == Set(PTX.MMA_INTRINSIC_NAMES)
@@ -551,7 +575,7 @@ end
     )
     wrapped = Set(vcat(PTX.MMA_INTRINSIC_NAMES, PTX.MMA_SP_INTRINSIC_NAMES,
                        PTX.MMA_SCALED_INTRINSIC_NAMES))
-    @test length(wrapped) == 110
+    @test length(wrapped) == 142
     @test wrapped ⊆ Set(names)
     # the overlay must not leak beyond mma.*
     @test !NVVM.is_convergent(NVVM.intrinsic("llvm.nvvm.fence.proxy.async"))
