@@ -14,7 +14,9 @@
 # Intrinsic mapping (probed against llc 22.1.7, sm_100a):
 #   - alloc → alloc.shared.cgN (p3 dst): ISel emits `.shared::cta` explicitly,
 #     including for the ISA's equivalent generic-address spelling.
-#   - dealloc/shift/cp/wait/relinquish → 1:1, identical spellings.
+#   - dealloc/shift/wait/relinquish → 1:1, identical spellings; cp too,
+#     except intrinsic names flatten the multicast qualifier into the
+#     shape stem (64x128b.warpx2::02_13 → 64x128b_warpx2_02_13).
 #   - ld/st → ld.<shape>.<count> / st.<shape>.<count>: identical
 #     spellings. The data moves as an LLVM vector (v<N>i32), so the
 #     wrappers repack to/from the notation surface's plain NTuple{N,
@@ -96,6 +98,102 @@
 @inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x128b"))})(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x128b.cg2"(_tmem(taddr), s_desc)
+
+# Multicast shapes (PTX 9.3 §9.7.17.9: `.64x128b` requires one of the
+# `.warpx2::*` pairings, `.32x128b` requires `.warpx4`) and optional
+# `.b8x16.{b6x16_p32,b4x16_p64}` decompression during the copy. The
+# intrinsic names flatten the multicast qualifier into the shape stem
+# (`64x128b_warpx2_02_13`); the notation keeps the ISA's modifier order.
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("128x256b"), :b8x16, :b6x16_p32)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.128x256b.b6x16_p32.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x256b"), :b8x16, :b6x16_p32)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.128x256b.b6x16_p32.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("128x256b"), :b8x16, :b4x16_p64)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.128x256b.b4x16_p64.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x256b"), :b8x16, :b4x16_p64)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.128x256b.b4x16_p64.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("4x256b"), :b8x16, :b6x16_p32)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.4x256b.b6x16_p32.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("4x256b"), :b8x16, :b6x16_p32)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.4x256b.b6x16_p32.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("4x256b"), :b8x16, :b4x16_p64)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.4x256b.b4x16_p64.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("4x256b"), :b8x16, :b4x16_p64)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.4x256b.b4x16_p64.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("128x128b"), :b8x16, :b6x16_p32)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.128x128b.b6x16_p32.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x128b"), :b8x16, :b6x16_p32)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.128x128b.b6x16_p32.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("128x128b"), :b8x16, :b4x16_p64)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.128x128b.b4x16_p64.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x128b"), :b8x16, :b4x16_p64)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.128x128b.b4x16_p64.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("64x128b"), Symbol("warpx2::02_13"))})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.64x128b_warpx2_02_13.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("64x128b"), Symbol("warpx2::02_13"))})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.64x128b_warpx2_02_13.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("64x128b"), Symbol("warpx2::02_13"), :b8x16, :b6x16_p32)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.64x128b_warpx2_02_13.b6x16_p32.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("64x128b"), Symbol("warpx2::02_13"), :b8x16, :b6x16_p32)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.64x128b_warpx2_02_13.b6x16_p32.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("64x128b"), Symbol("warpx2::02_13"), :b8x16, :b4x16_p64)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.64x128b_warpx2_02_13.b4x16_p64.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("64x128b"), Symbol("warpx2::02_13"), :b8x16, :b4x16_p64)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.64x128b_warpx2_02_13.b4x16_p64.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("64x128b"), Symbol("warpx2::01_23"))})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.64x128b_warpx2_01_23.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("64x128b"), Symbol("warpx2::01_23"))})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.64x128b_warpx2_01_23.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("64x128b"), Symbol("warpx2::01_23"), :b8x16, :b6x16_p32)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.64x128b_warpx2_01_23.b6x16_p32.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("64x128b"), Symbol("warpx2::01_23"), :b8x16, :b6x16_p32)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.64x128b_warpx2_01_23.b6x16_p32.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("64x128b"), Symbol("warpx2::01_23"), :b8x16, :b4x16_p64)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.64x128b_warpx2_01_23.b4x16_p64.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("64x128b"), Symbol("warpx2::01_23"), :b8x16, :b4x16_p64)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.64x128b_warpx2_01_23.b4x16_p64.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("32x128b"), :warpx4)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.32x128b_warpx4.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("32x128b"), :warpx4)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.32x128b_warpx4.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("32x128b"), :warpx4, :b8x16, :b6x16_p32)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.32x128b_warpx4.b6x16_p32.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("32x128b"), :warpx4, :b8x16, :b6x16_p32)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.32x128b_warpx4.b6x16_p32.cg2"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("32x128b"), :warpx4, :b8x16, :b4x16_p64)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.32x128b_warpx4.b4x16_p64.cg1"(_tmem(taddr), s_desc)
+@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("32x128b"), :warpx4, :b8x16, :b4x16_p64)})(
+        taddr::UInt32, s_desc::UInt64) =
+    nvvm"tcgen05.cp.32x128b_warpx4.b4x16_p64.cg2"(_tmem(taddr), s_desc)
 
 # --- ld / st (Table 49 expansion) ---------------------------------------------
 
@@ -631,9 +729,13 @@ const TCGEN05_INTEGER_ADDRESS_ADAPTERS = let
     for cg in 1:2
         cta = Symbol("cta_group::", cg)
         add((:shift, cta, :down), (A32,))
-        for shape in (Symbol("128x256b"), Symbol("4x256b"),
-                      Symbol("128x128b"))
-            add((:cp, cta, shape), (A32, UInt64))
+        for shapemods in ((Symbol("128x256b"),), (Symbol("4x256b"),),
+                          (Symbol("128x128b"),),
+                          (Symbol("64x128b"), Symbol("warpx2::02_13")),
+                          (Symbol("64x128b"), Symbol("warpx2::01_23")),
+                          (Symbol("32x128b"), :warpx4)),
+                fmt in ((), (:b8x16, :b6x16_p32), (:b8x16, :b4x16_p64))
+            add((:cp, cta, shapemods..., fmt...), (A32, UInt64))
         end
     end
     for (shape, base, counts) in (

@@ -340,10 +340,23 @@ for cg in (1, 2)
         ("llvm.nvvm.tcgen05.commit.mc.shared.cg$cg", (pS8, UInt16), "sm_100a", "+ptx86",
             Regex("tcgen05\\.commit\\.cta_group::$cg\\.mbarrier::arrive::one\\.shared::cluster\\.multicast::cluster\\.b64")),
     ])
-    for shape in ("128x256b", "4x256b", "128x128b")
-        push!(PROBES, ("llvm.nvvm.tcgen05.cp.$shape.cg$cg", (p6, UInt64),
-                       "sm_100a", "+ptx86",
-                       Regex("tcgen05\\.cp\\.cta_group::$cg\\.$shape")))
+    # Every shape (incl. the multicast-mandatory 64x128b/32x128b) is
+    # probed plain and with both decompression formats; the regex pins the
+    # ISA modifier order cta_group.shape{.multicast}{.dst_fmt.src_fmt}.
+    for (spell, stem) in (("128x256b", "128x256b"),
+                          ("4x256b", "4x256b"),
+                          ("128x128b", "128x128b"),
+                          ("64x128b.warpx2::02_13", "64x128b_warpx2_02_13"),
+                          ("64x128b.warpx2::01_23", "64x128b_warpx2_01_23"),
+                          ("32x128b.warpx4", "32x128b_warpx4")),
+        fmt in ("", "b6x16_p32", "b4x16_p64")
+
+        iname = fmt == "" ? "$stem.cg$cg" : "$stem.$fmt.cg$cg"
+        re = "tcgen05\\.cp\\.cta_group::$cg\\." *
+             replace(spell, "." => "\\.") *
+             (fmt == "" ? "" : "\\.b8x16\\.$fmt")
+        push!(PROBES, ("llvm.nvvm.tcgen05.cp.$iname", (p6, UInt64),
+                       "sm_100a", "+ptx86", Regex(re)))
     end
 end
 for w in ("ld", "st")
