@@ -70,13 +70,16 @@ function _expected_tcgen05_integer_address_forms()
         end
     end
     for (shape, counts) in (
-            (Symbol("16x64b"),  (1, 2, 4, 8, 16, 32, 64, 128)),
-            (Symbol("32x32b"),  (1, 2, 4, 8, 16, 32, 64, 128)),
-            (Symbol("16x128b"), (1, 2, 4, 8, 16, 32, 64)),
-            (Symbol("16x256b"), (1, 2, 4, 8, 16, 32)))
-        for count in counts, op in (:ld, :st)
+            (Symbol("16x64b"),   (1, 2, 4, 8, 16, 32, 64, 128)),
+            (Symbol("32x32b"),   (1, 2, 4, 8, 16, 32, 64, 128)),
+            (Symbol("16x128b"),  (1, 2, 4, 8, 16, 32, 64)),
+            (Symbol("16x256b"),  (1, 2, 4, 8, 16, 32)),
+            (Symbol("16x32bx2"), (1, 2, 4, 8, 16, 32, 64, 128)))
+        for count in counts, op in (:ld, :st), repack in (false, true)
+            flag = repack ?
+                (Symbol(op === :ld ? "pack::16b" : "unpack::16b"),) : ()
             push!(forms, (op, :sync, :aligned, shape,
-                          Symbol("x", count), :b32))
+                          Symbol("x", count), flag..., :b32))
         end
     end
     for cg in 1:2
@@ -112,18 +115,22 @@ function _expected_tcgen05_integer_address_adapters()
     specs = Set{Tuple{Tuple{Vararg{Symbol}}, Tuple{Vararg{Type}}}}()
     A32 = Address{UInt32}
     for mods in _expected_tcgen05_integer_address_forms()
-        argtypes = if first(mods) === :shift || first(mods) === :ld
+        argtypes = if first(mods) === :shift
             (A32,)
+        elseif first(mods) === :ld
+            mods[4] === Symbol("16x32bx2") ? (A32, Val) : (A32,)
         elseif first(mods) === :alloc
             (A32, UInt32)
         elseif first(mods) === :cp
             (A32, UInt64)
         elseif first(mods) === :st
             base = Dict(Symbol("16x64b") => 1, Symbol("32x32b") => 1,
+                        Symbol("16x32bx2") => 1,
                         Symbol("16x128b") => 2,
                         Symbol("16x256b") => 4)[mods[4]]
             count = parse(Int, String(mods[5])[2:end])
-            (A32, NTuple{base * count, UInt32})
+            split = mods[4] === Symbol("16x32bx2") ? (Val,) : ()
+            (A32, split..., NTuple{base * count, UInt32})
         elseif first(mods) === :commit
             Symbol("multicast::cluster") in mods ? (A32, Integer) : (A32,)
         elseif first(mods) === :mma && :block_scale in mods
@@ -261,16 +268,21 @@ end
 @testset "closed tcgen05 integer-address adapters" begin
     expected_forms = _expected_tcgen05_integer_address_forms()
     @test Set(PTX.TCGEN05_INTEGER_ADDRESS_FORMS) == expected_forms
-    @test length(expected_forms) == 98
+    @test length(expected_forms) == 188
     expected = _expected_tcgen05_integer_address_adapters()
     actual = Set((s.mods, s.argtypes)
                  for s in PTX.TCGEN05_INTEGER_ADDRESS_ADAPTERS)
     @test actual == expected
-    @test length(actual) == 114
+    @test length(actual) == 204
     for (mods, signature) in actual
-        marked = Tuple(T === Integer ? UInt16 : T for T in signature)
+        # The 16x32bx2 immHalfSplitoff spec is the abstract `Val`
+        # (dispatch admits any immediate); lowering probes need a concrete
+        # instance, as every real call site has.
+        marked = Tuple(T === Integer ? UInt16 :
+                       T === Val ? Val{8} : T for T in signature)
         payload = Tuple(T <: Address ? T.parameters[1] :
-                        T === Integer ? UInt16 : T for T in signature)
+                        T === Integer ? UInt16 :
+                        T === Val ? Val{8} : T for T in signature)
         op = Operation{:tcgen05, mods}()
         payload_info = PTX.lowering(op, payload)
         marked_info = PTX.lowering(op, marked)
@@ -280,11 +292,15 @@ end
         @test which(op, Tuple{marked...}) !== PTX._CHAIN_METHOD
     end
 
-    # An unreviewed modifier tuple cannot use the adapter or raw fallback.
+    # A reviewed spelling with a missing operand (16x32bx2 without its
+    # immHalfSplitoff) and an unreviewed spelling (ld.red) can use neither
+    # the adapter nor the raw fallback.
     miss = ptx"tcgen05.ld.sync.aligned.16x32bx2.x1.b32"
     @test PTX.lowering(miss, (Address{UInt32},)).tier === :forbidden
     @test PTX.lowering(ptx"tcgen05.ld.sync.aligned.16x32bx2.x1.b32"raw,
                        (Address{UInt32},)).tier === :forbidden
+    red = ptx"tcgen05.ld.red.sync.aligned.32x32b.x2.min.f32"
+    @test PTX.lowering(red, (Float32, Address{UInt32})).tier === :forbidden
 
     # PTX 9.3 §9.7.17.7.1 spells dealloc's taddr as a bare register. It must
     # retain the existing exact UInt32 method and reject an invented bracketed
