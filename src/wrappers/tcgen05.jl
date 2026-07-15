@@ -26,12 +26,14 @@
 #     explicit-widening as mbarrier's expect_tx default), and renders
 #     `.shared::cluster.multicast::cluster` where pyptx put multicast
 #     first. ptxas accepts both spellings.
-#   - dense mma (kinds f16/tf32/f8f6f4/i8) → mma.shared with immargs
-#     kind (0=f16, 1=tf32, 2=f8f6f4, 3=i8), cta_group, collector_usage
-#     (0 = discard = the ISA default; emitted explicitly). The intrinsic
-#     is the MASKLESS dense form — the asm tier passed an all-zero
-#     disable-output-lane mask, which is semantically identical; the
-#     4/8-word zero-mask materialization disappears. Requires PTX 8.8.
+#   - dense mma (kinds f16/tf32/f8f6f4/i8) → mma.{shared,tensor} (A from
+#     an SMEM descriptor vs a TMEM address) with immargs kind (0=f16,
+#     1=tf32, 2=f8f6f4, 3=i8), cta_group, collector_usage (0 = discard =
+#     the ISA default; emitted explicitly; 1=lastuse, 2=fill, 3=use). The
+#     maskless forms omit the disable-output-lane operand entirely; the
+#     masked forms are separate .disable_output_lane.cgN intrinsics with
+#     an explicit 4/8-word vector operand. scale-input-d rides separate
+#     .scale_d records (f16/tf32 only). Requires PTX 8.8.
 #   - mx kinds (mxf8f6f4/mxf4/mxf4nvf4) stay on the asm tier with the ISA's
 #     complete block-scale operand schema.  Scale-A and scale-B are explicit
 #     TMEM addresses, and the modifier inventory distinguishes architecture-
@@ -342,6 +344,105 @@
     nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
                              Val(3), Val(2), Val(0))
 
+# --- dense mma completion (generated) -------------------------------------------
+# The remaining PTX 9.3 §9.7.17.10 dense forms are a modifier/operand
+# product too large for literal methods: A source (SMEM descriptor vs
+# TMEM address, distinguished by UInt64 vs UInt32 dispatch exactly like
+# the ISA distinguishes `a-desc` vs `[a-tmem]`), the collector buffer
+# (`collector::a::{lastuse,fill,use}` — spelled-nothing defaults to
+# discard, the literal methods above), `.ashift` (TMEM A only), an
+# optional disable-output-lane mask vector (4 words for cta_group::1,
+# 8 for ::2, positional before enable-input-d), and an optional
+# scale-input-d immediate (f16/tf32 only, `Val(s)` with s ∈ 0:15,
+# positional after enable-input-d). Notation keeps the ISA order
+# `kind{.ashift}{.collector::a::op}`; ISel renders the collector before
+# `.ashift` — same accepted non-WYSIWYG rendering class as commit's
+# multicast. Methods are generated from one spec;
+# TCGEN05_MMA_DENSE_INTRINSIC_NAMES records every tier-2 name for the
+# conformance replay (the mma.jl generated-family standing guarantee).
+#
+# Empirical NVVM collector enum (llc 22.1.7): 0=discard, 1=lastuse,
+# 2=fill, 3=use. The ashift variants' immarg range [0, 2) is exactly the
+# ISA's "no fill/use with ashift" rule.
+const _TCGEN05_DENSE_KINDS =
+    ((:f16, 0, true), (:tf32, 1, true), (:f8f6f4, 2, false), (:i8, 3, false))
+const _TCGEN05_DENSE_COLLECTORS =
+    ((nothing, 0), (Symbol("collector::a::lastuse"), 1),
+     (Symbol("collector::a::fill"), 2), (Symbol("collector::a::use"), 3))
+
+const TCGEN05_MMA_DENSE_INTRINSIC_NAMES = String[]
+
+function _tcgen05_dense_register(kind::Symbol, kindval::Int, scale_ok::Bool,
+                                 cg::Int, tmem_a::Bool, ashift::Bool,
+                                 collmod, collval::Int)
+    mods = (:mma, Symbol("cta_group::", cg), Symbol("kind::", kind),
+            (ashift ? (:ashift,) : ())...,
+            (collmod === nothing ? () : (collmod,))...)
+    maskN = cg == 1 ? 4 : 8
+    stem = "llvm.nvvm.tcgen05.mma." * (tmem_a ? "tensor" : "shared")
+    sh = ashift ? ".ashift" : ""
+    aT = tmem_a ? UInt32 : UInt64
+    aexpr = tmem_a ? :(_tmem(a)) : :a
+    function reg(name)
+        name in TCGEN05_MMA_DENSE_INTRINSIC_NAMES ||
+            push!(TCGEN05_MMA_DENSE_INTRINSIC_NAMES, name)
+        NVVM.IntrinsicCall{Symbol(name)}()
+    end
+
+    # [d], a, b, idesc, enable — the literal SMEM-A discard methods above
+    # already own that cell of the grid.
+    if tmem_a || ashift || collmod !== nothing
+        call = reg(stem * sh)
+        @eval @inline function (::Operation{:tcgen05, $mods})(
+                d::UInt32, a::$aT, b_desc::UInt64, idesc::UInt32,
+                enable_input_d::Bool)
+            $call(_tmem(d), $aexpr, b_desc, idesc, enable_input_d,
+                  Val($kindval), Val($cg), Val($collval))
+        end
+    end
+
+    # [d], a, b, idesc, {disable-output-lane}, enable
+    call = reg(stem * ".disable_output_lane.cg$cg" * sh)
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            d::UInt32, a::$aT, b_desc::UInt64, idesc::UInt32,
+            mask::NTuple{$maskN, UInt32}, enable_input_d::Bool)
+        $call(_tmem(d), $aexpr, b_desc, idesc, enable_input_d,
+              _tc_vec(mask), Val($kindval), Val($collval))
+    end
+
+    scale_ok || return nothing
+
+    # [d], a, b, idesc, enable, scale-input-d
+    call = reg(stem * ".scale_d" * sh)
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            d::UInt32, a::$aT, b_desc::UInt64, idesc::UInt32,
+            enable_input_d::Bool, scale::Val)
+        $call(_tmem(d), $aexpr, b_desc, idesc, enable_input_d,
+              scale, Val($kindval), Val($cg), Val($collval))
+    end
+
+    # [d], a, b, idesc, {disable-output-lane}, enable, scale-input-d
+    call = reg(stem * ".scale_d.disable_output_lane.cg$cg" * sh)
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            d::UInt32, a::$aT, b_desc::UInt64, idesc::UInt32,
+            mask::NTuple{$maskN, UInt32}, enable_input_d::Bool, scale::Val)
+        $call(_tmem(d), $aexpr, b_desc, idesc, enable_input_d,
+              scale, _tc_vec(mask), Val($kindval), Val($collval))
+    end
+    nothing
+end
+
+for (kind, kindval, scale_ok) in _TCGEN05_DENSE_KINDS, cg in (1, 2),
+        (collmod, collval) in _TCGEN05_DENSE_COLLECTORS
+    _tcgen05_dense_register(kind, kindval, scale_ok, cg, false, false,
+                            collmod, collval)
+    _tcgen05_dense_register(kind, kindval, scale_ok, cg, true, false,
+                            collmod, collval)
+    collval < 2 &&
+        _tcgen05_dense_register(kind, kindval, scale_ok, cg, true, true,
+                                collmod, collval)
+end
+
 # --- mx block-scaled mma (asm tier) ------------------------------------------
 #
 # PTX 9.3 §9.7.17.10.9.1 gives MX forms a different grammar from dense
@@ -465,9 +566,22 @@ const TCGEN05_INTEGER_ADDRESS_ADAPTERS = let
         add((:commit, cta, Symbol("mbarrier::arrive::one"),
              Symbol("multicast::cluster"),
              Symbol("shared::cluster"), :b64), (A32, Integer))
-        for kind in (:f16, :tf32, :f8f6f4, :i8)
-            add((:mma, cta, Symbol("kind::", kind)),
-                (A32, UInt64, UInt64, UInt32, Bool))
+        for (kind, _, scale_ok) in _TCGEN05_DENSE_KINDS,
+                (collmod, collval) in _TCGEN05_DENSE_COLLECTORS,
+                (tmem_a, ashift) in ((false, false), (true, false),
+                                     (true, true))
+            ashift && collval >= 2 && continue
+            mods = (:mma, cta, Symbol("kind::", kind),
+                    (ashift ? (:ashift,) : ())...,
+                    (collmod === nothing ? () : (collmod,))...)
+            aT = tmem_a ? A32 : UInt64
+            maskT = NTuple{cg == 1 ? 4 : 8, UInt32}
+            add(mods, (A32, aT, UInt64, UInt32, Bool))
+            add(mods, (A32, aT, UInt64, UInt32, maskT, Bool))
+            if scale_ok
+                add(mods, (A32, aT, UInt64, UInt32, Bool, Val))
+                add(mods, (A32, aT, UInt64, UInt32, maskT, Bool, Val))
+            end
         end
     end
     for (kind, scale_vec, block) in _TCGEN05_MX_SCALE_VARIANTS,

@@ -373,6 +373,110 @@ push!(PROBES, ("llvm.nvvm.tcgen05.mma.shared",
                "sm_100a", "+ptx88",
                r"tcgen05\.mma\.cta_group::2\.kind::f16\.collector::a::discard"))
 
+# Generated dense-mma completion (wrappers/tcgen05.jl): TMEM-A, ashift,
+# collector usage, disable-output-lane mask vectors, and scale-input-d.
+# One probe per tier-2 name plus rendering pins for the empirical
+# collector enum (0=discard, 1=lastuse, 2=fill, 3=use); the mask renders
+# as a brace vector before the enable predicate and scale-input-d as a
+# trailing immediate. ISel spells `.ashift` after the collector.
+let v4 = NTuple{4, VecElement{UInt32}}, v8 = NTuple{8, VecElement{UInt32}}
+    push!(PROBES,
+        ("llvm.nvvm.tcgen05.mma.shared",
+         (p6, UInt64, UInt64, UInt32, Bool, Val{0}, Val{1}, Val{1}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::f16\.collector::a::lastuse"),
+        ("llvm.nvvm.tcgen05.mma.shared",
+         (p6, UInt64, UInt64, UInt32, Bool, Val{0}, Val{1}, Val{2}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::f16\.collector::a::fill"),
+        ("llvm.nvvm.tcgen05.mma.shared",
+         (p6, UInt64, UInt64, UInt32, Bool, Val{0}, Val{1}, Val{3}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::f16\.collector::a::use"),
+        ("llvm.nvvm.tcgen05.mma.tensor",
+         (p6, p6, UInt64, UInt32, Bool, Val{0}, Val{1}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::f16\.collector::a::discard \[%r\d+\], \[%r\d+\], %rd\d+"),
+        ("llvm.nvvm.tcgen05.mma.tensor",
+         (p6, p6, UInt64, UInt32, Bool, Val{1}, Val{2}, Val{3}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::2\.kind::tf32\.collector::a::use \[%r\d+\], \[%r\d+\]"),
+        ("llvm.nvvm.tcgen05.mma.tensor.ashift",
+         (p6, p6, UInt64, UInt32, Bool, Val{0}, Val{1}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::f16\.collector::a::discard\.ashift"),
+        ("llvm.nvvm.tcgen05.mma.tensor.ashift",
+         (p6, p6, UInt64, UInt32, Bool, Val{3}, Val{1}, Val{1}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::i8\.collector::a::lastuse\.ashift"),
+        ("llvm.nvvm.tcgen05.mma.shared.disable_output_lane.cg1",
+         (p6, UInt64, UInt64, UInt32, Bool, v4, Val{0}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::f16\.collector::a::discard \[%r\d+\], %rd\d+, %rd\d+, %r\d+, \{%r\d+, %r\d+, %r\d+, %r\d+\}, %p\d+;"),
+        ("llvm.nvvm.tcgen05.mma.shared.disable_output_lane.cg2",
+         (p6, UInt64, UInt64, UInt32, Bool, v8, Val{0}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::2\.kind::f16\.collector::a::discard \[%r\d+\], %rd\d+, %rd\d+, %r\d+, \{(%r\d+, ){7}%r\d+\}, %p\d+;"),
+        ("llvm.nvvm.tcgen05.mma.tensor.disable_output_lane.cg1",
+         (p6, p6, UInt64, UInt32, Bool, v4, Val{0}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::f16\.collector::a::discard \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, \{%r\d+, %r\d+, %r\d+, %r\d+\}, %p\d+;"),
+        ("llvm.nvvm.tcgen05.mma.tensor.disable_output_lane.cg2",
+         (p6, p6, UInt64, UInt32, Bool, v8, Val{0}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::2\.kind::f16\.collector::a::discard \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, \{(%r\d+, ){7}%r\d+\}, %p\d+;"),
+        ("llvm.nvvm.tcgen05.mma.tensor.disable_output_lane.cg1.ashift",
+         (p6, p6, UInt64, UInt32, Bool, v4, Val{0}, Val{1}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::f16\.ashift\.collector::a::lastuse \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, \{%r\d+, %r\d+, %r\d+, %r\d+\}, %p\d+;"),
+        # (every masked .ashift record renders `.ashift` before the
+        # collector; the unmasked .ashift records render it after — see
+        # the ISel-order note below.)
+        ("llvm.nvvm.tcgen05.mma.tensor.disable_output_lane.cg2.ashift",
+         (p6, p6, UInt64, UInt32, Bool, v8, Val{0}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::2\.kind::f16\.ashift\.collector::a::discard"),
+        ("llvm.nvvm.tcgen05.mma.shared.scale_d",
+         (p6, UInt64, UInt64, UInt32, Bool, Val{5}, Val{1}, Val{1}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::tf32\.collector::a::discard \[%r\d+\], %rd\d+, %rd\d+, %r\d+, %p\d+, 5;"),
+        ("llvm.nvvm.tcgen05.mma.tensor.scale_d",
+         (p6, p6, UInt64, UInt32, Bool, Val{5}, Val{0}, Val{2}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::2\.kind::f16\.collector::a::discard \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, %p\d+, 5;"),
+        ("llvm.nvvm.tcgen05.mma.tensor.scale_d.ashift",
+         (p6, p6, UInt64, UInt32, Bool, Val{9}, Val{1}, Val{1}, Val{1}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::tf32\.collector::a::lastuse\.ashift \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, %p\d+, 9;"),
+        ("llvm.nvvm.tcgen05.mma.shared.scale_d.disable_output_lane.cg1",
+         (p6, UInt64, UInt64, UInt32, Bool, Val{5}, v4, Val{0}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::f16\.collector::a::discard \[%r\d+\], %rd\d+, %rd\d+, %r\d+, \{%r\d+, %r\d+, %r\d+, %r\d+\}, %p\d+, 5;"),
+        ("llvm.nvvm.tcgen05.mma.shared.scale_d.disable_output_lane.cg2",
+         (p6, UInt64, UInt64, UInt32, Bool, Val{5}, v8, Val{0}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::2\.kind::f16\.collector::a::discard"),
+        ("llvm.nvvm.tcgen05.mma.tensor.scale_d.disable_output_lane.cg1",
+         (p6, p6, UInt64, UInt32, Bool, Val{5}, v4, Val{1}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::tf32\.collector::a::discard \[%r\d+\], \[%r\d+\]"),
+        ("llvm.nvvm.tcgen05.mma.tensor.scale_d.disable_output_lane.cg2",
+         (p6, p6, UInt64, UInt32, Bool, Val{5}, v8, Val{0}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::2\.kind::f16\.collector::a::discard \[%r\d+\], \[%r\d+\]"),
+        # ISel is inconsistent about the two ISA-legal qualifier orders:
+        # these two records render `.ashift` BEFORE the collector, unlike
+        # every other .ashift record. Pinned as observed (llc 22.1.7).
+        ("llvm.nvvm.tcgen05.mma.tensor.scale_d.disable_output_lane.cg1.ashift",
+         (p6, p6, UInt64, UInt32, Bool, Val{5}, v4, Val{0}, Val{1}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::1\.kind::f16\.ashift\.collector::a::lastuse"),
+        ("llvm.nvvm.tcgen05.mma.tensor.scale_d.disable_output_lane.cg2.ashift",
+         (p6, p6, UInt64, UInt32, Bool, Val{5}, v8, Val{0}, Val{0}),
+         "sm_100a", "+ptx88",
+         r"tcgen05\.mma\.cta_group::2\.kind::f16\.ashift\.collector::a::discard"))
+end
+
 # mma.sync (wrappers/mma.jl, mma_scaled.jl) — a GENERATED family, not
 # hand-literal, so the src/ literal-scan can't see it. One probe per
 # structural class instead (the dtype cross-product within a class shares
@@ -618,6 +722,19 @@ end
 # every tier-2 name gets a selection probe, a name-table churn at an LLVM
 # bump surfaces as a red test naming the family, and a wrapper loop edit
 # without a matching sweep edit is equally loud.
+@testset "tcgen05 dense mma generated family: full probe coverage" begin
+    names = PTX.TCGEN05_MMA_DENSE_INTRINSIC_NAMES
+    @test length(names) == 18
+    registry = [n for n in keys(PTX.NVVM.TABLE)
+                if startswith(n, "llvm.nvvm.tcgen05.mma.") &&
+                   !occursin(".sp.", n) && !occursin(".ws.", n) &&
+                   !occursin("block_scale", n)]
+    @test Set(names) == Set(registry)
+    probed = Set(p[1] for p in PROBES)
+    unprobed = sort!([n for n in names if !(n in probed)])
+    @test isempty(unprobed)
+end
+
 @testset "mma generated families: full probe coverage" begin
     @test length(PTX.MMA_INTRINSIC_NAMES) == 102   # dense tier-2 forms
     @test length(PTX.MMA_SP_INTRINSIC_NAMES) == 12 # sparse tier-2 forms
