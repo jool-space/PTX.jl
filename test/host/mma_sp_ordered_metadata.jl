@@ -57,7 +57,13 @@ ordered_argtypes(f, selector) = (
         @test PTX.NVVM.callsiteattrs(intrinsic) == "convergent nomerge"
     end
 
-    @test expected_names == Set(PTX.MMA_SP_ORDERED_INTRINSIC_NAMES)
+    ordered_names = Set(PTX.MMA_SP_ORDERED_INTRINSIC_NAMES)
+    integer_names = Set(PTX.MMA_SP_INTEGER_INTRINSIC_NAMES)
+
+    # This oracle independently pins the floating ordered-metadata island. The
+    # production inventory also contains the separately reviewed integer forms.
+    @test expected_names == setdiff(ordered_names, integer_names)
+    @test length(intersect(ordered_names, integer_names)) == 32
     @test isempty(intersect(expected_names, Set(PTX.MMA_SP_INTRINSIC_NAMES)))
 end
 
@@ -73,9 +79,10 @@ end
                    NTuple{4, Float32}, UInt32, Val{0})
     @test PTX.lowering(literal, wrong_width).tier === :forbidden
 
+    # m16n8k256 is outside the classic sparse integer shape set in §9.7.15.6.
     unreviewed = Operation{:mma,
-        (Symbol("sp::ordered_metadata"), :sync, :aligned, :m16n8k64,
-         :row, :col, :s32, :u8, :u8, :s32)}()
+        (Symbol("sp::ordered_metadata"), :sync, :aligned, :m16n8k256,
+         :row, :col, :s32, :u4, :u4, :s32)}()
     @test PTX.lowering(unreviewed,
         (NTuple{4, UInt32}, NTuple{4, UInt32}, NTuple{4, Int32},
          UInt32, Val{0})).tier === :forbidden
