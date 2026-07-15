@@ -494,6 +494,73 @@ end
         Int32(c5), UInt64(cache_policy), Val(true))
 end
 
+# Base im2col prefetch is a separate grammar island from tile prefetch. PTX
+# 9.3 §9.7.9.26.5.4 admits ranks 3d..5d and requires exactly N signed tensor
+# coordinates followed by N-2 signed 16-bit im2col offsets (Figures 11–15).
+# Keep this surface exact: the later `.im2col::w[::128]` modes and
+# `.tile::gather4` have different operands and target restrictions.
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("3d"), :L2, :global, :im2col)})(
+        tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32, c3::Int32,
+        o1::Int16)
+    nvvm"cp.async.bulk.tensor.prefetch.im2col.3d"(
+        _tma_tmap(tmap), c1, c2, c3, o1, UInt64(0), Val(false))
+end
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("4d"), :L2, :global, :im2col)})(
+        tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32,
+        c3::Int32, c4::Int32,
+        o1::Int16, o2::Int16)
+    nvvm"cp.async.bulk.tensor.prefetch.im2col.4d"(
+        _tma_tmap(tmap), c1, c2, c3, c4, o1, o2,
+        UInt64(0), Val(false))
+end
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("5d"), :L2, :global, :im2col)})(
+        tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32,
+        c3::Int32, c4::Int32,
+        c5::Int32, o1::Int16, o2::Int16, o3::Int16)
+    nvvm"cp.async.bulk.tensor.prefetch.im2col.5d"(
+        _tma_tmap(tmap), c1, c2, c3, c4, c5, o1, o2, o3,
+        UInt64(0), Val(false))
+end
+
+# As for tile prefetch, PTX couples the optional cache-policy operand to the
+# `.L2::cache_hint` qualifier. It remains a weak, non-observable hint.
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("3d"), :L2, :global, :im2col,
+        Symbol("L2::cache_hint"))})(
+        tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32, c3::Int32,
+        o1::Int16, cache_policy::UInt64)
+    nvvm"cp.async.bulk.tensor.prefetch.im2col.3d"(
+        _tma_tmap(tmap), c1, c2, c3, o1, cache_policy, Val(true))
+end
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("4d"), :L2, :global, :im2col,
+        Symbol("L2::cache_hint"))})(
+        tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32,
+        c3::Int32, c4::Int32,
+        o1::Int16, o2::Int16, cache_policy::UInt64)
+    nvvm"cp.async.bulk.tensor.prefetch.im2col.4d"(
+        _tma_tmap(tmap), c1, c2, c3, c4, o1, o2, cache_policy, Val(true))
+end
+
+@inline function (::Operation{:cp, (:async, :bulk, :prefetch, :tensor,
+        Symbol("5d"), :L2, :global, :im2col,
+        Symbol("L2::cache_hint"))})(
+        tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32,
+        c3::Int32, c4::Int32,
+        c5::Int32, o1::Int16, o2::Int16, o3::Int16,
+        cache_policy::UInt64)
+    nvvm"cp.async.bulk.tensor.prefetch.im2col.5d"(
+        _tma_tmap(tmap), c1, c2, c3, c4, c5, o1, o2, o3,
+        cache_policy, Val(true))
+end
+
 # --- Residue: shared::cta × cta_group::2 (asm tier) ---------------------------
 # No NVVM intrinsic carries both qualifiers at 22.1.7: `g2s.cta` has no
 # cta_group operand and `g2s` renders `shared::cluster`. Asm strings keep
