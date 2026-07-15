@@ -64,9 +64,13 @@ function _expected_tcgen05_integer_address_forms()
     for cg in 1:2
         cta = Symbol("cta_group::", cg)
         push!(forms, (:shift, cta, :down))
-        for shape in (Symbol("128x256b"), Symbol("4x256b"),
-                      Symbol("128x128b"))
-            push!(forms, (:cp, cta, shape))
+        for shapemods in ((Symbol("128x256b"),), (Symbol("4x256b"),),
+                          (Symbol("128x128b"),),
+                          (Symbol("64x128b"), Symbol("warpx2::02_13")),
+                          (Symbol("64x128b"), Symbol("warpx2::01_23")),
+                          (Symbol("32x128b"), :warpx4)),
+                fmt in ((), (:b8x16, :b6x16_p32), (:b8x16, :b4x16_p64))
+            push!(forms, (:cp, cta, shapemods..., fmt...))
         end
     end
     for (shape, counts) in (
@@ -268,12 +272,12 @@ end
 @testset "closed tcgen05 integer-address adapters" begin
     expected_forms = _expected_tcgen05_integer_address_forms()
     @test Set(PTX.TCGEN05_INTEGER_ADDRESS_FORMS) == expected_forms
-    @test length(expected_forms) == 188
+    @test length(expected_forms) == 218
     expected = _expected_tcgen05_integer_address_adapters()
     actual = Set((s.mods, s.argtypes)
                  for s in PTX.TCGEN05_INTEGER_ADDRESS_ADAPTERS)
     @test actual == expected
-    @test length(actual) == 204
+    @test length(actual) == 234
     for (mods, signature) in actual
         # The 16x32bx2 immHalfSplitoff spec is the abstract `Val`
         # (dispatch admits any immediate); lowering probes need a concrete
