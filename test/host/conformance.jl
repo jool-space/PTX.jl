@@ -733,6 +733,33 @@ for a in (:e4m3, :e5m2), b in (:e4m3, :e5m2)
     _mma_sp_sweep!(:m16n8k64, a, b, :f32; ordered = true)
 end
 
+# Integer sparse MMA (PTX 7.1, ordered metadata PTX 8.5; sm_80). A/B are
+# packed UInt32 fragments, C/D are semantic Int32, and `e` is UInt32.
+function _mma_sp_integer_sweep!(shape, a, b, satfinite, ordered)
+    name = "llvm.nvvm." * PTX._mma_sp_int_intrinsic_name(
+        shape, a, b, satfinite; ordered)
+    n_a, n_b, n_cd = PTX.MMA_SP_FRAGS[(shape, a, :s32)]
+    selector = last(PTX._mma_sp_selectors(shape, a))
+    args = (fill(UInt32, n_a + n_b)..., fill(Int32, n_cd)...,
+            UInt32, Val{selector})
+    qualifier = ordered ? "sp::ordered_metadata" : "sp"
+    sat = satfinite ? "satfinite\\." : ""
+    push!(PROBES, (name, args, "sm_80", ordered ? "+ptx85" : "+ptx71",
+        Regex("mma\\.$qualifier\\.sync\\.aligned\\.$shape\\.row\\.col\\.$sat" *
+              "s32\\.$a\\.$b\\.s32")))
+    push!(ordered ? _MMA_SP_ORDERED_SWEPT : _MMA_SP_SWEPT, name)
+    nothing
+end
+for (shape, u, s) in (
+        (:m16n8k32, :u8, :s8),
+        (:m16n8k64, :u8, :s8),
+        (:m16n8k64, :u4, :s4),
+        (:m16n8k128, :u4, :s4)),
+        a in (u, s), b in (u, s), satfinite in (false, true),
+        ordered in (false, true)
+    _mma_sp_integer_sweep!(shape, a, b, satfinite, ordered)
+end
+
 const _MMA_SCALED_SWEPT = Set{String}()
 function _mma_scaled_sweep!(kind, sv, a, b, s; shape = :m16n8k32)
     infix = PTX._MMA_SCALE_VEC_INFIX[sv]
@@ -809,8 +836,9 @@ end
     @test length(PTX.MMA_INTRINSIC_NAMES) == 102   # dense tier-2 forms
     @test length(PTX.MMA_B1_INTRINSIC_NAMES) == 5
     @test PTX.MMA_B1_ASM_FORMS == [(:m8n8k128, :xor)]
-    @test length(PTX.MMA_SP_INTRINSIC_NAMES) == 12 # sparse tier-2 forms
-    @test length(PTX.MMA_SP_ORDERED_INTRINSIC_NAMES) == 12
+    @test length(PTX.MMA_SP_INTRINSIC_NAMES) == 44 # floating + integer sparse
+    @test length(PTX.MMA_SP_ORDERED_INTRINSIC_NAMES) == 44
+    @test length(PTX.MMA_SP_INTEGER_INTRINSIC_NAMES) == 64
     @test length(PTX.MMA_SCALED_INTRINSIC_NAMES) == 28
     @test _MMA_SWEPT == Set(PTX.MMA_INTRINSIC_NAMES)
     @test _MMA_B1_SWEPT == Set(PTX.MMA_B1_INTRINSIC_NAMES)
@@ -862,7 +890,7 @@ end
                        PTX.MMA_SP_ORDERED_INTRINSIC_NAMES,
                        PTX.MMA_SCALED_INTRINSIC_NAMES,
                        PTX.MMA_B1_INTRINSIC_NAMES))
-    @test length(wrapped) == 159
+    @test length(wrapped) == 223
     @test wrapped ⊆ Set(names)
     # the overlay must not leak beyond mma.*
     @test !NVVM.is_convergent(NVVM.intrinsic("llvm.nvvm.fence.proxy.async"))

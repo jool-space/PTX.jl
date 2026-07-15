@@ -1797,7 +1797,13 @@ end
         PTX._mma_sp_register(:m16n8k32, :f32, :bf16, :bf16, :f32)
         PTX._mma_sp_register(:m16n8k32, :f32, :bf16, :bf16, :f32;
                              ordered = true)
+        PTX._mma_sp_register(:m16n8k64, :s32, :u4, :s4, :s32;
+                             satfinite = true)
+        PTX._mma_sp_register(:m16n8k64, :s32, :s4, :u4, :s32;
+                             ordered = true)
         @test PTX._mma_sp_register(:m99n99k99, :f32, :bf16, :bf16, :f32) === nothing
+        @test PTX._mma_sp_register(:m16n8k32, :f32, :bf16, :bf16, :f32;
+                                   satfinite = true) === nothing
     end
     @test which(Operation{:mma,
             (:sp, :sync, :aligned, :m16n8k32, :row, :col, :f32, :bf16, :bf16, :f32)}(),
@@ -1807,6 +1813,16 @@ end
             (Symbol("sp::ordered_metadata"), :sync, :aligned, :m16n8k32,
              :row, :col, :f32, :bf16, :bf16, :f32)}(),
         (NTuple{4, UInt32}, NTuple{4, UInt32}, NTuple{4, Float32},
+         UInt32, Val{1})).module == PTX
+    @test which(Operation{:mma,
+            (:sp, :sync, :aligned, :m16n8k64, :row, :col, :satfinite,
+             :s32, :u4, :s4, :s32)}(),
+        (NTuple{2, UInt32}, NTuple{2, UInt32}, NTuple{4, Int32},
+         UInt32, Val{1})).module == PTX
+    @test which(Operation{:mma,
+            (Symbol("sp::ordered_metadata"), :sync, :aligned, :m16n8k64,
+             :row, :col, :s32, :s4, :u4, :s32)}(),
+        (NTuple{2, UInt32}, NTuple{2, UInt32}, NTuple{4, Int32},
          UInt32, Val{1})).module == PTX
 
     # ---- _mma_scaled_register ----

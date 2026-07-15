@@ -401,7 +401,9 @@ end
 # each group of four contributes metadata; its legal range is shape/dtype
 # specific and enforced by the intrinsic's immarg range at compile time
 # (k16 16-bit & k8 tf32: one thread, 0..3; k32 16-bit & k16 tf32: a pair,
-# 0..1; k64 fp8: all threads, must be 0).
+# 0..1; k64 fp8: all threads, must be 0). Integer products use the same
+# exact boundary: k32 u8/s8 and k64 u4/s4 select 0..1; k64 u8/s8 and k128
+# u4/s4 require 0.
 #
 # Surface (fragments per lane in MMA_SP_FRAGS):
 #
@@ -415,12 +417,13 @@ end
 # form that loses its intrinsic on a backend bump lands in
 # MMA_SP_MISSING_INTRINSICS and fails the conformance count instead of
 # silently vanishing. `sp::ordered_metadata` (PTX 8.5+, sm_80+) is exposed for
-# the same 12 shape/type ABIs as the base form. The ISA recommends it because
-# the unordered form may have substantially reduced performance on some
-# targets. Its metadata nibbles must encode retained indices in increasing order;
-# any other order has undefined behavior.  Ordered forms use exact `Val{sel}`
-# methods so the ISA's shape-dependent selector domain is a dispatch boundary,
-# not merely an LLVM immarg diagnostic.
+# the 12 floating ABIs and all 32 integer products (shape/type/saturation) also
+# exposed by the base form. The ISA recommends it because the unordered form
+# may have substantially reduced performance on some targets. Its metadata
+# nibbles must encode retained indices in increasing order; any other order has
+# undefined behavior. Ordered forms and both integer variants use exact
+# `Val{sel}` methods so the ISA's shape-dependent selector domain is a dispatch
+# boundary, not merely an LLVM immarg diagnostic.
 
 # (shape, ab_dtype, cd_dtype) → (n_a_regs, n_b_regs, n_cd_regs) per lane.
 const MMA_SP_FRAGS = Dict{Tuple{Symbol, Symbol, Symbol}, NTuple{3, Int}}(
@@ -434,6 +437,23 @@ const MMA_SP_FRAGS = Dict{Tuple{Symbol, Symbol, Symbol}, NTuple{3, Int}}(
     (:m16n8k16, :tf32, :f32) => (4, 4, 4),
     (:m16n8k64, :e4m3, :f32) => (4, 4, 4),
     (:m16n8k64, :e5m2, :f32) => (4, 4, 4),
+    (:m16n8k32, :u8,   :s32) => (2, 2, 4),
+    (:m16n8k32, :s8,   :s32) => (2, 2, 4),
+    (:m16n8k64, :u8,   :s32) => (4, 4, 4),
+    (:m16n8k64, :s8,   :s32) => (4, 4, 4),
+    (:m16n8k64, :u4,   :s32) => (2, 2, 4),
+    (:m16n8k64, :s4,   :s32) => (2, 2, 4),
+    (:m16n8k128, :u4,  :s32) => (4, 4, 4),
+    (:m16n8k128, :s4,  :s32) => (4, 4, 4),
+)
+
+# PTX 9.3 §9.7.15.6 integer products. Every row expands to four A/B
+# signedness pairs, ordinary and `.satfinite`, then both metadata variants.
+const MMA_SP_INT_VARIANTS = (
+    (:m16n8k32,  :u8, :s8),
+    (:m16n8k64,  :u8, :s8),
+    (:m16n8k64,  :u4, :s4),
+    (:m16n8k128, :u4, :s4),
 )
 
 function _mma_sp_intrinsic_name(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
@@ -446,31 +466,50 @@ function _mma_sp_intrinsic_name(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
     return "$base.$c_ty.$a_ty.$b_ty.$c_ty"   # fp8 (e4m3/e5m2, mixed legal)
 end
 
+function _mma_sp_int_intrinsic_name(shape::Symbol, a_ty::Symbol,
+                                    b_ty::Symbol, satfinite::Bool;
+                                    ordered::Bool = false)
+    prefix = ordered ? "mma.sp.ordered.metadata" : "mma.sp"
+    base = "$prefix.$shape.row.col" * (satfinite ? ".satfinite" : "")
+    base *= ".$a_ty"
+    a_ty === b_ty ? base : base * ".$b_ty"
+end
+
 const MMA_SP_INTRINSIC_NAMES = String[]
 const MMA_SP_ORDERED_INTRINSIC_NAMES = String[]
+const MMA_SP_INTEGER_INTRINSIC_NAMES = String[]
 const MMA_SP_MISSING_INTRINSICS = String[]
 
 # PTX 9.3 §9.7.15.6: the selector identifies one thread, one thread pair, or
 # the whole four-thread group depending on the sparse A fragment layout.
 function _mma_sp_selectors(shape::Symbol, a_ty::Symbol)
-    shape === :m16n8k64 && return (0,)
-    (shape === :m16n8k32 ||
+    shape === :m16n8k128 && return (0,)
+    (shape === :m16n8k64 && a_ty in (:u8, :s8, :e4m3, :e5m2)) &&
+        return (0,)
+    ((shape === :m16n8k64 && a_ty in (:u4, :s4)) ||
+     shape === :m16n8k32 ||
      (shape === :m16n8k16 && a_ty === :tf32)) && return (0, 1)
     return (0, 1, 2, 3)
 end
 
 function _mma_sp_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
-                          b_ty::Symbol, c_ty::Symbol; ordered::Bool = false)
+                          b_ty::Symbol, c_ty::Symbol; ordered::Bool = false,
+                          satfinite::Bool = false)
+    satfinite && c_ty !== :s32 && return nothing
     haskey(MMA_SP_FRAGS, (shape, a_ty, c_ty)) || return nothing
     n_a, n_b, n_cd = MMA_SP_FRAGS[(shape, a_ty, c_ty)]
+    integer = c_ty === :s32
 
     variant = ordered ? Symbol("sp::ordered_metadata") : :sp
-    mods = (variant, :sync, :aligned, shape, :row, :col,
+    satmod = satfinite ? (:satfinite,) : ()
+    mods = (variant, :sync, :aligned, shape, :row, :col, satmod...,
             d_ty, a_ty, b_ty, c_ty)
-    cd_J = c_ty === :f32 ? :Float32 : :UInt32
+    cd_J = c_ty === :f32 ? :Float32 : c_ty === :s32 ? :Int32 : :UInt32
 
-    full = "llvm.nvvm." * _mma_sp_intrinsic_name(
-        shape, a_ty, b_ty, c_ty; ordered)
+    intrinsic_name = integer ?
+        _mma_sp_int_intrinsic_name(shape, a_ty, b_ty, satfinite; ordered) :
+        _mma_sp_intrinsic_name(shape, a_ty, b_ty, c_ty; ordered)
+    full = "llvm.nvvm." * intrinsic_name
     if !NVVM.isintrinsic(full)
         # No asm fallback here (every registered form has an intrinsic at
         # the pinned backend) — record and let conformance fail loudly.
@@ -479,6 +518,8 @@ function _mma_sp_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
     end
     names = ordered ? MMA_SP_ORDERED_INTRINSIC_NAMES : MMA_SP_INTRINSIC_NAMES
     full in names || push!(names, full)
+    integer && !(full in MMA_SP_INTEGER_INTRINSIC_NAMES) &&
+        push!(MMA_SP_INTEGER_INTRINSIC_NAMES, full)
     call = NVVM.IntrinsicCall{Symbol(full)}()
 
     ab_vec = a_ty === :f16
@@ -487,11 +528,13 @@ function _mma_sp_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
     a_in = [ab_vec ? :(_mma_u32_v2h(a[$i])) : :(a[$i]) for i in 1:n_a]
     b_in = [ab_vec ? :(_mma_u32_v2h(b[$i])) : :(b[$i]) for i in 1:n_b]
     c_in = [cd_vec ? :(_mma_u32_v2h(c[$i])) : :(c[$i]) for i in 1:n_cd]
-    repack = cd_vec ? :(ntuple(i -> _mma_v2h_u32(d[i]), Val($n_cd))) : :d
+    repack = cd_vec ? :(ntuple(i -> _mma_v2h_u32(d[i]), Val($n_cd))) :
+             integer ? :(ntuple(i -> reinterpret(Int32, d[i]), Val($n_cd))) : :d
 
-    selectors = ordered ? _mma_sp_selectors(shape, a_ty) : (nothing,)
+    strict_selector = ordered || integer
+    selectors = strict_selector ? _mma_sp_selectors(shape, a_ty) : (nothing,)
     for selector in selectors
-        sel_type = ordered ? :(Val{$selector}) : :Val
+        sel_type = strict_selector ? :(Val{$selector}) : :Val
         @eval function (::Operation{:mma, $mods})(
                 a::NTuple{$n_a, UInt32},
                 b::NTuple{$n_b, UInt32},
@@ -521,4 +564,13 @@ end
 for a_ty in (:e4m3, :e5m2), b_ty in (:e4m3, :e5m2)
     _mma_sp_register(:m16n8k64, :f32, a_ty, b_ty, :f32)
     _mma_sp_register(:m16n8k64, :f32, a_ty, b_ty, :f32; ordered = true)
+end
+
+# Classic warp-level integer sparse MMA (PTX 7.1, sm_80). This is distinct
+# from tcgen05.mma.sp and deliberately shares none of its descriptor surface.
+for (shape, u_ty, s_ty) in MMA_SP_INT_VARIANTS,
+        a_ty in (u_ty, s_ty), b_ty in (u_ty, s_ty),
+        satfinite in (false, true), ordered in (false, true)
+    _mma_sp_register(shape, :s32, a_ty, b_ty, :s32;
+                     satfinite, ordered)
 end
