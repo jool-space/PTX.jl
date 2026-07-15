@@ -311,6 +311,28 @@ const PROBES = Tuple{String, Tuple, String, String, Regex}[
     ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.5d",
         (p0, Int32, Int32, Int32, Int32, Int32, UInt64, Val{true}), "sm_90", "+ptx80",
         r"cp\.async\.bulk\.prefetch\.tensor\.5d\.L2\.global\.tile\.L2::cache_hint \["),
+    # Base im2col prefetch: rank-many s32 tensor coordinates, then rank-2
+    # i16 offsets. The cache policy remains paired with its immediate flag.
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.3d",
+        (p0, Int32, Int32, Int32, Int16, UInt64, Val{false}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.3d\.L2\.global\.im2col \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.3d",
+        (p0, Int32, Int32, Int32, Int16, UInt64, Val{true}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.3d\.L2\.global\.im2col\.L2::cache_hint \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.4d",
+        (p0, Int32, Int32, Int32, Int32, Int16, Int16, UInt64, Val{false}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.4d\.L2\.global\.im2col \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.4d",
+        (p0, Int32, Int32, Int32, Int32, Int16, Int16, UInt64, Val{true}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.4d\.L2\.global\.im2col\.L2::cache_hint \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.5d",
+        (p0, Int32, Int32, Int32, Int32, Int32, Int16, Int16, Int16,
+         UInt64, Val{false}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.5d\.L2\.global\.im2col \["),
+    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.5d",
+        (p0, Int32, Int32, Int32, Int32, Int32, Int16, Int16, Int16,
+         UInt64, Val{true}), "sm_90", "+ptx80",
+        r"cp\.async\.bulk\.prefetch\.tensor\.5d\.L2\.global\.im2col\.L2::cache_hint \["),
 ]
 
 # tcgen05 (wrappers/tcgen05.jl) — datacenter Blackwell only (consumer
@@ -938,6 +960,10 @@ end
             (UInt32, UInt32, Int32, Int32), "sm_75", "+ptx71"),
         ("llvm.nvvm.mma.and.popc.m8n8k128.row.col.b1",
             (UInt32, UInt32, Int32, Int32), "sm_80", "+ptx70"),
+        # base TMA im2col prefetch: PTX 8.0 and baseline sm_90
+        ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.3d",
+            (p0, Int32, Int32, Int32, Int16, UInt64, Val{false}),
+            "sm_80", "+ptx80"),
         # tcgen05: datacenter-Blackwell only
         ("llvm.nvvm.tcgen05.alloc.shared.cg1", (pS8, UInt32), "sm_90a", "+ptx80"),
         # b8 matrix shapes: sm_100a family

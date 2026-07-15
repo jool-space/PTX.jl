@@ -80,7 +80,8 @@ end
           :global, Symbol("tile::gather4")),
          (tmap, Int32, Int32, Int32, Int32, Int32)),
         ((:async, :bulk, :prefetch, :tensor, Symbol("3d"), :L2,
-          :global, :im2col), (tmap, Int32, Int32, Int32, UInt16)),
+          :global, Symbol("im2col::w")),
+         (tmap, Int32, Int32, Int32, UInt16)),
     )
 
     for (mods, args) in misses
