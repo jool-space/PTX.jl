@@ -350,17 +350,29 @@ for w in ("ld", "st")
     push!(PROBES, ("llvm.nvvm.tcgen05.wait.$w", (), "sm_100a", "+ptx86",
                    Regex("tcgen05\\.wait::$w\\.sync\\.aligned")))
 end
-for (shape, base) in (("16x64b", 1), ("32x32b", 1), ("16x128b", 2), ("16x256b", 4)),
-    c in (1, 2, 4, 8, 16, 32, 64, 128)
+# Every shape×count is probed with both values of the pack/unpack i1
+# immarg, pinning the flag→qualifier rendering rather than just intrinsic
+# name selection. 16x32bx2 threads its i64 immHalfSplitoff immarg through
+# as an extra Val operand.
+for (shape, base) in (("16x64b", 1), ("32x32b", 1), ("16x128b", 2),
+                      ("16x256b", 4), ("16x32bx2", 1)),
+    c in (1, 2, 4, 8, 16, 32, 64, 128),
+    repack in (false, true)
+
     n = base * c
     n > 128 && continue
-    push!(PROBES, ("llvm.nvvm.tcgen05.ld.$shape.x$c", (p6, Val{false}),
+    split = shape == "16x32bx2" ? (Val{0},) : ()
+    ldre = repack ? "\\.pack::16b" : ""
+    stre = repack ? "\\.unpack::16b" : ""
+    push!(PROBES, ("llvm.nvvm.tcgen05.ld.$shape.x$c",
+                   (p6, split..., Val{repack}),
                    "sm_100a", "+ptx86",
-                   Regex("tcgen05\\.ld\\.sync\\.aligned\\.$shape\\.x$c\\.b32")))
+                   Regex("tcgen05\\.ld\\.sync\\.aligned\\.$shape\\.x$c$ldre\\.b32")))
     data = n == 1 ? UInt32 : NTuple{n, VecElement{UInt32}}
-    push!(PROBES, ("llvm.nvvm.tcgen05.st.$shape.x$c", (p6, data, Val{false}),
+    push!(PROBES, ("llvm.nvvm.tcgen05.st.$shape.x$c",
+                   (p6, split..., data, Val{repack}),
                    "sm_100a", "+ptx86",
-                   Regex("tcgen05\\.st\\.sync\\.aligned\\.$shape\\.x$c\\.b32")))
+                   Regex("tcgen05\\.st\\.sync\\.aligned\\.$shape\\.x$c$stre\\.b32")))
 end
 for (kind, kv) in (("f16", 0), ("tf32", 1), ("f8f6f4", 2), ("i8", 3))
     push!(PROBES, ("llvm.nvvm.tcgen05.mma.shared",

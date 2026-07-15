@@ -1291,21 +1291,31 @@ end
         @test occursin(intr, string(ci))
     end
 
-    # ld/st: the full Table-49 grid — arity, inferred return, intrinsic
+    # ld/st: the full Table-52 grid (plain and pack/unpack variants) —
+    # arity, inferred return, intrinsic. 16x32bx2 threads its
+    # immHalfSplitoff immediate as a Val operand after taddr.
     for (shape, base) in (("16x64b", 1), ("32x32b", 1),
-                          ("16x128b", 2), ("16x256b", 4)),
-        c in (1, 2, 4, 8, 16, 32, 64, 128)
+                          ("16x128b", 2), ("16x256b", 4),
+                          ("16x32bx2", 1)),
+        c in (1, 2, 4, 8, 16, 32, 64, 128),
+        repack in (false, true)
 
         n = base * c
         n > 128 && continue
         sh = Symbol(shape)
         cnt = Symbol("x$c")
-        ld = Operation{:tcgen05, (:ld, :sync, :aligned, sh, cnt, :b32)}()
-        ci, rt = first(Base.code_typed(ld, (UInt32,)))
+        split = shape == "16x32bx2" ? (Val{8},) : ()
+        ldflag = repack ? (Symbol("pack::16b"),) : ()
+        stflag = repack ? (Symbol("unpack::16b"),) : ()
+        ld = Operation{:tcgen05, (:ld, :sync, :aligned, sh, cnt,
+                                  ldflag..., :b32)}()
+        ci, rt = first(Base.code_typed(ld, (UInt32, split...)))
         @test rt === (n == 1 ? UInt32 : NTuple{n, UInt32})
         @test occursin("tcgen05.ld.$shape.x$c", string(ci))
-        st = Operation{:tcgen05, (:st, :sync, :aligned, sh, cnt, :b32)}()
-        ci2, rt2 = first(Base.code_typed(st, (UInt32, NTuple{n, UInt32})))
+        st = Operation{:tcgen05, (:st, :sync, :aligned, sh, cnt,
+                                  stflag..., :b32)}()
+        ci2, rt2 = first(Base.code_typed(st, (UInt32, split...,
+                                              NTuple{n, UInt32})))
         @test rt2 === Nothing
         @test occursin("tcgen05.st.$shape.x$c", string(ci2))
     end

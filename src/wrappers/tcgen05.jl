@@ -18,8 +18,10 @@
 #   - ld/st → ld.<shape>.<count> / st.<shape>.<count>: identical
 #     spellings. The data moves as an LLVM vector (v<N>i32), so the
 #     wrappers repack to/from the notation surface's plain NTuple{N,
-#     UInt32}; the i1 immarg is the .pack::16b/.unpack::16b flag (not in
-#     the notation surface — always Val(false)).
+#     UInt32}; the i1 immarg is the .pack::16b/.unpack::16b flag,
+#     surfaced as an explicit modifier (plain spellings pass Val(false)).
+#     The 16x32bx2 shape carries its extra `immHalfSplitoff` i64 immarg
+#     as a positional `Val(off)` operand after taddr.
 #   - commit → commit.shared.cgN / commit.mc.shared.cgN. ISel emits the
 #     `.shared::cluster` spelling for BOTH state-space notations (a
 #     shared::cta address is valid in the cluster window — same
@@ -38,9 +40,12 @@
 #     specific `.scale_vec::*` forms from family-compatible `.block*` aliases.
 #
 # ld/st per-lane register count = `base * count` where
-#   base = 1 for shape ∈ {16x64b, 32x32b}; 2 for 16x128b; 4 for 16x256b
-# (PTX 9.2 §9.7.16.8.3 Table 49). count ∈ {x1..x128} with per_lane ≤ 128.
-# Shape `.16x32bx2` excluded — needs an extra `immHalfSplitoff` immediate.
+#   base = 1 for shape ∈ {16x64b, 32x32b, 16x32bx2}; 2 for 16x128b;
+#   4 for 16x256b
+# (PTX 9.3 §9.7.17.8 Table 52). count ∈ {x1..x128} with per_lane ≤ 128.
+# The `.pack::16b`/`.unpack::16b` repack variants cover the same grid.
+# `tcgen05.ld.red` (load-with-reduction, PTX 9.1+) has no NVVM intrinsic
+# records at the pinned backend and stays outside the wrapper surface.
 #
 # Methods are written out literally (no name-building loop) so every
 # intrinsic this file stands on is greppable — test/host/conformance.jl
@@ -217,6 +222,199 @@
     _tc_unvec(nvvm"tcgen05.ld.16x256b.x32"(_tmem(taddr), Val(false)))
 @inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x32, :b32)})(taddr::UInt32, src::NTuple{128, UInt32}) =
     nvvm"tcgen05.st.16x256b.x32"(_tmem(taddr), _tc_vec(src), Val(false))
+
+# 16x32bx2 (base 1; two 16x32b accesses — the second starts at taddr +
+# immHalfSplitoff, an immediate operand passed as `Val(off)`)
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x1, :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x1"(_tmem(taddr), halfsplitoff, Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x1, :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{1, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x1"(_tmem(taddr), halfsplitoff, src[1], Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x2, :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x2"(_tmem(taddr), halfsplitoff, Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x2, :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{2, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x2"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x4, :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x4"(_tmem(taddr), halfsplitoff, Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x4, :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{4, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x4"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x8, :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x8"(_tmem(taddr), halfsplitoff, Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x8, :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{8, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x8"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x16, :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x16"(_tmem(taddr), halfsplitoff, Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x16, :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{16, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x16"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x32, :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x32"(_tmem(taddr), halfsplitoff, Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x32, :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{32, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x32"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x64, :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x64"(_tmem(taddr), halfsplitoff, Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x64, :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{64, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x64"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(false))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x128, :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x128"(_tmem(taddr), halfsplitoff, Val(false)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x128, :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{128, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x128"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(false))
+
+# pack::16b / unpack::16b — optional 16-bit repack during the transfer
+# (ld packs two 16-bit TMEM chunks per 32-bit register; st unpacks two
+# 16-bit chunks per source register). Register counts are unchanged:
+# the flag flips the intrinsics' trailing i1 immarg.
+# 16x64b (base 1)
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x1, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x1"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x1, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{1, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x1"(_tmem(taddr), src[1], Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x2, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x2"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x2, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{2, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x2"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x4, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x4"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x4, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{4, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x4"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x8, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x8"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x8, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{8, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x8"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x16, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x16"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x16, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{16, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x16"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x32, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x32"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x32, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{32, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x32"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x64, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x64"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x64, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{64, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x64"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x64b"), :x128, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x64b.x128"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x64b"), :x128, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{128, UInt32}) =
+    nvvm"tcgen05.st.16x64b.x128"(_tmem(taddr), _tc_vec(src), Val(true))
+# 32x32b (base 1)
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x1, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x1"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x1, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{1, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x1"(_tmem(taddr), src[1], Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x2, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x2"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x2, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{2, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x2"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x4, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x4"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x4, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{4, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x4"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x8, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x8"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x8, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{8, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x8"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x16, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x16"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x16, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{16, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x16"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x32, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x32"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x32, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{32, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x32"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x64, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x64"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x64, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{64, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x64"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("32x32b"), :x128, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.32x32b.x128"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("32x32b"), :x128, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{128, UInt32}) =
+    nvvm"tcgen05.st.32x32b.x128"(_tmem(taddr), _tc_vec(src), Val(true))
+# 16x128b (base 2)
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x1, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x1"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x1, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{2, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x1"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x2, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x2"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x2, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{4, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x2"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x4, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x4"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x4, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{8, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x4"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x8, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x8"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x8, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{16, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x8"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x16, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x16"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x16, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{32, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x16"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x32, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x32"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x32, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{64, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x32"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x128b"), :x64, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x128b.x64"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x128b"), :x64, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{128, UInt32}) =
+    nvvm"tcgen05.st.16x128b.x64"(_tmem(taddr), _tc_vec(src), Val(true))
+# 16x256b (base 4)
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x256b"), :x1, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x256b.x1"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x1, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{4, UInt32}) =
+    nvvm"tcgen05.st.16x256b.x1"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x256b"), :x2, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x256b.x2"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x2, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{8, UInt32}) =
+    nvvm"tcgen05.st.16x256b.x2"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x256b"), :x4, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x256b.x4"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x4, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{16, UInt32}) =
+    nvvm"tcgen05.st.16x256b.x4"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x256b"), :x8, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x256b.x8"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x8, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{32, UInt32}) =
+    nvvm"tcgen05.st.16x256b.x8"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x256b"), :x16, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x256b.x16"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x16, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{64, UInt32}) =
+    nvvm"tcgen05.st.16x256b.x16"(_tmem(taddr), _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x256b"), :x32, Symbol("pack::16b"), :b32)})(taddr::UInt32) =
+    _tc_unvec(nvvm"tcgen05.ld.16x256b.x32"(_tmem(taddr), Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x256b"), :x32, Symbol("unpack::16b"), :b32)})(taddr::UInt32, src::NTuple{128, UInt32}) =
+    nvvm"tcgen05.st.16x256b.x32"(_tmem(taddr), _tc_vec(src), Val(true))
+# 16x32bx2 (base 1)
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x1, Symbol("pack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x1"(_tmem(taddr), halfsplitoff, Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x1, Symbol("unpack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{1, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x1"(_tmem(taddr), halfsplitoff, src[1], Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x2, Symbol("pack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x2"(_tmem(taddr), halfsplitoff, Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x2, Symbol("unpack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{2, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x2"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x4, Symbol("pack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x4"(_tmem(taddr), halfsplitoff, Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x4, Symbol("unpack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{4, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x4"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x8, Symbol("pack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x8"(_tmem(taddr), halfsplitoff, Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x8, Symbol("unpack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{8, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x8"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x16, Symbol("pack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x16"(_tmem(taddr), halfsplitoff, Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x16, Symbol("unpack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{16, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x16"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x32, Symbol("pack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x32"(_tmem(taddr), halfsplitoff, Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x32, Symbol("unpack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{32, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x32"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x64, Symbol("pack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x64"(_tmem(taddr), halfsplitoff, Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x64, Symbol("unpack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{64, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x64"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(true))
+@inline (::Operation{:tcgen05, (:ld, :sync, :aligned, Symbol("16x32bx2"), :x128, Symbol("pack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val) =
+    _tc_unvec(nvvm"tcgen05.ld.16x32bx2.x128"(_tmem(taddr), halfsplitoff, Val(true)))
+@inline (::Operation{:tcgen05, (:st, :sync, :aligned, Symbol("16x32bx2"), :x128, Symbol("unpack::16b"), :b32)})(taddr::UInt32, halfsplitoff::Val, src::NTuple{128, UInt32}) =
+    nvvm"tcgen05.st.16x32bx2.x128"(_tmem(taddr), halfsplitoff, _tc_vec(src), Val(true))
 
 # --- alloc / relinquish / wait / commit ----------------------------------------
 
@@ -438,19 +636,22 @@ const TCGEN05_INTEGER_ADDRESS_ADAPTERS = let
             add((:cp, cta, shape), (A32, UInt64))
         end
     end
-    for (shape, counts) in (
-            (Symbol("16x64b"),  (1, 2, 4, 8, 16, 32, 64, 128)),
-            (Symbol("32x32b"),  (1, 2, 4, 8, 16, 32, 64, 128)),
-            (Symbol("16x128b"), (1, 2, 4, 8, 16, 32, 64)),
-            (Symbol("16x256b"), (1, 2, 4, 8, 16, 32)))
-        for count in counts, op in (:ld, :st)
-            mods = (op, :sync, :aligned, shape, Symbol("x", count), :b32)
+    for (shape, base, counts) in (
+            (Symbol("16x64b"),   1, (1, 2, 4, 8, 16, 32, 64, 128)),
+            (Symbol("32x32b"),   1, (1, 2, 4, 8, 16, 32, 64, 128)),
+            (Symbol("16x128b"),  2, (1, 2, 4, 8, 16, 32, 64)),
+            (Symbol("16x256b"),  4, (1, 2, 4, 8, 16, 32)),
+            (Symbol("16x32bx2"), 1, (1, 2, 4, 8, 16, 32, 64, 128)))
+        split = shape === Symbol("16x32bx2") ? (Val,) : ()
+        for count in counts, op in (:ld, :st), repack in (false, true)
+            flag = repack ?
+                (Symbol(op === :ld ? "pack::16b" : "unpack::16b"),) : ()
+            mods = (op, :sync, :aligned, shape, Symbol("x", count),
+                    flag..., :b32)
             if op === :ld
-                add(mods, (A32,))
+                add(mods, (A32, split...))
             else
-                base = shape in (Symbol("16x64b"), Symbol("32x32b")) ? 1 :
-                       shape === Symbol("16x128b") ? 2 : 4
-                add(mods, (A32, NTuple{base * count, UInt32}))
+                add(mods, (A32, split..., NTuple{base * count, UInt32}))
             end
         end
     end
