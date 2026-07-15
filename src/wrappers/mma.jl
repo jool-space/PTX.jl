@@ -1,8 +1,8 @@
-# `mma.sync.aligned` — fifth family migrated to tier-2 intrinsic lowering.
-# Source of truth: PTX 9.2 §9.7.14.5.
+# `mma.sync.aligned` — primarily tier-2 intrinsic lowering.
+# Source of truth: PTX 9.3 §9.7.15.5.
 #
 # This family was already a table-driven generator on the asm tier, and
-# stays one — but emitting `IntrinsicCall` instead of `@asmcall`. Unlike
+# stays one — normally emitting `IntrinsicCall` instead of `@asmcall`. Unlike
 # the hand-literal families (shfl/mbarrier/tma/tcgen05 verbs), the dtype
 # cross-product here is far too large to spell as `nvvm"..."` literals
 # (`kind::f8f6f4` alone is 5×5×2×2 = 100 structurally-identical forms), so
@@ -99,6 +99,11 @@ const MMA_SYNC_FRAGS = Dict{Tuple{Symbol, Symbol, Symbol}, NTuple{3, Int}}(
     (:m16n8k32, :s4,   :s32) => (2, 1, 4),
     (:m16n8k64, :u4,   :s32) => (4, 2, 4),
     (:m16n8k64, :s4,   :s32) => (4, 2, 4),
+    # PTX 9.3 §9.7.15.5.5, .12–.13, Figures 62–64 and 97–103.
+    # Each .b32 carries 32 single-bit elements; C/D are signed accumulators.
+    (:m8n8k128,  :b1, :s32) => (1, 1, 2),
+    (:m16n8k128, :b1, :s32) => (2, 1, 4),
+    (:m16n8k256, :b1, :s32) => (4, 2, 4),
 )
 
 # The intrinsic-name irregularity (LLVM IntrinsicsNVVM.td): bf16/tf32 carry
@@ -124,6 +129,12 @@ function _mma_int_intrinsic_name(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
     base *= ".$a_ty"
     a_ty === b_ty ? base : base * ".$b_ty"
 end
+
+# Single-bit intrinsic names move the logical operation before `popc` and
+# before the shape, unlike the complete PTX spelling where `.xor|and.popc`
+# trails the type quartet.
+_mma_b1_intrinsic_name(shape::Symbol, bitop::Symbol) =
+    "mma.$bitop.popc.$shape.row.col.b1"
 
 # Every name the generator routed to tier 2 — for the conformance
 # completeness assertion (this is what protects the family in place of the
@@ -185,8 +196,9 @@ end
 #   u8/s8: m16n8k16, m16n8k32
 #   u4/s4: m16n8k32, m16n8k64
 # Each permits every A×B signedness pair and optional `.satfinite`, for 32
-# exact forms.  All use `.s32` accumulators/results and `.row.col`; b1 and
-# older m8n8 forms are intentionally outside this first coverage slice.
+# exact forms.  All use `.s32` accumulators/results and `.row.col`; the b1
+# product is registered separately below because it has a distinct
+# `.bitOp.popc` grammar and shape-dependent floors.
 const MMA_INT_VARIANTS = (
     (:m16n8k16, :u8, :s8),
     (:m16n8k32, :u8, :s8),
@@ -292,6 +304,89 @@ for (shape, u_ty, s_ty) in MMA_INT_VARIANTS,
         a_ty in (u_ty, s_ty), b_ty in (u_ty, s_ty),
         satfinite in (false, true)
     _mma_int_register(shape, a_ty, b_ty, satfinite)
+end
+
+# --- single-bit integer mma (PTX 7.0/7.1, sm_75/sm_80) --------------------
+#
+# PTX 9.3 §9.7.15.5.14 defines exactly three shapes × two logical
+# operations.  XOR was introduced with b1 MMA in PTX 7.0; AND followed in
+# PTX 7.1.  Only m8n8k128.xor reaches back to sm_75.  Every m16 shape and
+# every AND form requires sm_80.  Target/version gating remains ISel/ptxas's
+# responsibility; this boundary pins the operand and result ABI.
+const MMA_B1_VARIANTS = (
+    (:m8n8k128,  :xor),
+    (:m8n8k128,  :and),
+    (:m16n8k128, :xor),
+    (:m16n8k128, :and),
+    (:m16n8k256, :xor),
+    (:m16n8k256, :and),
+)
+const MMA_B1_INTRINSIC_NAMES = String[]
+const MMA_B1_ASM_FORMS = Tuple{Symbol,Symbol}[]
+
+function _mma_b1_register_asm(shape::Symbol, bitop::Symbol,
+                              n_a::Int, n_b::Int, n_cd::Int)
+    slots(off, n) = "{" * join(("\$$i" for i in off:off+n-1), ", ") * "}"
+    asm = "mma.sync.aligned.$shape.row.col.s32.b1.b1.s32.$bitop.popc " *
+          "$(slots(0, n_cd)), $(slots(n_cd, n_a)), " *
+          "$(slots(n_cd + n_a, n_b)), " *
+          "$(slots(n_cd + n_a + n_b, n_cd));"
+    # Early-clobber prevents an output from sharing a register with a packed
+    # A/B source. No memory clobber: this is still pure per-warp arithmetic.
+    constraints = join(vcat(fill("=&r", n_cd),
+                            fill("r", n_a + n_b + n_cd)), ",")
+    flat_types = vcat(fill(UInt32, n_a + n_b), fill(Int32, n_cd))
+    ir = convergent_asm_ir(asm, constraints, NTuple{n_cd, Int32}, flat_types)
+    a_in = [:(a[$i]) for i in 1:n_a]
+    b_in = [:(b[$i]) for i in 1:n_b]
+    c_in = [:(c[$i]) for i in 1:n_cd]
+    mods = (:sync, :aligned, shape, :row, :col,
+            :s32, :b1, :b1, :s32, bitop, :popc)
+    @eval function (::Operation{:mma, $mods})(
+            a::NTuple{$n_a, UInt32}, b::NTuple{$n_b, UInt32},
+            c::NTuple{$n_cd, Int32})
+        Base.@inline
+        Base.llvmcall(($ir, "entry"), NTuple{$n_cd, Int32},
+                      Tuple{$(flat_types...)},
+                      $(a_in...), $(b_in...), $(c_in...))
+    end
+    push!(MMA_B1_ASM_FORMS, (shape, bitop))
+    nothing
+end
+
+function _mma_b1_register(shape::Symbol, bitop::Symbol)
+    n_a, n_b, n_cd = MMA_SYNC_FRAGS[(shape, :b1, :s32)]
+    # LLVM 22.1.7 carries the m8n8k128.xor intrinsic but its ISel predicate
+    # incorrectly rejects the ISA-legal sm_75 floor (it first selects at
+    # sm_80). Keep the public ISA floor with one typed convergent asm fallback;
+    # the other five forms use their existing intrinsics.
+    shape === :m8n8k128 && bitop === :xor &&
+        return _mma_b1_register_asm(shape, bitop, n_a, n_b, n_cd)
+
+    mods = (:sync, :aligned, shape, :row, :col,
+            :s32, :b1, :b1, :s32, bitop, :popc)
+    full = "llvm.nvvm." * _mma_b1_intrinsic_name(shape, bitop)
+    NVVM.isintrinsic(full) ||
+        error("single-bit mma intrinsic missing from pinned registry: $full")
+    full in MMA_B1_INTRINSIC_NAMES || push!(MMA_B1_INTRINSIC_NAMES, full)
+    call = NVVM.IntrinsicCall{Symbol(full)}()
+
+    a_in = [:(a[$i]) for i in 1:n_a]
+    b_in = [:(b[$i]) for i in 1:n_b]
+    c_in = [:(c[$i]) for i in 1:n_cd]
+    @eval function (::Operation{:mma, $mods})(
+            a::NTuple{$n_a, UInt32},
+            b::NTuple{$n_b, UInt32},
+            c::NTuple{$n_cd, Int32})
+        Base.@inline
+        d = $call($(a_in...), $(b_in...), $(c_in...))
+        ntuple(i -> reinterpret(Int32, d[i]), Val($n_cd))
+    end
+    nothing
+end
+
+for (shape, bitop) in MMA_B1_VARIANTS
+    _mma_b1_register(shape, bitop)
 end
 
 # --- mma.sp — 2:4 structured-sparse mma (sm_80+, PTX 7.1+) -------------------
