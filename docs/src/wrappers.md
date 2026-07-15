@@ -45,7 +45,7 @@ line in the loop.
 | `ldmatrix` | `wrappers/ldmatrix.jl` | `m8n8.{x1,x2,x4}[.trans].b16`; `m16n16.{x1,x2}.trans.b8`; and Blackwell optional decompression from `{b6x16_p32,b4x16_p64}` to `b8x16` for `m8n16.{x1,x2,x4}` and `m16n16.{x1,x2}.trans`, in `{shared,shared::cta}`. Returns one `UInt32` per `m8n16` matrix and two per `m16n16` matrix. Generic state-space addressing is not part of the typed wrapper surface. |
 | `mbarrier` | `wrappers/mbarrier.jl`, `mbarrier_forms.jl` | Closed PTX 9.3 form schema for lifecycle, tx-count, arrive/drop, waits, pending-count, layout, sem/scope, and CTA/cluster spaces; exact wrappers accelerate common forms while delegating to the same schema emitter. Results are explicit sink (`.sink` → PTX `_`), `UInt64` state, `Bool`, `UInt32` pending count, `(waitComplete, reportPredicate)`, or `(waitComplete, reportPredicate, reportValueCarrier::UInt16)`. The ISA's two noncanonical `arrive_drop` example heads are provenance-marked aliases and normalize on emission. PTX's 1-byte report value occupies the carrier's low byte because NVPTX has no i8 inline-asm constraint. Explicitly shared addresses use the NVPTX `r` constraint; every route carries `convergent nomerge`. |
 | `mma.sync.aligned` | `wrappers/mma.jl` | `mma.sync.aligned.<shape>.<layA>.<layB>.<d>.<a>.<b>.<c>` for bf16/f16/tf32/FP8, modern `m16n8` u8/s8 and u4/s4 integer forms, the exact six `s32.b1.b1.s32.{xor,and}.popc` forms, and `kind::f8f6f4` 5×5 sub-byte FP A/B (consumer Blackwell). Single-bit fragments are `(A,B,C/D) = (1,1,2)` registers at `m8n8k128`, `(2,1,4)` at `m16n8k128`, and `(4,2,4)` at `m16n8k256`; A/B use packed `UInt32`, while C/D use `Int32`. XOR starts at PTX 7.0, AND at PTX 7.1; only `m8n8k128.xor` has an sm_75 floor, with the other five at sm_80. LLVM 22 rejects its m8 XOR intrinsic at sm_75, so that one form uses typed convergent inline assembly while the other five use NVVM. |
-| `mma.sp[::ordered_metadata].sync.aligned` | `wrappers/mma.jl` | The same closed 12 sparse floating ABIs for base and ordered metadata: `m16n8k{16,32}` f16/bf16, `m16n8k{8,16}` tf32, and all four e4m3/e5m2 A/B pairs at `m16n8k64`. A/B fragments and metadata use `UInt32` carriers; C/D use `Float32` or packed-f16 `UInt32`. Ordered metadata requires increasing retained indices where a chunk encodes a pair, plus exact shape-dependent selectors (`0:3`, `0:1`, or `0`). |
+| `mma.sp[::ordered_metadata].sync.aligned` | `wrappers/mma.jl` | A closed sparse surface comprising 12 floating ABIs per metadata variant plus 64 integer forms: u8/s8 at `m16n8k{32,64}` and u4/s4 at `m16n8k{64,128}`, every A/B signedness pair, optional `.satfinite`, and ordinary/ordered metadata. A/B fragments and metadata use `UInt32`; integer C/D use `Int32`. Ordered metadata requires increasing retained indices, with exact shape-dependent selectors (`0:3`, `0:1`, or `0`). |
 | `mma.sync.aligned.kind::mxf*` (block-scaled) | `wrappers/mma_scaled.jl` | Three Blackwell-introduced kinds: `mxf4`, `mxf4nvf4`, `mxf8f6f4`. Operand layout `(scale_data::UInt32, byte_id::UInt16, thread_id::UInt16)` per side per PTX 9.2 §9.7.14.3 |
 | `shfl.sync` | `wrappers/shfl.jl` | `up` / `down` / `bfly` / `idx` × `b32` × {data-only, data+pred} |
 | `stmatrix` | `wrappers/stmatrix.jl` | mirror of `ldmatrix` — `m8n8.b16` (sm_70+) and `m16n8.b8` (Hopper) |
@@ -127,6 +127,20 @@ accept `Val(0)` through `Val(3)`, k32 16-bit and k16 tf32 accept `Val(0)` or
 or unreviewed shape/type combination fails before the generic scalar emitter.
 Like all `mma.sync` operations, these calls are warp-collective and carry
 `convergent nomerge`; they remain memory-free arithmetic operations.
+
+The classic integer sparse surface is separate from `tcgen05.mma.sp`. It uses
+register fragments rather than tensor-memory descriptors and contains exactly
+64 forms: u8/s8 at `m16n8k32` and `m16n8k64`, u4/s4 at `m16n8k64` and
+`m16n8k128`, all four A/B signedness pairs, with and without `.satfinite`, and
+both ordinary and ordered metadata. A/B register tuples contain 2/2, 4/4,
+2/2, and 4/4 packed `UInt32` values respectively; C/D are always four
+`Int32` values, and metadata is one `UInt32`. The k32 u8/s8 and k64 u4/s4
+products use selector `Val(0)` or `Val(1)`; k64 u8/s8 and k128 u4/s4 require
+`Val(0)`. For ordered u4/s4 storage, each 4:8 group is encoded as two ordered
+2-element retained subgroups; the wrapper cannot validate those opaque
+metadata nibbles.
+Ordinary integer sparse MMA requires PTX 7.1, ordered metadata requires PTX
+8.5, and all forms require `sm_80+`.
 
 ## Extended-precision arithmetic
 
