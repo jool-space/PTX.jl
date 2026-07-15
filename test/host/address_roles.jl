@@ -98,7 +98,16 @@ function _expected_tcgen05_integer_address_forms()
                       Symbol("multicast::cluster"),
                       Symbol("shared::cluster"), :b64))
         for kind in (:f16, :tf32, :f8f6f4, :i8)
-            push!(forms, (:mma, cta, Symbol("kind::", kind)))
+            for coll in (nothing, Symbol("collector::a::lastuse"),
+                         Symbol("collector::a::fill"),
+                         Symbol("collector::a::use"))
+                push!(forms, (:mma, cta, Symbol("kind::", kind),
+                              (coll === nothing ? () : (coll,))...))
+            end
+            for coll in (nothing, Symbol("collector::a::lastuse"))
+                push!(forms, (:mma, cta, Symbol("kind::", kind), :ashift,
+                              (coll === nothing ? () : (coll,))...))
+            end
         end
     end
     variants = (
@@ -119,6 +128,24 @@ function _expected_tcgen05_integer_address_adapters()
     specs = Set{Tuple{Tuple{Vararg{Symbol}}, Tuple{Vararg{Type}}}}()
     A32 = Address{UInt32}
     for mods in _expected_tcgen05_integer_address_forms()
+        if first(mods) === :mma && !(:block_scale in mods)
+            # dense mma: two A carriers (SMEM descriptor / TMEM address) ×
+            # {base, +disable-output-lane mask} operand shapes, plus
+            # {+scale, +mask+scale} for f16/tf32; ashift is TMEM-only
+            cg = mods[2] === Symbol("cta_group::1") ? 1 : 2
+            maskT = NTuple{cg == 1 ? 4 : 8, UInt32}
+            scale_ok = mods[3] in (Symbol("kind::f16"), Symbol("kind::tf32"))
+            for aT in (:ashift in mods ? (A32,) : (UInt64, A32))
+                push!(specs, (mods, (A32, aT, UInt64, UInt32, Bool)))
+                push!(specs, (mods, (A32, aT, UInt64, UInt32, maskT, Bool)))
+                if scale_ok
+                    push!(specs, (mods, (A32, aT, UInt64, UInt32, Bool, Val)))
+                    push!(specs, (mods,
+                        (A32, aT, UInt64, UInt32, maskT, Bool, Val)))
+                end
+            end
+            continue
+        end
         argtypes = if first(mods) === :shift
             (A32,)
         elseif first(mods) === :ld
@@ -139,8 +166,6 @@ function _expected_tcgen05_integer_address_adapters()
             Symbol("multicast::cluster") in mods ? (A32, Integer) : (A32,)
         elseif first(mods) === :mma && :block_scale in mods
             (A32, UInt64, UInt64, UInt32, A32, A32, Bool)
-        elseif first(mods) === :mma
-            (A32, UInt64, UInt64, UInt32, Bool)
         else
             error("unclassified tcgen05 adapter form: $mods")
         end
@@ -272,16 +297,16 @@ end
 @testset "closed tcgen05 integer-address adapters" begin
     expected_forms = _expected_tcgen05_integer_address_forms()
     @test Set(PTX.TCGEN05_INTEGER_ADDRESS_FORMS) == expected_forms
-    @test length(expected_forms) == 218
+    @test length(expected_forms) == 258
     expected = _expected_tcgen05_integer_address_adapters()
     actual = Set((s.mods, s.argtypes)
                  for s in PTX.TCGEN05_INTEGER_ADDRESS_ADAPTERS)
     @test actual == expected
-    @test length(actual) == 234
+    @test length(actual) == 466
     for (mods, signature) in actual
-        # The 16x32bx2 immHalfSplitoff spec is the abstract `Val`
-        # (dispatch admits any immediate); lowering probes need a concrete
-        # instance, as every real call site has.
+        # Immediate specs are the abstract `Val` (dispatch admits any
+        # immediate); lowering probes need a concrete instance, as every
+        # real call site has.
         marked = Tuple(T === Integer ? UInt16 :
                        T === Val ? Val{8} : T for T in signature)
         payload = Tuple(T <: Address ? T.parameters[1] :
