@@ -534,6 +534,29 @@ for (shape, u, s) in (
     _mma_integer_sweep!(shape, a, b, satfinite)
 end
 
+# Single-bit MMA (PTX 7.0/7.1). The PTX spelling places bitOp.popc last,
+# while the six NVVM intrinsic names place it before the shape.
+const _MMA_B1_SWEPT = Set{String}()
+function _mma_b1_sweep!(shape, bitop)
+    name = "llvm.nvvm." * PTX._mma_b1_intrinsic_name(shape, bitop)
+    # LLVM 22.1.7 carries this intrinsic but rejects the ISA-legal sm_75
+    # floor. The wrapper uses typed convergent asm; ptxas/mma_b1.jl proves
+    # exact-floor selection independently.
+    shape === :m8n8k128 && bitop === :xor && return nothing
+    n_a, n_b, n_cd = PTX.MMA_SYNC_FRAGS[(shape, :b1, :s32)]
+    args = (fill(UInt32, n_a + n_b)..., fill(Int32, n_cd)...)
+    mcpu = "sm_80"
+    mattr = bitop === :xor ? "+ptx70" : "+ptx71"
+    push!(PROBES, (name, args, mcpu, mattr,
+        Regex("mma\\.sync\\.aligned\\.$shape\\.row\\.col\\." *
+              "s32\\.b1\\.b1\\.s32\\.$bitop\\.popc")))
+    push!(_MMA_B1_SWEPT, name)
+    nothing
+end
+for (shape, bitop) in PTX.MMA_B1_VARIANTS
+    _mma_b1_sweep!(shape, bitop)
+end
+
 # Sparse (mma.sp) sweep — replays the _mma_sp_register loops.
 const _MMA_SP_SWEPT = Set{String}()
 const _MMA_SP_ORDERED_SWEPT = Set{String}()
@@ -632,10 +655,13 @@ end
 # without a matching sweep edit is equally loud.
 @testset "mma generated families: full probe coverage" begin
     @test length(PTX.MMA_INTRINSIC_NAMES) == 102   # dense tier-2 forms
+    @test length(PTX.MMA_B1_INTRINSIC_NAMES) == 5
+    @test PTX.MMA_B1_ASM_FORMS == [(:m8n8k128, :xor)]
     @test length(PTX.MMA_SP_INTRINSIC_NAMES) == 12 # sparse tier-2 forms
     @test length(PTX.MMA_SP_ORDERED_INTRINSIC_NAMES) == 12
     @test length(PTX.MMA_SCALED_INTRINSIC_NAMES) == 28
     @test _MMA_SWEPT == Set(PTX.MMA_INTRINSIC_NAMES)
+    @test _MMA_B1_SWEPT == Set(PTX.MMA_B1_INTRINSIC_NAMES)
     @test _MMA_SP_SWEPT == Set(PTX.MMA_SP_INTRINSIC_NAMES)
     @test _MMA_SP_ORDERED_SWEPT == Set(PTX.MMA_SP_ORDERED_INTRINSIC_NAMES)
     @test _MMA_SCALED_SWEPT == Set(PTX.MMA_SCALED_INTRINSIC_NAMES)
@@ -649,7 +675,8 @@ end
     mma_probes = filter(p -> startswith(p[1], "llvm.nvvm.mma."), PROBES)
     @test all(p -> p[1] in _MMA_SWEPT || p[1] in _MMA_SP_SWEPT ||
                    p[1] in _MMA_SP_ORDERED_SWEPT ||
-                   p[1] in _MMA_SCALED_SWEPT, mma_probes)
+                   p[1] in _MMA_SCALED_SWEPT || p[1] in _MMA_B1_SWEPT,
+              mma_probes)
 end
 
 # The emission-side convergent overlay (NVVM.CONVERGENT_OVERLAY_PREFIXES):
@@ -681,8 +708,9 @@ end
     )
     wrapped = Set(vcat(PTX.MMA_INTRINSIC_NAMES, PTX.MMA_SP_INTRINSIC_NAMES,
                        PTX.MMA_SP_ORDERED_INTRINSIC_NAMES,
-                       PTX.MMA_SCALED_INTRINSIC_NAMES))
-    @test length(wrapped) == 154
+                       PTX.MMA_SCALED_INTRINSIC_NAMES,
+                       PTX.MMA_B1_INTRINSIC_NAMES))
+    @test length(wrapped) == 159
     @test wrapped ⊆ Set(names)
     # the overlay must not leak beyond mma.*
     @test !NVVM.is_convergent(NVVM.intrinsic("llvm.nvvm.fence.proxy.async"))
@@ -765,6 +793,21 @@ end
         # tensor-map proxy fences: PTX 8.3 and baseline sm_90
         ("llvm.nvvm.fence.proxy.tensormap_generic.acquire.gpu",
             (p0, Val{128}), "sm_80", "+ptx83"),
+        # m8 b1 xor is the sole sm_75 form; all m16 forms require sm_80
+        ("llvm.nvvm.mma.xor.popc.m8n8k128.row.col.b1",
+            (UInt32, UInt32, Int32, Int32), "sm_70", "+ptx70"),
+        # Backend-specific gap: the intrinsic first selects at sm_80 even
+        # though raw PTX and the typed asm fallback are legal at sm_75.
+        ("llvm.nvvm.mma.xor.popc.m8n8k128.row.col.b1",
+            (UInt32, UInt32, Int32, Int32), "sm_75", "+ptx70"),
+        ("llvm.nvvm.mma.xor.popc.m16n8k128.row.col.b1",
+            (UInt32, UInt32, UInt32, Int32, Int32, Int32, Int32),
+            "sm_75", "+ptx70"),
+        # AND independently raises both the PTX ISA and target floors.
+        ("llvm.nvvm.mma.and.popc.m8n8k128.row.col.b1",
+            (UInt32, UInt32, Int32, Int32), "sm_75", "+ptx71"),
+        ("llvm.nvvm.mma.and.popc.m8n8k128.row.col.b1",
+            (UInt32, UInt32, Int32, Int32), "sm_80", "+ptx70"),
         # tcgen05: datacenter-Blackwell only
         ("llvm.nvvm.tcgen05.alloc.shared.cg1", (pS8, UInt32), "sm_90a", "+ptx80"),
         # b8 matrix shapes: sm_100a family

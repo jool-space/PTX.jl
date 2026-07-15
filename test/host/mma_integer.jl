@@ -66,10 +66,6 @@ end
         ((:sync, :aligned, :m16n8k16, :row, :col,
           :s32, :u8, :u8, :s32),
          (NTuple{2, UInt32}, NTuple{1, UInt32}, NTuple{4, UInt32})),
-        # b1 is intentionally reserved for the next standalone slice.
-        ((:sync, :aligned, :m16n8k128, :row, :col,
-          :s32, :b1, :b1, :s32, :xor, :popc),
-         (NTuple{2, UInt32}, NTuple{1, UInt32}, NTuple{4, Int32})),
     )
 
     for (mods, argtypes) in bad
