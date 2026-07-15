@@ -443,6 +443,87 @@ for (kind, kindval, scale_ok) in _TCGEN05_DENSE_KINDS, cg in (1, 2),
                                 collmod, collval)
 end
 
+# --- sparse mma (generated) ------------------------------------------------------
+# tcgen05.mma.sp (PTX 9.3 §9.7.17.10.9.2) mirrors the dense grid with one
+# extra operand: the sparsity-metadata TMEM address, spelled between the
+# B descriptor and idesc exactly as PTX orders `[sp-meta-tmem]`. The
+# intrinsics instead carry sp-meta after enable-input-d; the wrappers
+# reorder. Kinds, collector enum, .ashift restrictions, mask widths, and
+# scale-input-d legality are identical to dense. The sp block-scale (MX)
+# records stay outside this family, like their dense counterparts.
+const TCGEN05_MMA_SP_DENSE_INTRINSIC_NAMES = String[]
+
+function _tcgen05_sp_register(kind::Symbol, kindval::Int, scale_ok::Bool,
+                              cg::Int, tmem_a::Bool, ashift::Bool,
+                              collmod, collval::Int)
+    mods = (:mma, :sp, Symbol("cta_group::", cg), Symbol("kind::", kind),
+            (ashift ? (:ashift,) : ())...,
+            (collmod === nothing ? () : (collmod,))...)
+    maskN = cg == 1 ? 4 : 8
+    stem = "llvm.nvvm.tcgen05.mma.sp." * (tmem_a ? "tensor" : "shared")
+    sh = ashift ? ".ashift" : ""
+    aT = tmem_a ? UInt32 : UInt64
+    aexpr = tmem_a ? :(_tmem(a)) : :a
+    function reg(name)
+        name in TCGEN05_MMA_SP_DENSE_INTRINSIC_NAMES ||
+            push!(TCGEN05_MMA_SP_DENSE_INTRINSIC_NAMES, name)
+        NVVM.IntrinsicCall{Symbol(name)}()
+    end
+
+    # [d], a, b, [sp-meta], idesc, enable
+    call = reg(stem * sh)
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            d::UInt32, a::$aT, b_desc::UInt64, sp_meta::UInt32,
+            idesc::UInt32, enable_input_d::Bool)
+        $call(_tmem(d), $aexpr, b_desc, idesc, enable_input_d,
+              _tmem(sp_meta), Val($kindval), Val($cg), Val($collval))
+    end
+
+    # [d], a, b, [sp-meta], idesc, {disable-output-lane}, enable
+    call = reg(stem * ".disable_output_lane.cg$cg" * sh)
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            d::UInt32, a::$aT, b_desc::UInt64, sp_meta::UInt32,
+            idesc::UInt32, mask::NTuple{$maskN, UInt32},
+            enable_input_d::Bool)
+        $call(_tmem(d), $aexpr, b_desc, idesc, enable_input_d,
+              _tmem(sp_meta), _tc_vec(mask), Val($kindval), Val($collval))
+    end
+
+    scale_ok || return nothing
+
+    # [d], a, b, [sp-meta], idesc, enable, scale-input-d
+    call = reg(stem * ".scale_d" * sh)
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            d::UInt32, a::$aT, b_desc::UInt64, sp_meta::UInt32,
+            idesc::UInt32, enable_input_d::Bool, scale::Val)
+        $call(_tmem(d), $aexpr, b_desc, idesc, enable_input_d,
+              _tmem(sp_meta), scale, Val($kindval), Val($cg), Val($collval))
+    end
+
+    # [d], a, b, [sp-meta], idesc, {disable-output-lane}, enable, scale
+    call = reg(stem * ".scale_d.disable_output_lane.cg$cg" * sh)
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            d::UInt32, a::$aT, b_desc::UInt64, sp_meta::UInt32,
+            idesc::UInt32, mask::NTuple{$maskN, UInt32},
+            enable_input_d::Bool, scale::Val)
+        $call(_tmem(d), $aexpr, b_desc, idesc, enable_input_d,
+              _tmem(sp_meta), scale, _tc_vec(mask), Val($kindval),
+              Val($collval))
+    end
+    nothing
+end
+
+for (kind, kindval, scale_ok) in _TCGEN05_DENSE_KINDS, cg in (1, 2),
+        (collmod, collval) in _TCGEN05_DENSE_COLLECTORS
+    _tcgen05_sp_register(kind, kindval, scale_ok, cg, false, false,
+                         collmod, collval)
+    _tcgen05_sp_register(kind, kindval, scale_ok, cg, true, false,
+                         collmod, collval)
+    collval < 2 &&
+        _tcgen05_sp_register(kind, kindval, scale_ok, cg, true, true,
+                             collmod, collval)
+end
+
 # --- mx block-scaled mma (asm tier) ------------------------------------------
 #
 # PTX 9.3 §9.7.17.10.9.1 gives MX forms a different grammar from dense
@@ -581,6 +662,13 @@ const TCGEN05_INTEGER_ADDRESS_ADAPTERS = let
             if scale_ok
                 add(mods, (A32, aT, UInt64, UInt32, Bool, Val))
                 add(mods, (A32, aT, UInt64, UInt32, maskT, Bool, Val))
+            end
+            spmods = (:mma, :sp, mods[2:end]...)
+            add(spmods, (A32, aT, UInt64, A32, UInt32, Bool))
+            add(spmods, (A32, aT, UInt64, A32, UInt32, maskT, Bool))
+            if scale_ok
+                add(spmods, (A32, aT, UInt64, A32, UInt32, Bool, Val))
+                add(spmods, (A32, aT, UInt64, A32, UInt32, maskT, Bool, Val))
             end
         end
     end
