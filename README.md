@@ -13,7 +13,7 @@ using PTX, CUDA
 function add_kernel!(c, a, b)
     tid = ptx"mov.u32"(sreg"%tid.x") # access instructions and special registers,
     i = tid + one(tid)               # while also writing familiar julia code.
-    c[i] = ptx"add.f32"(a[i], b[i])  # same to a[i] + b[i], assuming Float32
+    c[i] = ptx"add.f32"(a[i], b[i])  # same as a[i] + b[i], assuming Float32
     return
 end
 
@@ -22,7 +22,10 @@ a = cu(randn(n));
 b = cu(randn(n));
 c = similar(a);
 @cuda threads=n add_kernel!(c, a, b);
-c == a + b
+@assert c == a + b
+
+# or simply use an instruction in a broadcast:
+@assert c == ptx"add.f32".(a, b)
 ```
 
 ## Motivation
@@ -34,25 +37,9 @@ why generic Julia code works on GPUs at all: the optimizer sees your whole
 kernel, so abstractions, closures, and multiple dispatch cost nothing by the
 time instructions are emitted.
 
-That pipeline assumes the classic SIMT model — every thread running the same
-scalar code — which is exactly the shape generic Julia code lowers to, and
-exactly the shape the latest architectures have moved past. A state-of-the-art
-kernel on Hopper or Blackwell is an orchestration of asynchronous units: TMA
-copying the next tile while tensor cores consume the current one, mbarriers
-sequencing the handoff, warps specialized into producers and consumers,
-`tcgen05` issuing matrix multiplies against dedicated tensor memory. These
-hierarchies do not fall out of compiling generic code, and they are not a
-failure of portability layers like
-[KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl)
-either — one kernel for every backend is the right abstraction for
-SIMT-shaped problems and, by the same token, cannot be the vehicle for
-kernels whose whole point is one architecture's hardware. Until now, writing
-something like flash attention tuned to Hopper or Blackwell from Julia has
-been painful enough that it simply wasn't done.
-
 The missing piece is the instruction surface: LLVM emits only what its
 backend knows how to select, and CUDA.jl wraps only what it chooses to
-support — it does not, and should not, expose every hardware instruction.
+support; it does not — and should not — expose every hardware instruction.
 When you need one it doesn't (tensor core MMA shapes, `ldmatrix`, TMA,
 mbarriers, cluster ops), the traditional escape hatches are:
 
@@ -61,8 +48,8 @@ mbarriers, cluster ops), the traditional escape hatches are:
 - inline assembly (`@asmcall` from LLVM.jl, or `llvmcall` with an `asm`
   snippet) when one doesn't;
 
-These both work, but each makes you pick the mechanism, hand-write IR
-types and register constraints, and declare effects correctly.
+These both work, but require hand-written IR, constraints, and declaration
+of effects.
 
 PTX.jl replaces them with one surface: you write the PTX instruction,
 and the package picks the lowering. Instructions LLVM recognizes lower to the
