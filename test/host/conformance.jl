@@ -989,6 +989,22 @@ end
     @test isempty(unprobed)
 end
 
+# Same standing guarantee for the generated ld/st grid: the recorded name
+# table must equal the NVVM registry's complete tcgen05.{ld,st} inventory
+# (ld.red has no records at the pinned backend), and every name keeps a
+# selection probe.
+@testset "tcgen05 ld/st generated family: full probe coverage" begin
+    names = PTX.TCGEN05_LDST_INTRINSIC_NAMES
+    @test length(names) == 74
+    registry = [n for n in keys(PTX.NVVM.TABLE)
+                if startswith(n, "llvm.nvvm.tcgen05.ld.") ||
+                   startswith(n, "llvm.nvvm.tcgen05.st.")]
+    @test Set(names) == Set(registry)
+    probed = Set(p[1] for p in PROBES)
+    unprobed = sort!([n for n in names if !(n in probed)])
+    @test isempty(unprobed)
+end
+
 @testset "mma generated families: full probe coverage" begin
     @test length(PTX.MMA_INTRINSIC_NAMES) == 102   # dense tier-2 forms
     @test length(PTX.MMA_B1_INTRINSIC_NAMES) == 5
