@@ -115,6 +115,18 @@ function _expected_tcgen05_integer_address_forms()
         push!(forms, (:mma, Symbol("cta_group::", cg),
                       Symbol("kind::", kind), :block_scale, scale))
     end
+    for kind in (:f16, :tf32, :f8f6f4, :i8), sp in ((), (:sp,))
+        colls = Any[nothing]
+        for buf in 0:3, op in (:discard, :lastuse, :fill, :use)
+            buf == 0 && op === :discard && continue
+            push!(colls, Symbol("collector::b$buf::$op"))
+        end
+        for coll in colls
+            push!(forms, (:mma, :ws, sp..., Symbol("cta_group::1"),
+                          Symbol("kind::", kind),
+                          (coll === nothing ? () : (coll,))...))
+        end
+    end
     Set(forms)
 end
 
@@ -122,6 +134,18 @@ function _expected_tcgen05_integer_address_adapters()
     specs = Set{Tuple{Tuple{Vararg{Symbol}}, Tuple{Vararg{Type}}}}()
     A32 = Address{UInt32}
     for mods in _expected_tcgen05_integer_address_forms()
+        if first(mods) === :mma && mods[2] === :ws
+            # weight-stationary: two A carriers × {base, +zero-col-mask
+            # descriptor}; sp inserts the metadata TMEM address
+            sp = mods[3] === :sp
+            meta = sp ? (A32,) : ()
+            for aT in (UInt64, A32)
+                push!(specs, (mods, (A32, aT, UInt64, meta..., UInt32, Bool)))
+                push!(specs, (mods,
+                    (A32, aT, UInt64, meta..., UInt32, Bool, UInt64)))
+            end
+            continue
+        end
         if first(mods) === :mma && !(:block_scale in mods)
             # dense/sparse mma: two A carriers (SMEM descriptor / TMEM
             # address) × {base, +disable-output-lane mask} operand shapes,
@@ -295,12 +319,12 @@ end
 @testset "closed tcgen05 integer-address adapters" begin
     expected_forms = _expected_tcgen05_integer_address_forms()
     @test Set(PTX.TCGEN05_INTEGER_ADDRESS_FORMS) == expected_forms
-    @test length(expected_forms) == 186
+    @test length(expected_forms) == 314
     expected = _expected_tcgen05_integer_address_adapters()
     actual = Set((s.mods, s.argtypes)
                  for s in PTX.TCGEN05_INTEGER_ADDRESS_ADAPTERS)
     @test actual == expected
-    @test length(actual) == 586
+    @test length(actual) == 1098
     for (mods, signature) in actual
         # Immediate specs are the abstract `Val` (dispatch admits any
         # immediate); lowering probes need a concrete instance, as every

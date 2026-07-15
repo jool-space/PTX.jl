@@ -561,6 +561,56 @@ let v4 = NTuple{4, VecElement{UInt32}}, v8 = NTuple{8, VecElement{UInt32}}
          r"tcgen05\.mma\.sp\.cta_group::2\.kind::f16\.ashift\.collector::a::discard"))
 end
 
+# Weight-stationary mma (generated, wrappers/tcgen05.jl): cta_group::1
+# only; the collector buffer is B-side and addressed (b0..b3); the
+# zero-column-mask descriptor is a trailing runtime 64-bit operand.
+# Probes pin both empirical enums (buffer identity, op order as dense).
+push!(PROBES,
+    ("llvm.nvvm.tcgen05.mma.ws.shared",
+     (p6, UInt64, UInt64, UInt32, Bool, Val{0}, Val{0}, Val{0}),
+     "sm_100a", "+ptx88",
+     r"tcgen05\.mma\.ws\.cta_group::1\.kind::f16\.collector::b0::discard \[%r\d+\], %rd\d+, %rd\d+, %r\d+, %p\d+;"),
+    ("llvm.nvvm.tcgen05.mma.ws.shared",
+     (p6, UInt64, UInt64, UInt32, Bool, Val{1}, Val{1}, Val{2}),
+     "sm_100a", "+ptx88",
+     r"tcgen05\.mma\.ws\.cta_group::1\.kind::tf32\.collector::b1::fill"),
+    ("llvm.nvvm.tcgen05.mma.ws.shared",
+     (p6, UInt64, UInt64, UInt32, Bool, Val{3}, Val{2}, Val{3}),
+     "sm_100a", "+ptx88",
+     r"tcgen05\.mma\.ws\.cta_group::1\.kind::i8\.collector::b2::use"),
+    ("llvm.nvvm.tcgen05.mma.ws.shared",
+     (p6, UInt64, UInt64, UInt32, Bool, Val{2}, Val{3}, Val{1}),
+     "sm_100a", "+ptx88",
+     r"tcgen05\.mma\.ws\.cta_group::1\.kind::f8f6f4\.collector::b3::lastuse"),
+    ("llvm.nvvm.tcgen05.mma.ws.tensor",
+     (p6, p6, UInt64, UInt32, Bool, Val{0}, Val{0}, Val{0}),
+     "sm_100a", "+ptx88",
+     r"tcgen05\.mma\.ws\.cta_group::1\.kind::f16\.collector::b0::discard \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, %p\d+;"),
+    ("llvm.nvvm.tcgen05.mma.ws.shared.zero_col_mask",
+     (p6, UInt64, UInt64, UInt32, Bool, UInt64, Val{0}, Val{1}, Val{0}),
+     "sm_100a", "+ptx88",
+     r"tcgen05\.mma\.ws\.cta_group::1\.kind::f16\.collector::b1::discard \[%r\d+\], %rd\d+, %rd\d+, %r\d+, %p\d+, %rd\d+;"),
+    ("llvm.nvvm.tcgen05.mma.ws.tensor.zero_col_mask",
+     (p6, p6, UInt64, UInt32, Bool, UInt64, Val{0}, Val{0}, Val{0}),
+     "sm_100a", "+ptx88",
+     r"tcgen05\.mma\.ws\.cta_group::1\.kind::f16\.collector::b0::discard \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, %p\d+, %rd\d+;"),
+    ("llvm.nvvm.tcgen05.mma.ws.sp.shared",
+     (p6, UInt64, UInt64, UInt32, Bool, p6, Val{0}, Val{0}, Val{0}),
+     "sm_100a", "+ptx88",
+     r"tcgen05\.mma\.ws\.sp\.cta_group::1\.kind::f16\.collector::b0::discard \[%r\d+\], %rd\d+, %rd\d+, \[%r\d+\], %r\d+, %p\d+;"),
+    ("llvm.nvvm.tcgen05.mma.ws.sp.tensor",
+     (p6, p6, UInt64, UInt32, Bool, p6, Val{1}, Val{0}, Val{0}),
+     "sm_100a", "+ptx88",
+     r"tcgen05\.mma\.ws\.sp\.cta_group::1\.kind::tf32\.collector::b0::discard \[%r\d+\], \[%r\d+\], %rd\d+, \[%r\d+\], %r\d+, %p\d+;"),
+    ("llvm.nvvm.tcgen05.mma.ws.sp.shared.zero_col_mask",
+     (p6, UInt64, UInt64, UInt32, Bool, p6, UInt64, Val{0}, Val{0}, Val{0}),
+     "sm_100a", "+ptx88",
+     r"tcgen05\.mma\.ws\.sp\.cta_group::1\.kind::f16\.collector::b0::discard \[%r\d+\], %rd\d+, %rd\d+, \[%r\d+\], %r\d+, %p\d+, %rd\d+;"),
+    ("llvm.nvvm.tcgen05.mma.ws.sp.tensor.zero_col_mask",
+     (p6, p6, UInt64, UInt32, Bool, p6, UInt64, Val{0}, Val{0}, Val{0}),
+     "sm_100a", "+ptx88",
+     r"tcgen05\.mma\.ws\.sp\.cta_group::1\.kind::f16\.collector::b0::discard \[%r\d+\], \[%r\d+\], %rd\d+, \[%r\d+\], %r\d+, %p\d+, %rd\d+;"))
+
 # mma.sync (wrappers/mma.jl, mma_scaled.jl) — a GENERATED family, not
 # hand-literal, so the src/ literal-scan can't see it. One probe per
 # structural class instead (the dtype cross-product within a class shares
@@ -806,6 +856,17 @@ end
 # every tier-2 name gets a selection probe, a name-table churn at an LLVM
 # bump surfaces as a red test naming the family, and a wrapper loop edit
 # without a matching sweep edit is equally loud.
+@testset "tcgen05 ws mma generated family: full probe coverage" begin
+    names = PTX.TCGEN05_MMA_WS_INTRINSIC_NAMES
+    @test length(names) == 8
+    registry = [n for n in keys(PTX.NVVM.TABLE)
+                if startswith(n, "llvm.nvvm.tcgen05.mma.ws.")]
+    @test Set(names) == Set(registry)
+    probed = Set(p[1] for p in PROBES)
+    unprobed = sort!([n for n in names if !(n in probed)])
+    @test isempty(unprobed)
+end
+
 @testset "tcgen05 sparse mma generated family: full probe coverage" begin
     names = PTX.TCGEN05_MMA_SP_DENSE_INTRINSIC_NAMES
     @test length(names) == 18

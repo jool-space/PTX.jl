@@ -524,6 +524,74 @@ for (kind, kindval, scale_ok) in _TCGEN05_DENSE_KINDS, cg in (1, 2),
                              collmod, collval)
 end
 
+# --- weight-stationary mma (generated) --------------------------------------------
+# tcgen05.mma.ws (PTX 9.3 §9.7.17.10.9.3) is cta_group::1-only. The
+# collector buffer belongs to matrix B and is addressed:
+# `collector::bN::op` with N ∈ 0:3; spelled-nothing defaults to
+# b0::discard, so every other buffer×op pair is an explicit modifier.
+# The optional zero-column-mask descriptor is a runtime 64-bit operand
+# trailing enable-input-d (separate .zero_col_mask records). The sp
+# forms insert the sparsity-metadata TMEM address between the B
+# descriptor and idesc. Empirical NVVM enums (llc 22.1.7): the buffer
+# immarg is identity (0..3 → b0..b3); the op immarg matches dense
+# (0=discard, 1=lastuse, 2=fill, 3=use).
+const _TCGEN05_WS_COLLECTORS = begin
+    out = Tuple{Any, Int, Int}[(nothing, 0, 0)]
+    for buf in 0:3, (op, opval) in ((:discard, 0), (:lastuse, 1),
+                                    (:fill, 2), (:use, 3))
+        buf == 0 && op === :discard && continue
+        push!(out, (Symbol("collector::b$buf::$op"), buf, opval))
+    end
+    Tuple(out)
+end
+
+const TCGEN05_MMA_WS_INTRINSIC_NAMES = String[]
+
+function _tcgen05_ws_register(kind::Symbol, kindval::Int, sp::Bool,
+                              tmem_a::Bool, collmod, bufval::Int,
+                              opval::Int)
+    mods = (:mma, :ws, (sp ? (:sp,) : ())..., Symbol("cta_group::1"),
+            Symbol("kind::", kind),
+            (collmod === nothing ? () : (collmod,))...)
+    stem = "llvm.nvvm.tcgen05.mma.ws." * (sp ? "sp." : "") *
+           (tmem_a ? "tensor" : "shared")
+    aT = tmem_a ? UInt32 : UInt64
+    aexpr = tmem_a ? :(_tmem(a)) : :a
+    meta_arg = sp ? (:(sp_meta::UInt32),) : ()
+    meta_val = sp ? (:(_tmem(sp_meta)),) : ()
+    function reg(name)
+        name in TCGEN05_MMA_WS_INTRINSIC_NAMES ||
+            push!(TCGEN05_MMA_WS_INTRINSIC_NAMES, name)
+        NVVM.IntrinsicCall{Symbol(name)}()
+    end
+
+    # [d], a, b{, [sp-meta]}, idesc, enable
+    call = reg(stem)
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            d::UInt32, a::$aT, b_desc::UInt64, $(meta_arg...),
+            idesc::UInt32, enable_input_d::Bool)
+        $call(_tmem(d), $aexpr, b_desc, idesc, enable_input_d,
+              $(meta_val...), Val($kindval), Val($bufval), Val($opval))
+    end
+
+    # [d], a, b{, [sp-meta]}, idesc, enable, zero-column-mask-desc
+    call = reg(stem * ".zero_col_mask")
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            d::UInt32, a::$aT, b_desc::UInt64, $(meta_arg...),
+            idesc::UInt32, enable_input_d::Bool, zero_col_mask::UInt64)
+        $call(_tmem(d), $aexpr, b_desc, idesc, enable_input_d,
+              $(meta_val...), zero_col_mask,
+              Val($kindval), Val($bufval), Val($opval))
+    end
+    nothing
+end
+
+for (kind, kindval, _) in _TCGEN05_DENSE_KINDS, sp in (false, true),
+        tmem_a in (false, true),
+        (collmod, bufval, opval) in _TCGEN05_WS_COLLECTORS
+    _tcgen05_ws_register(kind, kindval, sp, tmem_a, collmod, bufval, opval)
+end
+
 # --- mx block-scaled mma (asm tier) ------------------------------------------
 #
 # PTX 9.3 §9.7.17.10.9.1 gives MX forms a different grammar from dense
@@ -671,6 +739,17 @@ const TCGEN05_INTEGER_ADDRESS_ADAPTERS = let
                 add(spmods, (A32, aT, UInt64, A32, UInt32, maskT, Bool, Val))
             end
         end
+    end
+    for (kind, _, _) in _TCGEN05_DENSE_KINDS, sp in (false, true),
+            tmem_a in (false, true),
+            (collmod, _, _) in _TCGEN05_WS_COLLECTORS
+        mods = (:mma, :ws, (sp ? (:sp,) : ())..., Symbol("cta_group::1"),
+                Symbol("kind::", kind),
+                (collmod === nothing ? () : (collmod,))...)
+        aT = tmem_a ? A32 : UInt64
+        meta = sp ? (A32,) : ()
+        add(mods, (A32, aT, UInt64, meta..., UInt32, Bool))
+        add(mods, (A32, aT, UInt64, meta..., UInt32, Bool, UInt64))
     end
     for (kind, scale_vec, block) in _TCGEN05_MX_SCALE_VARIANTS,
             scale in (scale_vec, block), cg in 1:2
