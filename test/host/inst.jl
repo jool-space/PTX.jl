@@ -27,6 +27,32 @@ using PTX: build_call, format_call, Operation, SpecialReg, Chain, @mod_str
     @test_throws LoadError @eval ptx".add.f32"
 end
 
+# Definition-side methods must live at top level, outside the testset.
+struct _OptypeProbe
+    x::Int
+end
+@inline PTX.@optype_str("_optype_probe.f32.sat")(v::_OptypeProbe) = v.x + 1
+@inline optype"_optype_probe.wait::ld.pack::16b"(v::_OptypeProbe, w::_OptypeProbe) =
+    v.x + w.x
+
+@testset "optype\"...\" definition macro" begin
+    # Expands to the `::Operation{op, mods}` annotation for the same static
+    # spelling ptx"" produces — one shared parser.
+    @test (@macroexpand optype"add.f32") == :(::$(Operation{:add, (:f32,)}))
+
+    # A method defined via optype"" is dispatchable by the ptx"" spelling,
+    # including `::`-qualified segments.
+    @test ptx"_optype_probe.f32.sat"(_OptypeProbe(41)) == 42
+    @test ptx"_optype_probe.wait::ld.pack::16b"(
+        _OptypeProbe(20), _OptypeProbe(22)) == 42
+
+    # Same malformed-chain diagnostics as ptx"", plus: definition-site only,
+    # so interpolation is rejected outright.
+    @test_throws LoadError @eval optype""
+    @test_throws LoadError @eval optype"add..f32"
+    @test_throws LoadError @eval optype"add.$x"
+end
+
 @testset "ptx\"...\" string macro: \$ interpolation" begin
     dt = "u32"
     @test ptx"mov.$dt" === ptx"mov.u32"

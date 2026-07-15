@@ -35,7 +35,7 @@ using .Codegen: ptx_to_julia, ir_to_julia
 export ptx_to_julia, ir_to_julia
 
 include("inst.jl")
-export @ptx_str, @sreg_str
+export @ptx_str, @optype_str, @sreg_str
 export vector_load
 
 include("wrappers/barrier.jl")

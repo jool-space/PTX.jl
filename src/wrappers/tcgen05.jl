@@ -522,31 +522,27 @@
 # still requiring `dst` to lie in the CTA shared-memory window. Keep the
 # pointer schema exact so a wrong address space, pointee, arity, or nCols
 # carrier cannot fall through to generic tcgen05 rendering.
-@inline (::Operation{:tcgen05, (:alloc, Symbol("cta_group::1"), :sync, :aligned,
-        :b32)})(dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32) =
+@inline optype"tcgen05.alloc.cta_group::1.sync.aligned.b32"(
+        dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32) =
     nvvm"tcgen05.alloc.shared.cg1"(dst, ncols)
-@inline (::Operation{:tcgen05, (:alloc, Symbol("cta_group::2"), :sync, :aligned,
-        :b32)})(dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32) =
+@inline optype"tcgen05.alloc.cta_group::2.sync.aligned.b32"(
+        dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32) =
     nvvm"tcgen05.alloc.shared.cg2"(dst, ncols)
 
-@inline (::Operation{:tcgen05, (:alloc, Symbol("cta_group::1"), :sync, :aligned,
-        Symbol("shared::cta"), :b32)})(dst::UInt32, ncols::UInt32) =
+@inline optype"tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32"(
+        dst::UInt32, ncols::UInt32) =
     nvvm"tcgen05.alloc.shared.cg1"(_tc_smem(dst), ncols)
-@inline (::Operation{:tcgen05, (:alloc, Symbol("cta_group::2"), :sync, :aligned,
-        Symbol("shared::cta"), :b32)})(dst::UInt32, ncols::UInt32) =
+@inline optype"tcgen05.alloc.cta_group::2.sync.aligned.shared::cta.b32"(
+        dst::UInt32, ncols::UInt32) =
     nvvm"tcgen05.alloc.shared.cg2"(_tc_smem(dst), ncols)
 
-@inline (::Operation{:tcgen05, (:relinquish_alloc_permit, Symbol("cta_group::1"),
-        :sync, :aligned)})() =
+@inline optype"tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned"() =
     nvvm"tcgen05.relinq.alloc.permit.cg1"()
-@inline (::Operation{:tcgen05, (:relinquish_alloc_permit, Symbol("cta_group::2"),
-        :sync, :aligned)})() =
+@inline optype"tcgen05.relinquish_alloc_permit.cta_group::2.sync.aligned"() =
     nvvm"tcgen05.relinq.alloc.permit.cg2"()
 
-@inline (::Operation{:tcgen05, (Symbol("wait::ld"), :sync, :aligned)})() =
-    nvvm"tcgen05.wait.ld"()
-@inline (::Operation{:tcgen05, (Symbol("wait::st"), :sync, :aligned)})() =
-    nvvm"tcgen05.wait.st"()
+@inline optype"tcgen05.wait::ld.sync.aligned"() = nvvm"tcgen05.wait.ld"()
+@inline optype"tcgen05.wait::st.sync.aligned"() = nvvm"tcgen05.wait.st"()
 
 # Specialized thread-synchronization fences are side-effecting, no-argument
 # code-motion barriers (PTX 9.3 §9.7.17.11.1). Keep them as inline PTX with
@@ -556,44 +552,40 @@
 # retains each fence and `~{memory}` prevents tcgen05 and execution-ordering
 # operations from moving across it. Exact methods still prevent an accidental
 # operand from becoming a literal extra PTX operand through the generic chain.
-@inline (::Operation{:tcgen05, (Symbol("fence::before_thread_sync"),)})() =
+@inline optype"tcgen05.fence::before_thread_sync"() =
     @asmcall("tcgen05.fence::before_thread_sync;", "~{memory}", true,
              Nothing, Tuple{})
-@inline (::Operation{:tcgen05, (Symbol("fence::after_thread_sync"),)})() =
+@inline optype"tcgen05.fence::after_thread_sync"() =
     @asmcall("tcgen05.fence::after_thread_sync;", "~{memory}", true,
              Nothing, Tuple{})
 
 # Both state-space notations lower to the same intrinsic and emit the
 # `.shared::cluster` spelling (see header).
-@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::1"),
-        Symbol("mbarrier::arrive::one"), Symbol("shared::cluster"), :b64)})(
+@inline optype"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64"(
         mbar::Core.LLVMPtr{UInt64, AS.Shared}) =
     nvvm"tcgen05.commit.shared.cg1"(mbar)
-@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::2"),
-        Symbol("mbarrier::arrive::one"), Symbol("shared::cluster"), :b64)})(
+@inline optype"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64"(
         mbar::Core.LLVMPtr{UInt64, AS.Shared}) =
     nvvm"tcgen05.commit.shared.cg2"(mbar)
 
-@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::1"),
-        Symbol("mbarrier::arrive::one"), Symbol("shared::cta"), :b64)})(mbar::UInt32) =
+@inline optype"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cta.b64"(
+        mbar::UInt32) =
     nvvm"tcgen05.commit.shared.cg1"(_tc_smem(mbar))
-@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::2"),
-        Symbol("mbarrier::arrive::one"), Symbol("shared::cta"), :b64)})(mbar::UInt32) =
+@inline optype"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cta.b64"(
+        mbar::UInt32) =
     nvvm"tcgen05.commit.shared.cg2"(_tc_smem(mbar))
-@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::1"),
-        Symbol("mbarrier::arrive::one"), Symbol("shared::cluster"), :b64)})(mbar::UInt32) =
+@inline optype"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64"(
+        mbar::UInt32) =
     nvvm"tcgen05.commit.shared.cg1"(_tc_smem(mbar))
-@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::2"),
-        Symbol("mbarrier::arrive::one"), Symbol("shared::cluster"), :b64)})(mbar::UInt32) =
+@inline optype"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64"(
+        mbar::UInt32) =
     nvvm"tcgen05.commit.shared.cg2"(_tc_smem(mbar))
 
-@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::1"),
-        Symbol("mbarrier::arrive::one"), Symbol("multicast::cluster"),
-        Symbol("shared::cluster"), :b64)})(mbar::UInt32, mask::Integer) =
+@inline optype"tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64"(
+        mbar::UInt32, mask::Integer) =
     nvvm"tcgen05.commit.mc.shared.cg1"(_tc_smem(mbar), UInt16(mask))
-@inline (::Operation{:tcgen05, (:commit, Symbol("cta_group::2"),
-        Symbol("mbarrier::arrive::one"), Symbol("multicast::cluster"),
-        Symbol("shared::cluster"), :b64)})(mbar::UInt32, mask::Integer) =
+@inline optype"tcgen05.commit.cta_group::2.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64"(
+        mbar::UInt32, mask::Integer) =
     nvvm"tcgen05.commit.mc.shared.cg2"(_tc_smem(mbar), UInt16(mask))
 
 # --- dense mma (A from SMEM descriptor) ----------------------------------------
