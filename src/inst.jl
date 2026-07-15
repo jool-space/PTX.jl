@@ -64,15 +64,22 @@ See also: [`@mod_str`](@ref) for modifier-only chains usable on the right
 side of `*`.
 """
 macro ptx_str(s::String)
-    isempty(s) && error("ptx\"\": empty modifier chain")
     if !occursin('$', s)
-        raw = split(s, '.')
-        any(isempty, raw) && error("ptx\"" * s * "\": empty modifier between '.'")
-        op = Symbol(raw[1])
-        mods = Tuple(Symbol(p) for p in @view raw[2:end])
+        op, mods = _static_head("ptx", s)
         return :( $Operation{$(QuoteNode(op)), $mods}() )
     end
+    isempty(s) && error("ptx\"\": empty modifier chain")
     return _ptx_build_interp(s)
+end
+
+# Shared static-spelling parser for `ptx""`, `ptx""raw`, and `optype""`:
+# one splitter so a spelling means the same `(op, mods)` everywhere.
+function _static_head(macroname::String, s::String)
+    isempty(s) && error(macroname * "\"\": empty modifier chain")
+    raw = split(s, '.')
+    any(isempty, raw) &&
+        error(macroname * "\"" * s * "\": empty modifier between '.'")
+    Symbol(raw[1]), Tuple(Symbol(p) for p in @view raw[2:end])
 end
 
 # `ptx"..."raw` — RawOperation escape hatch for eligible unregistered chains
@@ -83,14 +90,40 @@ end
 macro ptx_str(s::String, flag::String)
     flag == "raw" ||
         error("ptx\"...\"$flag: unknown flag (only `raw` is supported)")
-    isempty(s) && error("ptx\"\"raw: empty modifier chain")
     occursin('$', s) &&
         error("ptx\"...\"raw: interpolation is not supported on the raw tier")
-    raw = split(s, '.')
-    any(isempty, raw) && error("ptx\"" * s * "\"raw: empty modifier between '.'")
-    op = Symbol(raw[1])
-    mods = Tuple(Symbol(p) for p in @view raw[2:end])
+    op, mods = _static_head("ptx", s)
     :( $RawOperation{$(QuoteNode(op)), $mods}() )
+end
+
+"""
+    optype"opcode.mod1.mod2..."
+
+The method-definition companion of [`@ptx_str`](@ref): expands to the
+*annotation* `::Operation{op, mods}` for the same static spelling, so a
+typed wrapper is defined in ISA text instead of a hand-transcribed mods
+tuple:
+
+    @inline optype"add.f32"(a::Float32, b::Float32) = ...
+
+is exactly
+
+    @inline (::Operation{:add, (:f32,)})(a::Float32, b::Float32) = ...
+
+Both string macros share one parser, so the definition is dispatchable by
+the `ptx""` spelling that reads back out of it, by construction — modifier
+transcription typos (which produce unreachable methods that only a count
+pin can catch) become impossible.
+
+Definition-site only; no `\$` interpolation (a generated family should use
+an explicit `@eval` loop over its spec, which builds mods tuples directly).
+"""
+macro optype_str(s::String)
+    occursin('$', s) && error(
+        "optype\"...\": interpolation is not supported (generated families " *
+        "belong in an explicit @eval loop over their spec)")
+    op, mods = _static_head("optype", s)
+    :( ::$(Operation{op, mods}) )
 end
 
 """
