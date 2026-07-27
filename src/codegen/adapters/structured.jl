@@ -40,6 +40,11 @@ function _structured_decl_types(kind::Symbol)
         return (ScalarType.B64, ScalarType.U64, ScalarType.S64)
     kind in (:u16, :s16) &&
         return (ScalarType.B16, ScalarType.U16, ScalarType.S16)
+    # isspacep's generic-address value is a .u32 or .u64 register
+    # (§9.7.9.20), so both integer widths satisfy the audited role.
+    kind === :genaddr &&
+        return (ScalarType.B32, ScalarType.U32, ScalarType.S32,
+                ScalarType.B64, ScalarType.U64, ScalarType.S64)
     ()
 end
 
@@ -67,7 +72,7 @@ function _structured_source_base(op::Operand)
 end
 
 const _STRUCTURED_INTEGER_SOURCE_KINDS =
-    (:b16, :b32, :b64, :u16, :u32, :u64, :s16, :s32, :s64)
+    (:b16, :b32, :b64, :u16, :u32, :u64, :s16, :s32, :s64, :genaddr)
 
 function _structured_integer_carrier_type(kind::Symbol)
     kind in (:b16, :u16) && return UInt16
@@ -76,6 +81,9 @@ function _structured_integer_carrier_type(kind::Symbol)
     kind === :s16 && return Int16
     kind === :s32 && return Int32
     kind === :s64 && return Int64
+    # A constant generic address is a 64-bit PTX integer literal; carry it
+    # in the wide unsigned register the dual-width :genaddr role accepts.
+    kind === :genaddr && return UInt64
     error("unknown structured integer source role $kind")
 end
 

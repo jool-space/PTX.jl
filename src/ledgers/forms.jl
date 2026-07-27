@@ -141,9 +141,9 @@ const FORMS = Dict{Symbol, FormFamily}(
     # in structured_results.jl.
     # Deliberately curated, not the whole ISA: an op joins this list only
     # after checking purity AND that its result ABI is generic or audited (e.g.
-    # `set.CmpOp.dtype.stype` and `testp` do NOT qualify — their tails name
-    # the source type — so they stay unregistered until given entries that
-    # handle their grammar).
+    # `set.CmpOp.dtype.stype` does NOT qualify — its tail names the source
+    # type — so it stays unregistered until given an entry that handles its
+    # grammar).
     (op => FormFamily(_PURE) for op in (
         :mov, :add, :sub, :mul, :mad, :mul24, :mad24, :fma, :div, :rem,
         :abs, :neg, :min, :max, :and, :or, :xor, :not, :shl, :shr, :shf,
@@ -152,7 +152,19 @@ const FORMS = Dict{Symbol, FormFamily}(
         :selp, :szext, :cvt, :cvta, :setp,
         # `clmad.{lo,hi}.type d, a, b, c;` — carryless multiply-add
         # (PTX 9.3, sm_80+). Pure ALU; tail names the result type.
-        :clmad))...,
+        :clmad,
+        # `testp.op.type p, a;` (§9.7.3.1) — pure per-lane FP property
+        # test: no memory operand or effect, no cross-lane semantics. The
+        # tail names the SOURCE type and the destination is one .pred, so
+        # its result ABI is audited in structured_results.jl.
+        :testp,
+        # `isspacep.space p, a;` (§9.7.9.20) — pure per-lane state-space
+        # window query on a generic-address *value*: writes only p, no
+        # memory access or ordering effect (LLVM's llvm.nvvm.isspacep.*
+        # surface is nomem + speculatable), no cross-lane semantics. The
+        # .pred destination and unbracketed u32/u64 address operand are
+        # audited in structured_results.jl.
+        :isspacep))...,
 
     # ── Non-collective side effects, no memory operand ───────────────────
     :membar            => FormFamily(_SIDEFX),

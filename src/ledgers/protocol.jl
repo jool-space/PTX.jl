@@ -125,6 +125,15 @@ function operand_accepts(kind::Symbol, ::Type{T}) where {T}
     elseif kind === :b64
         return T === UInt64 || T === Int64 || T === Float64 ||
                is_integer_immediate(T)
+    elseif kind === :genaddr
+        # isspacep's generic-address value: "the source address operand must
+        # be of type .u32 or .u64" (§9.7.9.20). Both register widths and an
+        # integer immediate assemble under .address_size 64 (CUDA 13 ptxas),
+        # so this kind admits either integer width, unlike the fixed-width
+        # kinds above. Pointer carriers stay out of this value-only surface;
+        # reinterpret an LLVMPtr to UInt64 at the call site.
+        return T === UInt32 || T === Int32 || T === UInt64 || T === Int64 ||
+               is_integer_immediate(T)
     end
     error("unknown audited operand kind: ", kind)
 end
@@ -145,5 +154,7 @@ function operand_description(kind::Symbol)
     kind === :b16  && return "a 16-bit scalar (.b16-compatible)"
     kind === :b32  && return "a 32-bit scalar (.b32-compatible)"
     kind === :b64  && return "a 64-bit scalar (.b64-compatible)"
+    kind === :genaddr &&
+        return "a 32- or 64-bit integer generic-address value (.u32/.u64)"
     string(kind)
 end

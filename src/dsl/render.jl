@@ -81,9 +81,11 @@ function _build_structured_result_call(schema::StructuredResultSchema,
     passthrough_unwrap = Bool[]
     slot = length(output_types)
     for (i, T) in enumerate(argtypes)
-        # The closed schema knows these are register/immediate operands.
-        # RAW_CONTRACT's generic pointer-bracketing guess must not turn an
-        # otherwise exact raw setp/lop3/match/elect call into invalid PTX.
+        # The closed schema knows these are register/immediate operands
+        # (isspacep's generic-address value included — §9.7.9.20 takes the
+        # address UNbracketed). RAW_CONTRACT's generic pointer-bracketing
+        # guess must not turn an otherwise exact raw structured-result call
+        # into invalid PTX.
         op_str, slots, slot = render_arg(T, slot, false)
         push!(operand_strs, op_str)
         for (letter, atype, lane, unwrap_address) in slots

@@ -65,10 +65,10 @@ owner = ["src/ledgers/forms.jl"]
 [[family]]
 section = "9.7.3.1"
 title = "Floating-Point Instructions: testp"
-status = "raw-only"
-verify = true
+status = "generic"
 opcodes = ["testp"]
-notes = "Deliberately unregistered (forms.jl header): the tail names the SOURCE type and the destination is a predicate, so raw's trailing-type inference renders a wrong destination class for every form — needs a structured-result ledger entry before raw is actually usable."
+notes = "Pure per-lane FP property test; the tail names the SOURCE type and the destination is a predicate, so the whole opcode is audited in the structured-result ledger (12 op×type forms, no legal `_` sink) instead of trailing-type inference."
+owner = ["src/ledgers/forms.jl", "src/ledgers/structured_results.jl"]
 
 # ── §9.7.4 / §9.7.5 Half and Mixed Precision ─────────────────────────────────
 
@@ -211,10 +211,10 @@ notes = "Cache-policy handle creation; raw renders the correct scalar .b64 desti
 [[family]]
 section = "9.7.9.20"
 title = "Data Movement and Conversion Instructions: isspacep"
-status = "raw-only"
-verify = true
+status = "generic"
 opcodes = ["isspacep"]
-notes = "Destination is a predicate and the address operand is NOT bracketed, so the current raw render is wrong on both counts (loud ptxas reject) — needs a structured-result ledger entry before raw is actually usable."
+notes = "Pure per-lane state-space window query; the predicate destination and UNbracketed dual-width (u32/u64) address operand are audited in the structured-result ledger (8 space forms, no legal `_` sink)."
+owner = ["src/ledgers/forms.jl", "src/ledgers/structured_results.jl"]
 
 [[family]]
 section = "9.7.9.21"

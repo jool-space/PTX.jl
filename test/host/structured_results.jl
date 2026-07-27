@@ -11,6 +11,10 @@ const _STRUCTURED_MATCH_SECTION =
     "ptx/9-instruction-set/9.7.14.11-parallel-synchronization-and-communication-instructions-match.sync.md"
 const _STRUCTURED_ELECT_SECTION =
     "ptx/9-instruction-set/9.7.14.15-parallel-synchronization-and-communication-instructions-elect.sync.md"
+const _STRUCTURED_TESTP_SECTION =
+    "ptx/9-instruction-set/9.7.3.1-floating-point-instructions-testp.md"
+const _STRUCTURED_ISSPACEP_SECTION =
+    "ptx/9-instruction-set/9.7.9.20-data-movement-and-conversion-instructions-isspacep.md"
 
 # Independent PTX 9.3 grammar oracle. This deliberately does not consume the
 # production schema constructors: a modifier-product edit on either side must
@@ -87,6 +91,33 @@ function _expected_structured_results()
         add!(:match, (mods..., :pred), mods, (:b32, :pred), (true, true),
              (dtype, :b32), v"6.0", v"7.0", _STRUCTURED_MATCH_SECTION)
     end
+
+    # §9.7.3.1: testp.op.type p, a — .op × .type product, one .pred result,
+    # source operand of the tail-named type, no legal sink (ptxas rejects
+    # discard for testp). PTX ISA 2.0 / sm_20.
+    for prop in (:finite, :infinite, :number, :notanumber, :normal,
+                 :subnormal), dtype in (:f32, :f64)
+        add!(:testp, (prop, dtype), (prop, dtype), (:pred,), (false,),
+             (dtype,), v"2.0", v"2.0", _STRUCTURED_TESTP_SECTION)
+    end
+
+    # §9.7.9.20: isspacep.space p, a — the .space grammar names eight
+    # printed spellings; one .pred result and one unbracketed u32-or-u64
+    # generic-address operand, no legal sink (ptxas rejects discard).
+    # Versions/floors from the section's PTX-ISA and Target-ISA notes.
+    for (space, ptx_version, min_sm) in (
+        (Symbol("const"),           v"3.1", v"2.0"),
+        (:global,                   v"2.0", v"2.0"),
+        (:local,                    v"2.0", v"2.0"),
+        (:shared,                   v"2.0", v"2.0"),
+        (Symbol("shared::cta"),     v"7.8", v"3.0"),
+        (Symbol("shared::cluster"), v"7.8", v"9.0"),
+        (:param,                    v"7.7", v"7.0"),
+        (Symbol("param::entry"),    v"8.3", v"7.0"),
+    )
+        add!(:isspacep, (space,), (space,), (:pred,), (false,), (:genaddr,),
+             ptx_version, min_sm, _STRUCTURED_ISSPACEP_SECTION)
+    end
     expected
 end
 
@@ -95,8 +126,8 @@ const EXPECTED_STRUCTURED_RESULTS = _expected_structured_results()
 @testset "structured-result PTX 9.3 closed-world inventory" begin
     actual = Dict((schema.op, schema.mods) => schema
                   for schema in PTX.STRUCTURED_RESULT_SCHEMAS)
-    @test length(EXPECTED_STRUCTURED_RESULTS) == 1114
-    @test length(actual) == 1114
+    @test length(EXPECTED_STRUCTURED_RESULTS) == 1134
+    @test length(actual) == 1134
     @test Set(keys(actual)) == Set(keys(EXPECTED_STRUCTURED_RESULTS))
 
     for (key, expected) in EXPECTED_STRUCTURED_RESULTS
@@ -113,13 +144,15 @@ const EXPECTED_STRUCTURED_RESULTS = _expected_structured_results()
     end
 
     by_op = Dict(op => count(s -> s.op === op, values(actual))
-                 for op in (:setp, :lop3, :match, :elect))
+                 for op in (:setp, :lop3, :match, :elect, :testp, :isspacep))
     @test by_op == Dict(:setp => 1104, :lop3 => 3,
-                        :match => 6, :elect => 1)
+                        :match => 6, :elect => 1,
+                        :testp => 12, :isspacep => 8)
     @test count(s -> length(s.outputs) == 2, values(actual)) == 557
-    @test count(s -> length(s.outputs) == 1, values(actual)) == 557
-    # Only base lop3 and the two match.any forms prohibit every sink.
-    @test count(s -> !any(s.sinkable), values(actual)) == 3
+    @test count(s -> length(s.outputs) == 1, values(actual)) == 577
+    # Base lop3, the two match.any forms, and every testp/isspacep form
+    # (ptxas: "Result discard mode is not allowed") prohibit every sink.
+    @test count(s -> !any(s.sinkable), values(actual)) == 23
 
     @test count(s -> s.op === :setp && first(s.mods) === :dual,
                 values(actual)) == 384
@@ -153,6 +186,24 @@ end
           (UInt64, Val{0xffffffff})),
          "match.any.sync.b64 \$0, \$1, 4294967295;",
          "=r,l,~{memory}", UInt32, true, true),
+        # The testp tail names the SOURCE type; the destination stays =b.
+        ((:testp, (:notanumber, :f32), (Float32,)),
+         "testp.notanumber.f32 \$0, \$1;",
+         "=b,f", Bool, false, false),
+        ((:testp, (:infinite, :f64), (UInt64,)),
+         "testp.infinite.f64 \$0, \$1;",
+         "=b,l", Bool, false, false),
+        # isspacep's address operand renders as a bare register in either
+        # ISA-admitted width — never bracketed.
+        ((:isspacep, (:global,), (UInt64,)),
+         "isspacep.global \$0, \$1;",
+         "=b,l", Bool, false, false),
+        ((:isspacep, (Symbol("shared::cluster"),), (UInt32,)),
+         "isspacep.shared::cluster \$0, \$1;",
+         "=b,r", Bool, false, false),
+        ((:isspacep, (Symbol("param::entry"),), (Int64,)),
+         "isspacep.param::entry \$0, \$1;",
+         "=b,l", Bool, false, false),
     )
     for ((op, mods, argtypes), asm, constraints, rettype,
          side_effects, convergent) in cases
@@ -182,6 +233,20 @@ end
         RawOperation{:setp, (:dual, :eq, :u32)}(), (UInt32, UInt32))
     @test raw_info.tier === :chain_asm
     @test raw_info.asm == raw.asm
+
+    # Issue #94's broken raw renders: isspacep must not bracket its address
+    # operand, and testp's destination must stay a predicate rather than the
+    # tail-inferred source class. Both now route through the audited schema
+    # even on the raw tier.
+    raw_iss = build_call(:isspacep, (:global,), (UInt64,); raw = true)
+    @test raw_iss.asm == "isspacep.global \$0, \$1;"
+    @test !occursin('[', raw_iss.asm)
+    @test raw_iss.rettype === Bool
+    @test startswith(raw_iss.constraints, "=b,")
+    raw_testp = build_call(:testp, (:finite, :f64), (Float64,); raw = true)
+    @test raw_testp.asm == "testp.finite.f64 \$0, \$1;"
+    @test raw_testp.rettype === Bool
+    @test startswith(raw_testp.constraints, "=b,")
 end
 
 @testset "structured-result misses fail loud on normal and raw routes" begin
@@ -194,6 +259,13 @@ end
          (UInt32, UInt32, UInt32, Val{0}, Bool)),
         (:match, (:any, :sync, :b32, :pred), (UInt32, UInt32)),
         (:elect, (), (UInt32,)),
+        (:testp, (:finite,), (Float32,)),
+        (:testp, (:f32, :finite), (Float32,)),
+        (:testp, (:finite, :f16), (Float16,)),
+        (:isspacep, (), (UInt64,)),
+        (:isspacep, (:generic,), (UInt64,)),
+        (:isspacep, (:shared, :cta), (UInt64,)),
+        (:isspacep, (Symbol("param::func"),), (UInt64,)),
     )
     for (op, mods, argtypes) in misses
         for raw in (false, true)
@@ -212,6 +284,10 @@ end
         (:lop3, (:b32,), (UInt32, UInt32, UInt32, Val{256})),
         (:elect, (:sync,), (UInt64,)),
         (:match, (:all, :sync, :b64, :pred), (UInt32, UInt32)),
+        (:testp, (:finite, :f32), (Float64,)),
+        (:testp, (:finite, :f32), (Float32, Float32)),
+        (:isspacep, (:global,), (Float32,)),
+        (:isspacep, (:global,), (UInt64, UInt64)),
     )
     for (op, mods, argtypes) in bad_operands
         @test PTX.lowering(Operation{op, mods}(), argtypes).tier === :forbidden
@@ -311,6 +387,53 @@ end
         }
         setp.eq.u32 inner, r0, r1;
         """; declarations = ".reg .u32 r0, r1;")
+end
+
+@testset "testp/isspacep transpile through the structured adapter" begin
+    julia = _structured_transpile("""
+        testp.notanumber.f32 %p0, %f0;
+        testp.infinite.f64 %p1, %fd0;
+        isspacep.global %p2, %rd0;
+        isspacep.shared::cluster %p3, %rd1;
+        isspacep.const %p4, %r0;
+        isspacep.param::entry %p5, %rd0;
+        isspacep.local %p6, 0;
+        """; declarations = """
+        .reg .pred %p<8>;
+        .reg .b32 %r<4>;
+        .reg .b64 %rd<4>;
+        .reg .f32 %f<4>;
+        .reg .f64 %fd<4>;
+        """)
+    @test occursin("p0 = ptx\"testp.notanumber.f32\"(f0)", julia)
+    @test occursin("p1 = ptx\"testp.infinite.f64\"(fd0)", julia)
+    @test occursin("p2 = ptx\"isspacep.global\"(rd0)", julia)
+    @test occursin("p3 = ptx\"isspacep.shared::cluster\"(rd1)", julia)
+    # The u32 register width is ISA-legal for the generic-address operand.
+    @test occursin("p4 = ptx\"isspacep.const\"(r0)", julia)
+    @test occursin("p5 = ptx\"isspacep.param::entry\"(rd0)", julia)
+    # A constant address is a 64-bit PTX integer literal.
+    @test occursin(
+        "p6 = ptx\"isspacep.local\"(UInt64(0x0000000000000000))", julia)
+    @test Meta.parseall(julia).head === :toplevel
+
+    # ptxas rejects the `_` sink for both opcodes; so must the transpiler.
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
+        "testp.finite.f32 _, %f0;")
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
+        "isspacep.global _, %rd0;")
+    # Wrong destination/source register classes stay inside the audited miss.
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
+        "testp.finite.f32 %r0, %f0;")
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
+        "testp.finite.f32 %p0, %rd0;")
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
+        "isspacep.global %p0, %f0;")
+    # Unreviewed spellings miss loudly instead of reaching the raw tier.
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
+        "isspacep.generic %p0, %rd0;")
+    @test_throws PTX.Codegen.TranspilerError _structured_transpile(
+        "testp.finite.f16 %p0, %h0;")
 end
 
 @testset "structured integer and predicate immediates use PTX semantics" begin

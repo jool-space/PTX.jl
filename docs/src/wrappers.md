@@ -75,7 +75,7 @@ line in the loop.
 
 `setp`, `lop3`, `match.sync`, and `elect.sync` no longer rely on a small set of
 hand-written dual-result methods. `src/ledgers/structured_results.jl` expands the
-complete PTX 9.3 grammar into 1,114 reviewed schemas and the generic chain
+complete PTX 9.3 grammar into 1,134 reviewed schemas and the generic chain
 emitter consumes those schemas directly. This keeps scalar and grouped
 siblings in the same closed boundary: modifier legality, source carriers,
 result tuple shape, sink positions, and target metadata cannot drift between a
@@ -87,7 +87,10 @@ lane predicates. BoolOp `lop3` returns `(UInt32, Bool)` and requires a
 `Val{N}` LUT with `N` in `0:255`; `match.all.sync.*.pred` selects the optional predicate, and
 `elect.sync` always returns `(UInt32, Bool)`. The two warp-collective families
 use the same `convergent nomerge` LLVM call-site path as the existing MMA and
-mbarrier wrappers.
+mbarrier wrappers. The single-predicate queries `testp` (source-type tail)
+and `isspacep` (unbracketed `.u32`/`.u64` generic-address value) live in the
+same ledger because the generic trailing-dtype rule would misread their
+destination ABI.
 
 For the mbarrier full-report form, `reportValue` is a PTX `.b8`
 destination. This agrees with the CUDA Runtime API's description of

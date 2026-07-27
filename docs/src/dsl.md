@@ -65,12 +65,17 @@ i8 inline-asm constraint, the full-result call carries it in the low byte of a
 zero-extended `UInt16`. Every mbarrier lowering route also carries a call-site
 `convergent nomerge` barrier, matching the complete NVVM mbarrier surface.
 
-`setp`, `lop3`, `match.sync`, and `elect.sync` use a second closed schema
-boundary for structured results. The PTX 9.3 ledger contains 1,114 exact API
-forms: 768 general `setp`, 336 half/bfloat `setp`, three `lop3`, six
-`match.sync`, and one `elect.sync`. It records emitted modifier order, result
-grouping, source carriers, legal `_` positions, PTX version, target floor, and
-ISA section. A spelling anywhere in one of these opcode islands must match the
+`setp`, `lop3`, `match.sync`, `elect.sync`, `testp`, and `isspacep` use a
+second closed schema boundary for structured results. The PTX 9.3 ledger
+contains 1,134 exact API forms: 768 general `setp`, 336 half/bfloat `setp`,
+three `lop3`, six `match.sync`, one `elect.sync`, twelve `testp`, and eight
+`isspacep`. It records emitted modifier order, result grouping, source
+carriers, legal `_` positions, PTX version, target floor, and ISA section.
+`testp` and `isspacep` are single-predicate queries whose modifier tails name
+the *source* (type or state-space window) rather than the destination;
+`isspacep` additionally takes its generic-address value unbracketed in either
+ISA-admitted register width (`.u32`/`.u64`), and neither opcode admits a `_`
+sink. A spelling anywhere in one of these opcode islands must match the
 ledger even on the raw tier; a misspelled grouped form cannot fall back to a
 plausible scalar ABI.
 
@@ -92,6 +97,8 @@ d, p = ptx"lop3.or.b32"(a, b, c, Val(0x96), gate)
 matching = ptx"match.any.sync.b64"(value, UInt32(0xffffffff))
 all_mask, all_p = ptx"match.all.sync.b64.pred"(value, UInt32(0xffffffff))
 leader, elected = ptx"elect.sync"(UInt32(0xffffffff))
+isnan = ptx"testp.notanumber.f32"(x)
+in_shared = ptx"isspacep.shared::cta"(addr)
 ```
 
 `ptx"..."raw` is an explicit opt-out from the reviewed form registry and most

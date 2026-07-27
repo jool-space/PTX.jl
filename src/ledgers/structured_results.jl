@@ -43,6 +43,10 @@ const _MATCH_SECTION =
     "ptx/9-instruction-set/9.7.14.11-parallel-synchronization-and-communication-instructions-match.sync.md"
 const _ELECT_SECTION =
     "ptx/9-instruction-set/9.7.14.15-parallel-synchronization-and-communication-instructions-elect.sync.md"
+const _TESTP_SECTION =
+    "ptx/9-instruction-set/9.7.3.1-floating-point-instructions-testp.md"
+const _ISSPACEP_SECTION =
+    "ptx/9-instruction-set/9.7.9.20-data-movement-and-conversion-instructions-isspacep.md"
 
 const _SETP_BASIC_CMPS = (:eq, :ne, :lt, :le, :gt, :ge)
 const _SETP_FLOAT_CMPS =
@@ -148,6 +152,43 @@ const STRUCTURED_RESULT_SCHEMAS = let schemas = StructuredResultSchema[]
         end
     end
 
+    # PTX 9.3 §9.7.3.1. `testp.op.type p, a;` — the modifier tail names the
+    # SOURCE type; the destination is always one .pred (the raw tier's
+    # terminal-type inference would misread it, issue #94). CUDA 13 ptxas
+    # rejects the `_` sink ("Result discard mode is not allowed"), so no
+    # position is sinkable. Introduced PTX ISA 2.0, sm_20.
+    for dtype in (:f32, :f64),
+        prop in (:finite, :infinite, :number, :notanumber, :normal,
+                 :subnormal)
+        mods = (prop, dtype)
+        _structured_result_schema!(schemas, :testp, mods, mods, (:pred,),
+                                   (dtype,), v"2.0", v"2.0", _TESTP_SECTION)
+    end
+
+    # PTX 9.3 §9.7.9.20. `isspacep.space p, a;` — one .pred destination and
+    # an UNbracketed generic-address value operand of type .u32 or .u64
+    # (both widths assemble under .address_size 64; CUDA 13 ptxas), hence
+    # the dual-width :genaddr kind. CUDA 13 ptxas rejects the `_` sink.
+    # Bare .shared defaults to ::cta and bare .param to ::entry, but each
+    # printed spelling is its own reviewed form. Version/floor per section:
+    # base spellings are PTX 2.0/sm_20, .const is PTX 3.1, ::cta is
+    # PTX 7.8/sm_30, ::cluster is PTX 7.8/sm_90, .param{::entry} is
+    # PTX 7.7/8.3 and sm_70.
+    for (space, ptx_version, min_sm) in (
+        (Symbol("const"),           v"3.1", v"2.0"),
+        (:global,                   v"2.0", v"2.0"),
+        (:local,                    v"2.0", v"2.0"),
+        (:shared,                   v"2.0", v"2.0"),
+        (Symbol("shared::cta"),     v"7.8", v"3.0"),
+        (Symbol("shared::cluster"), v"7.8", v"9.0"),
+        (:param,                    v"7.7", v"7.0"),
+        (Symbol("param::entry"),    v"8.3", v"7.0"),
+    )
+        _structured_result_schema!(schemas, :isspacep, (space,), (space,),
+                                   (:pred,), (:genaddr,), ptx_version,
+                                   min_sm, _ISSPACEP_SECTION)
+    end
+
     # Deliberately a Vector, not Tuple(...): a several-hundred-element NTuple
     # constant makes every downstream generator/Dict build specialize on the
     # full tuple type. Those inference+codegen bombs tripled package
@@ -159,23 +200,24 @@ const _STRUCTURED_RESULT_SCHEMA_BY_FORM = Dict(
     (schema.op, schema.mods) => schema for schema in STRUCTURED_RESULT_SCHEMAS)
 length(_STRUCTURED_RESULT_SCHEMA_BY_FORM) == length(STRUCTURED_RESULT_SCHEMAS) ||
     error("duplicate keys in STRUCTURED_RESULT_SCHEMAS")
-length(STRUCTURED_RESULT_SCHEMAS) == 1114 ||
+length(STRUCTURED_RESULT_SCHEMAS) == 1134 ||
     error("structured-result ledger count changed; re-audit PTX 9.3 grammar")
 
 schema(::StructuredLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     get(_STRUCTURED_RESULT_SCHEMA_BY_FORM, (op, mods), nothing)
 
-# The claim is opcode-wide: every setp/lop3/match/elect spelling must hit an
-# exact reviewed form, whatever its mods.
+# The claim is opcode-wide: every setp/lop3/match/elect/testp/isspacep
+# spelling must hit an exact reviewed form, whatever its mods.
 claims(::StructuredLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    op in (:setp, :lop3, :match, :elect)
+    op in (:setp, :lop3, :match, :elect, :testp, :isspacep)
 
 function miss(::StructuredLedger, op::Symbol,
               mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))
     ArgumentError(
         "ptx\"$spelling\" is inside the closed PTX 9.3 result grammar " *
-        "for setp/lop3/match/elect but does not match a reviewed form. " *
+        "for setp/lop3/match/elect/testp/isspacep but does not match a " *
+        "reviewed form. " *
         "Refusing to guess destination grouping, operand carriers, or " *
         "modifier legality; the raw tier cannot declare an alternative " *
         "result ABI.")
