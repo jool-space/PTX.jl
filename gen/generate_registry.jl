@@ -7,18 +7,16 @@
 # argument-property kind is an error, never a fallthrough. New vocabulary in
 # a future .td must be looked at, not absorbed.
 #
+# The emission logic lives in `generate_table_source` so the standing test
+# `test/host/registry_generation.jl` can regenerate from the committed JSON
+# snapshot and byte-compare against the committed table.
+#
 # Usage: julia --project=gen gen/generate_registry.jl [gen/nvvm_intrinsics_<v>.json]
 
 using JSON
 
 const GEN = @__DIR__
 const SRC = joinpath(dirname(GEN), "src", "nvvm", "table.jl")
-
-input = isempty(ARGS) ? only(filter(f -> occursin(r"^nvvm_intrinsics_.*\.json$", f),
-                                    readdir(GEN))) |> f -> joinpath(GEN, f) : ARGS[1]
-version = Base.match(r"nvvm_intrinsics_(.*)\.json$", basename(input)).captures[1]
-
-records = JSON.parsefile(input)
 
 # tblgen property name -> registry symbol. Closed set; see Intrinsic docs.
 const PROPS = Dict(
@@ -81,51 +79,58 @@ pos(a) = a == "ret" ? 0 : Int(a) + 1
 
 derived_name(rec) = "llvm." * replace(chopprefix(rec, "int_"), "_" => ".")
 
-lines = String[]
-names = Set{String}()
-for r in records
-    name = isempty(r["llvm_name"]) ? derived_name(r["record"]) : r["llvm_name"]
-    name in names && error("duplicate intrinsic name $name")
-    push!(names, name)
+# The complete content of src/nvvm/table.jl as generated from the JSON
+# snapshot at `input`. Pure emission: no filesystem writes, no LLVM needs.
+function generate_table_source(input::AbstractString)
+    version = Base.match(r"nvvm_intrinsics_(.*)\.json$", basename(input)).captures[1]
 
-    props = Symbol[]
-    for p in r["props"]
-        haskey(PROPS, p) || error("unknown property \"$p\" on $name — extend PROPS")
-        push!(props, PROPS[p])
-    end
+    records = JSON.parsefile(input)
 
-    immargs, ranges, argnames, argattrs = String[], String[], String[], String[]
-    for ap in r["arg_props"]
-        kind = ap["kind"]
-        if kind == "ImmArg"
-            ap["arg"] == "ret" && error("ImmArg on return of $name")
-            push!(immargs, string(pos(ap["arg"])))
-        elseif kind == "Range"
-            push!(ranges, "($(pos(ap["arg"])), $(ap["lower"]), $(ap["upper"]))")
-        elseif kind == "ArgName"
-            push!(argnames, "($(pos(ap["arg"])), :$(ap["name"]))")
-        elseif haskey(ARGATTRS, kind)
-            push!(argattrs, "($(pos(ap["arg"])), :$(ARGATTRS[kind]))")
-        else
-            error("unknown argument property \"$kind\" on $name — extend ARGATTRS")
+    lines = String[]
+    names = Set{String}()
+    for r in records
+        name = isempty(r["llvm_name"]) ? derived_name(r["record"]) : r["llvm_name"]
+        name in names && error("duplicate intrinsic name $name")
+        push!(names, name)
+
+        props = Symbol[]
+        for p in r["props"]
+            haskey(PROPS, p) || error("unknown property \"$p\" on $name — extend PROPS")
+            push!(props, PROPS[p])
         end
+
+        immargs, ranges, argnames, argattrs = String[], String[], String[], String[]
+        for ap in r["arg_props"]
+            kind = ap["kind"]
+            if kind == "ImmArg"
+                ap["arg"] == "ret" && error("ImmArg on return of $name")
+                push!(immargs, string(pos(ap["arg"])))
+            elseif kind == "Range"
+                push!(ranges, "($(pos(ap["arg"])), $(ap["lower"]), $(ap["upper"]))")
+            elseif kind == "ArgName"
+                push!(argnames, "($(pos(ap["arg"])), :$(ap["name"]))")
+            elseif haskey(ARGATTRS, kind)
+                push!(argattrs, "($(pos(ap["arg"])), :$(ARGATTRS[kind]))")
+            else
+                error("unknown argument property \"$kind\" on $name — extend ARGATTRS")
+            end
+        end
+
+        kw = String[]
+        isempty(immargs)  || push!(kw, "immargs=" * tuptext(immargs))
+        isempty(ranges)   || push!(kw, "ranges=" * tuptext(ranges))
+        isempty(argnames) || push!(kw, "argnames=" * tuptext(argnames))
+        isempty(argattrs) || push!(kw, "argattrs=" * tuptext(argattrs))
+
+        push!(lines, "intr(\"$name\", " *
+                     tuptext(token.(r["ret"])) * ", " *
+                     tuptext(token.(r["params"])) * ", " *
+                     tuptext(":" .* string.(props)) *
+                     (isempty(kw) ? "" : "; " * join(kw, ", ")) * ")")
     end
+    sort!(lines)
 
-    kw = String[]
-    isempty(immargs)  || push!(kw, "immargs=" * tuptext(immargs))
-    isempty(ranges)   || push!(kw, "ranges=" * tuptext(ranges))
-    isempty(argnames) || push!(kw, "argnames=" * tuptext(argnames))
-    isempty(argattrs) || push!(kw, "argattrs=" * tuptext(argattrs))
-
-    push!(lines, "intr(\"$name\", " *
-                 tuptext(token.(r["ret"])) * ", " *
-                 tuptext(token.(r["params"])) * ", " *
-                 tuptext(":" .* string.(props)) *
-                 (isempty(kw) ? "" : "; " * join(kw, ", ")) * ")")
-end
-sort!(lines)
-
-open(SRC, "w") do io
+    io = IOBuffer()
     print(io, """
         # Machine-generated by gen/generate_registry.jl from
         # gen/nvvm_intrinsics_$version.json — do not edit. To regenerate:
@@ -141,6 +146,17 @@ open(SRC, "w") do io
     for l in lines
         println(io, l)
     end
+    return String(take!(io))
 end
 
-println("wrote $SRC ($(length(lines)) intrinsics, backend $version)")
+if abspath(PROGRAM_FILE) == @__FILE__
+    input = isempty(ARGS) ? only(filter(f -> occursin(r"^nvvm_intrinsics_.*\.json$", f),
+                                        readdir(GEN))) |> f -> joinpath(GEN, f) : ARGS[1]
+    version = Base.match(r"nvvm_intrinsics_(.*)\.json$", basename(input)).captures[1]
+
+    source = generate_table_source(input)
+    write(SRC, source)
+
+    nlines = count(startswith("intr("), eachsplit(source, '\n'))
+    println("wrote $SRC ($nlines intrinsics, backend $version)")
+end
