@@ -50,9 +50,22 @@ result = "every push, both lanes; PTX_REQUIRE_GPU_RUNTIME fails the lane if the 
 # drop-the-softmax-wait falsified for this kernel). NREG sweep at
 # B=1 H=8 S=8192: (144,80,144) = 1150 TF WINNER (+6%), (144,96,128) 1137,
 # (128,96,160) 1133, (152,72,136) 1124, (128,112,144) 1116, old default
-# (136,96,144) 1086; every n2=64 candidate fails ptxas (producer register
-# floor is 72). (144,80,144) adopted as the branch default (c94bbda).
-# CTA scaling is linear (~7.6 TF/CTA up to the 148-SM fill).
+# (136,96,144) 1086; every n2=64 candidate fails ptxas (the CORRECTION
+# warpgroup's register floor is 72 — the nreg tuple is (softmax,
+# correction, mma/load)). (144,80,144) adopted as the branch default
+# (c94bbda). CTA scaling is linear (~7.6 TF/CTA up to the 148-SM fill).
+#
+# Offline SASS diagnosis (sm_100a, 2026-07-28): the Julia/LLVM exception
+# machinery does NOT inflate region floors — all 6 ArgumentError sites
+# (tcgen05_descriptor field validation, once per work item in the
+# mma-dispatch thread) plus ptxas's own 2 injected tcgen05 guardrail
+# traps are sunk into one shared cold tail after all hot code. The
+# kernel's 220/348 B spill traffic concentrates in the SOFTMAX region
+# (interleaved with MUFU.EX2 / LDTM / F2FP.BF16 packing) = genuine
+# arithmetic pressure at 144 regs, consistent with the sweep gradient;
+# the remaining perf lever is algorithmic (reduce softmax live set,
+# e.g. chunked bf16 output packing / the FA4 f32x2 path), not more
+# register shuffling.
 
 [[queue]]
 device = "B200/B300 (CC 10.x)"
