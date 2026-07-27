@@ -31,54 +31,54 @@
     _chain_call_expr(build_call(:mbarrier, mods, args))
 end
 
-@inline (::Operation{:mbarrier, (:init, :shared, :b64)})(
+@inline optype"mbarrier.init.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, count::Integer) where T =
     nvvm"mbarrier.init.shared"(mbar, UInt32(count))
 
-@inline (::Operation{:mbarrier, (:inval, :shared, :b64)})(
+@inline optype"mbarrier.inval.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"mbarrier.inval.shared"(mbar)
 
-@inline (::Operation{:mbarrier, (:arrive, :shared, :b64)})(
+@inline optype"mbarrier.arrive.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"mbarrier.arrive.shared"(mbar)
 
 # `count` is a per-thread arrive count (same as calling arrive `count`
 # times). The caller must choose it so this noComplete operation cannot finish
 # the phase; reaching completion is undefined behavior.
-@inline (::Operation{:mbarrier, (:arrive, :noComplete, :shared, :b64)})(
+@inline optype"mbarrier.arrive.noComplete.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, count::Integer) where T =
     nvvm"mbarrier.arrive.noComplete.shared"(mbar, UInt32(count))
 
 # (sm_90+) Fused expect+arrive: first increments tx-count by `tx_count`, then
 # performs one arrive-on operation, decrementing pending arrivals by 1.
-@inline (::Operation{:mbarrier, (:arrive, :expect_tx, :shared, :b64)})(
+@inline optype"mbarrier.arrive.expect_tx.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, tx_count::Integer) where T =
     nvvm"mbarrier.arrive.expect.tx.scope.cta.space.cta"(mbar, UInt32(tx_count))
 
 # (sm_90+) Standalone form: no arrive, no state output.
-@inline (::Operation{:mbarrier, (:expect_tx, :shared, :b64)})(
+@inline optype"mbarrier.expect_tx.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, tx_count::Integer) where T =
     nvvm"mbarrier.expect.tx.scope.cta.space.cta"(mbar, UInt32(tx_count))
 
 # Token form: pass the UInt64 returned by a prior arrive on the same mbar.
-@inline (::Operation{:mbarrier, (:test_wait, :shared, :b64)})(
+@inline optype"mbarrier.test_wait.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, state::Integer) where T =
     nvvm"mbarrier.test.wait.shared"(mbar, UInt64(state))
 
 # Phase form: pass a 0/1 phase parity bit; returns true once a full arrive
 # cycle has completed.
-@inline (::Operation{:mbarrier, (:test_wait, :parity, :shared, :b64)})(
+@inline optype"mbarrier.test_wait.parity.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, phase::Integer) where T =
     nvvm"mbarrier.test.wait.parity.scope.cta.space.cta"(mbar, UInt32(phase))
 
 # (sm_90+) Suspend-allowing wait — hardware may park the warp on miss
 # instead of returning false immediately.
-@inline (::Operation{:mbarrier, (:try_wait, :shared, :b64)})(
+@inline optype"mbarrier.try_wait.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, state::Integer) where T =
     nvvm"mbarrier.try.wait.scope.cta.space.cta"(mbar, UInt64(state))
 
-@inline (::Operation{:mbarrier, (:try_wait, :parity, :shared, :b64)})(
+@inline optype"mbarrier.try_wait.parity.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, phase::Integer) where T =
     nvvm"mbarrier.try.wait.parity.scope.cta.space.cta"(mbar, UInt32(phase))
 
@@ -88,17 +88,16 @@ end
 # state would be meaningless). Caller passes a cluster-mapped address from
 # `mapa.shared::cluster` when arriving on a remote CTA's mbarrier.
 
-@inline function (op::Operation{:mbarrier,
-        (:arrive, Symbol("shared::cluster"), :b64)})(
+@inline function optype"mbarrier.arrive.shared::cluster.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}) where T
-    _mbarrier_schema_call(op, mbar)
+    _mbarrier_schema_call(ptx"mbarrier.arrive.shared::cluster.b64", mbar)
 end
 
-@inline function (op::Operation{:mbarrier,
-        (:arrive, :expect_tx, Symbol("shared::cluster"), :b64)})(
+@inline function optype"mbarrier.arrive.expect_tx.shared::cluster.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared},
         tx_count::Integer) where T
-    _mbarrier_schema_call(op, mbar, UInt32(tx_count))
+    _mbarrier_schema_call(ptx"mbarrier.arrive.expect_tx.shared::cluster.b64",
+                          mbar, UInt32(tx_count))
 end
 
 # --- PTX 9.3 extensions (layout / phase_type / report), asm tier ------------

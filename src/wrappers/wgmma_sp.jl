@@ -85,6 +85,7 @@ function _wgmma_sp_register(dtype_d::Symbol, dtype_a::Symbol, dtype_b::Symbol,
     mods = (:mma_async, :sp, :sync, :aligned,
             Symbol("m64n", n, "k", k),
             dtype_d, dtype_a, dtype_b)
+    register_wrapper!(:wgmma_sp, :wgmma, mods, :asm)
 
     for sel in _wgmma_sp_sels(k)
         spec = wgmma_sp_spec(dtype_d, dtype_a, dtype_b, n, k, has_trans, sel)

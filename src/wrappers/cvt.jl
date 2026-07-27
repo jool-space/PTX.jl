@@ -4,23 +4,23 @@
 # NVIDIA's `__nv_cvt_*` shims in <cuda_fp4.hpp>). All other cvt forms flow
 # through the chain default in src/dsl/entries.jl.
 
-@inline (::Operation{:cvt, (:rn, :satfinite, :e2m1x2, :f32)})(a::Float32, b::Float32) =
+@inline optype"cvt.rn.satfinite.e2m1x2.f32"(a::Float32, b::Float32) =
     @asmcall("{ .reg .b8 t; cvt.rn.satfinite.e2m1x2.f32 t, \$1, \$2; mov.b16 \$0, {t, 0}; }",
              "=h,f,f", false, UInt16, Tuple{Float32, Float32}, a, b)
 
-@inline (::Operation{:cvt, (:rn, :satfinite, :e2m1x2, :f16x2)})(a::UInt32) =
+@inline optype"cvt.rn.satfinite.e2m1x2.f16x2"(a::UInt32) =
     @asmcall("{ .reg .b8 t; cvt.rn.satfinite.e2m1x2.f16x2 t, \$1; mov.b16 \$0, {t, 0}; }",
              "=h,r", false, UInt16, Tuple{UInt32}, a)
 
-@inline (::Operation{:cvt, (:rn, :satfinite, :e2m1x2, :bf16x2)})(a::UInt32) =
+@inline optype"cvt.rn.satfinite.e2m1x2.bf16x2"(a::UInt32) =
     @asmcall("{ .reg .b8 t; cvt.rn.satfinite.e2m1x2.bf16x2 t, \$1; mov.b16 \$0, {t, 0}; }",
              "=h,r", false, UInt16, Tuple{UInt32}, a)
 
-@inline (::Operation{:cvt, (:rn, :f16x2, :e2m1x2)})(a::UInt16) =
+@inline optype"cvt.rn.f16x2.e2m1x2"(a::UInt16) =
     @asmcall("{ .reg .b8 t, hi; mov.b16 {t, hi}, \$1; cvt.rn.f16x2.e2m1x2 \$0, t; }",
              "=r,h", false, UInt32, Tuple{UInt16}, a)
 
-@inline (::Operation{:cvt, (:rn, :bf16x2, :e2m1x2)})(a::UInt16) =
+@inline optype"cvt.rn.bf16x2.e2m1x2"(a::UInt16) =
     @asmcall("{ .reg .b8 t, hi; mov.b16 {t, hi}, \$1; cvt.rn.bf16x2.e2m1x2 \$0, t; }",
              "=r,h", false, UInt32, Tuple{UInt16}, a)
 

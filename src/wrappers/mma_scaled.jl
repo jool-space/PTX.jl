@@ -37,9 +37,6 @@ const _MMA_SCALE_VEC_INFIX = Dict(Symbol("1X") => "scale.1x",
                                   Symbol("2X") => "scale.2x",
                                   Symbol("4X") => "scale.4x")
 
-const MMA_SCALED_INTRINSIC_NAMES = String[]
-const MMA_SCALED_ASM_FORMS = NTuple{6, Symbol}[]   # (kind,svec,shape,a,b,stype)
-
 function _mma_scaled_register(kind::Symbol, scale_vec::Symbol,
                               shape::Symbol, layA::Symbol, layB::Symbol,
                               d_ty::Symbol, a_ty::Symbol, b_ty::Symbol,
@@ -57,15 +54,11 @@ function _mma_scaled_register(kind::Symbol, scale_vec::Symbol,
     full = "llvm.nvvm." * name
 
     if !NVVM.isintrinsic(full)
-        # Idempotent bookkeeping — see _mma_register.
-        form = (kind, scale_vec, shape, a_ty, b_ty, s_ty)
-        form in MMA_SCALED_ASM_FORMS || push!(MMA_SCALED_ASM_FORMS, form)
         return _mma_scaled_register_asm(mods, kind, scale_vec, shape,
                                         layA, layB, a_ty, b_ty, c_ty, s_ty,
                                         n_a, n_b, n_cd)
     end
-    full in MMA_SCALED_INTRINSIC_NAMES || push!(MMA_SCALED_INTRINSIC_NAMES, full)
-    call = NVVM.IntrinsicCall{Symbol(full)}()
+    call = wrapper_intrinsic_call(:mma_scaled, :mma, mods, full)
     cd_J = c_ty === :f32 ? :Float32 : :UInt32
 
     a_in = [:(a[$i]) for i in 1:n_a]
@@ -88,6 +81,7 @@ end
 # the pre-migration generator.
 function _mma_scaled_register_asm(mods, kind, scale_vec, shape, layA, layB,
                                   a_ty, b_ty, c_ty, s_ty, n_a, n_b, n_cd)
+    register_wrapper!(:mma_scaled, :mma, mods, :asm)
     slots(off, n) = "{" * join(("\$$i" for i in off:off+n-1), ", ") * "}"
     base = 2 * n_cd + n_a + n_b
     asm = "mma.sync.aligned.kind::$kind.block_scale.scale_vec::$scale_vec." *

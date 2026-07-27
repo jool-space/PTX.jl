@@ -57,8 +57,10 @@ end
     @test count(x -> x[1] == :madc, _IMPLICIT_CC_FORMS) == 16
 
     expected = Set((op, mods) for (op, mods, _) in _IMPLICIT_CC_FORMS)
-    @test Set(PTX.EXTENDED_PRECISION_WRAPPER_FORMS) == expected
-    @test length(PTX.EXTENDED_PRECISION_WRAPPER_FORMS) == 48
+    registered = [(r.op, r.mods)
+                  for r in PTX.wrapper_records(:extended_precision)]
+    @test Set(registered) == expected
+    @test length(registered) == 48
 
     for (op, mods, T) in _IMPLICIT_CC_FORMS
         @test PTX.uses_implicit_cc(op, mods)

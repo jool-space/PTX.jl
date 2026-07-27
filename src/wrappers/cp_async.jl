@@ -17,7 +17,7 @@ function cp_async_spec(qualifier::Symbol, n::Integer)
        rettype = Nothing)
 end
 
-@generated function (::Operation{:cp, (:async, :ca, :shared, :global)})(
+@generated function optype"cp.async.ca.shared.global"(
         dst::Core.LLVMPtr{T, AS.Shared},
         src::Core.LLVMPtr{S, AS.Global},
         ::Val{N}) where {T, S, N}
@@ -37,7 +37,7 @@ end
 end
 
 # `.cg` caches at L2 only (not L1). 16-byte size only.
-@generated function (::Operation{:cp, (:async, :cg, :shared, :global)})(
+@generated function optype"cp.async.cg.shared.global"(
         dst::Core.LLVMPtr{T, AS.Shared},
         src::Core.LLVMPtr{S, AS.Global},
         ::Val{N}) where {T, S, N}
@@ -68,7 +68,7 @@ end
 # generic dispatch that would (incorrectly) infer rettype = UInt64 from
 # the trailing `.b64` modifier (the chain treats `.b64` as a dtype
 # suffix; here it describes the *width of the address*, not a return).
-@inline function (::Operation{:cp, (:async, :mbarrier, :arrive, :shared, :b64)})(
+@inline function optype"cp.async.mbarrier.arrive.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}) where T
     @asmcall("cp.async.mbarrier.arrive.shared.b64 [\$0];",
              "r,~{memory}", true, Nothing,
@@ -77,7 +77,7 @@ end
     nothing
 end
 
-@inline function (::Operation{:cp, (:async, :mbarrier, :arrive, :noinc, :shared, :b64)})(
+@inline function optype"cp.async.mbarrier.arrive.noinc.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}) where T
     @asmcall("cp.async.mbarrier.arrive.noinc.shared.b64 [\$0];",
              "r,~{memory}", true, Nothing,

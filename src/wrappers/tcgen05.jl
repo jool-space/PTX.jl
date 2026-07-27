@@ -55,9 +55,10 @@
 # stand on is greppable — test/host/conformance.jl scans for `nvvm"..."`
 # literals and requires a probe for each. The regular grids (ld/st,
 # dense mma) are mechanical Table expansions too large for that; they are
-# generated from one spec each and record their tier-2 names in a
-# `*_INTRINSIC_NAMES` table that conformance replays with the same
-# probe-per-name requirement plus a registry-equality pin.
+# generated from one spec each and record their tier-2 names in the wrapper
+# registry (families :tcgen05_ldst / :tcgen05_mma_{dense,sp,ws}) that
+# conformance replays with the same probe-per-name requirement plus a
+# registry-equality pin.
 
 # taddr/SMEM-offset retypes (see address_space.jl).
 @inline _tmem(taddr::UInt32) = reinterpret_addrspace(Val(AS.Tmem), taddr)
@@ -71,36 +72,76 @@
 @inline _tc_vec(t::NTuple{N, UInt32}) where {N} =
     ntuple(i -> VecElement(t[i]), Val(N))
 
+# Exact integer-address adapters for the reviewed tcgen05 surface. PTX 9.3
+# §9.7.17 does not give the family one uniform operand convention: most forms
+# bracket operand 1, `dealloc` brackets no operand, and MX block-scale MMA also
+# brackets its scale descriptors plus an optional tensor-memory A operand.
+# Encode the complete Julia signature, including every Address role, so an
+# arity/carrier/role miss reaches the typed-wrapper-only rejection instead of
+# silently shedding one marker and entering generic asm. Generic-address alloc
+# and pointer commit forms need no entry because `address(::Core.LLVMPtr)` is
+# identity.
+#
+# Adapters are emitted by the SAME enumeration that emits (or, for the
+# literal families, sits next to) the primary methods: each registration
+# site calls `_tcgen05_adapter!` with the exact signature it reviewed, and
+# `TCGEN05_INTEGER_ADDRESS_ADAPTERS` at the bottom of this file is the
+# collected result. The independent double-entry copy of this grid lives in
+# test/host/address_roles.jl and pins both the 434 form set and the 1218
+# signature set.
+struct TCGen05IntegerAddressAdapter
+    mods::Tuple{Vararg{Symbol}}
+    argtypes::Tuple{Vararg{Type}}
+end
+
+const _TCGEN05_ADAPTER_SPECS = TCGen05IntegerAddressAdapter[]
+
+# Record the adapter signature and define the Address-unwrapping method that
+# forwards to the primary typed wrapper. Duplicate signatures are rejected
+# when the closed inventory is sealed below.
+function _tcgen05_adapter!(mods::Tuple{Vararg{Symbol}}, argtypes::Type...)
+    push!(_TCGEN05_ADAPTER_SPECS,
+          TCGen05IntegerAddressAdapter(mods, argtypes))
+    names = [gensym(:arg) for _ in argtypes]
+    decls = [:($(names[i])::$(argtypes[i])) for i in eachindex(names)]
+    args = [argtypes[i] <: Address ? :($(names[i]).value) : names[i]
+            for i in eachindex(names)]
+    @eval @inline function (op::Operation{:tcgen05, $mods})($(decls...))
+        op($(args...))
+    end
+    nothing
+end
+
 # --- shift / dealloc / cp -----------------------------------------------------
 
-@inline (::Operation{:tcgen05, (:shift, Symbol("cta_group::1"), :down)})(taddr::UInt32) =
+@inline optype"tcgen05.shift.cta_group::1.down"(taddr::UInt32) =
     nvvm"tcgen05.shift.down.cg1"(_tmem(taddr))
-@inline (::Operation{:tcgen05, (:shift, Symbol("cta_group::2"), :down)})(taddr::UInt32) =
+@inline optype"tcgen05.shift.cta_group::2.down"(taddr::UInt32) =
     nvvm"tcgen05.shift.down.cg2"(_tmem(taddr))
 
-@inline (::Operation{:tcgen05, (:dealloc, Symbol("cta_group::1"), :sync, :aligned, :b32)})(
+@inline optype"tcgen05.dealloc.cta_group::1.sync.aligned.b32"(
         taddr::UInt32, ncols::UInt32) =
     nvvm"tcgen05.dealloc.cg1"(_tmem(taddr), ncols)
-@inline (::Operation{:tcgen05, (:dealloc, Symbol("cta_group::2"), :sync, :aligned, :b32)})(
+@inline optype"tcgen05.dealloc.cta_group::2.sync.aligned.b32"(
         taddr::UInt32, ncols::UInt32) =
     nvvm"tcgen05.dealloc.cg2"(_tmem(taddr), ncols)
 
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("128x256b"))})(
+@inline optype"tcgen05.cp.cta_group::1.128x256b"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x256b.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x256b"))})(
+@inline optype"tcgen05.cp.cta_group::2.128x256b"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x256b.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("4x256b"))})(
+@inline optype"tcgen05.cp.cta_group::1.4x256b"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.4x256b.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("4x256b"))})(
+@inline optype"tcgen05.cp.cta_group::2.4x256b"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.4x256b.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("128x128b"))})(
+@inline optype"tcgen05.cp.cta_group::1.128x128b"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x128b.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x128b"))})(
+@inline optype"tcgen05.cp.cta_group::2.128x128b"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x128b.cg2"(_tmem(taddr), s_desc)
 
@@ -109,103 +150,120 @@
 # `.b8x16.{b6x16_p32,b4x16_p64}` decompression during the copy. The
 # intrinsic names flatten the multicast qualifier into the shape stem
 # (`64x128b_warpx2_02_13`); the notation keeps the ISA's modifier order.
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("128x256b"), :b8x16, :b6x16_p32)})(
+@inline optype"tcgen05.cp.cta_group::1.128x256b.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x256b.b6x16_p32.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x256b"), :b8x16, :b6x16_p32)})(
+@inline optype"tcgen05.cp.cta_group::2.128x256b.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x256b.b6x16_p32.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("128x256b"), :b8x16, :b4x16_p64)})(
+@inline optype"tcgen05.cp.cta_group::1.128x256b.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x256b.b4x16_p64.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x256b"), :b8x16, :b4x16_p64)})(
+@inline optype"tcgen05.cp.cta_group::2.128x256b.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x256b.b4x16_p64.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("4x256b"), :b8x16, :b6x16_p32)})(
+@inline optype"tcgen05.cp.cta_group::1.4x256b.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.4x256b.b6x16_p32.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("4x256b"), :b8x16, :b6x16_p32)})(
+@inline optype"tcgen05.cp.cta_group::2.4x256b.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.4x256b.b6x16_p32.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("4x256b"), :b8x16, :b4x16_p64)})(
+@inline optype"tcgen05.cp.cta_group::1.4x256b.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.4x256b.b4x16_p64.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("4x256b"), :b8x16, :b4x16_p64)})(
+@inline optype"tcgen05.cp.cta_group::2.4x256b.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.4x256b.b4x16_p64.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("128x128b"), :b8x16, :b6x16_p32)})(
+@inline optype"tcgen05.cp.cta_group::1.128x128b.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x128b.b6x16_p32.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x128b"), :b8x16, :b6x16_p32)})(
+@inline optype"tcgen05.cp.cta_group::2.128x128b.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x128b.b6x16_p32.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("128x128b"), :b8x16, :b4x16_p64)})(
+@inline optype"tcgen05.cp.cta_group::1.128x128b.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x128b.b4x16_p64.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("128x128b"), :b8x16, :b4x16_p64)})(
+@inline optype"tcgen05.cp.cta_group::2.128x128b.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.128x128b.b4x16_p64.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("64x128b"), Symbol("warpx2::02_13"))})(
+@inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.64x128b_warpx2_02_13.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("64x128b"), Symbol("warpx2::02_13"))})(
+@inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.64x128b_warpx2_02_13.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("64x128b"), Symbol("warpx2::02_13"), :b8x16, :b6x16_p32)})(
+@inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.64x128b_warpx2_02_13.b6x16_p32.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("64x128b"), Symbol("warpx2::02_13"), :b8x16, :b6x16_p32)})(
+@inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.64x128b_warpx2_02_13.b6x16_p32.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("64x128b"), Symbol("warpx2::02_13"), :b8x16, :b4x16_p64)})(
+@inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.64x128b_warpx2_02_13.b4x16_p64.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("64x128b"), Symbol("warpx2::02_13"), :b8x16, :b4x16_p64)})(
+@inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.64x128b_warpx2_02_13.b4x16_p64.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("64x128b"), Symbol("warpx2::01_23"))})(
+@inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.64x128b_warpx2_01_23.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("64x128b"), Symbol("warpx2::01_23"))})(
+@inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.64x128b_warpx2_01_23.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("64x128b"), Symbol("warpx2::01_23"), :b8x16, :b6x16_p32)})(
+@inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.64x128b_warpx2_01_23.b6x16_p32.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("64x128b"), Symbol("warpx2::01_23"), :b8x16, :b6x16_p32)})(
+@inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.64x128b_warpx2_01_23.b6x16_p32.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("64x128b"), Symbol("warpx2::01_23"), :b8x16, :b4x16_p64)})(
+@inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.64x128b_warpx2_01_23.b4x16_p64.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("64x128b"), Symbol("warpx2::01_23"), :b8x16, :b4x16_p64)})(
+@inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.64x128b_warpx2_01_23.b4x16_p64.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("32x128b"), :warpx4)})(
+@inline optype"tcgen05.cp.cta_group::1.32x128b.warpx4"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.32x128b_warpx4.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("32x128b"), :warpx4)})(
+@inline optype"tcgen05.cp.cta_group::2.32x128b.warpx4"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.32x128b_warpx4.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("32x128b"), :warpx4, :b8x16, :b6x16_p32)})(
+@inline optype"tcgen05.cp.cta_group::1.32x128b.warpx4.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.32x128b_warpx4.b6x16_p32.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("32x128b"), :warpx4, :b8x16, :b6x16_p32)})(
+@inline optype"tcgen05.cp.cta_group::2.32x128b.warpx4.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.32x128b_warpx4.b6x16_p32.cg2"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::1"), Symbol("32x128b"), :warpx4, :b8x16, :b4x16_p64)})(
+@inline optype"tcgen05.cp.cta_group::1.32x128b.warpx4.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.32x128b_warpx4.b4x16_p64.cg1"(_tmem(taddr), s_desc)
-@inline (::Operation{:tcgen05, (:cp, Symbol("cta_group::2"), Symbol("32x128b"), :warpx4, :b8x16, :b4x16_p64)})(
+@inline optype"tcgen05.cp.cta_group::2.32x128b.warpx4.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
     nvvm"tcgen05.cp.32x128b_warpx4.b4x16_p64.cg2"(_tmem(taddr), s_desc)
+
+# Integer-address adapters for the literal shift/cp methods above (dealloc
+# takes a bare register per PTX 9.3 §9.7.17.7.1 — no adapter).
+for cg in 1:2
+    cta = Symbol("cta_group::", cg)
+    _tcgen05_adapter!((:shift, cta, :down), Address{UInt32})
+    for shapemods in ((Symbol("128x256b"),), (Symbol("4x256b"),),
+                      (Symbol("128x128b"),),
+                      (Symbol("64x128b"), Symbol("warpx2::02_13")),
+                      (Symbol("64x128b"), Symbol("warpx2::01_23")),
+                      (Symbol("32x128b"), :warpx4)),
+            fmt in ((), (:b8x16, :b6x16_p32), (:b8x16, :b4x16_p64))
+        _tcgen05_adapter!((:cp, cta, shapemods..., fmt...),
+                          Address{UInt32}, UInt64)
+    end
+end
+
 # --- ld / st (Table 52 expansion, generated) ------------------------------------
 #
 # The full grid is `shape × count × {plain, repack}` for both ld and st,
-# generated from one spec (`_TCGEN05_LDST_SHAPES`, also consumed by the
-# integer-address adapter registry below) — 148 methods over 74 tier-2
-# names. `TCGEN05_LDST_INTRINSIC_NAMES` records every name for the
-# conformance replay (the dense-mma standing guarantee):
+# generated from one spec (`_TCGEN05_LDST_SHAPES`) — 148 methods over 74
+# tier-2 names, each with its integer-address adapter emitted by the same
+# registration call. The wrapper registry (family :tcgen05_ldst) records
+# every name for the conformance replay (the dense-mma standing guarantee):
 # test/host/conformance.jl requires a selection probe per recorded name
 # and pins the name set against the NVVM registry, so a grid edit here
 # without a matching probe edit is loud.
@@ -225,8 +283,6 @@ const _TCGEN05_LDST_SHAPES = (
     (Symbol("16x32bx2"), 1, (1, 2, 4, 8, 16, 32, 64, 128), true),
 )
 
-const TCGEN05_LDST_INTRINSIC_NAMES = String[]
-
 function _tcgen05_ldst_register(op::Symbol, shape::Symbol, base::Int,
                                 count::Int, split::Bool, repack::Bool)
     n = base * count
@@ -234,24 +290,22 @@ function _tcgen05_ldst_register(op::Symbol, shape::Symbol, base::Int,
         (Symbol(op === :ld ? "pack::16b" : "unpack::16b"),) : ()
     mods = (op, :sync, :aligned, shape, Symbol("x", count), flag..., :b32)
     name = "llvm.nvvm.tcgen05.$op.$shape.x$count"
-    # Generated names bypass the nvvm"" macro's expansion-time check;
-    # keep its can't-survive-load property here.
-    NVVM.isintrinsic(name) ||
-        error("tcgen05 ld/st generator built an unregistered name: $name")
-    name in TCGEN05_LDST_INTRINSIC_NAMES ||
-        push!(TCGEN05_LDST_INTRINSIC_NAMES, name)
-    call = NVVM.IntrinsicCall{Symbol(name)}()
+    call = wrapper_intrinsic_call(:tcgen05_ldst, :tcgen05, mods, name)
     hso_decl = split ? (:(halfsplitoff::Val),) : ()
     hso_arg  = split ? (:halfsplitoff,) : ()
+    hso_T    = split ? (Val,) : ()
     if op === :ld
         @eval @inline (::Operation{:tcgen05, $mods})(
                 taddr::UInt32, $(hso_decl...)) =
             _tc_unvec($call(_tmem(taddr), $(hso_arg...), Val($repack)))
+        _tcgen05_adapter!(mods, Address{UInt32}, hso_T...)
     else
         src = n == 1 ? :(src[1]) : :(_tc_vec(src))
         @eval @inline (::Operation{:tcgen05, $mods})(
                 taddr::UInt32, $(hso_decl...), src::NTuple{$n, UInt32}) =
             $call(_tmem(taddr), $(hso_arg...), $src, Val($repack))
+        _tcgen05_adapter!(mods, Address{UInt32}, hso_T...,
+                          NTuple{n, UInt32})
     end
     nothing
 end
@@ -333,45 +387,63 @@ end
         mbar::UInt32, mask::Integer) =
     nvvm"tcgen05.commit.mc.shared.cg2"(_tc_smem(mbar), UInt16(mask))
 
+# Integer-address adapters for the literal alloc/commit methods above.
+# The generic-address alloc and pointer commit forms need no entry because
+# `address(::Core.LLVMPtr)` is identity.
+for cg in 1:2
+    cta = Symbol("cta_group::", cg)
+    _tcgen05_adapter!((:alloc, cta, :sync, :aligned,
+                       Symbol("shared::cta"), :b32),
+                      Address{UInt32}, UInt32)
+    for space in (Symbol("shared::cta"), Symbol("shared::cluster"))
+        _tcgen05_adapter!((:commit, cta, Symbol("mbarrier::arrive::one"),
+                           space, :b64), Address{UInt32})
+    end
+    _tcgen05_adapter!((:commit, cta, Symbol("mbarrier::arrive::one"),
+                       Symbol("multicast::cluster"),
+                       Symbol("shared::cluster"), :b64),
+                      Address{UInt32}, Integer)
+end
+
 # --- dense mma (A from SMEM descriptor) ----------------------------------------
 # kind immarg: 0=f16, 1=tf32, 2=f8f6f4, 3=i8; collector_usage 0 = discard
 # (the ISA default, now spelled explicitly in the output).
-@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::f16"))})(
+@inline optype"tcgen05.mma.cta_group::1.kind::f16"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
                              Val(0), Val(1), Val(0))
-@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::f16"))})(
+@inline optype"tcgen05.mma.cta_group::2.kind::f16"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
                              Val(0), Val(2), Val(0))
-@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::tf32"))})(
+@inline optype"tcgen05.mma.cta_group::1.kind::tf32"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
                              Val(1), Val(1), Val(0))
-@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::tf32"))})(
+@inline optype"tcgen05.mma.cta_group::2.kind::tf32"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
                              Val(1), Val(2), Val(0))
-@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::f8f6f4"))})(
+@inline optype"tcgen05.mma.cta_group::1.kind::f8f6f4"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
                              Val(2), Val(1), Val(0))
-@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::f8f6f4"))})(
+@inline optype"tcgen05.mma.cta_group::2.kind::f8f6f4"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
                              Val(2), Val(2), Val(0))
-@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::1"), Symbol("kind::i8"))})(
+@inline optype"tcgen05.mma.cta_group::1.kind::i8"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
                              Val(3), Val(1), Val(0))
-@inline (::Operation{:tcgen05, (:mma, Symbol("cta_group::2"), Symbol("kind::i8"))})(
+@inline optype"tcgen05.mma.cta_group::2.kind::i8"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
@@ -390,8 +462,8 @@ end
 # positional after enable-input-d). Notation keeps the ISA order
 # `kind{.ashift}{.collector::a::op}`; ISel renders the collector before
 # `.ashift` — same accepted non-WYSIWYG rendering class as commit's
-# multicast. Methods are generated from one spec;
-# TCGEN05_MMA_DENSE_INTRINSIC_NAMES records every tier-2 name for the
+# multicast. Methods are generated from one spec; the wrapper registry
+# (family :tcgen05_mma_dense) records every tier-2 name for the
 # conformance replay (the mma.jl generated-family standing guarantee).
 #
 # Empirical NVVM collector enum (llc 22.1.7): 0=discard, 1=lastuse,
@@ -402,8 +474,6 @@ const _TCGEN05_DENSE_KINDS =
 const _TCGEN05_DENSE_COLLECTORS =
     ((nothing, 0), (Symbol("collector::a::lastuse"), 1),
      (Symbol("collector::a::fill"), 2), (Symbol("collector::a::use"), 3))
-
-const TCGEN05_MMA_DENSE_INTRINSIC_NAMES = String[]
 
 function _tcgen05_dense_register(kind::Symbol, kindval::Int, scale_ok::Bool,
                                  cg::Int, tmem_a::Bool, ashift::Bool,
@@ -416,10 +486,20 @@ function _tcgen05_dense_register(kind::Symbol, kindval::Int, scale_ok::Bool,
     sh = ashift ? ".ashift" : ""
     aT = tmem_a ? UInt32 : UInt64
     aexpr = tmem_a ? :(_tmem(a)) : :a
-    function reg(name)
-        name in TCGEN05_MMA_DENSE_INTRINSIC_NAMES ||
-            push!(TCGEN05_MMA_DENSE_INTRINSIC_NAMES, name)
-        NVVM.IntrinsicCall{Symbol(name)}()
+    reg(name) = wrapper_intrinsic_call(:tcgen05_mma_dense, :tcgen05,
+                                       mods, name)
+
+    # Integer-address adapters for every cell of this grid, including the
+    # SMEM-A discard base cell whose primary method is one of the literal
+    # methods above (the adapter forwards through ordinary dispatch).
+    A32 = Address{UInt32}
+    aA = tmem_a ? A32 : UInt64
+    maskT = NTuple{maskN, UInt32}
+    _tcgen05_adapter!(mods, A32, aA, UInt64, UInt32, Bool)
+    _tcgen05_adapter!(mods, A32, aA, UInt64, UInt32, maskT, Bool)
+    if scale_ok
+        _tcgen05_adapter!(mods, A32, aA, UInt64, UInt32, Bool, Val)
+        _tcgen05_adapter!(mods, A32, aA, UInt64, UInt32, maskT, Bool, Val)
     end
 
     # [d], a, b, idesc, enable — the literal SMEM-A discard methods above
@@ -484,8 +564,6 @@ end
 # reorder. Kinds, collector enum, .ashift restrictions, mask widths, and
 # scale-input-d legality are identical to dense. The sp block-scale (MX)
 # records stay outside this family, like their dense counterparts.
-const TCGEN05_MMA_SP_DENSE_INTRINSIC_NAMES = String[]
-
 function _tcgen05_sp_register(kind::Symbol, kindval::Int, scale_ok::Bool,
                               cg::Int, tmem_a::Bool, ashift::Bool,
                               collmod, collval::Int)
@@ -497,10 +575,20 @@ function _tcgen05_sp_register(kind::Symbol, kindval::Int, scale_ok::Bool,
     sh = ashift ? ".ashift" : ""
     aT = tmem_a ? UInt32 : UInt64
     aexpr = tmem_a ? :(_tmem(a)) : :a
-    function reg(name)
-        name in TCGEN05_MMA_SP_DENSE_INTRINSIC_NAMES ||
-            push!(TCGEN05_MMA_SP_DENSE_INTRINSIC_NAMES, name)
-        NVVM.IntrinsicCall{Symbol(name)}()
+    reg(name) = wrapper_intrinsic_call(:tcgen05_mma_sp, :tcgen05,
+                                       mods, name)
+
+    # Integer-address adapters, mirroring dense with the sp-meta TMEM
+    # address between the B descriptor and idesc.
+    A32 = Address{UInt32}
+    aA = tmem_a ? A32 : UInt64
+    maskT = NTuple{maskN, UInt32}
+    _tcgen05_adapter!(mods, A32, aA, UInt64, A32, UInt32, Bool)
+    _tcgen05_adapter!(mods, A32, aA, UInt64, A32, UInt32, maskT, Bool)
+    if scale_ok
+        _tcgen05_adapter!(mods, A32, aA, UInt64, A32, UInt32, Bool, Val)
+        _tcgen05_adapter!(mods, A32, aA, UInt64, A32, UInt32, maskT, Bool,
+                          Val)
     end
 
     # [d], a, b, [sp-meta], idesc, enable
@@ -578,8 +666,6 @@ const _TCGEN05_WS_COLLECTORS = begin
     Tuple(out)
 end
 
-const TCGEN05_MMA_WS_INTRINSIC_NAMES = String[]
-
 function _tcgen05_ws_register(kind::Symbol, kindval::Int, sp::Bool,
                               tmem_a::Bool, collmod, bufval::Int,
                               opval::Int)
@@ -592,11 +678,16 @@ function _tcgen05_ws_register(kind::Symbol, kindval::Int, sp::Bool,
     aexpr = tmem_a ? :(_tmem(a)) : :a
     meta_arg = sp ? (:(sp_meta::UInt32),) : ()
     meta_val = sp ? (:(_tmem(sp_meta)),) : ()
-    function reg(name)
-        name in TCGEN05_MMA_WS_INTRINSIC_NAMES ||
-            push!(TCGEN05_MMA_WS_INTRINSIC_NAMES, name)
-        NVVM.IntrinsicCall{Symbol(name)}()
-    end
+    reg(name) = wrapper_intrinsic_call(:tcgen05_mma_ws, :tcgen05,
+                                       mods, name)
+
+    # Integer-address adapters: base form and trailing zero-column-mask.
+    A32 = Address{UInt32}
+    aA = tmem_a ? A32 : UInt64
+    meta_A = sp ? (A32,) : ()
+    _tcgen05_adapter!(mods, A32, aA, UInt64, meta_A..., UInt32, Bool)
+    _tcgen05_adapter!(mods, A32, aA, UInt64, meta_A..., UInt32, Bool,
+                      UInt64)
 
     # [d], a, b{, [sp-meta]}, idesc, enable
     call = reg(stem)
@@ -654,7 +745,14 @@ function _tcgen05_mx_register(kind::Symbol, scale::Symbol, cta_group::Int)
     cg = Symbol("cta_group::", cta_group)
     kmod = Symbol("kind::", kind)
     mods = (:mma, cg, kmod, :block_scale, scale)
+    register_wrapper!(:tcgen05_mx, :tcgen05, mods, :asm)
     head = "tcgen05.mma.$cg.$kmod.block_scale.$scale"
+
+    # Integer-address adapters: both scale descriptors are bracketed TMEM
+    # addresses, and the A operand may itself be a TMEM address.
+    A32 = Address{UInt32}
+    _tcgen05_adapter!(mods, A32, UInt64, UInt64, UInt32, A32, A32, Bool)
+    _tcgen05_adapter!(mods, A32, A32, UInt64, UInt32, A32, A32, Bool)
 
     # Shared-memory A descriptor form.
     let asm = "$head [\$0], \$1, \$2, \$3, [\$4], [\$5], \$6;",
@@ -694,120 +792,16 @@ for (kind, scale_vec, block) in _TCGEN05_MX_SCALE_VARIANTS,
     _tcgen05_mx_register(kind, scale, cta_group)
 end
 
-# Exact integer-address adapters for the reviewed tcgen05 surface. PTX 9.3
-# §9.7.17 does not give the family one uniform operand convention: most forms
-# bracket operand 1, `dealloc` brackets no operand, and MX block-scale MMA also
-# brackets its scale descriptors plus an optional tensor-memory A operand.
-# Encode the complete Julia signature, including every Address role, so an
-# arity/carrier/role miss reaches the typed-wrapper-only rejection instead of
-# silently shedding one marker and entering generic asm. Generic-address alloc
-# and pointer commit forms need no entry because `address(::Core.LLVMPtr)` is
-# identity.
-struct TCGen05IntegerAddressAdapter
-    mods::Tuple{Vararg{Symbol}}
-    argtypes::Tuple{Vararg{Type}}
-end
-
-const TCGEN05_INTEGER_ADDRESS_ADAPTERS = let
-    specs = TCGen05IntegerAddressAdapter[]
-    A32 = Address{UInt32}
-    add(mods, argtypes) =
-        push!(specs, TCGen05IntegerAddressAdapter(mods, argtypes))
-    for cg in 1:2
-        cta = Symbol("cta_group::", cg)
-        add((:shift, cta, :down), (A32,))
-        for shapemods in ((Symbol("128x256b"),), (Symbol("4x256b"),),
-                          (Symbol("128x128b"),),
-                          (Symbol("64x128b"), Symbol("warpx2::02_13")),
-                          (Symbol("64x128b"), Symbol("warpx2::01_23")),
-                          (Symbol("32x128b"), :warpx4)),
-                fmt in ((), (:b8x16, :b6x16_p32), (:b8x16, :b4x16_p64))
-            add((:cp, cta, shapemods..., fmt...), (A32, UInt64))
-        end
-    end
-    for (shape, base, counts, has_split) in _TCGEN05_LDST_SHAPES
-        split = has_split ? (Val,) : ()
-        for count in counts, op in (:ld, :st), repack in (false, true)
-            flag = repack ?
-                (Symbol(op === :ld ? "pack::16b" : "unpack::16b"),) : ()
-            mods = (op, :sync, :aligned, shape, Symbol("x", count),
-                    flag..., :b32)
-            if op === :ld
-                add(mods, (A32, split...))
-            else
-                add(mods, (A32, split..., NTuple{base * count, UInt32}))
-            end
-        end
-    end
-    for cg in 1:2
-        cta = Symbol("cta_group::", cg)
-        add((:alloc, cta, :sync, :aligned,
-             Symbol("shared::cta"), :b32), (A32, UInt32))
-        for space in (Symbol("shared::cta"), Symbol("shared::cluster"))
-            add((:commit, cta, Symbol("mbarrier::arrive::one"), space, :b64),
-                (A32,))
-        end
-        add((:commit, cta, Symbol("mbarrier::arrive::one"),
-             Symbol("multicast::cluster"),
-             Symbol("shared::cluster"), :b64), (A32, Integer))
-        for (kind, _, scale_ok) in _TCGEN05_DENSE_KINDS,
-                (collmod, collval) in _TCGEN05_DENSE_COLLECTORS,
-                (tmem_a, ashift) in ((false, false), (true, false),
-                                     (true, true))
-            ashift && collval >= 2 && continue
-            mods = (:mma, cta, Symbol("kind::", kind),
-                    (ashift ? (:ashift,) : ())...,
-                    (collmod === nothing ? () : (collmod,))...)
-            aT = tmem_a ? A32 : UInt64
-            maskT = NTuple{cg == 1 ? 4 : 8, UInt32}
-            add(mods, (A32, aT, UInt64, UInt32, Bool))
-            add(mods, (A32, aT, UInt64, UInt32, maskT, Bool))
-            if scale_ok
-                add(mods, (A32, aT, UInt64, UInt32, Bool, Val))
-                add(mods, (A32, aT, UInt64, UInt32, maskT, Bool, Val))
-            end
-            spmods = (:mma, :sp, mods[2:end]...)
-            add(spmods, (A32, aT, UInt64, A32, UInt32, Bool))
-            add(spmods, (A32, aT, UInt64, A32, UInt32, maskT, Bool))
-            if scale_ok
-                add(spmods, (A32, aT, UInt64, A32, UInt32, Bool, Val))
-                add(spmods, (A32, aT, UInt64, A32, UInt32, maskT, Bool, Val))
-            end
-        end
-    end
-    for (kind, _, _) in _TCGEN05_DENSE_KINDS, sp in (false, true),
-            tmem_a in (false, true),
-            (collmod, _, _) in _TCGEN05_WS_COLLECTORS
-        mods = (:mma, :ws, (sp ? (:sp,) : ())..., Symbol("cta_group::1"),
-                Symbol("kind::", kind),
-                (collmod === nothing ? () : (collmod,))...)
-        aT = tmem_a ? A32 : UInt64
-        meta = sp ? (A32,) : ()
-        add(mods, (A32, aT, UInt64, meta..., UInt32, Bool))
-        add(mods, (A32, aT, UInt64, meta..., UInt32, Bool, UInt64))
-    end
-    for (kind, scale_vec, block) in _TCGEN05_MX_SCALE_VARIANTS,
-            scale in (scale_vec, block), cg in 1:2
-        mods = (:mma, Symbol("cta_group::", cg), Symbol("kind::", kind),
-                :block_scale, scale)
-        add(mods, (A32, UInt64, UInt64, UInt32, A32, A32, Bool))
-        add(mods, (A32, A32, UInt64, UInt32, A32, A32, Bool))
-    end
+# Seal the derived adapter inventory. Every signature above was emitted by
+# the same enumeration that registered (or accompanies) its primary method,
+# so this closed set cannot drift from the typed surface; the independent
+# oracle in test/host/address_roles.jl pins its 434 forms / 1218 signatures.
+const TCGEN05_INTEGER_ADDRESS_ADAPTERS = let specs = _TCGEN05_ADAPTER_SPECS
     keys = ((s.mods, s.argtypes) for s in specs)
-    allunique(keys) || error("duplicate tcgen05 integer-address adapter signature")
+    allunique(keys) ||
+        error("duplicate tcgen05 integer-address adapter signature")
     Tuple(specs)
 end
 
 const TCGEN05_INTEGER_ADDRESS_FORMS =
     Tuple(unique(s.mods for s in TCGEN05_INTEGER_ADDRESS_ADAPTERS))
-
-for spec in TCGEN05_INTEGER_ADDRESS_ADAPTERS
-    mods, argtypes = spec.mods, spec.argtypes
-    names = [gensym(:arg) for _ in argtypes]
-    decls = [:($(names[i])::$(argtypes[i])) for i in eachindex(argtypes)]
-    args = [argtypes[i] <: Address ? :($(names[i]).value) : names[i]
-            for i in eachindex(argtypes)]
-    @eval @inline function (op::Operation{:tcgen05, $mods})($(decls...))
-        op($(args...))
-    end
-end

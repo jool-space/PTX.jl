@@ -56,7 +56,7 @@ _t5_sp_mods(cg, kind; ashift = false, coll = nothing) =
                    if startswith(name, "llvm.nvvm.tcgen05.mma.sp.") &&
                       !occursin("block_scale", name))
     @test reviewed == registry
-    @test reviewed == Set(PTX.TCGEN05_MMA_SP_DENSE_INTRINSIC_NAMES)
+    @test reviewed == Set(PTX.wrapper_intrinsic_names(:tcgen05_mma_sp))
     @test length(reviewed) == 18
 
     # ashift records restrict the collector immarg to [0, 2).

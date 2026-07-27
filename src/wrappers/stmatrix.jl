@@ -12,33 +12,33 @@
 #     generator's non-trans m16n8 forms were ptxas-invalid (`.trans` is
 #     mandatory for the shape) — removed, not migrated.
 
-@inline (::Operation{:stmatrix, (:sync, :aligned, :m8n8, :x1, :shared, :b16)})(
+@inline optype"stmatrix.sync.aligned.m8n8.x1.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}, reg::UInt32) where T =
     nvvm"stmatrix.sync.aligned.m8n8.x1.b16"(addr, reg)
-@inline (::Operation{:stmatrix, (:sync, :aligned, :m8n8, :x1, :trans, :shared, :b16)})(
+@inline optype"stmatrix.sync.aligned.m8n8.x1.trans.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}, reg::UInt32) where T =
     nvvm"stmatrix.sync.aligned.m8n8.x1.trans.b16"(addr, reg)
-@inline (::Operation{:stmatrix, (:sync, :aligned, :m8n8, :x2, :shared, :b16)})(
+@inline optype"stmatrix.sync.aligned.m8n8.x2.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}, regs::NTuple{2, UInt32}) where T =
     nvvm"stmatrix.sync.aligned.m8n8.x2.b16"(addr, regs[1], regs[2])
-@inline (::Operation{:stmatrix, (:sync, :aligned, :m8n8, :x2, :trans, :shared, :b16)})(
+@inline optype"stmatrix.sync.aligned.m8n8.x2.trans.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}, regs::NTuple{2, UInt32}) where T =
     nvvm"stmatrix.sync.aligned.m8n8.x2.trans.b16"(addr, regs[1], regs[2])
-@inline (::Operation{:stmatrix, (:sync, :aligned, :m8n8, :x4, :shared, :b16)})(
+@inline optype"stmatrix.sync.aligned.m8n8.x4.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}, regs::NTuple{4, UInt32}) where T =
     nvvm"stmatrix.sync.aligned.m8n8.x4.b16"(addr, regs[1], regs[2], regs[3], regs[4])
-@inline (::Operation{:stmatrix, (:sync, :aligned, :m8n8, :x4, :trans, :shared, :b16)})(
+@inline optype"stmatrix.sync.aligned.m8n8.x4.trans.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}, regs::NTuple{4, UInt32}) where T =
     nvvm"stmatrix.sync.aligned.m8n8.x4.trans.b16"(addr, regs[1], regs[2], regs[3], regs[4])
 
 # b8 shape (sm_100a family).
-@inline (::Operation{:stmatrix, (:sync, :aligned, :m16n8, :x1, :trans, :shared, :b8)})(
+@inline optype"stmatrix.sync.aligned.m16n8.x1.trans.shared.b8"(
         addr::Core.LLVMPtr{T, AS.Shared}, reg::UInt32) where T =
     nvvm"stmatrix.sync.aligned.m16n8.x1.trans.b8"(addr, reg)
-@inline (::Operation{:stmatrix, (:sync, :aligned, :m16n8, :x2, :trans, :shared, :b8)})(
+@inline optype"stmatrix.sync.aligned.m16n8.x2.trans.shared.b8"(
         addr::Core.LLVMPtr{T, AS.Shared}, regs::NTuple{2, UInt32}) where T =
     nvvm"stmatrix.sync.aligned.m16n8.x2.trans.b8"(addr, regs[1], regs[2])
-@inline (::Operation{:stmatrix, (:sync, :aligned, :m16n8, :x4, :trans, :shared, :b8)})(
+@inline optype"stmatrix.sync.aligned.m16n8.x4.trans.shared.b8"(
         addr::Core.LLVMPtr{T, AS.Shared}, regs::NTuple{4, UInt32}) where T =
     nvvm"stmatrix.sync.aligned.m16n8.x4.trans.b8"(addr, regs[1], regs[2], regs[3], regs[4])
 

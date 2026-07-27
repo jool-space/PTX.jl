@@ -72,8 +72,6 @@ function _scalar_extended_spec(head::String, ::Type{T}, value_inputs::Int;
     (; asm, constraints, rettype, argtype)
 end
 
-const EXTENDED_PRECISION_WRAPPER_FORMS = Tuple{Symbol, Tuple{Vararg{Symbol}}}[]
-
 function _register_scalar_extended(op::Symbol, mods::Tuple{Vararg{Symbol}},
                                    head::String, ::Type{T}, value_inputs::Int;
                                    carry_in::Bool, carry_out::Bool,
@@ -87,11 +85,11 @@ function _register_scalar_extended(op::Symbol, mods::Tuple{Vararg{Symbol}},
     carry_in && push!(signature, :(carry::Bool))
     callargs = Any[args...]
     carry_in && push!(callargs, :carry)
+    register_wrapper!(:extended_precision, op, mods, :asm)
     @eval function (::Operation{$(QuoteNode(op)), $mods})($(signature...))
         Base.@inline
         @asmcall($asm, $constraints, true, $rettype, $argtype, $(callargs...))
     end
-    push!(EXTENDED_PRECISION_WRAPPER_FORMS, (op, mods))
     nothing
 end
 

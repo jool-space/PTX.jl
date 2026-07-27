@@ -18,6 +18,22 @@ auditable table in `src/ledgers/forms.jl`.
 PTX.form_contract
 ```
 
+## Wrapper registry
+
+Every typed wrapper method registers a record (family, op, mods, tier,
+intrinsic) through one entry point; the accessors below are what the
+conformance and coverage tests query instead of per-family bookkeeping
+constants.
+
+```@docs
+PTX.register_wrapper!
+PTX.wrapper_records
+PTX.wrapper_intrinsic_names
+PTX.wrapper_asm_forms
+PTX.wrapper_missing_intrinsics
+PTX.wrapper_intrinsic_call
+```
+
 ## Lowering reflection
 
 Ask any operation what it will actually become — which lowering tier a
