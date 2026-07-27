@@ -94,10 +94,22 @@ end
 # Wall-clock timing. Forward-attention FLOPs = 4·bh·S²·D (2 matmuls of
 # 2·S²·D each); softmax flops excluded by convention (matches FA papers).
 function fab_time(cfg = FAB_CFG_DEFAULT; B = 1, H = 16, S = 4096,
-                  input_scale = 0.5f0, iters = 20, warmup = 3)
+                  input_scale = 0.5f0, iters = 20, warmup = 3,
+                  warm_ms = 25.0)
     p = fab_setup(B, H, S; input_scale, cfg)
-    for _ in 1:warmup
+    # Warm the DEVICE, not just the code path. After the GPU idles (e.g.
+    # through fab_check's CPU reference, or a REPL pause) clocks drop to an
+    # idle P-state, and a few-launch warmup (~70 µs of work) does not ramp
+    # them — the whole timed batch then executes at idle clocks and reads
+    # ~40x slow (observed on B200: the sweep's first cell showed 7 TF for a
+    # 380 TF shape, reproducibly, because it is always the first batch after
+    # an idle gap). Spin launches for at least `warm_ms` of wall time, with
+    # `warmup` as the minimum launch count.
+    t_warm = time_ns()
+    launches = 0
+    while launches < warmup || (time_ns() - t_warm) < warm_ms * 1e6
         p.launch!()
+        launches += 1
     end
     CUDACore.synchronize()
     t0 = time_ns()
