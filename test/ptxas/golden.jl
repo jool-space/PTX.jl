@@ -557,3 +557,15 @@ end
                             CuDeviceVector{UInt32, 1},
                             CuDeviceVector{UInt16, 1}}; cap = v"7.0")
 end
+
+# Must stay the last testset in this file: GOLDEN_SEEN accumulates as the
+# golden_test calls above execute, and this compares the committed directory
+# against the exercised set in both directions. An orphaned .ptx (its testset
+# deleted) and a never-committed baseline are equally invisible without it.
+@testset "golden directory has no orphans" begin
+    committed = Set(readdir(GOLDEN_DIR))
+    @test committed == GOLDEN_SEEN
+    for orphan in sort!(collect(setdiff(committed, GOLDEN_SEEN)))
+        @error "golden baseline with no golden_test call" orphan
+    end
+end

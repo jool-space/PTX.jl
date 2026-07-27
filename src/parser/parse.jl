@@ -9,7 +9,7 @@ using ..IR: Module, Version, Target, AddressSize, TargetDirective, FormattingInf
             VectorOperand, AddressOperand, ParenthesizedOperand,
             NegatedOperand, PipeOperand, Predicate,
             Param, FunctionDirective, Function,
-            ScalarType, StateSpace, VectorShape, LinkingDirective,
+            StateSpace, VectorShape, LinkingDirective,
             scalar_type_from_ptx, vector_shape_from_ptx,
             validate_vector_declaration,
             state_space_from_ptx, linking_from_ptx
