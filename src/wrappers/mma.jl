@@ -250,8 +250,8 @@ function _mma_register_asm(mods, shape, a_ty, b_ty, c_ty, kind,
                             fill(cd_let, n_cd), ["~{memory}"]), ",")
     flat = vcat(fill(ab_J, n_a + n_b), fill(cd_J, n_cd))
     # mma.sync is warp-collective — emitted with a `convergent` call-site
-    # attribute, same reasoning as wgmma (see inst.jl, "convergent inline
-    # asm"). @asmcall can't attach it.
+    # attribute, same reasoning as wgmma (see src/dsl/convergent_asm.jl,
+    # "convergent inline asm"). @asmcall can't attach it.
     cdT = c_ty === :f32 ? Float32 : c_ty === :f64 ? Float64 : UInt32
     abT = a_ty === :f64 ? Float64 : UInt32
     flat_types = vcat(fill(abT, n_a + n_b), fill(cdT, n_cd))

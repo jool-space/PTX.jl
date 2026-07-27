@@ -233,7 +233,7 @@ end
 end
 
 @testset "infer_rettype + registry returns gate" begin
-    # Sink forms carry `returns=false` in the form registry (src/forms.jl),
+    # Sink forms carry `returns=false` in the form registry (src/ledgers/forms.jl),
     # suppressing the trailing-dtype rule. `st.global.b32` ends in :b32 but
     # the value is being *written*, not returned — so rettype must be Nothing.
     @test PTX.infer_rettype(:st, (:global, :b32)) === Nothing
@@ -452,5 +452,5 @@ end
 
     # binding metadata: which method won dispatch
     @test L(ptx"fabric.submit", ()).method.module == PTX
-    @test endswith(String(L(ptx"add.f32", (Float32, Float32)).method.file), "inst.jl")
+    @test endswith(String(L(ptx"add.f32", (Float32, Float32)).method.file), "entries.jl")
 end

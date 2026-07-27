@@ -6,5 +6,7 @@ using Republic: @public
 include("tokens.jl")
 include("lexer.jl")
 include("parse.jl")
+include("targets.jl")
+include("recovery.jl")
 
 end # module Parser

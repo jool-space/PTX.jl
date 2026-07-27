@@ -2,7 +2,7 @@
 # is `.b8`, but NVPTX has no i8 constraint letter — bridge through a UInt16
 # carrier with a `.reg .b8` plus `mov.b16` brace pair on either side (mirrors
 # NVIDIA's `__nv_cvt_*` shims in <cuda_fp4.hpp>). All other cvt forms flow
-# through the chain default in src/inst.jl.
+# through the chain default in src/dsl/entries.jl.
 
 @inline (::Operation{:cvt, (:rn, :satfinite, :e2m1x2, :f32)})(a::Float32, b::Float32) =
     @asmcall("{ .reg .b8 t; cvt.rn.satfinite.e2m1x2.f32 t, \$1, \$2; mov.b16 \$0, {t, 0}; }",

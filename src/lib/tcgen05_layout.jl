@@ -1,6 +1,6 @@
 # Blackwell tcgen05 TMEM addressing + K-major swizzle / layout helpers.
 #
-# Companion to src/wgmma_layout.jl (the sm_90a analogue). tcgen05_descriptor.jl
+# Companion to src/lib/wgmma_layout.jl (the sm_90a analogue). tcgen05_descriptor.jl
 # is the *bit-packer*; this is the *layout-picking* + index-math layer that
 # friction #1 of BLACKWELL_INTERFACE_NOTES.md flagged as missing — every
 # kernel was hand-passing `leading_bytes=16, stride_bytes=K*16` and inlining

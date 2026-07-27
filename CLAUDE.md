@@ -34,7 +34,7 @@ structure is documented in `docs/src/internals.md`; this file is about how to
 
 ## The form registry is a review boundary
 
-- An opcode absent from `FORMS` (src/forms.jl) errors at compile time — by
+- An opcode absent from `FORMS` (src/ledgers/forms.jl) errors at compile time — by
   design. Adding an entry is a review act: check the ISA for memory effects,
   cross-lane (convergent) semantics, and whether the chain tail names a
   result or an operand. A wrong promise in the permissive direction is a

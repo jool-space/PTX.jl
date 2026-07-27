@@ -1,7 +1,7 @@
 # PTX 9.3 §9.7.2: these are the only instruction families that access the
 # implicit condition-code flag CC.CF.  Keep this predicate independent of the
 # lowering registry: the parser/code generator needs the same semantic boundary
-# before `forms.jl` and `inst.jl` are loaded.
+# before `ledgers/forms.jl` and the `dsl/` chain machinery are loaded.
 _cc_modifier(m::Symbol) = m === :cc
 _cc_modifier(m::AbstractString) = m == "cc" || m == ".cc"
 

@@ -11,7 +11,7 @@
 # branch of `cute/atom/mma_traits_sm90_gmma.hpp::make_gmma_desc`.
 #
 # Output is plugged into the existing `wgmma_descriptor(...)` builder
-# (see src/wgmma_descriptor.jl): `swizzle = layout.swizzle_code`,
+# (see src/lib/wgmma_descriptor.jl): `swizzle = layout.swizzle_code`,
 # `leading_byte_offset = layout.leading_byte_offset`,
 # `stride_byte_offset = layout.stride_byte_offset`. The `tma_swizzle` /
 # `smem_swizzle` symbols feed the host-side TMA encoder + smem allocator

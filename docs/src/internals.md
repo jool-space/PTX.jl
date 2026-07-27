@@ -12,7 +12,7 @@ surface is the [Reference](reference.md) page.
 
 The blessing boundary's data: every promise the chain default makes to
 the optimizer (purity, memory effects, convergence) lives in one
-auditable table in `src/forms.jl`.
+auditable table in `src/ledgers/forms.jl`.
 
 ```@docs
 PTX.form_contract

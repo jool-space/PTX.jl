@@ -72,7 +72,7 @@ end
         op = Operation{:mma, mods}()
         info = PTX.lowering(op, argtypes)
         @test info.tier === :forbidden
-        @test endswith(String(which(op, argtypes).file), "inst.jl")
+        @test endswith(String(which(op, argtypes).file), "entries.jl")
     end
 
     op = Operation{:mma, first(first(bad))}()

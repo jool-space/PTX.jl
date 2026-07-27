@@ -35,7 +35,7 @@ test-side oracles (see [Count pins and oracles](#count-pins-and-oracles)).
 
 ## Recipe A: blessing a chain opcode (`FORMS` entry)
 
-Adding an entry to `FORMS` in `src/forms.jl` is a review act, not a
+Adding an entry to `FORMS` in `src/ledgers/forms.jl` is a review act, not a
 mechanical step. For the opcode (and any mods-prefix overrides) decide,
 against the PTX ISA section:
 
@@ -68,7 +68,7 @@ Files touched, in order:
    `nvvm"..."` literal out (no name-building loops) — the conformance
    scan greps for them. Guard registration with `NVVM.isintrinsic` when
    the method should fall back to asm on older registries.
-2. `src/forms.jl` — only if the opcode itself is new (the wrapper still
+2. `src/ledgers/forms.jl` — only if the opcode itself is new (the wrapper still
    needs the family's contract for the transpiler and reflection).
 3. `test/host/conformance.jl` — **mandatory**: a selection probe per
    intrinsic (`(name, argtypes, mcpu, mattr, expected instruction
@@ -98,14 +98,14 @@ dtype rule cannot recover:
 
 | Ledger | Owns |
 |---|---|
-| `src/scalar_results.jl` | scalar results not named by the tail |
-| `src/structured_results.jl` | grouped/multi-destination (`setp`, `lop3`, ...) |
-| `src/vector_results.jl` | homogeneous tuple results (`ld.vN`, ...) |
-| `src/b128_forms.jl` | the 128-bit register carrier grammar |
-| `src/mbarrier_forms.jl` | the closed mbarrier grammar |
-| `src/cvt_forms.jl` | ordinary `cvt` source carriers |
-| `src/immediate_forms.jl` | instruction-specific immediate domains |
-| `src/address_operands.jl` | address-role markers and deny rules |
+| `src/ledgers/scalar_results.jl` | scalar results not named by the tail |
+| `src/ledgers/structured_results.jl` | grouped/multi-destination (`setp`, `lop3`, ...) |
+| `src/ledgers/vector_results.jl` | homogeneous tuple results (`ld.vN`, ...) |
+| `src/ledgers/b128_forms.jl` | the 128-bit register carrier grammar |
+| `src/ledgers/mbarrier_forms.jl` | the closed mbarrier grammar |
+| `src/ledgers/cvt_forms.jl` | ordinary `cvt` source carriers |
+| `src/ledgers/immediate_forms.jl` | instruction-specific immediate domains |
+| `src/ledgers/address_operands.jl` | address-role markers and deny rules |
 
 **Adding entries to an existing ledger** touches the ledger file, its
 load-time count assertion (where present), and the test-side oracle +
@@ -115,10 +115,11 @@ oracle's generator to *derive* the new expectation; never make it read
 the source ledger.
 
 **Adding a new ledger** is a structural change. The consultation sequence
-currently lives in four places that must all agree — `build_call` and
-`lowering` in `src/inst.jl`, `infer_rettype`/`_result_abi_error` in
-`src/types.jl`, and the per-ledger adapters in
-`src/codegen/instruction.jl` — plus the include order in `src/PTX.jl`.
+currently lives in four places that must all agree — `build_call` in
+`src/dsl/render.jl` and `lowering` in `src/dsl/reflection.jl`,
+`infer_rettype`/`_result_abi_error` in
+`src/ledgers/types.jl`, and the per-ledger adapters in
+`src/codegen/adapters/` — plus the include order in `src/PTX.jl`.
 Budget for all of them, and add the mirrored `lowering` guard so
 reflection and reality cannot drift.
 
@@ -127,7 +128,7 @@ reflection and reality cannot drift.
 For forms the chain cannot express, add the wrapper methods (Recipe B
 shape) and close the boundary:
 
-- a rule in `TYPED_WRAPPER_ONLY_RULES` (`src/forms.jl`) so an uncovered
+- a rule in `TYPED_WRAPPER_ONLY_RULES` (`src/ledgers/forms.jl`) so an uncovered
   spelling errors at compile time instead of receiving a guessed
   contract — its count and content are pinned in
   `test/host/fallback_boundary.jl`;
