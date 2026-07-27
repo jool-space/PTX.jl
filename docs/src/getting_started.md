@@ -11,7 +11,12 @@ pkg> add PTX, CUDA
 ```
 
 PTX.jl depends on `LLVM.jl` for the inline-asm machinery (`@asmcall`).
-Kernel launch and memory go through `CUDA.jl` (or `CUDACore`).
+Kernel launch and memory go through CUDA.jl. PTX.jl itself carries no hard
+GPU dependency: it weak-depends on `CUDACore` (the runtime core CUDA.jl is
+built on), and loading either package activates the extension that provides
+the TMA tensor-map encoder ([`PTX.tensor_map_encode_tiled`](@ref)).
+Host-only use — parsing, transpiling, inspecting lowering — needs no GPU
+stack at all.
 
 ## First kernel
 
@@ -63,16 +68,19 @@ nvcc lowers to `asm volatile`-equivalent inline PTX. Real kernels mix both.
 ## Address spaces
 
 `ptx"ld.global.f32"` / `ptx"cp.async.ca.shared.global"` and friends take
-typed pointers. PTX.jl re-exports a small `AS` module of LLVM
-address-space numbers that match `CUDACore.AS.*`:
+typed pointers. PTX.jl provides a small `AS` module (not exported — spell
+it `PTX.AS`) of LLVM address-space numbers that match `CUDACore.AS.*`,
+plus two NVPTX-only spaces CUDACore doesn't name:
 
 ```julia
-PTX.AS.Generic   # 0
-PTX.AS.Global    # 1
-PTX.AS.Shared    # 3
-PTX.AS.Const     # 4
-PTX.AS.Local     # 5
-PTX.AS.Param     # 101
+PTX.AS.Generic        # 0
+PTX.AS.Global         # 1
+PTX.AS.Shared         # 3
+PTX.AS.Const          # 4
+PTX.AS.Local          # 5
+PTX.AS.Param          # 101
+PTX.AS.Tmem           # 6 — Blackwell tensor memory (tcgen05 taddr operands)
+PTX.AS.SharedCluster  # 7 — distributed shared memory (cluster-window operands)
 ```
 
 A pointer reaches a wrapper as `Core.LLVMPtr{T, AS.X}`. NVPTX lowers

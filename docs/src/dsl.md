@@ -527,6 +527,7 @@ memory/query coverage claim. The scalar-to-vector unpack direction remains
 fail-loud because the singleton chain API has no result-shape selector.
 
 ```@docs
+PTX.B128
 PTX.b128
 ```
 

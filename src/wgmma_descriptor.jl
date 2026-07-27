@@ -1,5 +1,5 @@
-# `wgmma.mma_async` SMEM operand encoding (PTX 9.2 §9.7.14.5;
-# PTX_ISA_DIGEST.md §10.4):
+# `wgmma.mma_async` SMEM operand encoding (PTX ISA 9.3 §9.7.16.5.1.2.2,
+# "Matrix Descriptor Format"):
 #   bits [13:0]   start_addr      = (smem_addr & 0x3FFFF) >> 4
 #   bits [29:16]  leading_offset  = (leading_byte_offset & 0x3FFFF) >> 4
 #   bits [45:32]  stride_offset   = (stride_byte_offset  & 0x3FFFF) >> 4
@@ -20,8 +20,14 @@ module WgmmaSwizzle
     const B32  = UInt8(3)
 end
 
-# Bounce a shared-AS pointer through inline asm with the `r` constraint to
-# surface the 32-bit SMEM offset NVPTX represents internally.
+"""
+    smem_addr_u32(p::Core.LLVMPtr{T, AS.Shared}) -> UInt32
+
+The 32-bit in-CTA SMEM offset of a shared-address-space pointer — the
+`smem_addr_u32` argument the descriptor builders take. Bounces the pointer
+through inline asm with the `r` constraint to surface the 32-bit offset
+NVPTX represents internally.
+"""
 @inline function smem_addr_u32(p::Core.LLVMPtr{T, AS.Shared}) where T
     @asmcall("mov.u32 \$0, \$1;", "=r,r", false, UInt32,
              Tuple{Core.LLVMPtr{T, AS.Shared}}, p)
@@ -29,6 +35,15 @@ end
 
 @inline _wgmma_field14(x::UInt64) = (x & 0x3FFFF) >> 4
 
+"""
+    wgmma_descriptor(smem_addr_u32; leading_byte_offset, stride_byte_offset,
+                     swizzle = WgmmaSwizzle.NONE, base_offset = 0) -> UInt64
+
+Pack a `wgmma.mma_async` shared-memory operand descriptor. Byte offsets
+encode as 14-bit fields covering the high bits of an 18-bit, 16-byte-aligned
+window; `swizzle` is one of the `WgmmaSwizzle` codes (0 = none, 1 = 128B,
+2 = 64B, 3 = 32B). Get `smem_addr_u32` from [`smem_addr_u32`](@ref).
+"""
 @inline function wgmma_descriptor(
         smem_addr_u32::UInt32;
         leading_byte_offset::Integer,
@@ -43,16 +58,20 @@ end
     addr | ld | sd | bo | sw
 end
 
-# Advance a wgmma SMEM-operand descriptor's start_addr by `byte_offset`
-# bytes. The descriptor's low 14 bits encode `(smem_addr & 0x3FFFF) >> 4`,
-# so adding `byte_offset >> 4` to the descriptor's UInt64 representation
-# moves its base by the equivalent byte distance — as long as the carry
-# stays within the 14-bit start_addr field (true for any in-CTA SMEM
-# offset on H100). Used to walk a SMEM ring buffer (per-stage offset)
-# or to step within a tile (per-wgmma-K offset on the inner loop).
-#
-# `byte_offset` must be a multiple of 16 — the operand encoding has no
-# representation for sub-16-byte offsets. Caller guarantees this; the
-# helper truncates silently if violated.
+"""
+    step_desc(desc::UInt64, byte_offset::Integer) -> UInt64
+
+Advance a wgmma SMEM-operand descriptor's start address by `byte_offset`
+bytes. The descriptor's low 14 bits encode `(smem_addr & 0x3FFFF) >> 4`,
+so adding `byte_offset >> 4` moves the base by the equivalent byte
+distance — as long as the carry stays within the 14-bit start_addr field
+(true for any in-CTA SMEM offset on H100). Used to walk a SMEM ring
+buffer (per-stage offset) or to step within a tile (per-wgmma-K offset
+on the inner loop).
+
+`byte_offset` must be a multiple of 16 — the operand encoding has no
+representation for sub-16-byte offsets. Caller guarantees this; the
+helper truncates silently if violated.
+"""
 @inline step_desc(desc::UInt64, byte_offset::Integer) =
     desc + UInt64(byte_offset >> 4)

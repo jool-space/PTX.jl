@@ -13,6 +13,15 @@
 #   ptx/9-instruction-set/9.7.14.5-parallel-synchronization-and-communication-instructions-atom.md
 #   ptx/9-instruction-set/9.7.14.19-parallel-synchronization-and-communication-instructions-clusterlaunchcontrol.query_cancel.md
 
+"""
+    B128
+
+PTX.jl's Julia carrier for one PTX `.b128` register: `NTuple{2,UInt64}`,
+low word first. LLVM's NVPTX inline-assembly constraints expose no 128-bit
+register class, so every `.b128` value crosses the asm boundary as two
+64-bit words bridged by the ISA's own `mov.b128` pack/unpack. Construct
+with [`b128`](@ref).
+"""
 const B128 = NTuple{2,UInt64}
 
 """Construct PTX.jl's low-word-first carrier for one PTX `.b128` register."""
