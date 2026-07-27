@@ -183,6 +183,11 @@ function _addsub_aggregate_expr(kind::Symbol, N::Int, ::Type{T},
     end
 end
 
+# The methods spell `Tuple{T, Vararg{T, N}}` rather than `NTuple{N, T}`: the
+# empty tuple is outside the domain (no limbs, nothing to add), and this
+# binds `T` from the first limb so no method has an unbound type parameter
+# (Aqua). NOTE: a comment must not sit between the docstring and the first
+# definition — it silently detaches the docstring from the binding.
 """
     add_with_carry(a::NTuple{N,T}, b::NTuple{N,T}[, carry::Bool])
         -> (words::NTuple{N,T}, carry_out::Bool)
@@ -193,9 +198,6 @@ An optional explicit carry-in is accepted. `T` may be `UInt32`, `Int32`,
 unsigned add. The complete straight-line sequence is emitted as one opaque,
 non-convergent inline-assembly call so `CC.CF` never crosses an LLVM boundary.
 """
-# `Tuple{T, Vararg{T, N}}` rather than `NTuple{N, T}`: the empty tuple is
-# outside the domain (no limbs, nothing to add), and this spelling binds `T`
-# from the first limb so no method has an unbound type parameter (Aqua).
 @generated add_with_carry(a::Tuple{T, Vararg{T, N}}, b::Tuple{T, Vararg{T, N}}) where
         {N,T<:ExtendedPrecisionWord} = _addsub_aggregate_expr(:add, N + 1, T, false)
 
