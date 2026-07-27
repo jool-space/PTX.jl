@@ -20,6 +20,7 @@ makedocs(;
         "Transpiler" => "transpiler.md",
         "Reference" => "reference.md",
         "Internals" => "internals.md",
+        "Extending" => "extending.md",
     ],
 )
 
