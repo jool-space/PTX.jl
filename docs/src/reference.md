@@ -24,6 +24,11 @@ PTX.address
 PTX.reinterpret_addrspace
 ```
 
+## 128-bit registers
+
+The exported carrier [`B128`](@ref) and constructor [`b128`](@ref) are
+documented on the [Chain DSL](dsl.md#Scalar-.b128-registers) page.
+
 ## Extended-precision arithmetic
 
 ```@docs

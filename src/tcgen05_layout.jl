@@ -20,7 +20,7 @@
 # host-side in test/host/tcgen05_layout.jl.
 
 # ---------------------------------------------------------------------------
-# TMEM addressing — PTX 9.2 §9.7.16.1 / PTX_ISA_DIGEST.md §11.1
+# TMEM addressing — PTX ISA 9.3 §9.7.17.1 (Tensor Memory)
 # ---------------------------------------------------------------------------
 #
 # 32-bit TMEM address = bits[31:16] lane index | bits[15:0] column.

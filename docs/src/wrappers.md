@@ -28,7 +28,11 @@ There are four patterns that force a wrapper:
 Each wrapper file follows the same shape: a small declarative table
 maps `(shape, dtype, …)` to register counts and constraints, a
 `_register` function builds the asm string + LLVM call, and a `for`
-loop emits a typed method per valid combination.
+loop emits a typed method per valid combination. Literal spellings are
+declared with the [`@optype_str`](@ref) definition macro
+(`@inline optype"tcgen05.alloc.cta_group::1.sync.aligned.b32"(...) = ...`);
+generator loops that build the mods tuple programmatically define methods
+on the `Operation{op, mods}` singleton directly.
 
 Adding a new dtype/shape combination is one entry in the table plus one
 line in the loop.
@@ -173,6 +177,7 @@ bit-packing helpers for both:
 | `tcgen05_descriptor` | Blackwell `tcgen05.mma` SMEM operand encoding (3-bit layout vs wgmma's 2-bit; legal swizzle values only). The ISA-fixed `0b001` field is inserted internally; `lbo_mode=1` selects the restricted `sm_103a` absolute leading-address mode. |
 | `tcgen05_instr_desc_f16bf16_f32` | Blackwell `tcgen05.mma` 32-bit instruction descriptor for F16/BF16/TF32 → F32 paths. The integer-only saturation bit and reserved bits are fixed at zero. Mirrors CUTLASS/CuTe's `UMMA::make_instr_desc`. |
 | `smem_addr_u32` | Convert a `Core.LLVMPtr{T, AS.Shared}` to its 32-bit in-CTA SMEM offset (used as the `smem_addr_u32` argument to the descriptor builders). |
+| `step_desc` | Advance a wgmma SMEM-operand descriptor's start address by a byte offset — walking a SMEM ring buffer or stepping K within a tile without re-packing. |
 
 These are not exported but are part of the documented API. Access them
 as `PTX.wgmma_descriptor`, `PTX.tcgen05_descriptor`, etc.
@@ -196,6 +201,9 @@ A and B (instruction-descriptor transpose bits 15 and 16 both zero), K=48B,
 and the architecture-specific `sm_103a` target.
 
 ```@docs
+PTX.wgmma_descriptor
+PTX.smem_addr_u32
+PTX.step_desc
 PTX.tcgen05_descriptor
 PTX.tcgen05_instr_desc_f16bf16_f32
 ```
@@ -244,4 +252,5 @@ Most chain-default coverage is sufficient. Reach for a wrapper when:
 
 The pattern: copy the closest existing wrapper file, adjust the table
 and asm template, add a `for` loop that emits one typed method per
-combination. ~80 LOC for a new family in most cases.
+combination (spelling literal forms with `optype""`). ~80 LOC for a new
+family in most cases.

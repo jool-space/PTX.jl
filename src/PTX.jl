@@ -65,4 +65,17 @@ include("tensor_map.jl")
 include("mbarriers.jl")
 include("pipelines.jl")
 
+function __init__()
+    # The TMA tensor-map encoders are implemented by the CUDACore package
+    # extension; without it they have no methods. Name the missing package
+    # in the MethodError instead of leaving a bare zero-methods failure.
+    Base.Experimental.register_error_hint(MethodError) do io, exc, _, _
+        if exc.f === tensor_map_encode_tiled || exc.f === tensor_map_tile_2d
+            print(io, "\nThe TMA tensor-map encoder is provided by PTX.jl's ",
+                      "CUDACore extension — run `using CUDA` (or ",
+                      "`using CUDACore`) to load it.")
+        end
+    end
+end
+
 end

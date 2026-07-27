@@ -9,7 +9,7 @@ Composes additively with [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) — CUDA
 owns launch, memory, and control flow; PTX.jl owns instruction emission.
 
 ```julia
-using PTX, CUDACore
+using PTX, CUDA
 
 function add_kernel!(c, a, b)
     tid = ptx"mov.u32"(sreg"%tid.x")

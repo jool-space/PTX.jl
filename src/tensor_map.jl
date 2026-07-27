@@ -133,8 +133,9 @@ Keyword arguments:
 - `l2_promotion::Symbol = :NONE` — `:NONE` / `:B64` / `:B128` / `:B256`.
 - `oob_fill::Symbol = :NONE` — `:NONE` / `:NAN_REQUEST_ZERO_FMA`.
 
-Requires `using CUDACore`. Without it the package extension is inert and
-this function raises a clear error.
+Requires the CUDACore package extension: load CUDA.jl (which depends on
+CUDACore) or CUDACore itself. Without it this function has no methods, and
+calling it raises a `MethodError` whose hint names the missing package.
 """
 function tensor_map_encode_tiled end
 
