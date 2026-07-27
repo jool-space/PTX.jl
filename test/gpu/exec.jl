@@ -2,7 +2,7 @@
 #
 # End-to-end tests: kernels launch on a real device and produce correct
 # numerical results. Compile-only Hopper/Blackwell tests live under
-# `ptxas/`; raw-PTX corpus tests live under `gpu/corpus_compile.jl`.
+# `ptxas/`; raw-PTX corpus tests live under `gpu/corpus_compile_*.jl`.
 
 # --- add.f32 ----------------------------------------------------------------
 
