@@ -422,7 +422,8 @@ end
 
 
 # --- wgmma convergence through the optimizer ---------------------------------
-# The spike shape (spikes/raw_asm_attrs.jl): identical collective calls
+# The spike shape (spikes/raw_asm_attrs.jl, removed in ccdfb8a; view with
+# `git show ccdfb8a~1:spikes/raw_asm_attrs.jl`): identical collective calls
 # leading both arms of a divergent branch, checked on the OPTIMIZED module.
 # Guards two things the straight-line goldens cannot see:
 #   - the `convergent` attribute group survives to the optimized module and

@@ -54,9 +54,9 @@ function _ordinary_cvt_result_abi_error(mods::Tuple{Vararg{Symbol}})
         "ptx\"$spelling\" does not use the supported canonical ordinary " *
         "cvt.<modifiers...>.<dst>.<src> order with two known terminal " *
         "dtype tokens. Reversed/postfix spellings from contradictory ISA " *
-        "examples remain unsupported under CVT-IMMEDIATE-001 because " *
-        "terminal inference would assign the wrong result ABI; raw cannot " *
-        "supply an explicit result ABI.")
+        "examples remain unsupported because terminal inference would " *
+        "assign the wrong result ABI; raw cannot supply an explicit " *
+        "result ABI.")
 end
 
 function ordinary_cvt_result_type(mods::Tuple{Vararg{Symbol}})

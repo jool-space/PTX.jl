@@ -802,7 +802,8 @@ end
 # middle end only — llc neither checks nor needs it — so tests assert emitted
 # llvmcall IR rather than ptxas acceptance.
 #
-# Mechanism validated by spikes/raw_asm_attrs.jl: a `convergent` attribute
+# Mechanism validated by spikes/raw_asm_attrs.jl (removed in ccdfb8a; view
+# with `git show ccdfb8a~1:spikes/raw_asm_attrs.jl`): a `convergent` attribute
 # group on an inline-asm call site parses through Base.llvmcall and survives
 # the optimized module. This helper builds the same shape `@asmcall` would —
 # asm callee returns a scalar or literal struct, entry returns Julia's

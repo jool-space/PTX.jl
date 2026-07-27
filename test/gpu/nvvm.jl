@@ -3,7 +3,8 @@
 # nvvm"" semantics on hardware. The ptxas/ tier proves the right instruction
 # is selected; this tier proves the values are right — warp data movement
 # (shfl), predicate plumbing through the Bool/i1 glue (vote, shfl pred), the
-# convergence shape from spikes/convergence.jl, and the m8n8 fragment layout
+# convergence shape from spikes/convergence.jl (spikes/ removed in ccdfb8a;
+# `git show ccdfb8a~1:spikes/`), and the m8n8 fragment layout
 # through the aggregate-return repack (ldmatrix).
 
 using PTX.NVVM

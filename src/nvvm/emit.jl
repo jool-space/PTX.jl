@@ -1,5 +1,6 @@
 # Tier-2 emission: registry-checked `Base.llvmcall` synthesis. Everything
-# the spikes validated lands here: explicit
+# the spikes validated lands here (spikes/ was removed in ccdfb8a; view the
+# scripts with `git show ccdfb8a~1:spikes/`): explicit
 # attribute groups on declarations and load-bearing convergence attributes
 # on call sites (the in-process LLVM may know and canonicalize some legacy
 # intrinsics, so a declaration alone is not an optimizer boundary), aggregate
