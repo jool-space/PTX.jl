@@ -11,3 +11,6 @@ Manifest*.toml
 # Local PTX ISA artifacts (large, regenerable from the PDF)
 /.ptx_isa.txt
 /.ptx_isa_outline.txt
+
+# Claude Code worktrees and local session state
+/.claude/
