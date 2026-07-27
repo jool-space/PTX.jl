@@ -249,15 +249,6 @@ notes = "Cluster CTA-rank query (observable cross-CTA visibility, hence not pure
 owner = ["src/ledgers/forms.jl"]
 
 [[family]]
-section = "9.7.9.25"
-title = "Data Movement and Conversion Instructions: cluster (no such ISA head)"
-status = "generic"
-verify = true
-opcodes = ["cluster"]
-notes = "FORMS carries a :cluster head grouped with the sm_90 cluster queries, but PTX ISA 9.3 defines no instruction whose opcode head is `cluster` (barrier.cluster and clusterlaunchcontrol have their own heads) — inventoried here so the FORMS key is owned; candidate for removal from FORMS."
-owner = ["src/ledgers/forms.jl"]
-
-[[family]]
 section = "9.7.9.26"
 title = "Data Movement and Conversion Instructions: Asynchronous copy (cp.async, cp.async.bulk, TMA)"
 status = "strict"
