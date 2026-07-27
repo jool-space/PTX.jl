@@ -136,7 +136,7 @@ end
                    for form in PTX.VECTOR_RESULT_COMPAT_FORMS)
     @test recorded == _VECTOR_ATOM_COMPAT_EXAMPLES
     for mods in _VECTOR_ATOM_COMPAT_EXAMPLES
-        schema = PTX.vector_result_schema(:atom, mods)
+        schema = PTX.schema(PTX.VectorLedger(), :atom, mods)
         @test schema !== nothing
         @test schema.provenance === :ptxas_compat
     end
@@ -144,8 +144,8 @@ end
     # The ninth vector example uses a type absent from the grammar and is also
     # rejected by CUDA 13.3 ptxas with "Unknown modifier '.b16x2'".
     rejected = (:global, :v4, :b16x2, :min, :noftz)
-    @test PTX.vector_result_schema(:atom, rejected) === nothing
-    @test PTX.requires_vector_result_schema(:atom, rejected)
+    @test PTX.schema(PTX.VectorLedger(), :atom, rejected) === nothing
+    @test PTX.claims(PTX.VectorLedger(), :atom, rejected)
     @test_throws ArgumentError PTX.build_call(
         :atom, rejected,
         (Core.LLVMPtr{UInt8,PTX.AS.Global}, NTuple{4,UInt32}))
@@ -165,26 +165,26 @@ end
         (:relaxed, :gpu, :global, Symbol("L1::evict_last"), :v2, :u32),
         (:acquire, :sys, :global, Symbol("L2::evict_last"), :v8, :u32),
     )
-        @test PTX.vector_result_schema(:ld, mods) !== nothing
+        @test PTX.schema(PTX.VectorLedger(), :ld, mods) !== nothing
     end
-    @test PTX.vector_result_schema(
+    @test PTX.schema(PTX.VectorLedger(),
         :ld, (:global, Symbol("L2::evict_last"), :v2, :u32)) === nothing
-    @test PTX.vector_result_schema(
+    @test PTX.schema(PTX.VectorLedger(),
         :ld, (:relaxed, :sys, :local, :v2, :u32)) === nothing
-    @test PTX.vector_result_schema(
+    @test PTX.schema(PTX.VectorLedger(),
         :ld, (:volatile, :const, :v2, :u32)) === nothing
 
     hint = Symbol("L2::cache_hint")
-    atom = PTX.vector_result_schema(
+    atom = PTX.schema(PTX.VectorLedger(),
         :atom, (:acq_rel, :sys, :global, :add, hint, :v2, :f32))
     @test atom !== nothing
     @test atom.cache_hint
-    @test PTX.vector_result_schema(
+    @test PTX.schema(PTX.VectorLedger(),
         :atom, (:global, hint, :add, :v2, :f32)) === nothing
-    @test PTX.vector_result_schema(
+    @test PTX.schema(PTX.VectorLedger(),
         :multimem, (:ld_reduce, :acquire, :gpu, :global,
                     :min, Symbol("acc::f16"), :v4, :e4m3)) !== nothing
-    @test PTX.vector_result_schema(
+    @test PTX.schema(PTX.VectorLedger(),
         :multimem, (:ld_reduce, :release, :gpu, :global,
                     :add, :v2, :f16)) === nothing
 end
@@ -250,7 +250,7 @@ end
 @testset "wide load sink masks" begin
     PtrG = Core.LLVMPtr{UInt8,PTX.AS.Global}
     mods = (:global, Symbol("L2::evict_last"), :v8, :u32)
-    schema = PTX.vector_result_schema(:ld, mods)
+    schema = PTX.schema(PTX.VectorLedger(), :ld, mods)
     mask = (true, false, true, true, false, true, true, true)
     spec = PTX._build_vector_result_call(
         schema, (PtrG,), PTX.form_contract(:ld, mods); sink_mask = mask)
@@ -266,7 +266,7 @@ end
         PTX.Operation{:ld, mods}(), UInt64(0),
         Val(ntuple(_ -> false, 8)))
     @test_throws ArgumentError PTX._build_vector_result_call(
-        PTX.vector_result_schema(:ld, (:global, :v4, :u32)),
+        PTX.schema(PTX.VectorLedger(), :ld, (:global, :v4, :u32)),
         (PtrG,), PTX.form_contract(:ld, (:global, :v4, :u32));
         sink_mask = (true, false, true, true))
 end

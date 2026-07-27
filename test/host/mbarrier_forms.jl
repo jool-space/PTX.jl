@@ -365,7 +365,7 @@ end
     @test length(expected) == 22
     @test actual == expected
     for mods in actual
-        @test PTX.mbarrier_form_schema(:mbarrier, mods) !== nothing
+        @test PTX.schema(PTX.MBarrierLedger(), :mbarrier, mods) !== nothing
     end
 
     # These twelve wrappers have no NVVM spelling. Their convenience methods
@@ -393,7 +393,7 @@ end
     for (mods, argtypes) in asm_wrappers
         ci, rettype = first(Base.code_typed(Operation{:mbarrier, mods}(),
                                             argtypes))
-        schema = PTX.mbarrier_form_schema(:mbarrier, mods)
+        schema = PTX.schema(PTX.MBarrierLedger(), :mbarrier, mods)
         @test rettype === _mb_rettype(schema.destination)
         @test occursin("asm sideeffect", string(ci))
         @test occursin("convergent nomerge", string(ci))

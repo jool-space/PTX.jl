@@ -162,14 +162,16 @@ length(_STRUCTURED_RESULT_SCHEMA_BY_FORM) == length(STRUCTURED_RESULT_SCHEMAS) |
 length(STRUCTURED_RESULT_SCHEMAS) == 1114 ||
     error("structured-result ledger count changed; re-audit PTX 9.3 grammar")
 
-structured_result_schema(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
+schema(::StructuredLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     get(_STRUCTURED_RESULT_SCHEMA_BY_FORM, (op, mods), nothing)
 
-requires_structured_result_schema(op::Symbol) =
+# The claim is opcode-wide: every setp/lop3/match/elect spelling must hit an
+# exact reviewed form, whatever its mods.
+claims(::StructuredLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     op in (:setp, :lop3, :match, :elect)
 
-function structured_result_schema_miss(op::Symbol,
-                                       mods::Tuple{Vararg{Symbol}})
+function miss(::StructuredLedger, op::Symbol,
+              mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))
     ArgumentError(
         "ptx\"$spelling\" is inside the closed PTX 9.3 result grammar " *
@@ -189,53 +191,6 @@ function structured_result_type(schema::StructuredResultSchema)
     length(types) == 1 ? only(types) : Core.apply_type(Tuple, types...)
 end
 
-_structured_integer_immediate(::Type{Val{V}}) where {V} =
-    V isa Integer && !(V isa Bool)
-_structured_integer_immediate(::Type) = false
-
-function _structured_operand_accepts(kind::Symbol, ::Type{T}) where {T}
-    if kind === :pred
-        return T === Bool
-    elseif kind === :imm8
-        return T <: Val && _structured_integer_immediate(T) &&
-               0 <= T.parameters[1] <= 255
-    elseif kind === :f16
-        return T === Float16 || T === UInt16
-    elseif kind === :bf16
-        return T === UInt16
-    elseif kind === :f32
-        return T === Float32 || T === UInt32
-    elseif kind === :f64
-        return T === Float64 || T === UInt64
-    elseif kind === :b16
-        return T in (UInt16, Int16, Float16) ||
-               _structured_integer_immediate(T)
-    elseif kind === :b32
-        return T in (UInt32, Int32, Float32) ||
-               _structured_integer_immediate(T)
-    elseif kind === :b64
-        return T in (UInt64, Int64, Float64) ||
-               _structured_integer_immediate(T)
-    elseif kind in (:u16, :s16)
-        return T in (UInt16, Int16) || _structured_integer_immediate(T)
-    elseif kind in (:u32, :s32)
-        return T in (UInt32, Int32) || _structured_integer_immediate(T)
-    elseif kind in (:u64, :s64)
-        return T in (UInt64, Int64) || _structured_integer_immediate(T)
-    end
-    return false
-end
-
-function _structured_operand_description(kind::Symbol)
-    kind === :pred && return "Bool predicate"
-    kind === :imm8 && return "Val{N} with integer N in 0:255"
-    kind === :f16 && return "Float16 or UInt16 bit carrier"
-    kind === :bf16 && return "UInt16 (.b16 carrier for bf16)"
-    kind === :f32 && return "Float32 or UInt32 bit carrier"
-    kind === :f64 && return "Float64 or UInt64 bit carrier"
-    string(kind, "-compatible scalar")
-end
-
 function validate_structured_result_args(schema::StructuredResultSchema,
                                          argtypes)
     spelling = string(schema.op, ".", join(schema.mods, "."))
@@ -244,11 +199,14 @@ function validate_structured_result_args(schema::StructuredResultSchema,
         "$(length(schema.operands)) source operands, got $(length(argtypes)); " *
         "see $(schema.section)"))
     for (i, (kind, T)) in enumerate(zip(schema.operands, argtypes))
-        _structured_operand_accepts(kind, T) && continue
+        operand_accepts(kind, T) && continue
         throw(ArgumentError(
             "ptx\"$spelling\" operand $i must use " *
-            _structured_operand_description(kind) * ", got $T; see " *
+            operand_description(kind) * ", got $T; see " *
             schema.section))
     end
     nothing
 end
+
+validate_ledger_args(::StructuredLedger, s::StructuredResultSchema, argtypes) =
+    validate_structured_result_args(s, argtypes)

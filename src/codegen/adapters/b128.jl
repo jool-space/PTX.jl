@@ -17,31 +17,31 @@ end
 function _instruction_b128_schema(cg::CodeGenState, inst::Instruction)
     op = Symbol(inst.opcode)
     mods = _schema_modifiers(inst.modifiers)
-    schema = b128_form_schema(op, mods)
-    schema === nothing && requires_b128_form_schema(op, mods) &&
-        throw(b128_form_schema_miss(op, mods))
-    schema === nothing && return nothing
+    s = schema(B128Ledger(), op, mods)
+    s === nothing && claims(B128Ledger(), op, mods) &&
+        throw(miss(B128Ledger(), op, mods))
+    s === nothing && return nothing
 
     operands = inst.operands
     source_start = 2
     destination = nothing
     sources = Operand[]
-    if schema.kind === :store
-        length(operands) == length(schema.operands) || throw(ArgumentError(
+    if s.kind === :store
+        length(operands) == length(s.operands) || throw(ArgumentError(
             "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) requires " *
-            "$(length(schema.operands)) operands, got $(length(operands)); " *
-            "see $(schema.section)"))
+            "$(length(s.operands)) operands, got $(length(operands)); " *
+            "see $(s.section)"))
         append!(sources, operands)
     else
-        length(operands) == length(schema.operands) + 1 || throw(ArgumentError(
+        length(operands) == length(s.operands) + 1 || throw(ArgumentError(
             "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) requires " *
-            "one destination and $(length(schema.operands)) source " *
-            "operand(s), got $(length(operands)); see $(schema.section)"))
+            "one destination and $(length(s.operands)) source " *
+            "operand(s), got $(length(operands)); see $(s.section)"))
         destination = operands[1]
         append!(sources, operands[2:end])
     end
 
-    if schema.kind === :mov
+    if s.kind === :mov
         (destination isa RegisterOperand || destination isa LabelOperand) ||
             throw(ArgumentError("PTX transpiler: mov.b128 destination must be a register"))
         decl = _declared_register(cg, destination)
@@ -60,11 +60,11 @@ function _instruction_b128_schema(cg::CodeGenState, inst::Instruction)
                 throw(ArgumentError("PTX transpiler: mov.b128 pack lanes must be registers"))
             _b128_require_register_type(cg, lane, lane_types, "mov source lane")
         end
-        return (; schema, destination, sources, mov_source = source,
+        return (; schema = s, destination, sources, mov_source = source,
                   discard_result = false)
     end
 
-    if schema.kind in (:load, :exch, :cas)
+    if s.kind in (:load, :exch, :cas)
         if !_is_sink_operand(destination)
             (destination isa RegisterOperand || destination isa LabelOperand) ||
                 throw(ArgumentError("PTX transpiler: b128 destination must be a register or `_`"))
@@ -76,17 +76,17 @@ function _instruction_b128_schema(cg::CodeGenState, inst::Instruction)
                 "accepted: PTX 9.3 grants sinks only to specific vector/simple-" *
                 "reduction cases, not atom.{exch,cas}.b128"))
         end
-    elseif schema.kind === :query_pred
+    elseif s.kind === :query_pred
         (destination isa RegisterOperand || destination isa LabelOperand) ||
             throw(ArgumentError("PTX transpiler: query_cancel predicate destination must be a register"))
         _b128_require_register_type(cg, destination, (ScalarType.PRED,),
                                     "query predicate destination")
-    elseif schema.kind === :query_dim
+    elseif s.kind === :query_dim
         (destination isa RegisterOperand || destination isa LabelOperand) ||
             throw(ArgumentError("PTX transpiler: query_cancel dimension destination must be a register"))
         _b128_require_register_type(cg, destination, _REGISTER_TYPES_32,
                                     "query dimension destination")
-    elseif schema.kind === :query_v4
+    elseif s.kind === :query_v4
         destination isa VectorOperand && length(destination.elements) == 4 ||
             throw(ArgumentError(
                 "PTX transpiler: query_cancel v4 destination must contain four registers"))
@@ -98,7 +98,7 @@ function _instruction_b128_schema(cg::CodeGenState, inst::Instruction)
         end
     end
 
-    for (i, (kind, source)) in enumerate(zip(schema.operands, sources))
+    for (i, (kind, source)) in enumerate(zip(s.operands, sources))
         if kind === :address
             source isa AddressOperand || throw(ArgumentError(
                 "PTX transpiler: b128 operand $i must be bracketed in input PTX"))
@@ -115,7 +115,7 @@ function _instruction_b128_schema(cg::CodeGenState, inst::Instruction)
                                         "cache policy")
         end
     end
-    (; schema, destination, sources, mov_source = nothing,
+    (; schema = s, destination, sources, mov_source = nothing,
        discard_result = destination !== nothing && _is_sink_operand(destination))
 end
 
@@ -168,4 +168,12 @@ function _emit_b128!(cg::CodeGenState, inst::Instruction, checked)
         schema.kind === :mov && push!(cg.inferred_b128_regs,
                                       checked.destination.name)
     end
+end
+
+function transpile_ledger!(::B128Ledger, cg::CodeGenState,
+                           inst::Instruction)
+    checked = _instruction_b128_schema(cg, inst)
+    checked === nothing && return false
+    _emit_b128!(cg, inst, checked)
+    true
 end

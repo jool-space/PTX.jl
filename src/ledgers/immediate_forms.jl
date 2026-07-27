@@ -65,23 +65,22 @@ const _IMMEDIATE_FORM_CONTRACT_BY_FORM = let by_form = Dict()
     by_form
 end
 
-immediate_form_contract(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
+schema(::ImmediateLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     get(_IMMEDIATE_FORM_CONTRACT_BY_FORM, (op, mods), nothing)
 
-requires_immediate_form_contract(op::Symbol) = op in (:setmaxnreg, :pmevent)
+# lop3's delegated contract is resolvable by `schema` but not claimed here:
+# the structured-result ledger owns lop3's grammar and immLut validation.
+claims(::ImmediateLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
+    op in (:setmaxnreg, :pmevent)
 
-function immediate_form_contract_miss(op::Symbol,
-                                      mods::Tuple{Vararg{Symbol}})
+function miss(::ImmediateLedger, op::Symbol,
+              mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))
     ArgumentError(
         "ptx\"$spelling\" is inside the closed PTX 9.3 immediate grammar " *
         "for setmaxnreg/pmevent but does not match a reviewed form. " *
         "The raw tier cannot make an invalid immediate spelling safe.")
 end
-
-_immediate_integer(::Type{Val{V}}) where {V} =
-    V isa Integer && !(V isa Bool)
-_immediate_integer(::Type) = false
 
 function validate_immediate_value(contract::ImmediateFormContract, value;
                                   context::AbstractString = "immediate operand")
@@ -106,17 +105,21 @@ function validate_immediate_form_args(contract::ImmediateFormContract,
     T = argtypes[contract.operand_index]
     T <: Val || throw(ArgumentError(
         "ptx immediate source must be Val{N}, got $T; see $(contract.section)"))
-    _immediate_integer(T) || throw(ArgumentError(
+    is_integer_immediate(T) || throw(ArgumentError(
         "ptx immediate source must be Val{N} with non-Bool integer N, got $T; " *
         "see $(contract.section)"))
     validate_immediate_value(contract, T.parameters[1])
     nothing
 end
 
+# lop3's delegated record is validated by its owning structured-result schema.
+validate_ledger_args(::ImmediateLedger, c::ImmediateFormContract, argtypes) =
+    c.delegated ? nothing : validate_immediate_form_args(c, argtypes)
+
 # Prove that the delegated lop3 record names exactly the forms and immediate
 # position owned by the structured-result ledger.  A future schema edit must
 # update one reviewed contract rather than create two drifting validators.
-let contract = immediate_form_contract(:lop3, (:b32,))
+let contract = schema(ImmediateLedger(), :lop3, (:b32,))
     contract !== nothing && contract.delegated ||
         error("missing delegated lop3 immediate contract")
     forms = Set((schema.mods, findfirst(==(:imm8), schema.operands))

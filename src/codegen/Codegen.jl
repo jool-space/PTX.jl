@@ -10,23 +10,13 @@ using ..IR: Module, Function, Instruction, Label, RegDecl, VarDecl, Param,
             AddressOperand, ParenthesizedOperand, NegatedOperand, PipeOperand,
             ScalarType, StateSpace, LinkingDirective, ptx
 using ..Parser: parse as parse_ptx, tokenize, TokenKind, LexError
-using ..PTX: uses_implicit_cc, structured_result_schema,
-             requires_structured_result_schema, structured_result_schema_miss,
-             immediate_form_contract, requires_immediate_form_contract,
-             immediate_form_contract_miss, validate_immediate_value,
-             scalar_result_schema,
-             requires_scalar_result_schema, scalar_result_schema_miss,
-             vector_result_schema, requires_vector_result_schema,
-             vector_result_schema_miss, validate_vector_result_mask,
+using ..PTX: uses_implicit_cc, claims, schema, miss, CALL_LEDGERS,
+             ImmediateLedger, MBarrierLedger, StructuredLedger,
+             CLCLedger, VectorLedger, ScalarLedger, B128Ledger, CvtLedger,
+             validate_immediate_value, validate_vector_result_mask,
              vector_result_operand_roles,
-             b128_form_schema, requires_b128_form_schema,
-             b128_form_schema_miss,
              form_contract, requires_typed_wrapper,
-             infer_rettype, ordinary_cvt_source_schema,
-             ordinary_cvt_source_schema_miss,
-             mbarrier_form_schema, mbarrier_schema_miss, DTYPE_RETTYPE,
-             clc_try_cancel_schema,
-             requires_clc_try_cancel_schema, clc_try_cancel_schema_miss
+             infer_rettype, DTYPE_RETTYPE
 
 include("state.jl")
 include("operands.jl")

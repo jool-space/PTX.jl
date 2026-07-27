@@ -47,7 +47,7 @@ function _vr_partition_body(partition; compat = false,
     if compat
         for record in PTX.VECTOR_RESULT_COMPAT_FORMS
             mods = only(record.spellings)
-            schema = PTX.vector_result_schema(:atom, mods)
+            schema = PTX.schema(PTX.VectorLedger(), :atom, mods)
             push!(body.args, _vr_call_expr(schema.form, mods))
         end
     end

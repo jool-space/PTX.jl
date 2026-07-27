@@ -65,26 +65,74 @@ function ordinary_cvt_result_type(mods::Tuple{Vararg{Symbol}})
     DTYPE_RETTYPE[mods[end - 1]]
 end
 
+# --- Per-ledger result-ABI dispatch families ---------------------------------
+#
+# `ledger_result_abi_error(l, op, mods)` returns `missing` when the ledger does
+# not gate the generic scalar result ABI here, `nothing` when the ledger owns
+# the spelling and its ABI is sound, or the ArgumentError to raise.
+# `ledger_rettype(l, op, mods)` returns `missing` or the Julia result type.
+#
+# The immediate, CLC, and b128 ledgers are deliberately transparent: their
+# calls are dispatched to dedicated builders/adapters before the generic tail
+# ever asks for a scalar rettype, and their sink/128-bit results never came
+# from DTYPE_RETTYPE. Consulting them here would change what
+# `infer_rettype(:setmaxnreg, ...)`-class queries observe.
+
+function ledger_result_abi_error(l::FormLedger, op::Symbol,
+                                 mods::Tuple{Vararg{Symbol}})
+    schema(l, op, mods) === nothing ? miss(l, op, mods) : nothing
+end
+ledger_result_abi_error(::ImmediateLedger, op::Symbol,
+                        mods::Tuple{Vararg{Symbol}}) = missing
+ledger_result_abi_error(::CLCLedger, op::Symbol,
+                        mods::Tuple{Vararg{Symbol}}) = missing
+ledger_result_abi_error(::B128Ledger, op::Symbol,
+                        mods::Tuple{Vararg{Symbol}}) = missing
+# The ordinary-cvt fallback is consulted explicitly by _result_abi_error at
+# its historical position (after the registry's `returns` gate), not through
+# CALL_LEDGERS.
+ledger_result_abi_error(::CvtLedger, op::Symbol,
+                        mods::Tuple{Vararg{Symbol}}) =
+    _ordinary_cvt_result_abi_error(mods)
+
+ledger_rettype(::ImmediateLedger, op::Symbol,
+               mods::Tuple{Vararg{Symbol}}) = missing
+ledger_rettype(::CLCLedger, op::Symbol,
+               mods::Tuple{Vararg{Symbol}}) = missing
+ledger_rettype(::B128Ledger, op::Symbol,
+               mods::Tuple{Vararg{Symbol}}) = missing
+function ledger_rettype(::MBarrierLedger, op::Symbol,
+                        mods::Tuple{Vararg{Symbol}})
+    s = schema(MBarrierLedger(), op, mods)
+    s === nothing ? missing : _mbarrier_rettype(s)
+end
+function ledger_rettype(::StructuredLedger, op::Symbol,
+                        mods::Tuple{Vararg{Symbol}})
+    s = schema(StructuredLedger(), op, mods)
+    s === nothing ? missing : structured_result_type(s)
+end
+function ledger_rettype(::VectorLedger, op::Symbol,
+                        mods::Tuple{Vararg{Symbol}})
+    s = schema(VectorLedger(), op, mods)
+    s === nothing ? missing : vector_result_type(s)
+end
+function ledger_rettype(::ScalarLedger, op::Symbol,
+                        mods::Tuple{Vararg{Symbol}})
+    s = schema(ScalarLedger(), op, mods)
+    s === nothing ? missing : s.rettype
+end
+ledger_rettype(::CvtLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
+    ordinary_cvt_result_type(mods)
+
 function _result_abi_error(op::Symbol, mods::Tuple{Vararg{Symbol}})
-    if requires_mbarrier_schema(op)
-        schema = mbarrier_form_schema(op, mods)
-        return schema === nothing ? mbarrier_schema_miss(mods) : nothing
+    l = first_claiming(op, mods)
+    if l !== nothing
+        r = ledger_result_abi_error(l, op, mods)
+        r === missing || return r
     end
-    structured = structured_result_schema(op, mods)
-    if requires_structured_result_schema(op)
-        return structured === nothing ? structured_result_schema_miss(op, mods) : nothing
-    end
-    vector = vector_result_schema(op, mods)
-    vector === nothing || return nothing
-    requires_vector_result_schema(op, mods) &&
-        return vector_result_schema_miss(op, mods)
-    schema = scalar_result_schema(op, mods)
-    schema === nothing || return nothing
-    requires_scalar_result_schema(op, mods) &&
-        return scalar_result_schema_miss(op, mods)
     c = form_contract(op, mods)
     c !== nothing && !c.returns && return nothing
-    op === :cvt && return _ordinary_cvt_result_abi_error(mods)
+    op === :cvt && return ledger_result_abi_error(CvtLedger(), op, mods)
     rettype = isempty(mods) ? Nothing : get(DTYPE_RETTYPE, last(mods), Nothing)
     if rettype === Nothing && c !== nothing && c.pure && c.returns
         spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))
@@ -101,17 +149,13 @@ end
 function infer_rettype(op::Symbol, mods::Tuple{Vararg{Symbol}})
     err = _result_abi_error(op, mods)
     err === nothing || throw(err)
-    mbarrier = mbarrier_form_schema(op, mods)
-    mbarrier === nothing || return _mbarrier_rettype(mbarrier)
-    structured = structured_result_schema(op, mods)
-    structured === nothing || return structured_result_type(structured)
-    vector = vector_result_schema(op, mods)
-    vector === nothing || return vector_result_type(vector)
-    schema = scalar_result_schema(op, mods)
-    schema === nothing || return schema.rettype
+    l = first_claiming(op, mods)
+    if l !== nothing
+        t = ledger_rettype(l, op, mods)
+        t === missing || return t
+    end
     c = form_contract(op, mods)
     c !== nothing && !c.returns && return Nothing
-    op === :cvt && return ordinary_cvt_result_type(mods)
-    rettype = isempty(mods) ? Nothing : get(DTYPE_RETTYPE, last(mods), Nothing)
-    rettype
+    op === :cvt && return ledger_rettype(CvtLedger(), op, mods)
+    isempty(mods) ? Nothing : get(DTYPE_RETTYPE, last(mods), Nothing)
 end

@@ -181,13 +181,15 @@ const CLC_TRY_CANCEL_FORMS = let
     forms
 end
 
-clc_try_cancel_schema(mods::Tuple{Vararg{Symbol}}) =
-    get(CLC_TRY_CANCEL_FORMS, mods, nothing)
+schema(::CLCLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
+    op === :clusterlaunchcontrol ? get(CLC_TRY_CANCEL_FORMS, mods, nothing) :
+    nothing
 
-requires_clc_try_cancel_schema(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
+claims(::CLCLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     op === :clusterlaunchcontrol && (:try_cancel in mods)
 
-function clc_try_cancel_schema_miss(mods::Tuple{Vararg{Symbol}})
+# `op` is always :clusterlaunchcontrol for a claimed miss; spelling is fixed.
+function miss(::CLCLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? "clusterlaunchcontrol" :
                "clusterlaunchcontrol." * join(mods, ".")
     ArgumentError(
@@ -238,3 +240,7 @@ function validate_clc_try_cancel_args(schema::CLCTryCancelSchema,
     end
     nothing
 end
+
+validate_ledger_args(::CLCLedger, s::CLCTryCancelSchema,
+                     @nospecialize(argtypes)) =
+    validate_clc_try_cancel_args(s, argtypes)

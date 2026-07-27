@@ -135,14 +135,14 @@ end
 end
 
 @testset "ordinary cvt schema selection is structural, not prefix grammar" begin
-    ordinary = PTX.ordinary_cvt_source_schema((:rn, :f32, :s32))
+    ordinary = PTX.schema(PTX.CvtLedger(), :cvt, (:rn, :f32, :s32))
     @test ordinary.destination === :f32
     @test ordinary.source === :s32
     @test ordinary.operands == (:s32,)
 
-    parsed_scaled = PTX.ordinary_cvt_source_schema(
+    parsed_scaled = PTX.schema(PTX.CvtLedger(), :cvt,
         (:rn, Symbol("scaled::n2::ue8m0"), :bf16x2, :e4m3x2))
-    direct_scaled = PTX.ordinary_cvt_source_schema(
+    direct_scaled = PTX.schema(PTX.CvtLedger(), :cvt,
         (:rn, :scaled__n2__ue8m0, :bf16x2, :e4m3x2))
     @test parsed_scaled === direct_scaled
     @test parsed_scaled.operands == (:b16, :b16)
@@ -150,7 +150,7 @@ end
     # The ledger closes terminal destination/source pairs and structural
     # rs/scaled operand roles. It intentionally leaves the large legal prefix
     # modifier cross-product to ptxas, matching the generic chain policy.
-    vendor_prefix = PTX.ordinary_cvt_source_schema(
+    vendor_prefix = PTX.schema(PTX.CvtLedger(), :cvt,
         (:future_modifier, :rn, :f32, :s32))
     @test vendor_prefix === ordinary
 
@@ -164,9 +164,9 @@ end
         (:rs, :f32, :s32),
         (:rn, :scaled__n2__ue8m0, :f32, :s32),
     )
-        @test_throws ArgumentError PTX.ordinary_cvt_source_schema(mods)
+        @test_throws ArgumentError PTX.schema(PTX.CvtLedger(), :cvt, mods)
     end
-    @test PTX.ordinary_cvt_source_schema((:pack, :sat, :u8, :s32, :b32)) ===
+    @test PTX.schema(PTX.CvtLedger(), :cvt, (:pack, :sat, :u8, :s32, :b32)) ===
           nothing
 end
 

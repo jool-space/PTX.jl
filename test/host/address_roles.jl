@@ -559,7 +559,7 @@ end
     A64 = Address{UInt64}
     for (mods, shared, multicast) in
             EXPECTED_CLC_TRY_CANCEL_FORMS
-        schema = PTX.clc_try_cancel_schema(mods)
+        schema = PTX.schema(PTX.CLCLedger(), :clusterlaunchcontrol, mods)
         @test schema !== nothing
         @test schema.shared_cta == shared
         @test schema.multicast == multicast

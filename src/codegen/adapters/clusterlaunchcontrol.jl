@@ -2,10 +2,10 @@ function _instruction_clc_try_cancel_schema(inst::Instruction)
     inst.opcode == "clusterlaunchcontrol" || return nothing
     op = :clusterlaunchcontrol
     mods = _schema_modifiers(inst.modifiers)
-    schema = clc_try_cancel_schema(mods)
-    schema === nothing && requires_clc_try_cancel_schema(op, mods) &&
-        throw(clc_try_cancel_schema_miss(mods))
-    schema === nothing && return nothing
+    s = schema(CLCLedger(), op, mods)
+    s === nothing && claims(CLCLedger(), op, mods) &&
+        throw(miss(CLCLedger(), op, mods))
+    s === nothing && return nothing
     length(inst.operands) == 2 || throw(ArgumentError(
         "PTX transpiler: clusterlaunchcontrol.try_cancel has exactly two " *
         "mandatory address operands ([addr], [mbar]); got " *
@@ -18,5 +18,14 @@ function _instruction_clc_try_cancel_schema(inst::Instruction)
             "PTX transpiler: clusterlaunchcontrol.try_cancel operand $i " *
             "must be a scalar PTX address, not a tensor-coordinate address"))
     end
-    schema
+    s
+end
+
+function transpile_ledger!(::CLCLedger, cg::CodeGenState, inst::Instruction)
+    _instruction_clc_try_cancel_schema(inst) === nothing && return false
+    chain = chain_expr(cg, inst.opcode, inst.modifiers)
+    args = join((render_operand(op, cg) for op in inst.operands), ", ")
+    emit_with_predicate!(cg, chain * "(" * args * ")",
+                         inst.predicate, String[])
+    true
 end
