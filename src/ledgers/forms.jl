@@ -170,9 +170,10 @@ const FORMS = Dict{Symbol, FormFamily}(
     :pmevent           => FormFamily(_SINK),
     :nanosleep         => FormFamily(_SINK),    # `.u32` names the duration operand
     # sm_90 cluster address queries: observable cross-CTA visibility.
+    # (`barrier.cluster` and `clusterlaunchcontrol` carry their own opcode
+    # heads; the ISA defines no bare `cluster` instruction — see SURFACE.toml.)
     :mapa              => FormFamily(_SIDEFX),
     :getctarank        => FormFamily(_SIDEFX),
-    :cluster           => FormFamily(_SIDEFX),
 
     # ── Memory ops (bracketed pointer operands) ──────────────────────────
     :ld       => FormFamily(_MEM),
