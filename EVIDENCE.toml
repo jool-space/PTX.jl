@@ -26,10 +26,10 @@ result = "full default-routing suite green — first hopper runtime execution of
 tests = "gpu/blackwell"
 runtime = "cc==10|cc==11"
 evidence = "manual"
-last_validated = "2026-07-14"
-device = "B300 (CC 10.3)"
-tree = "tcgen05-flash branch rebased on post-hardening main (62f4dfb era; before #88–#96)"
-result = "full suite 80,614/80,614 incl. FlashAttention numerics via the sm_103a auto-recompile path (B200 CC 10.0 validated 2026-07-12)"
+last_validated = "2026-07-28"
+device = "B200 (CC 10.0)"
+tree = "post-redesign main (c6c3ba5; #88–#97)"
+result = "full default-routing suite 91,870/91,870 incl. all tcgen05 runtime probes and blackwell GEMMs — run via Pkg.test, so the golden tier was filter-skipped (goldens run in CI). Prior records: B300 CC 10.3 2026-07-14 and B200 2026-07-12, both pre-redesign trees"
 
 [[tier]]
 tests = "gpu"
@@ -46,7 +46,6 @@ items = [
     "FA perf workbench: julia --project=test bench/flash_attention.jl (draft PR #18); knobs in order: scoreboard, NREG rebalance, emu pairs, 2-CTA variant",
     "issue #50: fabric spelling sm_100a ptxas evidence + configured-CFT-endpoint semantics",
     "tcgen05 idesc builders: validate i8/f8f6f4/MX instruction-descriptor helpers (only f16bf16_f32 exists)",
-    "re-validate gpu/blackwell runtime tier on post-redesign main (#88–#96)",
 ]
 
 [[queue]]
