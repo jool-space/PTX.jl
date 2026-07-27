@@ -193,11 +193,15 @@ An optional explicit carry-in is accepted. `T` may be `UInt32`, `Int32`,
 unsigned add. The complete straight-line sequence is emitted as one opaque,
 non-convergent inline-assembly call so `CC.CF` never crosses an LLVM boundary.
 """
-@generated add_with_carry(a::NTuple{N,T}, b::NTuple{N,T}) where
-        {N,T<:ExtendedPrecisionWord} = _addsub_aggregate_expr(:add, N, T, false)
+# `Tuple{T, Vararg{T, N}}` rather than `NTuple{N, T}`: the empty tuple is
+# outside the domain (no limbs, nothing to add), and this spelling binds `T`
+# from the first limb so no method has an unbound type parameter (Aqua).
+@generated add_with_carry(a::Tuple{T, Vararg{T, N}}, b::Tuple{T, Vararg{T, N}}) where
+        {N,T<:ExtendedPrecisionWord} = _addsub_aggregate_expr(:add, N + 1, T, false)
 
-@generated add_with_carry(a::NTuple{N,T}, b::NTuple{N,T}, carry::Bool) where
-        {N,T<:ExtendedPrecisionWord} = _addsub_aggregate_expr(:add, N, T, true)
+@generated add_with_carry(a::Tuple{T, Vararg{T, N}}, b::Tuple{T, Vararg{T, N}},
+                          carry::Bool) where
+        {N,T<:ExtendedPrecisionWord} = _addsub_aggregate_expr(:add, N + 1, T, true)
 
 """
     sub_with_borrow(a::NTuple{N,T}, b::NTuple{N,T}[, borrow::Bool])
@@ -208,11 +212,13 @@ difference and borrow-out. An optional explicit borrow-in is accepted. The
 entire sequence is one side-effecting, non-convergent asm block; see
 [`add_with_carry`](@ref) for supported limb types.
 """
-@generated sub_with_borrow(a::NTuple{N,T}, b::NTuple{N,T}) where
-        {N,T<:ExtendedPrecisionWord} = _addsub_aggregate_expr(:sub, N, T, false)
+@generated sub_with_borrow(a::Tuple{T, Vararg{T, N}}, b::Tuple{T, Vararg{T, N}}) where
+        {N,T<:ExtendedPrecisionWord} = _addsub_aggregate_expr(:sub, N + 1, T, false)
 
-@generated sub_with_borrow(a::NTuple{N,T}, b::NTuple{N,T}, borrow::Bool) where
-        {N,T<:ExtendedPrecisionWord} = _addsub_aggregate_expr(:sub, N, T, true, :borrow)
+@generated sub_with_borrow(a::Tuple{T, Vararg{T, N}}, b::Tuple{T, Vararg{T, N}},
+                           borrow::Bool) where
+        {N,T<:ExtendedPrecisionWord} =
+    _addsub_aggregate_expr(:sub, N + 1, T, true, :borrow)
 
 function _mul_wide_spec(::Type{T}) where {T<:Union{UInt32, UInt64}}
     dt, letter = _extended_precision_dtype(T)
