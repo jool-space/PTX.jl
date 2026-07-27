@@ -45,6 +45,11 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/julia-runtest@v1
+        env:
+          # Fail the lane if the GPU goes invisible instead of letting every
+          # runtime section skip and the suite go green with zero runtime
+          # evidence (test/runtests.jl enforces this).
+          PTX_REQUIRE_GPU_RUNTIME: 'true'
         with:
           # Pkg.test's default --check-bounds=yes overrides @inbounds inside
           # device code, injecting bounds-check branches into the golden-PTX

@@ -80,6 +80,24 @@ if args.list === nothing
     # summary, and skips without printing the entire test catalog.
     println(format_manifest(manifest, environment;
                             verbose = get(ENV, "CI", "") == "true"))
+
+    # A GPU CI lane whose device goes invisible must fail, not go green with
+    # every runtime section skipped — skips are informational, so without
+    # this check a dead runner silently produces zero runtime evidence.
+    # CI.yml sets PTX_REQUIRE_GPU_RUNTIME on the GPU lane only.
+    if get(ENV, "PTX_REQUIRE_GPU_RUNTIME", "") == "true" && apply_default_routing
+        # Count only requires=gpu files: their execution IS runtime evidence.
+        # (requires_gpu also covers toolkit+mixed files, but those execute
+        # their ptxas half without a device, so they can't stand in for it.)
+        executed_runtime = count(manifest) do entry
+            entry.action === :execute && entry.requirement.requires === :gpu
+        end
+        executed_runtime > 0 ||
+            error("PTX_REQUIRE_GPU_RUNTIME is set, but no GPU-runtime test " *
+                  "was routed to execute (functional GPU: $gpu_functional, " *
+                  "capability: $cap). A lane that promises runtime evidence " *
+                  "must not pass on skips.")
+    end
 end
 
 runtests(PTX, ARGS; init_code, testsuite)
