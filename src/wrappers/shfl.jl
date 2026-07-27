@@ -2,7 +2,8 @@
 # to tier-2 intrinsic lowering: the backend
 # selects the instruction from `llvm.nvvm.shfl.sync.<mode>.i32[p]`, with the
 # registry supplying `convergent` (shfl is the convergence guinea pig — see
-# spikes/convergence.jl for what its absence does).
+# spikes/convergence.jl, removed in ccdfb8a and viewable with
+# `git show ccdfb8a~1:spikes/convergence.jl`, for what its absence does).
 #
 # The notation surface is unchanged: `ptx"shfl.sync.<mode>.b32"(a, b, c,
 # membermask)` in PTX operand order, with the trailing `.pred` chain

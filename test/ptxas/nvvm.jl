@@ -32,10 +32,12 @@ end
 
 # --- the convergence regression, compile-only ------------------------------
 #
-# The shape from spikes/convergence.jl: identical convergent calls leading
-# both arms of a divergent branch. With the registry's `convergent` on the
-# declaration, both call sites must survive -O2 into the PTX; the hoisted
-# single-site version is the miscompile the spike demonstrated on hardware.
+# The shape from spikes/convergence.jl (removed in ccdfb8a; view with
+# `git show ccdfb8a~1:spikes/convergence.jl`): identical convergent calls
+# leading both arms of a divergent branch. With the registry's `convergent`
+# on the declaration, both call sites must survive -O2 into the PTX; the
+# hoisted single-site version is the miscompile the spike demonstrated on
+# hardware.
 
 function _nvvm_divergent_mask!(out::CuDeviceVector{UInt32, 1})
     i = ptx"mov.u32"(sreg"tid.x")

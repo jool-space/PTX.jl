@@ -1199,7 +1199,8 @@ end
 #     (Julia's, which knows nothing of these names and is constrained solely by
 #     what we attach). A wrong-in-the-permissive-direction attribute — claiming
 #     `memory(none)`/`speculatable`, or dropping `convergent` — is exactly the
-#     miscompile the convergence spike reproduced (spikes/convergence.jl).
+#     miscompile the convergence spike reproduced (spikes/convergence.jl,
+#     removed in ccdfb8a; `git show ccdfb8a~1:spikes/convergence.jl`).
 #
 # The realistic rot vector is an extraction-map regression in gen/ (PROPS / the
 # jq filter) on a future JLL re-gen, silently changing a tuple while names stay
