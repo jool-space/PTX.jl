@@ -47,9 +47,11 @@ include("flash_attention_defs.jl")
     @test occursin("tcgen05.fence::after_thread_sync", ptx)
     @test occursin("mbarrier.try_wait.parity.shared.b64", ptx)
     @test occursin("mbarrier.arrive.expect_tx.shared.b64", ptx)
-    @test occursin("setmaxnreg.inc.sync.aligned.u32 136", ptx)
-    @test occursin("setmaxnreg.dec.sync.aligned.u32 96", ptx)
+    # Default split (144, 80, 144): softmax and mma/load warpgroups both
+    # raise to 144, the producer drops to 80.
     @test occursin("setmaxnreg.inc.sync.aligned.u32 144", ptx)
+    @test occursin("setmaxnreg.dec.sync.aligned.u32 80", ptx)
+    @test !occursin("setmaxnreg.dec.sync.aligned.u32 96", ptx)
     @test occursin("vote.sync.ballot.b32", ptx)
     @test occursin("bar.arrive", ptx)
     @test occursin("ex2.approx.ftz.f32", ptx)
