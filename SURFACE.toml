@@ -1,0 +1,516 @@
+# SURFACE.toml — the machine-checked instruction-surface inventory.
+#
+# One entry per PTX ISA 9.3 §9.7.x instruction family (subsection splits where
+# one section's opcodes have different dispositions). Every PTX opcode head the
+# project has an opinion about appears in exactly ONE entry; test/host/surface.jl
+# asserts this inventory against the live code (PTX.FORMS,
+# PTX.TYPED_WRAPPER_ONLY_RULES, the wrapper registry) in both directions, so
+# textual expressibility is never mistaken for reviewed coverage (issue #55).
+#
+# status vocabulary (closed):
+#   strict       — closed reviewed schemas and/or typed wrappers; unreviewed
+#                  spellings fail loudly before LLVM.
+#   generic      — chain-default rendering under a reviewed FORMS contract.
+#   raw-only     — no FORMS entry or wrapper; the explicit `ptx"..."raw` escape
+#                  (RAW_CONTRACT, maximally conservative) is the only route.
+#   out-of-scope — deliberately unsupported; no FORMS entry, no wrapper, and
+#                  raw use is unsanctioned (unsound or structurally
+#                  inexpressible as a single asm call).
+#
+# `verify = true` marks entries whose disposition needs a human decision; the
+# note says why. `owner` lists the src file(s) that implement the entry.
+#
+# docs/src/coverage.md is generated from this file at docs-build time.
+
+# ── §9.7.1 Integer Arithmetic ────────────────────────────────────────────────
+
+[[family]]
+section = "9.7.1"
+title = "Integer Arithmetic Instructions"
+status = "generic"
+opcodes = ["add", "sub", "mul", "mad", "mul24", "mad24", "sad", "div", "rem",
+           "abs", "neg", "min", "max", "popc", "clz", "brev", "bfe", "bfi",
+           "szext", "dp4a", "dp2a", "clmad"]
+notes = "Pure per-lane ALU under the generic trailing-dtype rule; the add/sub/mul/mad/div/abs/neg/min/max heads also own the floating-point (§9.7.3), half (§9.7.4), and mixed-precision (§9.7.5) variants."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.1"
+title = "Integer Arithmetic Instructions: bfind, fns, bmsk"
+status = "raw-only"
+opcodes = ["bfind", "fns", "bmsk"]
+notes = "Unregistered pending review: bfind's destination is always .u32 regardless of source width, so the trailing-type heuristic misreads its .u64 forms (loud ptxas reject, never a miscompile); fns and bmsk raw-render correctly and simply await a reviewed FORMS entry."
+
+# ── §9.7.2 Extended-Precision Integer Arithmetic ─────────────────────────────
+
+[[family]]
+section = "9.7.2"
+title = "Extended-Precision Integer Arithmetic Instructions"
+status = "strict"
+opcodes = ["addc", "subc", "madc"]
+notes = "Implicit CC.CF cannot cross an LLVM inline-asm call boundary: chain AND raw are rejected by the semantic guard; typed wrappers expose the flag explicitly or fuse the operation. The add.cc/sub.cc/mad.cc spellings live under the §9.7.1 heads and hit the same guard."
+owner = ["src/wrappers/extended_precision.jl", "src/ledgers/implicit_state.jl"]
+
+# ── §9.7.3 Floating-Point ────────────────────────────────────────────────────
+
+[[family]]
+section = "9.7.3"
+title = "Floating-Point Instructions"
+status = "generic"
+opcodes = ["fma", "copysign", "rcp", "sqrt", "rsqrt", "sin", "cos", "lg2",
+           "ex2", "tanh"]
+notes = "Pure per-lane FP under the generic trailing-dtype rule; add/sub/mul/mad/div/abs/neg/min/max heads are owned by the §9.7.1 entry and cover the FP forms."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.3.1"
+title = "Floating-Point Instructions: testp"
+status = "raw-only"
+verify = true
+opcodes = ["testp"]
+notes = "Deliberately unregistered (forms.jl header): the tail names the SOURCE type and the destination is a predicate, so raw's trailing-type inference renders a wrong destination class for every form — needs a structured-result ledger entry before raw is actually usable."
+
+# ── §9.7.4 / §9.7.5 Half and Mixed Precision ─────────────────────────────────
+
+[[family]]
+section = "9.7.4"
+title = "Half Precision Floating-Point Instructions"
+status = "generic"
+opcodes = []
+notes = "No distinct opcode heads: add/sub/mul/fma/neg/abs/min/max/tanh/ex2 f16/f16x2/bf16 forms flow through the §9.7.1/§9.7.3 entries' FORMS contracts."
+
+[[family]]
+section = "9.7.5"
+title = "Mixed Precision Floating-Point Instructions"
+status = "generic"
+opcodes = []
+notes = "No distinct opcode heads: mixed-precision add/sub/fma forms flow through the §9.7.1/§9.7.3 entries' FORMS contracts."
+
+# ── §9.7.6 / §9.7.7 Comparison and Selection ─────────────────────────────────
+
+[[family]]
+section = "9.7.6"
+title = "Comparison and Selection Instructions: setp, selp"
+status = "generic"
+opcodes = ["setp", "selp"]
+notes = "selp is pure trailing-dtype; setp's scalar/grouped predicate ABI is audited in the structured-result ledger."
+owner = ["src/ledgers/forms.jl", "src/ledgers/structured_results.jl"]
+
+[[family]]
+section = "9.7.6"
+title = "Comparison and Selection Instructions: set, slct"
+status = "raw-only"
+opcodes = ["set", "slct"]
+notes = "Deliberately unregistered (forms.jl header): set's dtype.stype and slct's dtype.ctype tails end in an operand type, so raw misreads the destination class whenever dtype and the tail differ (loud ptxas reject) — stays raw-only until given grammar-aware entries."
+
+[[family]]
+section = "9.7.7"
+title = "Half Precision Comparison Instructions"
+status = "generic"
+opcodes = []
+notes = "No distinct opcode heads: f16 set/setp forms share the §9.7.6 entries (same tail-grammar caveat for set)."
+
+# ── §9.7.8 Logic and Shift ───────────────────────────────────────────────────
+
+[[family]]
+section = "9.7.8"
+title = "Logic and Shift Instructions"
+status = "generic"
+opcodes = ["and", "or", "xor", "not", "lop3", "shf", "shl", "shr"]
+notes = "Pure per-lane bit ops; lop3's optional predicate-destination group is audited in the structured-result ledger."
+owner = ["src/ledgers/forms.jl", "src/ledgers/structured_results.jl"]
+
+[[family]]
+section = "9.7.8.5"
+title = "Logic and Shift Instructions: cnot"
+status = "raw-only"
+opcodes = ["cnot"]
+notes = "Plain C-style logical negation; raw renders a correct scalar form, unregistered simply because nothing needed it yet."
+
+# ── §9.7.9 Data Movement and Conversion ──────────────────────────────────────
+
+[[family]]
+section = "9.7.9.3"
+title = "Data Movement and Conversion Instructions: mov"
+status = "generic"
+opcodes = ["mov"]
+notes = "Generic scalar mov plus special-register reads (sreg\"...\"); mov.b128 pack/unpack is the audited B128 carrier bridge."
+owner = ["src/ledgers/forms.jl", "src/ledgers/b128_forms.jl", "src/dsl/sregs.jl"]
+
+[[family]]
+section = "9.7.9.6"
+title = "Data Movement and Conversion Instructions: shfl.sync"
+status = "strict"
+opcodes = ["shfl"]
+notes = "Convergent; plain d-destination forms are chain-generic, but the d|p grouped destination is typed-wrapper-only (the :pred selector rule) and the deprecated non-sync shfl (§9.7.9.5) is not blessed."
+owner = ["src/ledgers/forms.jl", "src/wrappers/shfl.jl"]
+
+[[family]]
+section = "9.7.9.7"
+title = "Data Movement and Conversion Instructions: prmt"
+status = "generic"
+opcodes = ["prmt"]
+notes = "Pure byte-permute under the generic rule."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.9.8"
+title = "Data Movement and Conversion Instructions: ld, ldu, st"
+status = "generic"
+opcodes = ["ld", "ldu", "st"]
+notes = "Bracketed memory ops (st is a sink: the dtype tail names the value written); covers ld.global.nc, st.async (§9.7.9.12), and st.bulk (§9.7.9.14); vector and .b128 forms are audited in their ledgers, and vec_ldst typed wrappers cover the tuple API."
+owner = ["src/ledgers/forms.jl", "src/wrappers/vec_ldst.jl",
+         "src/ledgers/vector_results.jl", "src/ledgers/b128_forms.jl"]
+
+[[family]]
+section = "9.7.9.15"
+title = "Data Movement and Conversion Instructions: multimem"
+status = "generic"
+opcodes = ["multimem"]
+notes = "Multicast ld_reduce/st/red plus multimem.st.async (§9.7.9.13), multimem.red.async (§9.7.14.8), and multimem.cp bulk forms; st/red/cp prefixes are sink overrides."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.9.16"
+title = "Data Movement and Conversion Instructions: prefetch"
+status = "generic"
+opcodes = ["prefetch"]
+notes = "Bracketed cache-prefetch hint."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.9.16"
+title = "Data Movement and Conversion Instructions: prefetchu"
+status = "raw-only"
+opcodes = ["prefetchu"]
+notes = "Uniform-cache prefetch; raw renders the correct no-result bracketed form, unregistered because nothing needed it yet."
+
+[[family]]
+section = "9.7.9.17"
+title = "Data Movement and Conversion Instructions: applypriority"
+status = "generic"
+opcodes = ["applypriority"]
+notes = "Bracketed eviction-priority hint."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.9.18"
+title = "Data Movement and Conversion Instructions: discard"
+status = "generic"
+opcodes = ["discard"]
+notes = "Bracketed cache-discard hint."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.9.19"
+title = "Data Movement and Conversion Instructions: createpolicy"
+status = "raw-only"
+opcodes = ["createpolicy"]
+notes = "Cache-policy handle creation; raw renders the correct scalar .b64 destination, unregistered because nothing needed it yet."
+
+[[family]]
+section = "9.7.9.20"
+title = "Data Movement and Conversion Instructions: isspacep"
+status = "raw-only"
+verify = true
+opcodes = ["isspacep"]
+notes = "Destination is a predicate and the address operand is NOT bracketed, so the current raw render is wrong on both counts (loud ptxas reject) — needs a structured-result ledger entry before raw is actually usable."
+
+[[family]]
+section = "9.7.9.21"
+title = "Data Movement and Conversion Instructions: cvta"
+status = "generic"
+opcodes = ["cvta"]
+notes = "Address-space cast under the generic rule (pure: no memory access)."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.9.22"
+title = "Data Movement and Conversion Instructions: cvt"
+status = "generic"
+opcodes = ["cvt"]
+notes = "Destination is the penultimate type token (audited in infer_rettype); source carriers for ordinary cvt and cvt.pack (§9.7.9.23) come from the closed cvt ledger, with exact wrappers for the microfloat/stochastic forms."
+owner = ["src/ledgers/forms.jl", "src/ledgers/cvt_forms.jl", "src/wrappers/cvt.jl"]
+
+[[family]]
+section = "9.7.9.24"
+title = "Data Movement and Conversion Instructions: mapa"
+status = "generic"
+opcodes = ["mapa"]
+notes = "Cluster CTA address mapping (observable cross-CTA visibility, hence not pure); typed wrappers handle the shared::cluster addrspace bookkeeping."
+owner = ["src/ledgers/forms.jl", "src/wrappers/mapa.jl"]
+
+[[family]]
+section = "9.7.9.25"
+title = "Data Movement and Conversion Instructions: getctarank"
+status = "generic"
+opcodes = ["getctarank"]
+notes = "Cluster CTA-rank query (observable cross-CTA visibility, hence not pure)."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.9.25"
+title = "Data Movement and Conversion Instructions: cluster (no such ISA head)"
+status = "generic"
+verify = true
+opcodes = ["cluster"]
+notes = "FORMS carries a :cluster head grouped with the sm_90 cluster queries, but PTX ISA 9.3 defines no instruction whose opcode head is `cluster` (barrier.cluster and clusterlaunchcontrol have their own heads) — inventoried here so the FORMS key is owned; candidate for removal from FORMS."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.9.26"
+title = "Data Movement and Conversion Instructions: Asynchronous copy (cp.async, cp.async.bulk, TMA)"
+status = "strict"
+opcodes = ["cp"]
+notes = "cp.async and the bulk/tensor forms are chain-renderable under sink overrides (the terminal type token is an operand descriptor), cp.async.bulk.prefetch.tensor is typed-wrapper-only (rank-dependent coordinate vectors plus a paired cache-hint operand), and the TMA wrappers own the tensor-copy API."
+owner = ["src/ledgers/forms.jl", "src/wrappers/cp_async.jl", "src/wrappers/tma.jl"]
+
+[[family]]
+section = "9.7.9.27"
+title = "Data Movement and Conversion Instructions: tensormap.replace"
+status = "generic"
+opcodes = ["tensormap"]
+notes = "Sink (the type tail names the replaced field); the head also covers tensormap.cp_fenceproxy (§9.7.14.17); the tensormap PROXY FENCES live under the fence head and are typed-wrapper-only."
+owner = ["src/ledgers/forms.jl", "src/lib/tensor_map.jl"]
+
+# ── §9.7.10 Fabric ───────────────────────────────────────────────────────────
+
+[[family]]
+section = "9.7.10"
+title = "Fabric Instructions"
+status = "strict"
+opcodes = ["fabric"]
+notes = "Hand-written asm wrappers (submit/wait/try_get/try_put, PTX 9.3 sm_100+): the two-register CFT handle operand has no chain-default rendering, so :fabric is deliberately NOT in FORMS; try_red/try_pullred and the cp_mask/counted::bytes put forms are deferred."
+owner = ["src/wrappers/fabric.jl"]
+
+# ── §9.7.11 / §9.7.12 Texture and Surface ────────────────────────────────────
+
+[[family]]
+section = "9.7.11"
+title = "Texture Instructions"
+status = "out-of-scope"
+opcodes = ["tex", "tld4", "txq", "istypep"]
+notes = "Opaque texref/sampler operands and grouped vector destinations are inexpressible as a single scalar-constraint asm call; graphics-oriented surface not targeted by PTX.jl."
+
+[[family]]
+section = "9.7.12"
+title = "Surface Instructions"
+status = "out-of-scope"
+opcodes = ["suld", "sust", "sured", "suq"]
+notes = "Opaque surfref operands and grouped vector destinations, same boundary as §9.7.11; not targeted by PTX.jl."
+
+# ── §9.7.13 Control Flow ─────────────────────────────────────────────────────
+
+[[family]]
+section = "9.7.13"
+title = "Control Flow Instructions: ret, exit"
+status = "generic"
+opcodes = ["ret", "exit"]
+notes = "Terminal sinks with observable effects (sideeffect + clobber); no operands, so the generic contract fits."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.13"
+title = "Control Flow Instructions: bra, brx.idx, call ({} and @ are syntax, not opcodes)"
+status = "out-of-scope"
+opcodes = ["bra", "brx", "call"]
+notes = "Control transfer cannot cross an LLVM inline-asm call boundary (labels/targets are invisible to the compiler); Julia control flow is the supported route."
+
+# ── §9.7.14 Parallel Synchronization and Communication ───────────────────────
+
+[[family]]
+section = "9.7.14.1"
+title = "Parallel Synchronization and Communication Instructions: bar, barrier"
+status = "generic"
+opcodes = ["bar", "barrier"]
+notes = "Convergent collectives; covers bar.warp.sync (§9.7.14.2) and barrier.cluster (§9.7.14.3); bar.red returns while bar.sync's tail is an id, and intrinsic-backed wrappers cover the common forms."
+owner = ["src/ledgers/forms.jl", "src/wrappers/barrier.jl",
+         "src/wrappers/barrier_cluster.jl"]
+
+[[family]]
+section = "9.7.14.4"
+title = "Parallel Synchronization and Communication Instructions: membar"
+status = "generic"
+opcodes = ["membar"]
+notes = "Legacy memory barrier; sideeffect + clobber, no operands."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.14.4"
+title = "Parallel Synchronization and Communication Instructions: fence"
+status = "strict"
+opcodes = ["fence"]
+notes = "Ordinary fence forms are chain-generic, but the tensormap::generic proxy fences are typed-wrapper-only (direction-specific acquire/release ABIs, exact scope set, ISA-fixed 128-byte acquire range); intrinsic/core-IR wrappers cover the common scoped fences."
+owner = ["src/ledgers/forms.jl", "src/wrappers/fence.jl"]
+
+[[family]]
+section = "9.7.14.5"
+title = "Parallel Synchronization and Communication Instructions: atom"
+status = "generic"
+opcodes = ["atom"]
+notes = "Bracketed read-modify-write returning the old value; 128-bit forms are audited in the B128 ledger."
+owner = ["src/ledgers/forms.jl", "src/ledgers/b128_forms.jl"]
+
+[[family]]
+section = "9.7.14.6"
+title = "Parallel Synchronization and Communication Instructions: red, red.async"
+status = "generic"
+opcodes = ["red"]
+notes = "Sink reduction (the type tail names the value written); covers red.async (§9.7.14.7)."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.14.10"
+title = "Parallel Synchronization and Communication Instructions: vote.sync"
+status = "generic"
+opcodes = ["vote"]
+notes = "Convergent; the deprecated non-sync vote (§9.7.14.9) shares the head and the same conservative contract."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.14.11"
+title = "Parallel Synchronization and Communication Instructions: match.sync"
+status = "generic"
+opcodes = ["match"]
+notes = "Convergent; the match.all d|p grouped destination is audited in the structured-result ledger."
+owner = ["src/ledgers/forms.jl", "src/ledgers/structured_results.jl"]
+
+[[family]]
+section = "9.7.14.12"
+title = "Parallel Synchronization and Communication Instructions: activemask"
+status = "generic"
+opcodes = ["activemask"]
+notes = "Convergent by contract so the optimizer can never duplicate or merge it across divergence (the classic miscompile class)."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.14.13"
+title = "Parallel Synchronization and Communication Instructions: redux.sync"
+status = "generic"
+opcodes = ["redux"]
+notes = "Convergent warp reduction under the generic rule."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.14.14"
+title = "Parallel Synchronization and Communication Instructions: griddepcontrol"
+status = "generic"
+opcodes = ["griddepcontrol"]
+notes = "Grid-dependency control; sideeffect + clobber, no operands."
+owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.14.15"
+title = "Parallel Synchronization and Communication Instructions: elect.sync"
+status = "generic"
+opcodes = ["elect"]
+notes = "Convergent; the d|p grouped destination is audited in the structured-result ledger."
+owner = ["src/ledgers/forms.jl", "src/ledgers/structured_results.jl"]
+
+[[family]]
+section = "9.7.14.16"
+title = "Parallel Synchronization and Communication Instructions: mbarrier"
+status = "strict"
+opcodes = ["mbarrier"]
+notes = "Every mbarrier chain is gated by the closed §9.7.14.16 grammar/ABI ledger (the terminal .b64 is never a result type; destinations span sink/state/pred/count/report groups); the FORMS entry supplies only conservative optimizer attributes, and MBarriers/Pipelines build on the wrappers."
+owner = ["src/ledgers/mbarrier_forms.jl", "src/wrappers/mbarrier.jl",
+         "src/lib/mbarriers.jl", "src/lib/pipelines.jl"]
+
+[[family]]
+section = "9.7.14.18"
+title = "Parallel Synchronization and Communication Instructions: clusterlaunchcontrol"
+status = "generic"
+opcodes = ["clusterlaunchcontrol"]
+notes = "try_cancel is a sink with two mandatory address operands (dedicated override + schema); query_cancel (§9.7.14.19) .b128 forms are audited in the B128 ledger."
+owner = ["src/ledgers/forms.jl", "src/ledgers/b128_forms.jl"]
+
+# ── §9.7.15 Warp-Level Matrix Multiply-Accumulate ────────────────────────────
+
+[[family]]
+section = "9.7.15.4"
+title = "Warp Level Matrix Multiply-Accumulate Instructions: wmma"
+status = "out-of-scope"
+opcodes = ["wmma"]
+notes = "Legacy wmma.load/store/mma fragment API superseded by mma.sync; shape-dependent fragment groups are inexpressible in chain/raw, and no wrapper is planned."
+
+[[family]]
+section = "9.7.15.5"
+title = "Warp Level Matrix Multiply-Accumulate Instructions: mma"
+status = "strict"
+opcodes = ["mma"]
+notes = "Typed-wrapper-only (shape-dependent grouped fragment operands and results); covers mma.sync dense, block-scaled, .sp/.sp::ordered_metadata sparse, and the b1 forms via generated wrapper families."
+owner = ["src/wrappers/mma.jl", "src/wrappers/mma_scaled.jl"]
+
+[[family]]
+section = "9.7.15.5.15"
+title = "Warp-level matrix load instruction: ldmatrix"
+status = "strict"
+opcodes = ["ldmatrix"]
+notes = "Typed-wrapper-only: shape/count-dependent grouped results (two registers per matrix for m16n16) and format-specific arity."
+owner = ["src/wrappers/ldmatrix.jl"]
+
+[[family]]
+section = "9.7.15.5.16"
+title = "Warp-level matrix store instruction: stmatrix"
+status = "generic"
+opcodes = ["stmatrix"]
+notes = "Convergent bracketed sink; x1/x2/x4 source groups are covered by typed wrappers, and the FORMS contract keeps chain spellings conservative."
+owner = ["src/ledgers/forms.jl", "src/wrappers/stmatrix.jl"]
+
+[[family]]
+section = "9.7.15.5.17"
+title = "Warp-level matrix transpose instruction: movmatrix"
+status = "raw-only"
+opcodes = ["movmatrix"]
+notes = "Single-register warp transpose; raw renders the correct convergent scalar form, unregistered because nothing needed it yet."
+
+# ── §9.7.16 Asynchronous Warpgroup MMA ───────────────────────────────────────
+
+[[family]]
+section = "9.7.16"
+title = "Asynchronous Warpgroup Level Matrix Multiply-Accumulate Instructions"
+status = "strict"
+opcodes = ["wgmma"]
+notes = "wgmma.mma_async (dense and .sp) is typed-wrapper-only (shape-dependent tied accumulator groups and matrix descriptors); wgmma.fence/commit_group/wait_group share the head under the convergent FORMS contract."
+owner = ["src/wrappers/wgmma.jl", "src/wrappers/wgmma_sp.jl",
+         "src/lib/wgmma_descriptor.jl"]
+
+# ── §9.7.17 TensorCore 5th Generation (tcgen05) ──────────────────────────────
+
+[[family]]
+section = "9.7.17"
+title = "TensorCore 5th Generation Family Instructions"
+status = "strict"
+opcodes = ["tcgen05"]
+notes = "Typed-wrapper-only: one head spans address destinations, register vectors, sinks, fences, and matrix descriptors (alloc/dealloc, ld/st grids, cp, mma dense/sp/ws/mx, commit, fences); ~120/200 intrinsics remain unwrapped — see the tcgen05 coverage-gap plan."
+owner = ["src/wrappers/tcgen05.jl", "src/lib/tcgen05_descriptor.jl",
+         "src/lib/tcgen05_layout.jl"]
+
+# ── §9.7.18 / §9.7.19 Stack and Video ────────────────────────────────────────
+
+[[family]]
+section = "9.7.18"
+title = "Stack Manipulation Instructions"
+status = "out-of-scope"
+opcodes = ["stacksave", "stackrestore", "alloca"]
+notes = "Mutating the stack pointer behind LLVM's back inside compiler-managed frames is unsound; Julia/LLVM own stack allocation."
+
+[[family]]
+section = "9.7.19"
+title = "Video Instructions"
+status = "out-of-scope"
+opcodes = ["vadd", "vsub", "vabsdiff", "vmin", "vmax", "vshl", "vshr", "vmad",
+           "vset", "vadd2", "vsub2", "vavrg2", "vabsdiff2", "vmin2", "vmax2",
+           "vset2", "vadd4", "vsub4", "vavrg4", "vabsdiff4", "vmin4", "vmax4",
+           "vset4"]
+notes = "Legacy scalar/SIMD video ALU (emulated on modern targets); optional secondary-operation suffixes defeat the trailing-dtype rule and nothing motivates review."
+
+# ── §9.7.20 Miscellaneous ────────────────────────────────────────────────────
+
+[[family]]
+section = "9.7.20"
+title = "Miscellaneous Instructions"
+status = "generic"
+opcodes = ["brkpt", "nanosleep", "pmevent", "trap", "setmaxnreg"]
+notes = "Observable side effects, conservative contracts (nanosleep/pmevent tails name operands; setmaxnreg is convergent and requires .reqntid via minthreads to take effect)."
+owner = ["src/ledgers/forms.jl"]
