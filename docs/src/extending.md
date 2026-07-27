@@ -108,10 +108,13 @@ Files touched, in order:
    `# TEST_TARGET:` banner, when hardware semantics are checkable.
 7. `docs/src/wrappers.md` — the family's user-facing documentation.
 
-`src/nvvm/table.jl` is never hand-edited. If the intrinsic is missing
-from the registry, the wrapper is an asm-tier wrapper (same shape, but
-building `convergent_asm_ir`/`@asmcall` bodies), and the registry gains
-it on the next backend bump — see `gen/README.md`.
+`src/nvvm/table.jl` is never hand-edited — a standing test
+(`test/host/registry_generation.jl`) byte-compares it against
+regeneration from the committed JSON snapshot in `gen/`. If the
+intrinsic is missing from the registry, the wrapper is an asm-tier
+wrapper (same shape, but building `convergent_asm_ir`/`@asmcall`
+bodies), and the registry gains it on the next backend bump — see
+`gen/README.md`.
 
 ## Recipe C: result-ledger forms
 

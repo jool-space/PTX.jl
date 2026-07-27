@@ -27,6 +27,16 @@ generator halves and the extracted JSON snapshot they communicate through.
   cleanly). If a future tag outgrows the pinned tblgen, bump
   `LLVM_full_jll` here — this pin is independent of the backend version.
 
+## Standing conformance
+
+`test/host/registry_generation.jl` regenerates the table in memory from
+the committed JSON snapshot (via the generator's `generate_table_source`,
+which needs only the JSON package — not `LLVM_full_jll`) and byte-compares
+it against the committed `src/nvvm/table.jl` on every host test run. A red
+test means the two committed halves have drifted: either the table was
+hand-edited (revert it) or the snapshot/generator changed without
+regenerating (rerun step 3 below and review the diff).
+
 ## Backend bump runbook
 
 When `NVPTX_LLVM_Backend_jll` moves to a new version `X.Y.Z` (the compat
