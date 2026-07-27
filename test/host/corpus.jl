@@ -142,3 +142,17 @@ end
     rels = Set(relpath(path, EXTERNAL_SWEEP_DIR) for path in EXTERNAL_SWEEP_FILES)
     @test all(name -> name in rels, keys(EXTERNAL_SWEEP_RAWLINE_MANIFEST))
 end
+
+# The ptxas-acceptance evidence for the same external corpus lives in
+# gpu/corpus_compile_* (see test/setup.jl, ptxas external-corpus acceptance
+# support). Its selection (malformed-fixture filter + `.target` scan) and
+# size-balanced shard assignment are pure host, so pin here — on every lane,
+# toolchain or not — that the four slices partition the selected corpus
+# exactly: no file dropped, none doubled.
+@testset "ptxas corpus shard partition is exact" begin
+    selected = ptxas_corpus_files()
+    @test !isempty(selected)
+    sharded = sort(reduce(vcat, [ptxas_corpus_shard(i)
+                                 for i in 1:PTXAS_CORPUS_SHARDS]))
+    @test sharded == selected
+end

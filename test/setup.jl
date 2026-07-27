@@ -624,3 +624,226 @@ function _deep_structural_roundtrip(src::String, name::String;
     end
     first_text
 end
+
+# --- ptxas external-corpus acceptance support --------------------------------
+#
+# Shared by the gpu/corpus_compile_* shards: ptxas-acceptance of real-world
+# external PTX — AND of the PTX our parser/formatter re-emits from it. ptxas
+# is the ground truth for "valid PTX", far stricter than the parser's
+# syntactic check:
+#
+#   1. the source is real, valid PTX (sanity);
+#   2. parser+formatter preserve enough that ptxas STILL accepts the
+#      structurally re-emitted form (raw_source stripped).
+#
+# Pure parse + round-trip *fidelity* is already covered hardware-free by
+# test/host/corpus.jl (lossless / fixed-point / size-delta tiers). The shards'
+# sole added value is the ptxas leg, so they stay scoped to that.
+#
+# Design (and why it changed):
+#  * Uses the CUDACore-managed ptxas (`CUDA_Compiler.ptxas()`) invoked
+#    STANDALONE (PTX → cubin, --compile-only, no device load) — not the
+#    driver JIT. Fully hardware-independent: Ada, the GB10 dev box, a
+#    B200 and a B300 all produce identical results.
+#  * The old path (`CUDACore.CuModule`) JIT-compiled for the *live
+#    device*, which forced a device-CC gate (`_target_runnable`,
+#    arch-exact for `sm_NNa`). That silently made corpus coverage depend
+#    on which GPU ran the suite: only a CC-exactly-10.0 box ever
+#    exercised the sm_100a corpus, so the LLVM-fixture `.version 8.5` /
+#    `.target sm_100a` defect was invisible until a B200 first ran it.
+#    The whole CC gate is gone.
+#  * `.version` is stamped to the managed assembler's max PTX ISA —
+#    mirroring `CUDACore.rewrite_ptx_header` ("the ISA we want ptxas to
+#    validate against"). LLVM-derived fixtures carry loose `.version`
+#    directives (e.g. 8.5 with sm_100a+tcgen05, whose floor is 8.6) that
+#    ptxas correctly rejects; but the corpus exists to exercise our
+#    parser/formatter, not to assert LLVM's filecheck headers are
+#    ptxas-legal. Stamping to the assembler's own ISA makes "are the
+#    *instructions* valid for this target" a well-posed, single-rule
+#    question (no per-target floor table). Safe: ptxas is
+#    backward-compatible and the stamped ISA == the binary's own ceiling.
+#  * `_is_malformed_llvm_fixture` excludes LLVM FileCheck snippets that
+#    aren't complete modules (undefined `_param_N` / `func_retval0` /
+#    32-bit `[%rN]` address ABI) — structurally un-assemblable. Their
+#    parse/round-trip is still covered by host/corpus.jl.
+#  * The point of this evidence is PTX-*ISA* coverage, not which legacy GPU
+#    still builds on a modern toolkit. ptxas's instruction-superset
+#    (the PTX *language*) is distinct from its per-arch SASS backends
+#    (which NVIDIA prunes — CUDA 13 dropped sm_50/sm_70). So if a file's
+#    declared `.target` arch was pruned, we retarget UP to the lowest
+#    arch the managed ptxas still backs (PTX is forward-portable) and
+#    validate the instructions there — symmetric with stamping
+#    `.version` up to the assembler's ISA. Verbatim-`.target` fidelity
+#    stays covered by host/corpus.jl's round-trip tiers. Net: every
+#    selected file is asserted; nothing is skipped.
+#
+# setup.jl loads into EVERY test worker, including host-only ones with no
+# CUDA toolchain, so nothing here may touch `CUDA_Compiler.ptxas()` or query
+# the PTX ISA at include time. All toolchain state (assembler handle, ISA
+# ceiling, arch probes, minimum backed arch) is function-level memoized and
+# first materializes inside a gpu/corpus_compile_* testset. Corpus selection
+# and shard assignment are pure host (file reads + regex), memoized the same
+# way so host/corpus.jl can pin the partition without a toolchain.
+
+# Many LLVM-testsuite-derived corpus files are filecheck fixtures that
+# generate PTX from IR without emitting a full prologue. They share one of
+# three malformed patterns, all of which ptxas correctly rejects:
+#
+#   (a) `.visible .entry NAME()` with zero params but body references
+#       `[NAME_param_N]` — undefined param symbols.
+#   (b) `.visible .entry NAME()` with no return slot but body stores to
+#       `func_retval0` — undefined retval symbol.
+#   (c) Body uses 32-bit regs `[%rN]` as memory addresses; ptxas treats
+#       this as 32-bit ABI which is rejected on sm_90+. Real PTX uses
+#       `%rdN` (i64) for addresses there.
+#
+# Also catches the clusterlaunchcontrol__* family which adds undeclared
+# 128-bit `%clc_handle` regs on top of (a). Easier to filter structurally
+# than to maintain a per-file blacklist.
+function _is_malformed_llvm_fixture(path::AbstractString)
+    src = read(path, String)
+    m = match(r"\.visible\s+\.entry\s+([A-Za-z_0-9]+)\(\)", src)
+    m === nothing && return false
+    entry_name = m.captures[1]
+    # (a) `_param_N` body references against an empty `()` entry.
+    occursin(Regex("\\b" * entry_name * "_param_\\d"), src) && return true
+    # (b) `func_retval0` body references against an empty `()` entry.
+    occursin("func_retval0", src) && return true
+    # (c) 32-bit reg as memory address — `[%r<digits>]` or `[%r<digits>+...]`,
+    # but NOT `[%rd...]` (the 64-bit form). ptxas rejects on sm_90+.
+    occursin(r"\[%r\d", src) && return true
+    return false
+end
+
+# The managed standalone assembler. Memoized: resolving the artifact requires
+# the toolchain, which host-only workers don't have.
+const _PTXAS_TOOL = Ref{Any}(nothing)
+function _ptxas_tool()
+    _PTXAS_TOOL[] === nothing &&
+        (_PTXAS_TOOL[] = CUDACore.CUDA_Compiler.ptxas())
+    _PTXAS_TOOL[]
+end
+
+# Max PTX ISA the managed assembler accepts (CUDA 13.2 → 9.2). Tracks the
+# shipped toolkit automatically; never below any feature floor, never
+# above the binary's ceiling.
+const _PTXAS_ISA = Ref{Union{Nothing, VersionNumber}}(nothing)
+function _ptxas_isa()
+    isa = _PTXAS_ISA[]
+    isa === nothing || return isa
+    _PTXAS_ISA[] =
+        maximum(CUDACore.ptxas_ptx_support(CUDACore.compiler_version()))
+end
+
+# Stamp `.version` to the managed assembler's ISA.
+function _stamp_version(src::AbstractString)
+    isa = _ptxas_isa()
+    replace(src, r"^(\.version[ \t]+)[0-9.]+"m =>
+            SubstitutionString("\\g<1>$(isa.major).$(isa.minor)"))
+end
+
+# Can the managed ptxas emit SASS for `arch`? A property of the shipped
+# binary (its per-arch backends), not of any device — memoized.
+const _ARCH_OK = Dict{String, Bool}()
+function _arch_supported(arch::AbstractString)
+    get!(_ARCH_OK, arch) do
+        isa = _ptxas_isa()
+        stub = ".version $(isa.major).$(isa.minor)\n.target $arch\n" *
+               ".address_size 64\n.visible .entry _probe(){ ret; }\n"
+        ptx = tempname() * ".ptx"; write(ptx, stub)
+        cub = tempname() * ".cubin"
+        proc = run(pipeline(ignorestatus(
+                       `$(_ptxas_tool()) --compile-only --gpu-name $arch --output-file $cub $ptx`);
+                   stdout = devnull, stderr = devnull))
+        rm(ptx; force = true); rm(cub; force = true)
+        proc.exitcode == 0
+    end
+end
+
+# Lowest real arch the managed ptxas still backs. Derived (not hardcoded)
+# by scanning a fixed ascending ladder — self-adjusts when CUDACore bumps
+# the toolkit (CUDA 13 → sm_75; a future CUDA pruning more just moves it).
+const _ARCH_LADDER = ["sm_50", "sm_52", "sm_53", "sm_60", "sm_61", "sm_62",
+                      "sm_70", "sm_72", "sm_75", "sm_80", "sm_86", "sm_87",
+                      "sm_89", "sm_90", "sm_90a", "sm_100a", "sm_103a",
+                      "sm_120a"]
+const _MIN_ARCH = Ref{Union{Nothing, String}}(nothing)
+function _ptxas_min_arch()
+    arch = _MIN_ARCH[]
+    arch === nothing || return arch
+    _MIN_ARCH[] = _ARCH_LADDER[findfirst(_arch_supported, _ARCH_LADDER)]
+end
+
+# Arch to actually assemble at: the file's declared one if the managed
+# ptxas still backs it, else retarget UP to the ladder minimum (PTX is
+# forward-portable; we want ISA coverage, not legacy-GPU coverage).
+_target_arch(declared::AbstractString) =
+    _arch_supported(declared) ? declared : _ptxas_min_arch()
+
+# Run the managed ptxas standalone: PTX → cubin, no device. `.version`
+# stamped to the managed ISA; `.target` retargeted up iff its declared
+# arch was pruned from the binary. Returns (ok::Bool, stderr::String).
+function _ptxas_accepts(src::AbstractString, declared::AbstractString)
+    arch = _target_arch(declared)
+    text = _stamp_version(src)
+    arch == declared ||
+        (text = replace(text, r"^\.target[ \t]+sm_\w+"m => ".target $arch"))
+    ptx = tempname() * ".ptx"; write(ptx, text)
+    cub = tempname() * ".cubin"
+    errbuf = IOBuffer()
+    proc = run(pipeline(ignorestatus(
+                   `$(_ptxas_tool()) --compile-only --gpu-name $arch --output-file $cub $ptx`);
+               stdout = devnull, stderr = errbuf))
+    rm(ptx; force = true)
+    rm(cub; force = true)
+    (proc.exitcode == 0, String(take!(errbuf)))
+end
+
+# `(path, declared_arch)` for every non-malformed external `.ptx`. No
+# device, no toolchain, no CC gate — selection is a static property of the
+# corpus, so host/corpus.jl can pin the shard partition on any lane.
+const _PTXAS_CORPUS = Ref{Union{Nothing, Vector{Tuple{String, String}}}}(nothing)
+function ptxas_corpus_files()
+    corpus = _PTXAS_CORPUS[]
+    corpus === nothing || return corpus
+    files = Tuple{String, String}[]
+    for path in EXTERNAL_SWEEP_FILES
+        _is_malformed_llvm_fixture(path) && continue
+        target_line = nothing
+        for line in eachline(path)
+            startswith(line, ".target") && (target_line = line; break)
+        end
+        target_line === nothing && continue
+        m = match(r"^\.target\s+(sm_\w+)", target_line)
+        m === nothing && continue
+        push!(files, (path, String(m.captures[1])))
+    end
+    _PTXAS_CORPUS[] = sort!(files)
+end
+
+# Number of gpu/corpus_compile_* shard files. The shards must partition
+# ptxas_corpus_files() exactly; host/corpus.jl asserts the partition.
+# Deterministic greedy bin-packing by byte size (largest first, into the
+# currently lightest shard), same rationale as the host external sweep:
+# each file costs two standalone ptxas invocations whose cost is strongly
+# size-correlated, and the largest compiler outputs dwarf the median — an
+# alphabetical stride would leave one shard owning most of the wall clock.
+const PTXAS_CORPUS_SHARDS = 4
+const _PTXAS_CORPUS_ASSIGNMENT =
+    Ref{Union{Nothing, Vector{Vector{Tuple{String, String}}}}}(nothing)
+function ptxas_corpus_shard(shard::Int)
+    assignment = _PTXAS_CORPUS_ASSIGNMENT[]
+    if assignment === nothing
+        bins = [Tuple{String, String}[] for _ in 1:PTXAS_CORPUS_SHARDS]
+        load = zeros(Int, PTXAS_CORPUS_SHARDS)
+        for entry in sort(ptxas_corpus_files();
+                          by = e -> (-filesize(e[1]), e[1]))
+            i = argmin(load)
+            push!(bins[i], entry)
+            load[i] += filesize(entry[1])
+        end
+        assignment = map(sort, bins)
+        _PTXAS_CORPUS_ASSIGNMENT[] = assignment
+    end
+    assignment[shard]
+end
