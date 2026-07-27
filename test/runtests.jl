@@ -1,4 +1,4 @@
-import PTX, CUDACore, CUDATools
+import PTX, CUDACore, CUDATools, TOML
 using ParallelTestRunner
 
 include(joinpath(@__DIR__, "target_requirements.jl"))
@@ -80,6 +80,25 @@ if args.list === nothing
     # summary, and skips without printing the entire test catalog.
     println(format_manifest(manifest, environment;
                             verbose = get(ENV, "CI", "") == "true"))
+
+    # Hardware-evidence staleness: when a manual-evidence tier's runtime
+    # sections are all skipped in this run, say when that tier last actually
+    # executed on hardware and on which tree (EVIDENCE.toml), so green output
+    # is never mistaken for runtime evidence the run didn't produce.
+    if apply_default_routing
+        evidence = TOML.parsefile(joinpath(@__DIR__, "..", "EVIDENCE.toml"))
+        for tier in get(evidence, "tier", [])
+            tier["evidence"] == "manual" || continue
+            prefix = tier["tests"] * "/"
+            entries = filter(e -> startswith(e.test, prefix), manifest)
+            isempty(entries) && continue
+            any(e -> e.action === :execute && e.requirement.requires === :gpu,
+                entries) && continue
+            println("  evidence: $(tier["tests"]) runtime last validated ",
+                    "$(tier["last_validated"]) on $(tier["device"]) — ",
+                    tier["tree"])
+        end
+    end
 
     # A GPU CI lane whose device goes invisible must fail, not go green with
     # every runtime section skipped — skips are informational, so without

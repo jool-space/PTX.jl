@@ -1,0 +1,58 @@
+# EVIDENCE.toml — the hardware-evidence ledger.
+#
+# The gpu/hopper and gpu/blackwell runtime tiers run in NO CI lane (see
+# CLAUDE.md "Hardware reality"): their evidence comes from manual cloud
+# sessions, and without a dated record "green CI" quietly reads as more than
+# it is. Each [[tier]] entry records the most recent time a tier's runtime
+# sections actually executed on hardware, and on which tree. runtests.jl
+# prints the record whenever it routes a tier's runtime sections to skip;
+# docs/src/coverage.md renders the ledger.
+#
+# Update discipline: a hardware session ends by updating `last_validated`,
+# `device`, `tree`, and `result` for the tiers it exercised — in the same PR
+# as any fixes it produced. [[queue]] holds the standing experiment list for
+# the next session on each device class, so a session is turnkey.
+
+[[tier]]
+tests = "gpu/hopper"
+runtime = "cc==9.0"
+evidence = "manual"
+last_validated = "2026-07-06"
+device = "H100 PCIe (CC 9.0)"
+tree = "pre-redesign main (before #88–#96)"
+result = "full suite 27,817/27,817 — first hardware execution of the wgmma/TMA/cluster runtime tier"
+
+[[tier]]
+tests = "gpu/blackwell"
+runtime = "cc==10|cc==11"
+evidence = "manual"
+last_validated = "2026-07-14"
+device = "B300 (CC 10.3)"
+tree = "tcgen05-flash branch rebased on post-hardening main (62f4dfb era; before #88–#96)"
+result = "full suite 80,614/80,614 incl. FlashAttention numerics via the sm_103a auto-recompile path (B200 CC 10.0 validated 2026-07-12)"
+
+[[tier]]
+tests = "gpu"
+runtime = "cc>=7.0 floors up to cc==12.1"
+evidence = "ci-continuous"
+device = "GB10 (CC 12.1 / sm_121a), self-hosted CI runner"
+result = "every push, both lanes; PTX_REQUIRE_GPU_RUNTIME fails the lane if the device goes invisible"
+
+# ── Standing experiment queue (batch into one session per device class) ─────
+
+[[queue]]
+device = "B200/B300 (CC 10.x)"
+items = [
+    "FA perf workbench: julia --project=test bench/flash_attention.jl (draft PR #18); knobs in order: scoreboard, NREG rebalance, emu pairs, 2-CTA variant",
+    "issue #50: fabric spelling sm_100a ptxas evidence + configured-CFT-endpoint semantics",
+    "tcgen05 idesc builders: validate i8/f8f6f4/MX instruction-descriptor helpers (only f16bf16_f32 exists)",
+    "re-validate gpu/blackwell runtime tier on post-redesign main (#88–#96)",
+]
+
+[[queue]]
+device = "H100/H200 (CC 9.0)"
+items = [
+    "issue #52: shared-cluster u64 mapa carrier semantic probe",
+    "issue #49: matrix-ambiguity assembly experiments (f8f6f4 K shape, integer WGMMA upper-N, modifier ordering) across toolkits",
+    "re-validate gpu/hopper runtime tier on post-redesign main (#88–#96)",
+]

@@ -73,6 +73,25 @@ function write_coverage_page()
         end
         println(io)
     end
+    # The hardware-evidence ledger (EVIDENCE.toml): which runtime tiers CI
+    # exercises continuously, and when the manual tiers last ran on hardware.
+    evidence = TOML.parsefile(joinpath(pkgdir(PTX), "EVIDENCE.toml"))
+    println(io, "## Hardware evidence\n")
+    println(io, """
+        The `gpu/hopper` and `gpu/blackwell` runtime tiers run in no CI
+        lane; their evidence comes from manual cloud sessions recorded in
+        `EVIDENCE.toml` (the test manifest prints these records whenever it
+        skips a tier). Dates matter: a record older than the tree under
+        test is *spelled/assembles* evidence only.
+        """)
+    println(io, "| Tier | Evidence | Last validated | Device | Tree | Result |")
+    println(io, "|---|---|---|---|---|---|")
+    for t in evidence["tier"]
+        println(io, "| `", t["tests"], "` (", t["runtime"], ") | ",
+                t["evidence"], " | ", get(t, "last_validated", "—"), " | ",
+                t["device"], " | ", get(t, "tree", "—"), " | ",
+                replace(t["result"], "|" => "\\|"), " |")
+    end
     write(joinpath(@__DIR__, "src", "coverage.md"), take!(io))
 end
 write_coverage_page()
