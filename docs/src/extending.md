@@ -33,6 +33,15 @@ Every recipe ends the same way: run the affected suites with
 `julia --project=test test/runtests.jl <names...>` and update the
 test-side oracles (see [Count pins and oracles](#count-pins-and-oracles)).
 
+Whatever the recipe, adding coverage also means updating `SURFACE.toml`
+(repo root) — the machine-checked inventory that assigns every ISA
+§9.7.x family an explicit disposition (`strict`/`generic`/`raw-only`/
+`out-of-scope`). A new `FORMS` opcode, typed-wrapper-only rule, or
+wrapper family that the inventory doesn't own fails
+`test/host/surface.jl` by name; the [Coverage](coverage.md) page is
+generated from the same file at docs-build time, so the inventory and
+the documentation cannot drift apart.
+
 ## Recipe A: blessing a chain opcode (`FORMS` entry)
 
 Adding an entry to `FORMS` in `src/ledgers/forms.jl` is a review act, not a
