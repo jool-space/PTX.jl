@@ -1,6 +1,7 @@
-# Exhaustive offline compiler evidence for the 1,114-form structured-result
-# ledger. CUDA 13's retained sm_75 floor covers general/f16 setp, lop3, and
-# match; sm_90 covers bf16 setp and elect. No live GPU is used.
+# Exhaustive offline compiler evidence for the 1,134-form structured-result
+# ledger. CUDA 13's retained sm_75 floor covers general/f16 setp, lop3,
+# match, testp, and the non-cluster isspacep spellings; sm_90 covers bf16
+# setp, elect, and isspacep.shared::cluster. No live GPU is used.
 
 using LLVM.Interop: @asmcall
 
@@ -80,6 +81,7 @@ _structured_ptxas_arg(kind) =
     kind === :s32 ? :s32 :
     kind === :u64 ? :u64 :
     kind === :s64 ? :s64 :
+    kind === :genaddr ? :u64 :
     error("unknown structured ptxas operand kind $kind")
 
 function _structured_ptxas_body(partition)
@@ -130,8 +132,8 @@ const _STRUCTURED_PTXAS_TYPES = Tuple{
 
 @testset "all structured-result spellings assemble at retained/exact floors" begin
     partitions = (
-        (_structured_sm75!, :sm75, 1001, 1501, v"7.5"),
-        (_structured_sm90!, :sm90, 113, 170, v"9.0"),
+        (_structured_sm75!, :sm75, 1020, 1520, v"7.5"),
+        (_structured_sm90!, :sm90, 114, 171, v"9.0"),
     )
     for (kernel, partition, expected_forms, expected_outputs, cap) in partitions
         schemas = filter(s -> _structured_ptxas_partition(s) === partition,
@@ -168,6 +170,62 @@ end
                    emitted)
     @test occursin(r"match\.any\.sync\.b64\s+%r[0-9]+,\s*%rd[0-9]+,\s*(?:0xffffffff|4294967295);",
                    emitted)
+end
+
+# §9.7.9.20 admits both .u32 and .u64 source registers under
+# .address_size 64, plus an integer immediate; §9.7.3.1 testp accepts the
+# §6.1 bit-carrier alternates for its floating source. Pin every carrier
+# the schemas admit so the dual-width :genaddr role and the f32/f64 bit
+# carriers cannot narrow during a later cleanup.
+@noinline function _structured_query_carriers!(out::CuDeviceVector{UInt32,1},
+                                               addr64::UInt64,
+                                               addr32::UInt32,
+                                               x32::Float32, x64::Float64,
+                                               b32::UInt32, b64::UInt64)
+    @inbounds out[1] = ptx"isspacep.global"(addr64) ? UInt32(1) : UInt32(0)
+    @inbounds out[2] = ptx"isspacep.shared"(addr32) ? UInt32(1) : UInt32(0)
+    @inbounds out[3] = ptx"isspacep.local"(Val(0)) ? UInt32(1) : UInt32(0)
+    @inbounds out[4] = ptx"testp.finite.f32"(x32) ? UInt32(1) : UInt32(0)
+    @inbounds out[5] = ptx"testp.notanumber.f64"(x64) ? UInt32(1) : UInt32(0)
+    @inbounds out[6] = ptx"testp.subnormal.f32"(b32) ? UInt32(1) : UInt32(0)
+    @inbounds out[7] = ptx"testp.infinite.f64"(b64) ? UInt32(1) : UInt32(0)
+    return nothing
+end
+
+@testset "testp/isspacep source carriers assemble at the retained floor" begin
+    types = Tuple{CuDeviceVector{UInt32,1}, UInt64, UInt32,
+                  Float32, Float64, UInt32, UInt64}
+    @test ptxas_compiles(_structured_query_carriers!, types; cap = v"7.5")
+    emitted = emit_ptx(_structured_query_carriers!, types; cap = v"7.5")
+    @test occursin(r"isspacep\.global\s+%p[0-9]+,\s*%rd[0-9]+;", emitted)
+    @test occursin(r"isspacep\.shared\s+%p[0-9]+,\s*%r[0-9]+;", emitted)
+    @test occursin(r"isspacep\.local\s+%p[0-9]+,\s*0;", emitted)
+    # NVPTX may place the f32 value in either register file (%f or, with the
+    # unified b32 class, %r); §6.1 makes both ptxas-legal for .f32.
+    @test occursin(r"testp\.finite\.f32\s+%p[0-9]+,\s*%[fr][0-9]+;", emitted)
+    @test !occursin(r"isspacep[^\n]*\[", emitted)
+end
+
+@testset "ptxas rejects testp/isspacep result discard" begin
+    # The `_` prohibition recorded in the schemas (sinkable all-false) is
+    # compiler-pinned, not just ISA prose.
+    for instruction in ("testp.finite.f32 _, %f0;",
+                        "isspacep.global _, %rd0;")
+        source = """.version 8.5
+        .target sm_75
+        .address_size 64
+        .visible .entry probe() {
+            .reg .f32 %f<2>;
+            .reg .b64 %rd<2>;
+            $instruction
+            ret;
+        }
+        """
+        ok, log, dump = _structured_raw_ptxas(source, "sm_75")
+        @test !ok
+        @test occursin("Result discard mode is not allowed", log)
+        @test isempty(dump)
+    end
 end
 
 @testset "ptxas pins ambiguous constant-expression semantics" begin

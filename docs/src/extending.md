@@ -129,7 +129,7 @@ the single `CALL_LEDGERS` consultation order defined there.
 | Ledger | Owns |
 |---|---|
 | `src/ledgers/scalar_results.jl` | scalar results not named by the tail |
-| `src/ledgers/structured_results.jl` | grouped/multi-destination (`setp`, `lop3`, ...) |
+| `src/ledgers/structured_results.jl` | grouped/multi-destination and predicate-result queries (`setp`, `lop3`, `testp`, `isspacep`, ...) |
 | `src/ledgers/vector_results.jl` | homogeneous tuple results (`ld.vN`, ...) |
 | `src/ledgers/b128_forms.jl` | the 128-bit register carrier grammar |
 | `src/ledgers/mbarrier_forms.jl` | the closed mbarrier grammar |
