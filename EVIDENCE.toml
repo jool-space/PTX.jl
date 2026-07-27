@@ -40,10 +40,24 @@ result = "every push, both lanes; PTX_REQUIRE_GPU_RUNTIME fails the lane if the 
 
 # ── Standing experiment queue (batch into one session per device class) ─────
 
+# FA perf session (tcgen05-flash branch, B200 CC 10.0, 2026-07-28):
+# fab_check green at scale=2.0 (maxdiff 1.55e-2, the rescale-heavy gate).
+# An initially-reported S=1024 anomaly (7 TF) was a MEASUREMENT artifact —
+# the first timed batch after a GPU-idle gap ran at idle clocks; fab_time
+# now does time-based device warmup (branch commit 2884a17). Clean table
+# (old default split): S=1024: 364, S=2048: 957, S=4096: 1052,
+# S=8192: 1086 TF. Scoreboard knob NEUTRAL at every shape (FA4
+# drop-the-softmax-wait falsified for this kernel). NREG sweep at
+# B=1 H=8 S=8192: (144,80,144) = 1150 TF WINNER (+6%), (144,96,128) 1137,
+# (128,96,160) 1133, (152,72,136) 1124, (128,112,144) 1116, old default
+# (136,96,144) 1086; every n2=64 candidate fails ptxas (producer register
+# floor is 72). (144,80,144) adopted as the branch default (c94bbda).
+# CTA scaling is linear (~7.6 TF/CTA up to the 148-SM fill).
+
 [[queue]]
 device = "B200/B300 (CC 10.x)"
 items = [
-    "FA perf workbench: julia --project=test bench/flash_attention.jl (draft PR #18); knobs in order: scoreboard, NREG rebalance, emu pairs, 2-CTA variant",
+    "FA perf follow-ups: port the FA4 f32x2 exp2 emulation (not yet ported — no knob to sweep), then decide the 2-CTA port",
     "issue #50: fabric spelling sm_100a ptxas evidence + configured-CFT-endpoint semantics",
     "tcgen05 idesc builders: validate i8/f8f6f4/MX instruction-descriptor helpers (only f16bf16_f32 exists)",
 ]
