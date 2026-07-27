@@ -188,6 +188,12 @@ end
 
 const GOLDEN_DIR = joinpath(@__DIR__, "golden")
 
+# Every golden_test call records its baseline filename here so the orphan
+# scan at the end of ptxas/golden.jl can assert the committed directory and
+# the exercised set are identical — a golden whose testset was deleted (or a
+# testset whose baseline never landed) must not sit invisible.
+const GOLDEN_SEEN = Set{String}()
+
 # Pkg.test's default --check-bounds=yes overrides @inbounds in device code,
 # injecting bounds branches the committed baselines don't have. Comparing in
 # that state produces environmental mismatches; REGENERATING in that state
@@ -321,6 +327,7 @@ canonical_ptx(f, tt::Type{<:Tuple}; cap::VersionNumber,
 
 function golden_test(name::String, f, tt::Type{<:Tuple}; cap::VersionNumber,
                      feature_set::Symbol = :baseline)
+    push!(GOLDEN_SEEN, name * ".ptx")
     if _forced_bounds_checks()
         @error """golden_test($name): running under --check-bounds=yes (Pkg.test's default), \
                   which injects bounds branches into the golden kernels. Refusing to compare \
@@ -334,6 +341,11 @@ function golden_test(name::String, f, tt::Type{<:Tuple}; cap::VersionNumber,
     got = PTX.IR.format(PTX.IR.canonicalize(parsed))
     path = joinpath(GOLDEN_DIR, name * ".ptx")
     if get(ENV, "PTX_UPDATE_GOLDEN", "") == "1"
+        # Regeneration makes every golden comparison pass unconditionally; in
+        # CI that would silently rewrite the review baselines while green.
+        get(ENV, "CI", "") == "true" &&
+            error("PTX_UPDATE_GOLDEN is set in CI — goldens are regenerated " *
+                  "locally and reviewed as a git diff, never in CI")
         mkpath(GOLDEN_DIR)
         write(path, got)
         @info "golden written — review the git diff" name path
