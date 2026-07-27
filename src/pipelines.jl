@@ -1,13 +1,16 @@
-# N-stage producer/consumer ring built on top of `PTX.MBarriers`.
-# Mirrors `<cuda/pipeline>` in scope: a phantom `Pipeline{N}` type, the
-# `(stage, phase) = cursor(P, k_iter)` arithmetic, and the thread-0 init
-# ritual that every Hopper warp-spec kernel repeats verbatim.
-#
-# Pure leaf module: depends on `PTX.MBarriers` for the verbs +
-# `BarrierArray` storage type, but no method dispatches on a Barrier
-# type — Pipelines just calls verb functions and treats `BarrierArray`
-# as an indexable pointer.
+"""
+N-stage producer/consumer ring built on top of `PTX.MBarriers`.
+Mirrors `<cuda/pipeline>` in scope: a phantom
+[`Pipeline{N}`](@ref Pipelines.Pipeline) type, the
+`(stage, phase) = pipeline_cursor(P, k_iter)` arithmetic, and the
+thread-0 init ritual that every Hopper warp-spec kernel repeats
+verbatim.
 
+Pure leaf module: depends on `PTX.MBarriers` for the verbs +
+`BarrierArray` storage type, but no method dispatches on a Barrier
+type — Pipelines just calls verb functions and treats `BarrierArray`
+as an indexable pointer.
+"""
 module Pipelines
 
 using ..PTX: @ptx_str
@@ -18,53 +21,73 @@ using Republic: @public
         pipeline_stage, pipeline_phase, pipeline_cursor,
         pipeline_init!
 
-# Phantom type carrying the stage count for cursor arithmetic. Use
-# `pipeline_cursor(Pipeline{N_STAGES}, k_iter)` to get `(stage, phase)`.
+"""
+    Pipeline{N_STAGES}
+
+Phantom type carrying the stage count for cursor arithmetic. Use
+`pipeline_cursor(Pipeline{N_STAGES}, k_iter)` to get `(stage, phase)`.
+"""
 struct Pipeline{N_STAGES} end
 
-# Stage cursor: `k_iter mod N`. Compile-time-constant divisor → LLVM
-# strength-reduces to `& (N-1)` for power-of-two N and to a multiply-
-# and-shift otherwise.
+"""
+    pipeline_stage(::Type{Pipeline{N}}, k_iter) -> Int32
+
+Stage cursor: `k_iter mod N`. Compile-time-constant divisor → LLVM
+strength-reduces to `& (N-1)` for power-of-two N and to a multiply-
+and-shift otherwise.
+"""
 @inline pipeline_stage(::Type{Pipeline{N}}, k_iter::Integer) where N =
     Int32(Int32(k_iter) % Int32(N))
 
-# Phase parity: which round through this stage's mbarrier we're on.
-# `(k_iter ÷ N) & 1`. For pow2 N this folds to a single shift; for
-# non-pow2 N (e.g. N=3, the pyptx headline config) it lowers to a
-# divide-by-constant which LLVM strength-reduces.
+"""
+    pipeline_phase(::Type{Pipeline{N}}, k_iter) -> UInt32
+
+Phase parity: which round through this stage's mbarrier we're on —
+`(k_iter ÷ N) & 1`. For pow2 N this folds to a single shift; for
+non-pow2 N (e.g. N=3) it lowers to a divide-by-constant which LLVM
+strength-reduces.
+"""
 @inline pipeline_phase(::Type{Pipeline{N}}, k_iter::Integer) where N =
     UInt32((Int32(k_iter) ÷ Int32(N)) & Int32(1))
 
+"""
+    pipeline_cursor(::Type{Pipeline{N}}, k_iter) -> (stage, phase)
+
+The `(pipeline_stage, pipeline_phase)` pair for iteration `k_iter`.
+"""
 @inline pipeline_cursor(P::Type{Pipeline{N}}, k_iter::Integer) where N =
     (pipeline_stage(P, k_iter), pipeline_phase(P, k_iter))
 
-# ── Pipeline init ──────────────────────────────────────────────────────
-#
-# Initializes the producer/consumer mbarrier pair for an N-stage ring
-# and pre-arrives `empty[s]` once per consumer so the producer's first
-# wait succeeds without a prior consumer arrival.
-#
-# - `full`  : mbarriers consumers wait on after the producer finishes a
-#             stage. Init count = 1 (the producer's expect_tx arrive
-#             flips the phase by itself).
-# - `empty` : mbarriers the producer waits on after consumers finish a
-#             stage. Init count = `EMPTY_COUNT` (one arrive per
-#             releasing party per stage).
-# - `EMPTY_COUNT` is the per-stage release count: NUM_CONSUMERS for a
-#   single CTA, NUM_CONSUMERS × CLUSTERS for a clustered pipeline.
-# - `CLUSTER=true` emits `fence.mbarrier_init.release.cluster` (visible
-#   cluster-wide) instead of the CTA-scope `fence.proxy.async.shared::cta`.
-#
-# Caller responsibility:
-#   - Invoke from a single thread (typically thread 0).
-#   - Follow with `bar.sync(0)` to publish init within the CTA.
-#   - If `CLUSTER=true`, follow with `ptx"barrier.cluster.arrive"();
-#     ptx"barrier.cluster.wait"()` (PTX tier-2 wrappers — convergent by
-#     registry, and unlike CUDACore's cluster_arrive/cluster_wait they
-#     don't trap on Julia ≤ 1.11; see wrappers/barrier_cluster.jl).
-#
-# Body is fully unrolled across stages and pre-arrives via @generated;
-# the emitted PTX matches the hand-rolled version byte-for-byte.
+"""
+    pipeline_init!(full::BarrierArray{N}, empty::BarrierArray{N},
+                   ::Val{EMPTY_COUNT}, ::Val{CLUSTER})
+
+Initialize the producer/consumer mbarrier pair for an N-stage ring and
+pre-arrive `empty[s]` once per consumer so the producer's first wait
+succeeds without a prior consumer arrival.
+
+- `full`  : mbarriers consumers wait on after the producer finishes a
+  stage. Init count = 1 (the producer's expect_tx arrive flips the
+  phase by itself).
+- `empty` : mbarriers the producer waits on after consumers finish a
+  stage. Init count = `EMPTY_COUNT` (one arrive per releasing party
+  per stage).
+- `EMPTY_COUNT` is the per-stage release count: NUM_CONSUMERS for a
+  single CTA, NUM_CONSUMERS × CLUSTERS for a clustered pipeline.
+- `CLUSTER=true` emits `fence.mbarrier_init.release.cluster` (visible
+  cluster-wide) instead of the CTA-scope `fence.proxy.async.shared::cta`.
+
+Caller responsibility:
+- Invoke from a single thread (typically thread 0).
+- Follow with `bar.sync(0)` to publish init within the CTA.
+- If `CLUSTER=true`, follow with `ptx"barrier.cluster.arrive"();
+  ptx"barrier.cluster.wait"()` (PTX tier-2 wrappers — convergent by
+  registry, and unlike CUDACore's cluster_arrive/cluster_wait they
+  don't trap on Julia ≤ 1.11; see wrappers/barrier_cluster.jl).
+
+Body is fully unrolled across stages and pre-arrives via `@generated`;
+the emitted PTX matches the hand-rolled version byte-for-byte.
+"""
 @generated function pipeline_init!(full::BarrierArray{N},
                                     empty::BarrierArray{N},
                                     ::Val{EMPTY_COUNT},
