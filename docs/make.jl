@@ -4,7 +4,8 @@ using Documenter
 DocMeta.setdocmeta!(PTX, :DocTestSetup, :(using PTX); recursive=true)
 
 makedocs(;
-    modules=[PTX, PTX.IR, PTX.Codegen, PTX.Parser],
+    modules=[PTX, PTX.IR, PTX.Codegen, PTX.Parser, PTX.MBarriers,
+             PTX.Pipelines],
     authors="Anton Oresten <antonoresten@proton.me>",
     sitename="PTX.jl",
     format=Documenter.HTML(;
@@ -17,6 +18,7 @@ makedocs(;
         "Getting started" => "getting_started.md",
         "Chain DSL" => "dsl.md",
         "Wrappers" => "wrappers.md",
+        "Barriers & pipelines" => "barriers.md",
         "Transpiler" => "transpiler.md",
         "Reference" => "reference.md",
         "Internals" => "internals.md",
