@@ -127,7 +127,7 @@ end
 function fab_sweep(; cfgs = [
         "default"    => FAB_CFG_DEFAULT,
         "scoreboard" => (scoreboard = true, beacon = false,
-                         nreg = (136, 96, 144)),
+                         nreg = (144, 80, 144)),
     ], shapes = [(1, 16, 1024), (1, 16, 2048), (1, 16, 4096), (1, 8, 8192)])
     for (name, cfg) in cfgs
         fab_check(cfg) || (println("  skipping $name (failed check)"); continue)

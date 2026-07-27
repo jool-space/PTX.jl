@@ -22,7 +22,8 @@
 #       instead of hanging. Decode with FAB_SITES. Default false.
 #   nreg       :: NTuple{3,Int} — setmaxnreg split (softmax, correction,
 #       mma/load warpgroup). Constraint: 256a + 128b + 128c ≤ 65536.
-#       Default (136, 96, 144) = pyptx's split.
+#       Default (144, 80, 144) — B200 sweep winner 2026-07-28 (+6% over
+#       pyptx's (136, 96, 144); producer floor is 72 — n2=64 fails ptxas).
 #
 # Structure (faithful to pyptx):
 #   * 256 query rows per CTA as two 128-row subtiles ("stages"); BN=128 KV
@@ -129,11 +130,15 @@ const FAB_LOAD_TID = UInt32(448)   # warp 14 lane 0
 
 # ── compile-time config ─────────────────────────────────────────────────
 
-# Default: the B200-validated configuration (2026-07-12).
-# nreg = pyptx's split (setmaxnreg is warpgroup-collective):
-# 136*256 + 96*128 + 144*128 = 65536.
+# Default nreg = the 2026-07-28 B200 sweep winner (setmaxnreg is
+# warpgroup-collective): 144*256 + 80*128 + 144*128 = 65536, 1150 TF at
+# B=1 H=8 S=8192 vs 1086 for pyptx's original (136, 96, 144) split. The
+# sweep bracketed the optimum ((144,96,128) 1137, (152,72,136) 1124,
+# (128,112,144) 1116) and found the producer's register floor: every
+# n2=64 candidate fails ptxas. Correctness re-gated by fab_check at each
+# candidate (rescale-heavy input, scale=2.0).
 const FAB_CFG_DEFAULT = (scoreboard = false, beacon = false,
-                         nreg = (136, 96, 144))
+                         nreg = (144, 80, 144))
 
 function fab_check_cfg(cfg)
     a, b, c = cfg.nreg

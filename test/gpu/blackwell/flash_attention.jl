@@ -61,7 +61,7 @@ include("flash_attention_defs.jl")
     # config variants: the workbench's knobs must stay compilable, and
     # each must actually change the emitted PTX the way it claims.
     sb_cfg = fab_check_cfg((scoreboard = true, beacon = false,
-                            nreg = (136, 96, 144)))
+                            nreg = (144, 80, 144)))
     @test ptxas_compiles(_fab_kernel!, types(sb_cfg);
                          cap = v"10.0", feature_set = :arch, minthreads = 512)
     sb_ptx = emit_ptx(_fab_kernel!, types(sb_cfg);
@@ -73,7 +73,7 @@ include("flash_attention_defs.jl")
     @test 0 < n_waits(sb_ptx) < n_waits(ptx)
 
     bc_cfg = fab_check_cfg((scoreboard = false, beacon = true,
-                            nreg = (136, 96, 144)))
+                            nreg = (144, 80, 144)))
     @test ptxas_compiles(_fab_kernel!, types(bc_cfg);
                          cap = v"10.0", feature_set = :arch, minthreads = 512)
 
