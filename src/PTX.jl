@@ -8,25 +8,25 @@ using .IR
 
 include("parser/Parser.jl")
 
-include("implicit_state.jl")
+include("ledgers/implicit_state.jl")
 
-include("structured_results.jl")
-include("immediate_forms.jl")
-include("scalar_results.jl")
-include("cvt_forms.jl")
-include("vector_results.jl")
-include("b128_forms.jl")
-include("mbarrier_forms.jl")
+include("ledgers/structured_results.jl")
+include("ledgers/immediate_forms.jl")
+include("ledgers/scalar_results.jl")
+include("ledgers/cvt_forms.jl")
+include("ledgers/vector_results.jl")
+include("ledgers/b128_forms.jl")
+include("ledgers/mbarrier_forms.jl")
 
 include("nvvm/NVVM.jl")
 using .NVVM: NVVM, @nvvm_str
 
 include("address_space.jl")
-include("address_operands.jl")
+include("ledgers/address_operands.jl")
 export Address, address
 export B128, b128
-include("forms.jl")
-include("types.jl")
+include("ledgers/forms.jl")
+include("ledgers/types.jl")
 
 # The transpiler shares the audited structured/scalar/cvt and mbarrier ABI
 # validators above, so load it only after their definitions are available.
@@ -34,7 +34,13 @@ include("codegen/Codegen.jl")
 using .Codegen: ptx_to_julia, ir_to_julia
 export ptx_to_julia, ir_to_julia
 
-include("inst.jl")
+include("dsl/macros.jl")
+include("dsl/render.jl")
+include("dsl/convergent_asm.jl")
+include("dsl/entries.jl")
+include("dsl/sregs.jl")
+include("dsl/show.jl")
+include("dsl/reflection.jl")
 export @ptx_str, @optype_str, @sreg_str
 export vector_load
 
@@ -57,13 +63,13 @@ include("wrappers/vec_ldst.jl")
 include("wrappers/wgmma.jl")
 include("wrappers/wgmma_sp.jl")
 include("wrappers/tcgen05.jl")
-include("wgmma_descriptor.jl")
-include("wgmma_layout.jl")
-include("tcgen05_descriptor.jl")
-include("tcgen05_layout.jl")
-include("tensor_map.jl")
-include("mbarriers.jl")
-include("pipelines.jl")
+include("lib/wgmma_descriptor.jl")
+include("lib/wgmma_layout.jl")
+include("lib/tcgen05_descriptor.jl")
+include("lib/tcgen05_layout.jl")
+include("lib/tensor_map.jl")
+include("lib/mbarriers.jl")
+include("lib/pipelines.jl")
 
 function __init__()
     # The TMA tensor-map encoders are implemented by the CUDACore package

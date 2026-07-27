@@ -43,7 +43,7 @@ const DTYPE_RETTYPE = Dict{Symbol, Type}(
 # mods[end-1]. `cvt.pack` is instead covered by the fixed-u32 scalar-result
 # ledger before this fallback.
 # Sink forms whose dtype tail names an *operand* (st, red, nanosleep, ...) are
-# gated by the form registry's `returns` flag (src/forms.jl) — without that
+# gated by the form registry's `returns` flag (src/ledgers/forms.jl) — without that
 # gate the chain would reserve $0 for a phantom output and ptxas would reject
 # with "Arguments mismatch".
 function _ordinary_cvt_result_abi_error(mods::Tuple{Vararg{Symbol}})

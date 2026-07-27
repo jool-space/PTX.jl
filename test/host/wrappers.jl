@@ -199,7 +199,7 @@ end
 end
 
 @testset "constraint_letter" begin
-    # NVPTX register-class letters per src/types.jl. Wrong letters → ptxas
+    # NVPTX register-class letters per src/ledgers/types.jl. Wrong letters → ptxas
     # rejects with "Invalid register class" or silent miscompile (e.g. an i8
     # value passed via "r" is zero-extended into the high bits).
     @test PTX.constraint_letter(Float64) == "d"
@@ -291,7 +291,7 @@ end
 @testset "clmad chain entry (PTX 9.3)" begin
     # `clmad.{lo,hi}.u64 d, a, b, c;` — pure carryless multiply-add. No
     # hand-written wrapper: last modifier `.u64` flows through DTYPE_RETTYPE,
-    # `:clmad` is registered _PURE in src/forms.jl (pure ALU, no memory).
+    # `:clmad` is registered _PURE in src/ledgers/forms.jl (pure ALU, no memory).
     # PTX 9.3 / sm_80+. The chain doesn't enforce arity — ptxas rejects
     # wrong-arity calls.
     @test format_call(ptx"clmad.lo.u64", Tuple{UInt64, UInt64, UInt64}) ==
@@ -313,7 +313,7 @@ end
     # variants). DTYPE_RETTYPE has entries for most of those, so the chain
     # default would misread the terminal as a return slot without the
     # `(:async, :bulk)` / `(:reduce, :async, :bulk)` / `(:cp,)` _MEMSINK
-    # overrides in src/forms.jl.
+    # overrides in src/ledgers/forms.jl.
 
     # `cp.async.bulk` with .sem/.scope + .b128 (sm_100+ global→shared::cta).
     asm = format_call(
@@ -388,7 +388,7 @@ end
 @testset "multimem chain entries (PTX 9.3 async forms)" begin
     # `multimem.st.async.<sem>.<scope>{.ss}.<type> [a], b;` — bracketed
     # multimem address + register value, no return. Routes through the
-    # chain default: `:multimem` is _MEM in src/forms.jl with `(:st,)` /
+    # chain default: `:multimem` is _MEM in src/ledgers/forms.jl with `(:st,)` /
     # `(:red,)` _MEMSINK overrides so the terminal dtype isn't misread as
     # a return slot.
     @test format_call(ptx"multimem.st.async.release.gpu.global.u32",
@@ -709,7 +709,7 @@ end
     @test format_call(ptx"wgmma.wait_group.sync.aligned",   Tuple{Val{0}}) == "wgmma.wait_group.sync.aligned 0;"
     @test format_call(ptx"wgmma.wait_group.sync.aligned",   Tuple{Val{2}}) == "wgmma.wait_group.sync.aligned 2;"
 
-    # `:wgmma` is registered nonpure (src/forms.jl) → memory clobber + side_effects.
+    # `:wgmma` is registered nonpure (src/ledgers/forms.jl) → memory clobber + side_effects.
     spec = build_call(:wgmma, (:fence, :sync, :aligned), ())
     @test spec.side_effects == true
     @test occursin("~{memory}", spec.constraints)
@@ -780,7 +780,7 @@ end
     # collective: `sideeffect` alone permits jump-threading duplication of
     # the call site across a divergent branch — the active_mask miscompile
     # class. The wrappers emit llvmcall IR with a `convergent` call-site
-    # attribute group (inst.jl, convergent_asm_ir). This attribute binds in
+    # attribute group (src/dsl/convergent_asm.jl, convergent_asm_ir). This attribute binds in
     # the *in-process* middle end only — llc ignores it — so no ptxas/golden
     # test can catch its loss; this IR-level pin is the tripwire.
     # (The optimizer-shape counterpart lives in test/ptxas/hopper.jl.)
@@ -1574,7 +1574,7 @@ end
     # separate N grids (PTX 9.3 §9.7.16.5.2). For unsupported
     # combinations — e.g. bf16/bf16 with k=8 (only valid for tf32), N=7, or
     # N=264 — no specific method exists on `Operation{parts}`. Dispatch still
-    # reaches the shared `Vararg` method in `inst.jl`, but its typed-wrapper
+    # reaches the shared `Vararg` method in `src/dsl/entries.jl`, but its typed-wrapper
     # boundary must reject the call before it can render garbage asm (wrong
     # rettype and operand count). Tests here lock in the registered surface so
     # a dropped (n,k,dtype) combo fails at host time with an actionable error.
@@ -1616,9 +1616,9 @@ end
                   :m64n8k8, :f32, :bf16, :bf16)
     bad_k_method = which(Operation{:wgmma, mods_bad_k}(),
                          (NTuple{4, Float32}, UInt64, UInt64, Bool))
-    # Resolves to the shared method in inst.jl, NOT a wgmma-specific method,
+    # Resolves to the shared method in src/dsl/entries.jl, NOT a wgmma-specific method,
     # but reflection classifies that generic path as forbidden.
-    @test endswith(string(bad_k_method.file), "inst.jl")
+    @test endswith(string(bad_k_method.file), "entries.jl")
     @test PTX.lowering(Operation{:wgmma, mods_bad_k}(),
                        (NTuple{4, Float32}, UInt64, UInt64, Bool)).tier === :forbidden
 
@@ -1627,7 +1627,7 @@ end
                   :m64n7k16, :f32, :bf16, :bf16)
     @test endswith(string(which(Operation{:wgmma, mods_bad_n}(),
                                  (NTuple{4, Float32}, UInt64, UInt64, Bool)).file),
-                   "inst.jl")
+                   "entries.jl")
     @test PTX.lowering(Operation{:wgmma, mods_bad_n}(),
                        (NTuple{4, Float32}, UInt64, UInt64, Bool)).tier === :forbidden
 
@@ -1636,7 +1636,7 @@ end
                       :m64n40k32, :s32, :s8, :s8)
     @test endswith(string(which(Operation{:wgmma, mods_bad_int_n}(),
                                  (NTuple{20, Int32}, UInt64, UInt64, Bool)).file),
-                   "inst.jl")
+                   "entries.jl")
     @test PTX.lowering(Operation{:wgmma, mods_bad_int_n}(),
                        (NTuple{20, Int32}, UInt64, UInt64, Bool)).tier === :forbidden
 end

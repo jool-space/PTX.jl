@@ -119,33 +119,6 @@ function _take_same_line_trailing_comment!(s::ParserState, end_line::Int)
     ""
 end
 
-function _extract_source(s::ParserState, start_line::Int, end_line::Int)
-    isempty(s.source_lines) && return ""
-    lo = clamp(start_line, 1, length(s.source_lines))
-    hi = clamp(end_line,   1, length(s.source_lines))
-    join(view(s.source_lines, lo:hi), "\n")
-end
-
-# Capturing `raw_line` would duplicate text when a statement shares its source
-# line with neighbours — only capture when no token before/after also lives on
-# that line.
-function _owns_line(s::ParserState, prev_pos::Int, start_line::Int, end_line::Int)
-    if prev_pos > 1
-        prev = s.tokens[prev_pos - 1]
-        prev.line >= start_line && return false
-    end
-    p = s.pos
-    while p <= length(s.tokens)
-        t = s.tokens[p]
-        t.kind == TokenKind.EOF && return true
-        t.kind == TokenKind.NEWLINE && return true
-        t.line > end_line && return true
-        t.kind == TokenKind.COMMENT || return false
-        p += 1
-    end
-    true
-end
-
 """
     parse(source::AbstractString) -> IR.Module
 
@@ -272,23 +245,6 @@ function _skip_inline_comment!(s::ParserState)
     end
 end
 
-function _capture_raw_line!(s::ParserState, leading::String)
-    start_line = _peek(s).line
-    end_line = start_line
-
-    # Walk every token through the trailing newline — including a comment past
-    # the semicolon — so it isn't re-emitted as a standalone Comment.
-    while !_at_end(s) && _peek_kind(s) ∉ (TokenKind.NEWLINE, TokenKind.EOF)
-        t = _advance!(s)
-        end_line = t.line
-    end
-
-    text = isempty(s.source_lines) ?
-           leading :
-           _extract_source(s, start_line, end_line)
-    RawLine(text)
-end
-
 function _parse_version!(s::ParserState)
     _expect!(s, TokenKind.DIRECTIVE, ".version")
     _skip_newlines_and_comments!(s)
@@ -312,93 +268,6 @@ function _parse_version!(s::ParserState)
         return Version(major, minor)
     end
     throw(_err(s, "Expected version number, got $(t.kind)"))
-end
-
-const _PTX_93 = Version(9, 3)
-
-const _TARGET_INTRODUCED = let entries = Pair{String,Version}[]
-    function add!(version::Version, names...)
-        append!(entries, (String(name) => version for name in names))
-    end
-    add!(Version(1, 0), "10", "11")
-    add!(Version(1, 2), "12", "13")
-    add!(Version(2, 0), "20")
-    add!(Version(3, 0), "30")
-    add!(Version(3, 1), "35")
-    add!(Version(4, 0), "32", "50")
-    add!(Version(4, 1), "37", "52")
-    add!(Version(4, 2), "53")
-    add!(Version(5, 0), "60", "61", "62")
-    add!(Version(6, 0), "70")
-    add!(Version(6, 1), "72")
-    add!(Version(6, 3), "75")
-    add!(Version(7, 0), "80")
-    add!(Version(7, 1), "86")
-    add!(Version(7, 4), "87")
-    add!(Version(7, 8), "89", "90")
-    add!(Version(8, 0), "90a")
-    add!(Version(8, 6), "100", "100a", "101", "101a")
-    add!(Version(8, 7), "120", "120a")
-    add!(Version(8, 8), "100f", "101f", "103", "103f", "103a",
-                           "120f", "121", "121f", "121a")
-    add!(Version(9, 0), "88", "110", "110f", "110a")
-    Dict(entries)
-end
-
-const _TARGET_OPTIONS = Set(("texmode_unified", "texmode_independent",
-                             "debug", "map_f64_to_f32"))
-const _TEXTURE_MODES = Set(("texmode_unified", "texmode_independent"))
-
-_version_tuple(v::Version) = (v.major, v.minor)
-_version_at_least(v::Version, floor::Version) = _version_tuple(v) >= _version_tuple(floor)
-_known_ptx_version(v::Version) = _version_tuple(v) <= _version_tuple(_PTX_93)
-_architecture_match(value::String) = match(r"^(sm|compute)_([0-9]+)([af]?)$", value)
-
-function _target_floor(value::String)
-    m = _architecture_match(value)
-    m === nothing && return nothing
-    suffix = String(m.captures[2]) * String(m.captures[3])
-    get(_TARGET_INTRODUCED, suffix, nothing)
-end
-
-function _validate_target!(s::ParserState, target::Target, version::Version)
-    values = target.targets
-    isempty(values) && throw(_err(s, ".target requires an architecture"))
-    arch = first(values)
-    _architecture_match(arch) === nothing &&
-        throw(_err(s, "first .target specifier must be an sm_XX or compute_XX architecture, got $(repr(arch))"))
-
-    floor = _target_floor(arch)
-    if floor === nothing
-        _known_ptx_version(version) &&
-            throw(_err(s, "target architecture $(repr(arch)) is not defined by PTX ISA 9.3"))
-    elseif !_version_at_least(version, floor)
-        throw(_err(s, "target architecture $(repr(arch)) requires PTX ISA $(floor.major).$(floor.minor) or later"))
-    end
-
-    options = values[2:end]
-    length(unique(options)) == length(options) ||
-        throw(_err(s, ".target contains duplicate platform options"))
-    for option in options
-        if option in _TARGET_OPTIONS
-            option == "debug" && !_version_at_least(version, Version(3, 0)) &&
-                throw(_err(s, ".target debug requires PTX ISA 3.0 or later"))
-            option in _TEXTURE_MODES && !_version_at_least(version, Version(1, 5)) &&
-                throw(_err(s, ".target texturing mode requires PTX ISA 1.5 or later"))
-        elseif _architecture_match(option) !== nothing
-            throw(_err(s, ".target specifies more than one architecture"))
-        elseif _known_ptx_version(version)
-            throw(_err(s, "unknown PTX 9.3 .target option $(repr(option))"))
-        end
-    end
-    count(in(_TEXTURE_MODES), options) <= 1 ||
-        throw(_err(s, ".target cannot select both texturing modes"))
-
-    # PTX 11.1.2 explicitly disallows this legacy mapping on sm_13.
-    base_arch = replace(arch, "compute_" => "sm_")
-    base_arch == "sm_13" && "map_f64_to_f32" in options &&
-        throw(_err(s, "map_f64_to_f32 is not allowed for sm_13"))
-    target
 end
 
 function _parse_target!(s::ParserState, version::Version)
@@ -436,33 +305,10 @@ function _parse_address_size!(s::ParserState, version::Version)
     AddressSize(size)
 end
 
-function _find_raw_header(s::ParserState, address_size_explicit::Bool)
-    isempty(s.source_lines) && return nothing
-    header_start = 1
-    for (i, line) in enumerate(s.source_lines)
-        startswith(strip(line), ".version") || continue
-        header_start = i
-        break
-    end
-    header_end = header_start
-    # The first matching target is the required header target; later targets
-    # remain ordered statements in `directives`.
-    terminal = address_size_explicit ? ".address_size" : ".target"
-    for i in header_start:length(s.source_lines)
-        startswith(strip(s.source_lines[i]), terminal) || continue
-        header_end = i
-        break
-    end
-    join(view(s.source_lines, header_start:header_end), "\n")
-end
-
 _is_module_header_directive(t::Token) =
     t.kind == TokenKind.DIRECTIVE && t.text in (".version", ".address_size")
 _is_module_directive(t::Token) =
     t.kind == TokenKind.DIRECTIVE && t.text in (".version", ".target", ".address_size")
-_parse_error_points_to_module_directive(s::ParserState, e::ParseError) =
-    any(t -> t.line == e.line && t.col == e.col && _is_module_directive(t),
-        s.tokens)
 
 function _parse_later_target!(s::ParserState, version::Version)
     start_line = _peek(s).line
@@ -476,19 +322,6 @@ function _parse_later_target!(s::ParserState, version::Version)
                     formatting = FormattingInfo(indent = indent,
                                                 trailing = trailing,
                                                 raw_line = raw_line))
-end
-
-function _validate_module_target_options!(s::ParserState, initial::Target,
-                                          directives::Tuple{Vararg{Statement}})
-    targets = Target[initial]
-    append!(targets, (d.target for d in directives if d isa TargetDirective))
-    texture_modes = String[]
-    for target in targets, option in target.targets[2:end]
-        option in _TEXTURE_MODES && push!(texture_modes, option)
-    end
-    length(unique(texture_modes)) <= 1 ||
-        throw(_err(s, "the module-wide .target texturing mode cannot be changed"))
-    nothing
 end
 
 const _VAR_DECL_DIRECTIVES = Set{String}((

@@ -66,7 +66,7 @@ _wgmma_mods(dt_d, dt_a, dt_b, n, k) =
             legal = n in legal_ns
             for argts in signatures
                 method = which(op, argts)
-                exact = !endswith(String(method.file), "inst.jl")
+                exact = !endswith(String(method.file), "entries.jl")
                 @test exact == legal
                 info = PTX.lowering(op, argts)
                 if legal
@@ -76,7 +76,7 @@ _wgmma_mods(dt_d, dt_a, dt_b, n, k) =
                 else
                     @test info.tier === :forbidden
                     @test info.asm === nothing
-                    @test endswith(String(method.file), "inst.jl")
+                    @test endswith(String(method.file), "entries.jl")
                 end
             end
         end
@@ -98,7 +98,7 @@ end
         op = Operation{:wgmma, _wgmma_mods(dt_d, dt_a, dt_b, n, k)}()
         argts = (d_T, UInt64, UInt64, Bool)
         @test PTX.lowering(op, argts).tier === :forbidden
-        @test endswith(String(which(op, argts).file), "inst.jl")
+        @test endswith(String(which(op, argts).file), "entries.jl")
     end
 
     # Exercise generated dispatch itself, not only reflection.
@@ -182,7 +182,7 @@ end
         old = Operation{:tcgen05,
             (:mma, Symbol("cta_group::", cg), Symbol("kind::", kind))}()
         @test PTX.lowering(old, old_argts).tier === :forbidden
-        @test endswith(String(which(old, old_argts).file), "inst.jl")
+        @test endswith(String(which(old, old_argts).file), "entries.jl")
     end
 
     # Legal modifier, wrong arity/carrier: scale addresses cannot be omitted,
@@ -195,7 +195,7 @@ end
             (UInt32, UInt64, UInt64, UInt32, UInt64, UInt64, Bool),
             (UInt32, UInt64, UInt32, UInt32, UInt32, UInt32, Bool))
         @test PTX.lowering(goodop, argts).tier === :forbidden
-        @test endswith(String(which(goodop, argts).file), "inst.jl")
+        @test endswith(String(which(goodop, argts).file), "entries.jl")
     end
 
     # Modifier pairs outside Table 60 and the ambiguous no-scale spelling are

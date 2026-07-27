@@ -49,7 +49,7 @@ ordered_argtypes(f, selector) = (
         bad_selector = last(f.selectors) + 1
         bad_types = ordered_argtypes(f, bad_selector)
         @test PTX.lowering(op, bad_types).tier === :forbidden
-        @test endswith(String(which(op, bad_types).file), "inst.jl")
+        @test endswith(String(which(op, bad_types).file), "entries.jl")
 
         intrinsic = PTX.NVVM.intrinsic(name)
         @test :nomem in intrinsic.props

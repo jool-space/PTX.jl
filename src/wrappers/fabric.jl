@@ -7,7 +7,7 @@
 # intrinsics. Hand-written rather than chain-default: the two-register CFT
 # handle operand `[leId, off]` (u32 + u64 inside one bracketed group) has no
 # chain-default rendering, so `:fabric` is deliberately NOT in the form
-# registry (src/forms.jl) — an unimplemented fabric form errors at the
+# registry (src/ledgers/forms.jl) — an unimplemented fabric form errors at the
 # blessing boundary instead of rendering wrong asm; `ptx"..."raw` remains
 # the explicit escape hatch.
 #

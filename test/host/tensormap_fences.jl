@@ -93,7 +93,7 @@ end
         op = Operation{:fence, mods}()
         info = PTX.lowering(op, argtypes)
         @test info.tier === :forbidden
-        @test endswith(String(which(op, argtypes).file), "inst.jl")
+        @test endswith(String(which(op, argtypes).file), "entries.jl")
     end
 
     bad = Operation{:fence, _tmap_fence_mods(:acquire, :gpu)}()

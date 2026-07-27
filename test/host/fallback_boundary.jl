@@ -103,7 +103,7 @@ end
         info = PTX.lowering(op, argts)
         @test info.tier === :forbidden
         @test info.asm === nothing
-        @test endswith(String(info.method.file), "inst.jl")
+        @test endswith(String(info.method.file), "entries.jl")
 
         opsym, mods = typeof(op).parameters
         err = try
@@ -143,7 +143,7 @@ end
          (Int32(0), Int32(0), Int32(0), Int32(0))),
     )
     for (op, args) in dispatch_misses
-        @test endswith(String(which(op, Tuple{typeof.(args)...}).file), "inst.jl")
+        @test endswith(String(which(op, Tuple{typeof.(args)...}).file), "entries.jl")
         err = try
             op(args...)
             nothing
@@ -252,7 +252,7 @@ end
         end
 
         for argts in bad_argtypes
-            @test endswith(String(which(op, argts).file), "inst.jl")
+            @test endswith(String(which(op, argts).file), "entries.jl")
             bad = PTX.lowering(op, argts)
             @test bad.tier === :forbidden
             @test bad.asm === nothing

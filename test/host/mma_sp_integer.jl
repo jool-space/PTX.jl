@@ -58,7 +58,7 @@ end
         bad_types = (NTuple{row.n_a, UInt32}, NTuple{row.n_b, UInt32},
                      NTuple{4, Int32}, UInt32, Val{last(row.selectors) + 1})
         @test PTX.lowering(op, bad_types).tier === :forbidden
-        @test endswith(String(which(op, bad_types).file), "inst.jl")
+        @test endswith(String(which(op, bad_types).file), "entries.jl")
 
         intrinsic = PTX.NVVM.intrinsic(name)
         @test :nomem in intrinsic.props
@@ -110,7 +110,7 @@ end
     )
     for (op, argtypes) in bad
         @test PTX.lowering(op, argtypes).tier === :forbidden
-        @test endswith(String(which(op, argtypes).file), "inst.jl")
+        @test endswith(String(which(op, argtypes).file), "entries.jl")
     end
 
     args = (ntuple(_ -> UInt32(0), Val(4)),

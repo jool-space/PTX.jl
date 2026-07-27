@@ -4,7 +4,7 @@
 # the same physical register file. `imm_scale_a/b` and `imm_trans_a/b` are
 # baked. Sync ops (`wgmma.fence/commit_group/wait_group`) flow through the
 # chain — `:wgmma` is registered nonpure + convergent in the form
-# registry (src/forms.jl). Source: PTX 9.3 §9.7.16.5.
+# registry (src/ledgers/forms.jl). Source: PTX 9.3 §9.7.16.5.
 #
 # Four variants per shape:
 #   1. `scale_d::Bool`        — runtime SREG (b constraint, $nd+2 slot).
@@ -153,7 +153,7 @@ function _wgmma_mma_async_register(
     # the same call site. Emitted via convergent_asm_ir (not @asmcall) so the
     # call carries `convergent` — sideeffect alone permits jump-threading
     # duplication across divergent branches, the active_mask miscompile class
-    # (see inst.jl, "convergent inline asm").
+    # (see src/dsl/convergent_asm.jl, "convergent inline asm").
 
     # Variant 1: runtime scale_d::Bool (tied d input, b constraint).
     let spec = wgmma_mma_async_spec(dtype_d, dtype_a, dtype_b, n, k, has_trans)

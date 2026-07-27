@@ -494,7 +494,7 @@ end
 # descriptor with `tensormap.replace.tile.<field>.shared::cta.b1024.<wty>`
 # before publishing it via `tensormap.cp_fenceproxy.*`. PTX 9.2 §9.7.9.10.
 # All chain-default — first arg is the [shared-mem descriptor pointer] (the
-# `tensormap` brackets=true contract in src/forms.jl), then a mix
+# `tensormap` brackets=true contract in src/ledgers/forms.jl), then a mix
 # of immediate field indices and value registers. Each field has a fixed
 # write width (b32 for most, b64 for global_address / global_stride).
 
