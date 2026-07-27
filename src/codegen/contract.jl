@@ -585,6 +585,14 @@ end
 
 function _validate_exact_schema!(state::_TranspileContractState,
                                  inst::Instruction, path::String)
+    # Consults the ledgers in the shared CALL_LEDGERS order
+    # (src/ledgers/protocol.jl): immediate → mbarrier → structured → clc →
+    # vector → scalar → b128, with the ordinary-cvt source gate after the
+    # walk (its ledgers/types.jl slot; scalar owns cvt.pack, and no cvt
+    # spelling reaches b128). Probe order is throw order: when two ledgers
+    # claim one spelling (vector/b128 overlap on .b128 tails), the first
+    # consulted ledger's miss is the one a TranspilerError carries — the
+    # same choice `build_call` makes.
     immediate = _instruction_immediate_form_contract(inst)
     immediate === nothing || return true
     mbarrier = _instruction_mbarrier_schema(state.cg, inst)
@@ -595,6 +603,25 @@ function _validate_exact_schema!(state::_TranspileContractState,
                                    mbarrier.variant.operands, path, address_role)
         return true
     end
+    structured = _instruction_structured_result_schema(state.cg, inst)
+    clc = _instruction_clc_try_cancel_schema(inst)
+    vector = _instruction_vector_result_schema(state.cg, inst)
+    if vector !== nothing
+        _validate_exact_addresses!(state, vector.sources, vector.roles, path,
+                                   _exact_address_role(vector.schema.mods))
+        for (i, (source, role)) in enumerate(zip(vector.sources, vector.roles))
+            role === :cache_policy && source isa ImmediateOperand || continue
+            _ptx_integer_carrier_expr(source.text, UInt64)
+        end
+        return true
+    end
+    # The scalar consult defers its miss-side result-ABI boundary check
+    # (result_boundary=false) exactly like emit_instruction!'s walk: the
+    # check throws for pure forms with unregistered tails (mov.b128), which
+    # must reach the b128 consult below first. It re-runs at the tail.
+    scalar = structured === nothing ?
+             _instruction_scalar_result_schema(inst; result_boundary = false) :
+             nothing
     b128 = _instruction_b128_schema(state.cg, inst)
     if b128 !== nothing
         _validate_exact_addresses!(state, b128.sources, b128.schema.operands,
@@ -608,20 +635,14 @@ function _validate_exact_schema!(state::_TranspileContractState,
         end
         return true
     end
-    structured = _instruction_structured_result_schema(state.cg, inst)
-    vector = _instruction_vector_result_schema(state.cg, inst)
-    if vector !== nothing
-        _validate_exact_addresses!(state, vector.sources, vector.roles, path,
-                                   _exact_address_role(vector.schema.mods))
-        for (i, (source, role)) in enumerate(zip(vector.sources, vector.roles))
-            role === :cache_policy && source isa ImmediateOperand || continue
-            _ptx_integer_carrier_expr(source.text, UInt64)
-        end
-        return true
-    end
-    scalar = structured === nothing ? _instruction_scalar_result_schema(inst) : nothing
     cvt = _instruction_cvt_source_schema(state.cg, inst, scalar)
-    clc = _instruction_clc_try_cancel_schema(inst)
+    if scalar === nothing && structured === nothing && cvt === nothing &&
+            clc === nothing
+        # Deferred scalar boundary check (see the consult above): every
+        # ledger has missed, so a pure form with an unregistered tail must
+        # fail here, at its historical position.
+        _instruction_scalar_result_schema(inst)
+    end
     scalar === nothing || _validate_scalar_schema!(state, inst, scalar, path)
     cvt === nothing || _validate_cvt_schema!(state, inst, cvt, path)
     clc === nothing || _validate_clc_schema!(state, inst, path)

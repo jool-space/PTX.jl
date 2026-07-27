@@ -170,12 +170,12 @@ sequence lives in exactly ONE place: `CALL_LEDGERS` in
    `protocol.jl`).
 
 `lowering` needs no per-ledger work: it walks `CALL_LEDGERS` through the
-shared `lowering_entry`, so reflection and reality cannot drift. One
-deliberate exception exists: the transpiler's module *preflight*
-(`_validate_exact_schema!` in `src/codegen/contract.jl`) retains its own
-historical adapter order because its rejection messages are pinned;
-emission (`emit_instruction!`) walks `CALL_LEDGERS` and is shielded by
-that preflight.
+shared `lowering_entry`, so reflection and reality cannot drift. The
+transpiler consults the same order twice: the module *preflight*
+(`_validate_exact_schema!` in `src/codegen/contract.jl`) walks it with
+the scalar boundary check deferred to the tail (`mov.b128`-class forms
+must reach the b128 consult first), and emission (`emit_instruction!`)
+walks it shielded by that preflight.
 
 ## Recipe D: typed-wrapper-only families
 
