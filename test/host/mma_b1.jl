@@ -32,8 +32,9 @@ _b1_mma_intrinsic(row) =
     @test length(unique(_b1_mma_mods.(EXPECTED_B1_MMA))) == 6
     @test Set((r.shape, r.bitop) for r in EXPECTED_B1_MMA) ==
           Set(PTX.MMA_B1_VARIANTS)
-    @test PTX.MMA_B1_ASM_FORMS == [(:m8n8k128, :xor)]
-    @test Set(PTX.MMA_B1_INTRINSIC_NAMES) ==
+    @test PTX.wrapper_asm_forms(:mma_b1) ==
+          [_b1_mma_mods(EXPECTED_B1_MMA[1])]   # m8n8k128.xor only
+    @test Set(PTX.wrapper_intrinsic_names(:mma_b1)) ==
           Set(_b1_mma_intrinsic(r) for r in EXPECTED_B1_MMA[2:end])
 
     for row in EXPECTED_B1_MMA

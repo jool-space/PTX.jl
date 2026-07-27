@@ -136,13 +136,10 @@ end
 _mma_b1_intrinsic_name(shape::Symbol, bitop::Symbol) =
     "mma.$bitop.popc.$shape.row.col.b1"
 
-# Every name the generator routed to tier 2 — for the conformance
-# completeness assertion (this is what protects the family in place of the
-# literal scan). Forms with no intrinsic fall back to the asm tier and are
-# listed in MMA_ASM_FORMS instead.
-const MMA_INTRINSIC_NAMES = String[]
-const MMA_ASM_FORMS = NTuple{5, Symbol}[]   # (shape, a, b, c, kind|:none)
-
+# Every name the generator routes to tier 2 lands in the wrapper registry
+# (family :mma) — for the conformance completeness assertion (this is what
+# protects the family in place of the literal scan). Forms with no intrinsic
+# fall back to the asm tier and are recorded as :asm registry records instead.
 function _mma_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
                        b_ty::Symbol, c_ty::Symbol;
                        kind::Union{Symbol, Nothing} = nothing)
@@ -159,16 +156,10 @@ function _mma_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
     full = "llvm.nvvm." * name
     if !NVVM.isintrinsic(full)
         # No intrinsic at 22.1.7 (e.g. kind::f8f6f4 at m16n8k16) — asm tier.
-        # Bookkeeping is idempotent: re-invoking a register helper (the
-        # coverage testset does) must not grow the lists the conformance
-        # counts pin.
-        form = (shape, a_ty, b_ty, c_ty, kind === nothing ? :none : kind)
-        form in MMA_ASM_FORMS || push!(MMA_ASM_FORMS, form)
         return _mma_register_asm(mods, shape, a_ty, b_ty, c_ty, kind,
                                  n_a, n_b, n_cd, cd_J)
     end
-    full in MMA_INTRINSIC_NAMES || push!(MMA_INTRINSIC_NAMES, full)
-    call = NVVM.IntrinsicCall{Symbol(full)}()
+    call = wrapper_intrinsic_call(:mma, :mma, mods, full)
 
     ab_vec = a_ty === :f16          # f16 inputs → <2 x half> A/B
     cd_vec = c_ty === :f16          # f16 accumulator → <2 x half> C/D
@@ -215,10 +206,7 @@ function _mma_int_register(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
 
     full = "llvm.nvvm." *
            _mma_int_intrinsic_name(shape, a_ty, b_ty, satfinite)
-    NVVM.isintrinsic(full) ||
-        error("integer mma intrinsic missing from pinned registry: $full")
-    full in MMA_INTRINSIC_NAMES || push!(MMA_INTRINSIC_NAMES, full)
-    call = NVVM.IntrinsicCall{Symbol(full)}()
+    call = wrapper_intrinsic_call(:mma, :mma, mods, full)
 
     a_in = [:(a[$i]) for i in 1:n_a]
     b_in = [:(b[$i]) for i in 1:n_b]
@@ -238,6 +226,7 @@ end
 # to the pre-migration generator (UInt32 fragments, =f/f/r constraints).
 function _mma_register_asm(mods, shape, a_ty, b_ty, c_ty, kind,
                            n_a, n_b, n_cd, cd_J)
+    register_wrapper!(:mma, :mma, mods, :asm)
     asm_kind = kind === nothing ? "" : "kind::$kind."
     cd_let = c_ty === :f32 ? "f" : c_ty === :f64 ? "d" : "r"
     ab_let = a_ty === :f64 ? "d" : "r"
@@ -321,8 +310,6 @@ const MMA_B1_VARIANTS = (
     (:m16n8k256, :xor),
     (:m16n8k256, :and),
 )
-const MMA_B1_INTRINSIC_NAMES = String[]
-const MMA_B1_ASM_FORMS = Tuple{Symbol,Symbol}[]
 
 function _mma_b1_register_asm(shape::Symbol, bitop::Symbol,
                               n_a::Int, n_b::Int, n_cd::Int)
@@ -342,6 +329,7 @@ function _mma_b1_register_asm(shape::Symbol, bitop::Symbol,
     c_in = [:(c[$i]) for i in 1:n_cd]
     mods = (:sync, :aligned, shape, :row, :col,
             :s32, :b1, :b1, :s32, bitop, :popc)
+    register_wrapper!(:mma_b1, :mma, mods, :asm)
     @eval function (::Operation{:mma, $mods})(
             a::NTuple{$n_a, UInt32}, b::NTuple{$n_b, UInt32},
             c::NTuple{$n_cd, Int32})
@@ -350,7 +338,6 @@ function _mma_b1_register_asm(shape::Symbol, bitop::Symbol,
                       Tuple{$(flat_types...)},
                       $(a_in...), $(b_in...), $(c_in...))
     end
-    push!(MMA_B1_ASM_FORMS, (shape, bitop))
     nothing
 end
 
@@ -366,10 +353,7 @@ function _mma_b1_register(shape::Symbol, bitop::Symbol)
     mods = (:sync, :aligned, shape, :row, :col,
             :s32, :b1, :b1, :s32, bitop, :popc)
     full = "llvm.nvvm." * _mma_b1_intrinsic_name(shape, bitop)
-    NVVM.isintrinsic(full) ||
-        error("single-bit mma intrinsic missing from pinned registry: $full")
-    full in MMA_B1_INTRINSIC_NAMES || push!(MMA_B1_INTRINSIC_NAMES, full)
-    call = NVVM.IntrinsicCall{Symbol(full)}()
+    call = wrapper_intrinsic_call(:mma_b1, :mma, mods, full)
 
     a_in = [:(a[$i]) for i in 1:n_a]
     b_in = [:(b[$i]) for i in 1:n_b]
@@ -414,8 +398,8 @@ end
 # Same intrinsic-name irregularity as dense: bf16/tf32 carry the input
 # dtype, pure-f16 forms are named by accumulator, fp8 carries the quad.
 # All registered forms have tier-2 intrinsics at the pinned backend; a
-# form that loses its intrinsic on a backend bump lands in
-# MMA_SP_MISSING_INTRINSICS and fails the conformance count instead of
+# form that loses its intrinsic on a backend bump lands in the registry as
+# a :missing record and fails the conformance count instead of
 # silently vanishing. `sp::ordered_metadata` (PTX 8.5+, sm_80+) is exposed for
 # the 12 floating ABIs and all 32 integer products (shape/type/saturation) also
 # exposed by the base form. The ISA recommends it because the unordered form
@@ -475,11 +459,6 @@ function _mma_sp_int_intrinsic_name(shape::Symbol, a_ty::Symbol,
     a_ty === b_ty ? base : base * ".$b_ty"
 end
 
-const MMA_SP_INTRINSIC_NAMES = String[]
-const MMA_SP_ORDERED_INTRINSIC_NAMES = String[]
-const MMA_SP_INTEGER_INTRINSIC_NAMES = String[]
-const MMA_SP_MISSING_INTRINSICS = String[]
-
 # PTX 9.3 §9.7.15.6: the selector identifies one thread, one thread pair, or
 # the whole four-thread group depending on the sparse A fragment layout.
 function _mma_sp_selectors(shape::Symbol, a_ty::Symbol)
@@ -510,17 +489,13 @@ function _mma_sp_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
         _mma_sp_int_intrinsic_name(shape, a_ty, b_ty, satfinite; ordered) :
         _mma_sp_intrinsic_name(shape, a_ty, b_ty, c_ty; ordered)
     full = "llvm.nvvm." * intrinsic_name
-    if !NVVM.isintrinsic(full)
-        # No asm fallback here (every registered form has an intrinsic at
-        # the pinned backend) — record and let conformance fail loudly.
-        full in MMA_SP_MISSING_INTRINSICS || push!(MMA_SP_MISSING_INTRINSICS, full)
-        return nothing
-    end
-    names = ordered ? MMA_SP_ORDERED_INTRINSIC_NAMES : MMA_SP_INTRINSIC_NAMES
-    full in names || push!(names, full)
-    integer && !(full in MMA_SP_INTEGER_INTRINSIC_NAMES) &&
-        push!(MMA_SP_INTEGER_INTRINSIC_NAMES, full)
-    call = NVVM.IntrinsicCall{Symbol(full)}()
+    # No asm fallback here (every registered form has an intrinsic at the
+    # pinned backend) — a miss becomes a :missing registry record and the
+    # conformance counts fail loudly. The integer subset needs no separate
+    # list: integer records are exactly those whose mods carry :s32.
+    family = ordered ? :mma_sp_ordered : :mma_sp
+    call = wrapper_intrinsic_call(family, :mma, mods, full; missing_ok = true)
+    call === nothing && return nothing
 
     ab_vec = a_ty === :f16
     cd_vec = c_ty === :f16

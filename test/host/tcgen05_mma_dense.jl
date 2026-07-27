@@ -58,7 +58,7 @@ _t5_dense_mods(cg, kind; ashift = false, coll = nothing) =
                       !occursin(".sp.", name) && !occursin(".ws.", name) &&
                       !occursin("block_scale", name))
     @test reviewed == registry
-    @test reviewed == Set(PTX.TCGEN05_MMA_DENSE_INTRINSIC_NAMES)
+    @test reviewed == Set(PTX.wrapper_intrinsic_names(:tcgen05_mma_dense))
     @test length(reviewed) == 18
 
     # The ashift-legal collector subset is pinned by the registry ranges:

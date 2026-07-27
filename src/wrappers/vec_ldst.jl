@@ -80,6 +80,7 @@ end
 
 function _vec_ld_register(n::Int, dtype::Symbol, T)
     mods = (:global, Symbol("v", n), dtype)
+    register_wrapper!(:vec_ldst, :ld, mods, :core_ir)
     ir   = vec_ld_ir(n, dtype, n * sizeof(T))
     @eval @generated function (::Operation{:ld, $mods})(
             addr::Core.LLVMPtr{S, AS.Global}) where S
@@ -94,6 +95,7 @@ end
 
 function _vec_st_register(n::Int, dtype::Symbol, T)
     mods = (:global, Symbol("v", n), dtype)
+    register_wrapper!(:vec_ldst, :st, mods, :core_ir)
     ir   = vec_st_ir(n, dtype, n * sizeof(T))
     @eval function (::Operation{:st, $mods})(
             addr::Core.LLVMPtr{S, AS.Global},

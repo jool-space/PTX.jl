@@ -29,65 +29,65 @@
 # Methods spell intrinsic names literally — test/host/conformance.jl
 # scans for `nvvm"..."` literals and requires a selection probe for each.
 
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m8n8, :x1, :shared, :b16)})(
+@inline optype"ldmatrix.sync.aligned.m8n8.x1.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m8n8.x1.b16"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m8n8, :x1, :trans, :shared, :b16)})(
+@inline optype"ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m8n8.x1.trans.b16"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m8n8, :x2, :shared, :b16)})(
+@inline optype"ldmatrix.sync.aligned.m8n8.x2.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m8n8.x2.b16"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m8n8, :x2, :trans, :shared, :b16)})(
+@inline optype"ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m8n8.x2.trans.b16"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m8n8, :x4, :shared, :b16)})(
+@inline optype"ldmatrix.sync.aligned.m8n8.x4.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m8n8.x4.b16"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m8n8, :x4, :trans, :shared, :b16)})(
+@inline optype"ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m8n8.x4.trans.b16"(addr)
 
 # b8 shapes (sm_100a family): 2 regs per count step.
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m16n16, :x1, :trans, :shared, :b8)})(
+@inline optype"ldmatrix.sync.aligned.m16n16.x1.trans.shared.b8"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m16n16.x1.trans.b8"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m16n16, :x2, :trans, :shared, :b8)})(
+@inline optype"ldmatrix.sync.aligned.m16n16.x2.trans.shared.b8"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m16n16.x2.trans.b8"(addr)
 
 # Optional decompression from packed unsigned 4-/6-bit source rows. The
 # pointer element type is deliberately unconstrained: PTX consumes an address,
 # while the formats (not Julia's pointee type) define the 128-bit row payload.
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m8n16, :x1, :shared, :b8x16, :b4x16_p64)})(
+@inline optype"ldmatrix.sync.aligned.m8n16.x1.shared.b8x16.b4x16_p64"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m8n16.x1.b8x16.b4x16_p64"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m8n16, :x1, :shared, :b8x16, :b6x16_p32)})(
+@inline optype"ldmatrix.sync.aligned.m8n16.x1.shared.b8x16.b6x16_p32"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m8n16.x1.b8x16.b6x16_p32"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m8n16, :x2, :shared, :b8x16, :b4x16_p64)})(
+@inline optype"ldmatrix.sync.aligned.m8n16.x2.shared.b8x16.b4x16_p64"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m8n16.x2.b8x16.b4x16_p64"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m8n16, :x2, :shared, :b8x16, :b6x16_p32)})(
+@inline optype"ldmatrix.sync.aligned.m8n16.x2.shared.b8x16.b6x16_p32"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m8n16.x2.b8x16.b6x16_p32"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m8n16, :x4, :shared, :b8x16, :b4x16_p64)})(
+@inline optype"ldmatrix.sync.aligned.m8n16.x4.shared.b8x16.b4x16_p64"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m8n16.x4.b8x16.b4x16_p64"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m8n16, :x4, :shared, :b8x16, :b6x16_p32)})(
+@inline optype"ldmatrix.sync.aligned.m8n16.x4.shared.b8x16.b6x16_p32"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m8n16.x4.b8x16.b6x16_p32"(addr)
 
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m16n16, :x1, :trans, :shared, :b8x16, :b4x16_p64)})(
+@inline optype"ldmatrix.sync.aligned.m16n16.x1.trans.shared.b8x16.b4x16_p64"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m16n16.x1.trans.b8x16.b4x16_p64"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m16n16, :x1, :trans, :shared, :b8x16, :b6x16_p32)})(
+@inline optype"ldmatrix.sync.aligned.m16n16.x1.trans.shared.b8x16.b6x16_p32"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m16n16.x1.trans.b8x16.b6x16_p32"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m16n16, :x2, :trans, :shared, :b8x16, :b4x16_p64)})(
+@inline optype"ldmatrix.sync.aligned.m16n16.x2.trans.shared.b8x16.b4x16_p64"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m16n16.x2.trans.b8x16.b4x16_p64"(addr)
-@inline (::Operation{:ldmatrix, (:sync, :aligned, :m16n16, :x2, :trans, :shared, :b8x16, :b6x16_p32)})(
+@inline optype"ldmatrix.sync.aligned.m16n16.x2.trans.shared.b8x16.b6x16_p32"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
     nvvm"ldmatrix.sync.aligned.m16n16.x2.trans.b8x16.b6x16_p32"(addr)
 

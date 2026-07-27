@@ -63,19 +63,32 @@ Then:
 Files touched, in order:
 
 1. `src/wrappers/<family>.jl` — a typed method on the operation
-   singleton. Prefer the `optype"opcode.mods"` definition spelling over a
-   hand-transcribed `(::Operation{:op, (...)})` tuple. Spell every
-   `nvvm"..."` literal out (no name-building loops) — the conformance
-   scan greps for them. Guard registration with `NVVM.isintrinsic` when
-   the method should fall back to asm on older registries.
+   singleton. A compile-time literal spelling uses the
+   `optype"opcode.mods"` definition macro (never a hand-transcribed
+   `(::Operation{:op, (...)})` tuple — the string form is dispatchable by
+   the `ptx""` call spelling by construction); only generator loops that
+   build the mods tuple programmatically define methods on the
+   `Operation{op, mods}` singleton directly. Spell every `nvvm"..."`
+   literal out (no name-building loops) — the conformance scan greps for
+   them. A *generated* family instead routes its bookkeeping through the
+   wrapper registry (`src/wrappers/registry.jl`): tier-2 generators call
+   `wrapper_intrinsic_call(family, op, mods, name)` (which validates the
+   built name against the pinned NVVM registry, records a `WrapperRecord`,
+   and returns the `IntrinsicCall`; guard with `NVVM.isintrinsic` first
+   when the method should fall back to asm on older registries), and
+   asm/core-IR generators call `register_wrapper!(family, op, mods,
+   tier)`. Registration is idempotent behind one shared key set — never
+   add a per-family accumulator list.
 2. `src/ledgers/forms.jl` — only if the opcode itself is new (the wrapper still
    needs the family's contract for the transpiler and reflection).
 3. `test/host/conformance.jl` — **mandatory**: a selection probe per
    intrinsic (`(name, argtypes, mcpu, mattr, expected instruction
    regex)`). The "every wrapper intrinsic has a selection probe" testset
    scans `src/` for `nvvm"..."` literals and fails listing any you
-   missed. Generated method families additionally maintain name-list
-   constants with count pins.
+   missed. Generated method families are instead pinned through the
+   wrapper registry: the sweep replays the registration loops and asserts
+   set equality plus a count pin against
+   `PTX.wrapper_intrinsic_names(:family)`.
 4. `test/host/<family>.jl` — dispatch, argument validation, and
    `lowering` classification.
 5. `test/ptxas/` — instruction-text assertions on `emit_ptx` output plus
@@ -161,8 +174,12 @@ shape) and close the boundary:
   spelling errors at compile time instead of receiving a guessed
   contract — its count and content are pinned in
   `test/host/fallback_boundary.jl`;
-- if operands accept integer addresses, forwarding adapters and their
-  pins (see `test/host/address_roles.jl` for the tcgen05 pattern);
+- if operands accept integer addresses, forwarding adapters emitted by
+  the *same* enumeration that emits (or, for literal methods, sits next
+  to) the primary methods — the tcgen05 registration calls
+  `_tcgen05_adapter!(mods, argtypes...)` with the exact reviewed
+  signature, and the sealed `TCGEN05_INTEGER_ADDRESS_ADAPTERS` inventory
+  is pinned by the independent oracle in `test/host/address_roles.jl`;
 - combinatorial modifier grids should be generated (`@eval` over a
   declarative spec, like the tcgen05 ld/st grid), with the spec — not
   the expansion — as the reviewed artifact.

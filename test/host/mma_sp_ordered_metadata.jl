@@ -57,14 +57,17 @@ ordered_argtypes(f, selector) = (
         @test PTX.NVVM.callsiteattrs(intrinsic) == "convergent nomerge"
     end
 
-    ordered_names = Set(PTX.MMA_SP_ORDERED_INTRINSIC_NAMES)
-    integer_names = Set(PTX.MMA_SP_INTEGER_INTRINSIC_NAMES)
+    ordered_names = Set(PTX.wrapper_intrinsic_names(:mma_sp_ordered))
+    integer_names = Set(r.intrinsic
+                        for r in PTX.wrapper_records(:mma_sp, :mma_sp_ordered)
+                        if :s32 in r.mods)
 
     # This oracle independently pins the floating ordered-metadata island. The
     # production inventory also contains the separately reviewed integer forms.
     @test expected_names == setdiff(ordered_names, integer_names)
     @test length(intersect(ordered_names, integer_names)) == 32
-    @test isempty(intersect(expected_names, Set(PTX.MMA_SP_INTRINSIC_NAMES)))
+    @test isempty(intersect(expected_names,
+                            Set(PTX.wrapper_intrinsic_names(:mma_sp))))
 end
 
 @testset "mma.sp::ordered_metadata canonical spelling and fail-loud boundary" begin

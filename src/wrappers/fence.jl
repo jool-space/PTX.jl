@@ -34,20 +34,20 @@
 # async proxy is the memory proxy used by TMA (cp.async.bulk*) and tcgen05;
 # generic-proxy ops (regular load/store, mma) need this fence to observe
 # async-proxy writes (and vice versa). sm_90+ only.
-@inline (::Operation{:fence, (:proxy, :async)})() =
+@inline optype"fence.proxy.async"() =
     nvvm"fence.proxy.async"()
 
 # `fence.proxy.async.shared::cta;` — the shared-CTA-scoped async proxy fence
 # the producer/consumer GEMM pipelines emit after staging into shared memory
 # (used across the Hopper/Blackwell kernels). Intrinsic spells the space
 # with an underscore (shared_cta); the emitted PTX is `shared::cta`.
-@inline (::Operation{:fence, (:proxy, :async, Symbol("shared::cta"))})() =
+@inline optype"fence.proxy.async.shared::cta"() =
     nvvm"fence.proxy.async.shared_cta"()
 
 # `fence.mbarrier_init.release.cluster;` — release-fence after
 # `mbarrier.init` so other CTAs in the cluster observe the initialized
 # mbarrier state before reading/arriving on it. sm_90+ (cluster scope).
-@inline (::Operation{:fence, (:mbarrier_init, :release, :cluster)})() =
+@inline optype"fence.mbarrier_init.release.cluster"() =
     nvvm"fence.mbarrier_init.release.cluster"()
 
 # --- Tensor-map proxy fences (PTX 8.3, sm_90+) -----------------------------
@@ -72,44 +72,36 @@
 # release intrinsics deliberately carry no permissive memory attribute, so
 # optimized LLVM retains every fence and cannot move memory through it.
 
-@inline function (::Operation{:fence,
-        (:proxy, Symbol("tensormap::generic"), :acquire, :cta)})(
+@inline function optype"fence.proxy.tensormap::generic.acquire.cta"(
         addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
     nvvm"fence.proxy.tensormap_generic.acquire.cta"(addr, Val(128))
 end
 
-@inline function (::Operation{:fence,
-        (:proxy, Symbol("tensormap::generic"), :acquire, :cluster)})(
+@inline function optype"fence.proxy.tensormap::generic.acquire.cluster"(
         addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
     nvvm"fence.proxy.tensormap_generic.acquire.cluster"(addr, Val(128))
 end
 
-@inline function (::Operation{:fence,
-        (:proxy, Symbol("tensormap::generic"), :acquire, :gpu)})(
+@inline function optype"fence.proxy.tensormap::generic.acquire.gpu"(
         addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
     nvvm"fence.proxy.tensormap_generic.acquire.gpu"(addr, Val(128))
 end
 
-@inline function (::Operation{:fence,
-        (:proxy, Symbol("tensormap::generic"), :acquire, :sys)})(
+@inline function optype"fence.proxy.tensormap::generic.acquire.sys"(
         addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
     nvvm"fence.proxy.tensormap_generic.acquire.sys"(addr, Val(128))
 end
 
-@inline (::Operation{:fence,
-    (:proxy, Symbol("tensormap::generic"), :release, :cta)})() =
+@inline optype"fence.proxy.tensormap::generic.release.cta"() =
     nvvm"fence.proxy.tensormap_generic.release.cta"()
 
-@inline (::Operation{:fence,
-    (:proxy, Symbol("tensormap::generic"), :release, :cluster)})() =
+@inline optype"fence.proxy.tensormap::generic.release.cluster"() =
     nvvm"fence.proxy.tensormap_generic.release.cluster"()
 
-@inline (::Operation{:fence,
-    (:proxy, Symbol("tensormap::generic"), :release, :gpu)})() =
+@inline optype"fence.proxy.tensormap::generic.release.gpu"() =
     nvvm"fence.proxy.tensormap_generic.release.gpu"()
 
-@inline (::Operation{:fence,
-    (:proxy, Symbol("tensormap::generic"), :release, :sys)})() =
+@inline optype"fence.proxy.tensormap::generic.release.sys"() =
     nvvm"fence.proxy.tensormap_generic.release.sys"()
 
 # --- generic memory fences (tier-1 core IR) ---------------------------------
@@ -124,6 +116,7 @@ const _FENCE_SCOPES = (
 
 function _generic_fence_register(sem::Symbol, ordering::String,
                                  scope::Symbol, syncscope::String)
+    register_wrapper!(:fence, :fence, (sem, scope), :core_ir)
     ir = "fence $syncscope$ordering\nret void"
     @eval @inline (::Operation{:fence, ($(QuoteNode(sem)), $(QuoteNode(scope)))})() =
         Base.llvmcall($ir, Nothing, Tuple{})

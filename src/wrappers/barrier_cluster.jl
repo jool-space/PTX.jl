@@ -22,16 +22,16 @@
 # intrinsic this file stands on is greppable — test/host/conformance.jl
 # scans for `nvvm"..."` literals and requires a probe for each.
 
-@inline (::Operation{:barrier, (:cluster, :arrive)})() =
+@inline optype"barrier.cluster.arrive"() =
     nvvm"barrier.cluster.arrive"()
-@inline (::Operation{:barrier, (:cluster, :arrive, :relaxed)})() =
+@inline optype"barrier.cluster.arrive.relaxed"() =
     nvvm"barrier.cluster.arrive.relaxed"()
-@inline (::Operation{:barrier, (:cluster, :wait)})() =
+@inline optype"barrier.cluster.wait"() =
     nvvm"barrier.cluster.wait"()
 
-@inline (::Operation{:barrier, (:cluster, :arrive, :aligned)})() =
+@inline optype"barrier.cluster.arrive.aligned"() =
     nvvm"barrier.cluster.arrive.aligned"()
-@inline (::Operation{:barrier, (:cluster, :arrive, :relaxed, :aligned)})() =
+@inline optype"barrier.cluster.arrive.relaxed.aligned"() =
     nvvm"barrier.cluster.arrive.relaxed.aligned"()
-@inline (::Operation{:barrier, (:cluster, :wait, :aligned)})() =
+@inline optype"barrier.cluster.wait.aligned"() =
     nvvm"barrier.cluster.wait.aligned"()

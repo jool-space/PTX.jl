@@ -46,7 +46,7 @@ _t5_ws_mods(kind; sp = false, coll = nothing) =
     registry = Set(name for name in keys(PTX.NVVM.TABLE)
                    if startswith(name, "llvm.nvvm.tcgen05.mma.ws."))
     @test reviewed == registry
-    @test reviewed == Set(PTX.TCGEN05_MMA_WS_INTRINSIC_NAMES)
+    @test reviewed == Set(PTX.wrapper_intrinsic_names(:tcgen05_mma_ws))
     @test length(reviewed) == 8
 end
 

@@ -27,12 +27,26 @@ There are four patterns that force a wrapper:
 
 Each wrapper file follows the same shape: a small declarative table
 maps `(shape, dtype, …)` to register counts and constraints, a
-`_register` function builds the asm string + LLVM call, and a `for`
-loop emits a typed method per valid combination. Literal spellings are
-declared with the [`@optype_str`](@ref) definition macro
+`_register` function builds the family-local spec (asm template, llvmcall
+body, or intrinsic name) and emits a typed method per valid combination
+from a `for` loop. Bookkeeping is shared, not per-file: every generator
+records what it defined in the wrapper registry
+(`src/wrappers/registry.jl`) — one `WrapperRecord` per
+`(family, op, mods, tier, intrinsic)` key behind a single idempotency
+set, so re-invoking a registration helper cannot inflate the inventories
+the test count pins protect. Tier-2 generators obtain their
+`IntrinsicCall` through `wrapper_intrinsic_call`, which validates the
+generated name against the pinned NVVM registry and records it in one
+step; asm/core-IR generators call `register_wrapper!` directly. The
+test-side oracles read the inventories back through `wrapper_records` /
+`wrapper_intrinsic_names` / `wrapper_asm_forms` /
+`wrapper_missing_intrinsics`.
+
+Literal spellings are declared with the [`@optype_str`](@ref) definition
+macro
 (`@inline optype"tcgen05.alloc.cta_group::1.sync.aligned.b32"(...) = ...`);
-generator loops that build the mods tuple programmatically define methods
-on the `Operation{op, mods}` singleton directly.
+only generator loops that build the mods tuple programmatically define
+methods on the `Operation{op, mods}` singleton directly.
 
 Adding a new dtype/shape combination is one entry in the table plus one
 line in the loop.
@@ -252,5 +266,7 @@ Most chain-default coverage is sufficient. Reach for a wrapper when:
 
 The pattern: copy the closest existing wrapper file, adjust the table
 and asm template, add a `for` loop that emits one typed method per
-combination (spelling literal forms with `optype""`). ~80 LOC for a new
-family in most cases.
+combination — spelling literal forms with `optype""` and routing the
+generator's bookkeeping through `register_wrapper!` /
+`wrapper_intrinsic_call` (see `src/wrappers/registry.jl`). ~80 LOC for a
+new family in most cases.

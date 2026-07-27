@@ -148,6 +148,7 @@ function _wgmma_mma_async_register(
     mods = (:mma_async, :sync, :aligned,
             Symbol("m64n", n, "k", k),
             dtype_d, dtype_a, dtype_b)
+    register_wrapper!(:wgmma, :wgmma, mods, :asm)
 
     # wgmma.mma_async is warpgroup-collective: all 128 threads must execute
     # the same call site. Emitted via convergent_asm_ir (not @asmcall) so the

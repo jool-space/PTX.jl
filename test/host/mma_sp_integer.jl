@@ -67,7 +67,10 @@ end
     end
 
     @test method_count == 96
-    @test expected_names == Set(PTX.MMA_SP_INTEGER_INTRINSIC_NAMES)
+    integer_names = Set(r.intrinsic
+                        for r in PTX.wrapper_records(:mma_sp, :mma_sp_ordered)
+                        if :s32 in r.mods)
+    @test expected_names == integer_names
     @test count(startswith("llvm.nvvm.mma.sp.ordered.metadata"),
                 expected_names) == 32
     @test count(startswith("llvm.nvvm.mma.sp.m16"), expected_names) == 32

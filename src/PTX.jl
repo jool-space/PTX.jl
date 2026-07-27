@@ -45,6 +45,7 @@ include("dsl/reflection.jl")
 export @ptx_str, @optype_str, @sreg_str
 export vector_load
 
+include("wrappers/registry.jl")
 include("wrappers/barrier.jl")
 include("wrappers/barrier_cluster.jl")
 include("wrappers/cp_async.jl")
