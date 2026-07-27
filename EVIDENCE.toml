@@ -17,10 +17,10 @@
 tests = "gpu/hopper"
 runtime = "cc==9.0"
 evidence = "manual"
-last_validated = "2026-07-06"
-device = "H100 PCIe (CC 9.0)"
-tree = "pre-redesign main (before #88–#96)"
-result = "full suite 27,817/27,817 — first hardware execution of the wgmma/TMA/cluster runtime tier"
+last_validated = "2026-07-27"
+device = "H200 (CC 9.0)"
+tree = "post-redesign main (9d6f1f8; #88–#96 ledger protocol, wrapper registry, preflight unification)"
+result = "full default-routing suite green — first hopper runtime execution of the redesigned lowering internals (prior record: H100 PCIe 2026-07-06, 27,817/27,817 on the pre-redesign tree)"
 
 [[tier]]
 tests = "gpu/blackwell"
@@ -54,5 +54,4 @@ device = "H100/H200 (CC 9.0)"
 items = [
     "issue #52: shared-cluster u64 mapa carrier semantic probe",
     "issue #49: matrix-ambiguity assembly experiments (f8f6f4 K shape, integer WGMMA upper-N, modifier ordering) across toolkits",
-    "re-validate gpu/hopper runtime tier on post-redesign main (#88–#96)",
 ]
