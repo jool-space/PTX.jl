@@ -81,6 +81,13 @@ function _render_schema_source(op::Operand, cg::CodeGenState, kind::Symbol)
     render_operand(op, cg; type_hint = _schema_operand_hint(kind))
 end
 
+# Transpiler adapter-selection dispatch family. Each method consults its
+# ledger's `_instruction_*` adapter (which throws the ledger's miss for a
+# claimed-but-invalid spelling) and, on a hit, performs the adapter's
+# specialized emission. Returns whether the instruction was handled.
+# Methods live next to their adapters in src/codegen/adapters/*.jl.
+function transpile_ledger! end
+
 function emit_instruction!(cg::CodeGenState, inst::Instruction)
     # Drop debug directives.
     (inst.opcode == ".loc" || inst.opcode == ".file") && return
@@ -96,38 +103,20 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
         "that dependency. Use PTX.add_with_carry, PTX.sub_with_borrow, or " *
         "PTX.mul_wide in Julia source."))
 
-    # Validate constant-only, destinationless instructions before generic
-    # destination inference or pointer-alias absorption can reinterpret their
-    # sole source as a definition. Constant expressions are reduced to Val so
-    # reconstructed Julia retains the compile-time ISA contract.
-    immediate_checked = _instruction_immediate_form_contract(inst)
-    if immediate_checked !== nothing
-        chain = chain_expr(cg, inst.opcode, inst.modifiers)
-        call = chain * "(Val($(immediate_checked.value)))"
-        emit_with_predicate!(cg, call, inst.predicate, String[])
-        return
+    # The closed grammar islands, consulted in the shared CALL_LEDGERS order.
+    # This selection is behavior-shielded by the module preflight
+    # (_validate_exact_schema! in contract.jl): emission only ever sees
+    # instructions whose unique exact schema already validated, so at most one
+    # ledger handles each instruction here.
+    for l in CALL_LEDGERS
+        transpile_ledger!(l, cg, inst) && return
     end
 
-    mbarrier_schema = _instruction_mbarrier_schema(cg, inst)
-    mbarrier_schema === nothing ||
-        return _emit_mbarrier!(cg, inst, mbarrier_schema)
-
-    b128_checked = _instruction_b128_schema(cg, inst)
-    b128_checked === nothing || return _emit_b128!(cg, inst, b128_checked)
-
-    structured_checked = _instruction_structured_result_schema(cg, inst)
-
-    # Close fixed-result grammar islands before any instruction can be erased
-    # by pointer-alias absorption. The schema also provides a distinct type
-    # hint for every source operand; one terminal hint is wrong for mixed
-    # precision, mixed-sign dot products, widened arithmetic, and cvt.pack.
-    vector_schema = _instruction_vector_result_schema(cg, inst)
-    vector_schema === nothing ||
-        return _emit_vector_result!(cg, inst, vector_schema)
-    scalar_schema = structured_checked === nothing ?
-                    _instruction_scalar_result_schema(inst) : nothing
-    cvt_schema = _instruction_cvt_source_schema(cg, inst, scalar_schema)
-    clc_schema = _instruction_clc_try_cancel_schema(inst)
+    # Keep the parser/transpiler on the same result-ABI boundary as direct
+    # calls. This catches noncanonical cvt and any reviewed pure form that
+    # would otherwise infer void before pointer-alias absorption can erase
+    # a malformed mov/add/sub definition.
+    infer_rettype(Symbol(inst.opcode), _schema_modifiers(inst.modifiers))
 
     if inst.opcode == "ret" && isempty(inst.operands)
         if inst.predicate === nothing
@@ -153,56 +142,28 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     # Shared-pointer alias propagation: if this `mov`/`add`/`sub` defines a
     # register from a translated shared symbol or an existing alias, record
     # the alias and emit nothing. Use sites of the dst register are
-    # substituted via `pointer_aliases` in `render_operand`.
-    structured_checked === nothing && scalar_schema === nothing &&
-        inst.predicate === nothing &&
-        _try_alias_def!(cg, inst) && return
+    # substituted via `pointer_aliases` in `render_operand`. Audited scalar/
+    # structured forms never reach this point — their ledger emitted above.
+    inst.predicate === nothing && _try_alias_def!(cg, inst) && return
 
-    if clc_schema !== nothing
-        chain = chain_expr(cg, inst.opcode, inst.modifiers)
-        args = join((render_operand(op, cg) for op in inst.operands), ", ")
-        emit_with_predicate!(cg, chain * "(" * args * ")",
-                             inst.predicate, String[])
-        return
-    end
+    # Ordinary cvt's source-carrier ledger sits outside CALL_LEDGERS (see
+    # protocol.jl); cvt.pack was already handled by the scalar ledger above.
+    transpile_ledger!(CvtLedger(), cg, inst) && return
 
     # Exact-schema islands above retain their specialized emission. Every
     # remaining instruction is emitted from the same finite form/role ledger
     # used by the module preflight; do not reintroduce address/result guesses.
-    if structured_checked === nothing && scalar_schema === nothing &&
-            cvt_schema === nothing
-        return _emit_transpile_form!(cg, inst)
-    end
+    _emit_transpile_form!(cg, inst)
+end
 
-    # Structured-result schemas choose their reviewed API modifiers. Shfl's
-    # existing intrinsic wrapper retains its trailing `.pred` selector.
-    modifiers = structured_checked === nothing ? inst.modifiers :
-                Tuple("." * string(mod) for mod in structured_checked.mods)
-    if structured_checked === nothing && !isempty(inst.operands) &&
-            inst.operands[1] isa PipeOperand
-        if inst.opcode == "shfl"
-            modifiers = (modifiers..., ".pred")
-        end
-    end
+# The generic destination/source emission shared by the scalar, structured,
+# and cvt islands: `dst = ptx"op.mods"(srcs...)` under the predicate.
+function _emit_schema_call!(cg::CodeGenState, inst::Instruction,
+                            modifiers::Tuple{Vararg{String}},
+                            dst_expr::String, dst_names::Vector{String},
+                            src_strs::Vector{String})
     chain = chain_expr(cg, inst.opcode, modifiers)
-
-    dst_expr, dst_names = structured_checked === nothing ?
-                          render_dst(inst.operands[1], cg) :
-                          _render_structured_dst(inst.operands[1], cg)
-    src_strs = if structured_checked !== nothing
-        [_render_structured_source(op, cg, kind)
-         for (op, kind) in zip(inst.operands[2:end],
-                               structured_checked.schema.operands)]
-    elseif cvt_schema !== nothing
-        [_render_cvt_source(op, cg, kind, cvt_schema, index)
-         for (index, (op, kind)) in
-             enumerate(zip(inst.operands[2:end], cvt_schema.operands))]
-    else
-        [_render_schema_source(op, cg, kind)
-         for (op, kind) in zip(inst.operands[2:end], scalar_schema.operands)]
-    end
-    args = join(src_strs, ", ")
-    line = dst_expr * " = " * chain * "(" * args * ")"
+    line = dst_expr * " = " * chain * "(" * join(src_strs, ", ") * ")"
     emit_with_predicate!(cg, line, inst.predicate, dst_names)
 end
 

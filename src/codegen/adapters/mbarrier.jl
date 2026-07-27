@@ -87,7 +87,7 @@ function _instruction_mbarrier_schema(cg::CodeGenState, inst::Instruction)
     source_start = 1
 
     if !isempty(operands) && operands[1] isa PipeOperand
-        isempty(mods) && throw(mbarrier_schema_miss(mods))
+        isempty(mods) && throw(miss(MBarrierLedger(), :mbarrier, mods))
         pipe = operands[1]::PipeOperand
         _mbarrier_is_declared_register(cg, pipe.left) &&
             _mbarrier_is_declared_register(cg, pipe.right) ||
@@ -121,19 +121,19 @@ function _instruction_mbarrier_schema(cg::CodeGenState, inst::Instruction)
         mods = _mbarrier_sink_selector_mods(mods)
     end
 
-    schema = mbarrier_form_schema(:mbarrier, mods)
-    schema === nothing && throw(mbarrier_schema_miss(mods))
+    s = schema(MBarrierLedger(), :mbarrier, mods)
+    s === nothing && throw(miss(MBarrierLedger(), :mbarrier, mods))
 
     if isempty(destination_operands)
-        if schema.destination === :none
+        if s.destination === :none
             source_start = 1
-        elseif schema.destination in (:sink, :remote_sink)
+        elseif s.destination in (:sink, :remote_sink)
             !isempty(operands) && _is_sink_operand(operands[1]) ||
                 throw(ArgumentError(
                     "PTX transpiler: sink-result mbarrier arrival requires " *
                     "the `_` destination"))
             source_start = 2
-        elseif schema.destination === :state
+        elseif s.destination === :state
             isempty(operands) && throw(ArgumentError(
                 "PTX transpiler: mbarrier state form is missing its destination"))
             _mbarrier_is_declared_register(cg, operands[1]) ||
@@ -142,7 +142,7 @@ function _instruction_mbarrier_schema(cg::CodeGenState, inst::Instruction)
                     "declared register"))
             push!(destination_operands, operands[1])
             source_start = 2
-        elseif schema.destination in (:predicate, :count)
+        elseif s.destination in (:predicate, :count)
             !isempty(operands) &&
                 _mbarrier_is_declared_register(cg, operands[1]) ||
                 throw(ArgumentError(
@@ -159,22 +159,30 @@ function _instruction_mbarrier_schema(cg::CodeGenState, inst::Instruction)
     sources = source_start > length(operands) ? Operand[] :
               collect(operands[source_start:end])
     variant_index = findfirst(v -> length(v.operands) == length(sources),
-                              schema.variants)
+                              s.variants)
     variant_index === nothing && throw(ArgumentError(
-        "PTX transpiler: mbarrier.$(join(schema.mods, ".")) has invalid source " *
-        "arity $(length(sources)); see $(schema.section)"))
-    variant = schema.variants[variant_index]
+        "PTX transpiler: mbarrier.$(join(s.mods, ".")) has invalid source " *
+        "arity $(length(sources)); see $(s.section)"))
+    variant = s.variants[variant_index]
     for (i, (kind, op)) in enumerate(zip(variant.operands, sources))
         _mbarrier_source_operand(kind, op) && continue
         throw(ArgumentError(
-            "PTX transpiler: mbarrier.$(join(schema.mods, ".")) source $i " *
-            "does not match the audited $kind operand role; see $(schema.section)"))
+            "PTX transpiler: mbarrier.$(join(s.mods, ".")) source $i " *
+            "does not match the audited $kind operand role; see $(s.section)"))
     end
-    _validate_mbarrier_destination_types!(cg, schema, destination_operands)
+    _validate_mbarrier_destination_types!(cg, s, destination_operands)
     for (i, (kind, op)) in enumerate(zip(variant.operands, sources))
         _validate_mbarrier_source_type!(cg, kind, op, i)
     end
-    (; schema, variant, sources, destination_operands)
+    (; schema = s, variant, sources, destination_operands)
+end
+
+function transpile_ledger!(::MBarrierLedger, cg::CodeGenState,
+                           inst::Instruction)
+    checked = _instruction_mbarrier_schema(cg, inst)
+    checked === nothing && return false
+    _emit_mbarrier!(cg, inst, checked)
+    true
 end
 
 function _emit_mbarrier!(cg::CodeGenState, inst::Instruction, checked)

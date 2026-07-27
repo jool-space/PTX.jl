@@ -49,10 +49,10 @@ memory-model audit.
 """
 @generated function vector_load(::Operation{:ld, mods}, addr::A,
                                 ::Val{mask}) where {mods, A, mask}
-    schema = vector_result_schema(:ld, mods)
-    schema === nothing && throw(vector_result_schema_miss(:ld, mods))
-    spec = _build_vector_result_call(schema, (A,), form_contract(:ld, mods);
-                                     sink_mask = mask)
+    s = schema(VectorLedger(), :ld, mods)
+    s === nothing && throw(miss(VectorLedger(), :ld, mods))
+    spec = build_ledger_call(VectorLedger(), s, (A,), form_contract(:ld, mods);
+                             sink_mask = mask)
     body = _chain_call_expr(spec)
     quote
         Base.@inline
@@ -64,10 +64,10 @@ end
 
 @generated function vector_load(::Operation{:ld, mods}, addr::A, policy::P,
                                 ::Val{mask}) where {mods, A, P, mask}
-    schema = vector_result_schema(:ld, mods)
-    schema === nothing && throw(vector_result_schema_miss(:ld, mods))
-    spec = _build_vector_result_call(schema, (A, P), form_contract(:ld, mods);
-                                     sink_mask = mask)
+    s = schema(VectorLedger(), :ld, mods)
+    s === nothing && throw(miss(VectorLedger(), :ld, mods))
+    spec = build_ledger_call(VectorLedger(), s, (A, P), form_contract(:ld, mods);
+                             sink_mask = mask)
     body = _chain_call_expr(spec)
     quote
         Base.@inline

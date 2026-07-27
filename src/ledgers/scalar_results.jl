@@ -255,11 +255,11 @@ const _SCALAR_RESULT_SCHEMA_BY_FORM = Dict(
 length(_SCALAR_RESULT_SCHEMA_BY_FORM) == length(SCALAR_RESULT_SCHEMAS) ||
     error("duplicate keys in SCALAR_RESULT_SCHEMAS")
 
-scalar_result_schema(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
+schema(::ScalarLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     get(_SCALAR_RESULT_SCHEMA_BY_FORM, (op, mods), nothing)
 
-function requires_scalar_result_schema(op::Symbol,
-                                       mods::Tuple{Vararg{Symbol}})
+function claims(::ScalarLedger, op::Symbol,
+                mods::Tuple{Vararg{Symbol}})
     op in (:popc, :clz, :dp2a, :dp4a) && return true
     op in (:mul, :mad) && :wide in mods && return true
     op === :cvt && :pack in mods && return true
@@ -279,65 +279,14 @@ function requires_scalar_result_schema(op::Symbol,
     false
 end
 
-function scalar_result_schema_miss(op::Symbol,
-                                   mods::Tuple{Vararg{Symbol}})
+function miss(::ScalarLedger, op::Symbol,
+              mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))
     ArgumentError(
         "ptx\"$spelling\" is inside an audited scalar-result grammar " *
         "island but does not match a reviewed form. Refusing terminal-modifier " *
         "result inference; check modifier order and spelling. The raw tier " *
         "also rejects this miss because it cannot supply an explicit result ABI.")
-end
-
-_integer_immediate(::Type{Val{V}}) where {V} = V isa Integer && !(V isa Bool)
-_integer_immediate(::Type) = false
-
-function _scalar_operand_accepts(kind::Symbol, ::Type{T}) where {T}
-    if kind === :f16
-        # A .b16 register is compatible with .f16 (§6.1); UInt16 is PTX.jl's
-        # established bit-size carrier.
-        return T === Float16 || T === UInt16
-    elseif kind === :bf16
-        # PTX §5.2.3 requires a bf16 value to live in a .b16 register; UInt16
-        # is PTX.jl's established bit-pattern carrier.
-        return T === UInt16
-    elseif kind === :f32
-        # A .b32 register is compatible with .f32 (§6.1).
-        return T === Float32 || T === UInt32
-    elseif kind === :u16 || kind === :s16
-        return T === UInt16 || T === Int16 || _integer_immediate(T)
-    elseif kind === :u32 || kind === :s32
-        # Signed and unsigned integer types of common size are mutually
-        # compatible (§6.1). The modifier still determines instruction
-        # semantics and the schema still determines Julia result signedness.
-        return T === UInt32 || T === Int32 || _integer_immediate(T)
-    elseif kind === :u64 || kind === :s64
-        return T === UInt64 || T === Int64 || _integer_immediate(T)
-    elseif kind === :b32
-        # PTX §6.1 makes a bit-size type compatible with every same-size
-        # scalar type.  Keep pointer values out of this value-only surface.
-        return T === UInt32 || T === Int32 || T === Float32 ||
-               _integer_immediate(T)
-    elseif kind === :b64
-        return T === UInt64 || T === Int64 || T === Float64 ||
-               _integer_immediate(T)
-    end
-    error("unknown audited scalar operand kind: ", kind)
-end
-
-function _scalar_operand_description(kind::Symbol)
-    kind === :f16  && return "Float16 or UInt16 bit carrier (.f16-compatible)"
-    kind === :bf16 && return "UInt16 (.b16 carrier for bf16)"
-    kind === :f32  && return "Float32 or UInt32 bit carrier (.f32-compatible)"
-    kind === :u16  && return "a 16-bit integer (.u16-compatible)"
-    kind === :s16  && return "a 16-bit integer (.s16-compatible)"
-    kind === :u32  && return "a 32-bit integer (.u32-compatible)"
-    kind === :s32  && return "a 32-bit integer (.s32-compatible)"
-    kind === :u64  && return "a 64-bit integer (.u64-compatible)"
-    kind === :s64  && return "a 64-bit integer (.s64-compatible)"
-    kind === :b32  && return "a 32-bit scalar (.b32-compatible)"
-    kind === :b64  && return "a 64-bit scalar (.b64-compatible)"
-    string(kind)
 end
 
 function validate_scalar_result_args(schema::ScalarResultSchema, argtypes)
@@ -347,10 +296,13 @@ function validate_scalar_result_args(schema::ScalarResultSchema, argtypes)
         "$(length(schema.operands)) source operands, got $(length(argtypes)); " *
         "see $(schema.section)"))
     for (i, (kind, T)) in enumerate(zip(schema.operands, argtypes))
-        _scalar_operand_accepts(kind, T) && continue
+        operand_accepts(kind, T) && continue
         throw(ArgumentError(
             "ptx\"$spelling\" operand $i must use " *
-            _scalar_operand_description(kind) * ", got $T; see $(schema.section)"))
+            operand_description(kind) * ", got $T; see $(schema.section)"))
     end
     nothing
 end
+
+validate_ledger_args(::ScalarLedger, s::ScalarResultSchema, argtypes) =
+    validate_scalar_result_args(s, argtypes)

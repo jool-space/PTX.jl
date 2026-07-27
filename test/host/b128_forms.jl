@@ -1,5 +1,4 @@
-using PTX: B128, Address, Operation, RawOperation, build_call, b128,
-           b128_form_schema
+using PTX: B128, Address, Operation, RawOperation, build_call, b128
 
 function _expected_b128_form_keys()
     keys = Set{Tuple{Symbol,Tuple}}()
@@ -183,7 +182,7 @@ const EXPECTED_B128_ACCEPTED = (
     @test b128(0x89abcdef, 0x01234567, 0x76543210, 0xfedcba98) ==
           (0x0123456789abcdef, 0xfedcba9876543210)
     for (op, mods, kind, result, operands) in EXPECTED_B128_ACCEPTED
-        schema = b128_form_schema(op, mods)
+        schema = PTX.schema(PTX.B128Ledger(), op, mods)
         @test schema !== nothing
         @test schema.kind === kind
         @test schema.result === result
@@ -211,7 +210,7 @@ const REJECTED_B128_FORMS = (
                op === :clusterlaunchcontrol ? (B128,) : (A,)
         ordinary = Operation{op,mods}()
         raw = RawOperation{op,mods}()
-        @test b128_form_schema(op, mods) === nothing
+        @test PTX.schema(PTX.B128Ledger(), op, mods) === nothing
         @test PTX.lowering(ordinary, args).tier === :forbidden
         @test PTX.lowering(raw, args).tier === :forbidden
         @test_throws ArgumentError build_call(op, mods, args)

@@ -1,4 +1,4 @@
-using PTX: Operation, RawOperation, build_call, immediate_form_contract
+using PTX: Operation, RawOperation, build_call
 
 const _IMMEDIATE_SECTIONS = (
     setmaxnreg =

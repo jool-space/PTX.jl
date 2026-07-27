@@ -162,41 +162,56 @@ end
 function _instruction_structured_result_schema(cg::CodeGenState,
                                                inst::Instruction)
     op = Symbol(inst.opcode)
-    requires_structured_result_schema(op) || return nothing
     mods = _structured_api_modifiers(inst)
-    schema = structured_result_schema(op, mods)
-    schema === nothing && throw(structured_result_schema_miss(op, mods))
+    claims(StructuredLedger(), op, mods) || return nothing
+    s = schema(StructuredLedger(), op, mods)
+    s === nothing && throw(miss(StructuredLedger(), op, mods))
     isempty(inst.operands) && throw(ArgumentError(
         "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) is missing " *
         "its destination"))
     destinations = _structured_destinations(inst.operands[1])
-    length(destinations) == length(schema.outputs) || throw(ArgumentError(
+    length(destinations) == length(s.outputs) || throw(ArgumentError(
         "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) requires " *
-        "$(length(schema.outputs)) destination(s), got $(length(destinations)); " *
-        "see $(schema.section)"))
-    length(inst.operands) == length(schema.operands) + 1 || throw(ArgumentError(
+        "$(length(s.outputs)) destination(s), got $(length(destinations)); " *
+        "see $(s.section)"))
+    length(inst.operands) == length(s.operands) + 1 || throw(ArgumentError(
         "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) requires " *
-        "$(length(schema.operands)) source operands, got " *
-        "$(max(length(inst.operands) - 1, 0)); see $(schema.section)"))
+        "$(length(s.operands)) source operands, got " *
+        "$(max(length(inst.operands) - 1, 0)); see $(s.section)"))
     sink_count = count(_is_sink_operand, destinations)
-    sink_count <= schema.max_sinks || throw(ArgumentError(
+    sink_count <= s.max_sinks || throw(ArgumentError(
         "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) may discard " *
-        "at most $(schema.max_sinks) destination(s) with `_`; see " *
-        schema.section))
-    for (i, (dest, kind)) in enumerate(zip(destinations, schema.outputs))
+        "at most $(s.max_sinks) destination(s) with `_`; see " *
+        s.section))
+    for (i, (dest, kind)) in enumerate(zip(destinations, s.outputs))
         if _is_sink_operand(dest)
-            schema.sinkable[i] || throw(ArgumentError(
+            s.sinkable[i] || throw(ArgumentError(
                 "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) " *
-                "destination $i may not use `_`; see $(schema.section)"))
+                "destination $i may not use `_`; see $(s.section)"))
             continue
         end
         _validate_structured_decl!(cg, dest, kind, "destination $i")
     end
     for (i, (source, kind)) in enumerate(zip(inst.operands[2:end],
-                                              schema.operands))
+                                              s.operands))
         _validate_structured_source!(cg, source, kind, i)
     end
-    (; schema, mods)
+    (; schema = s, mods)
+end
+
+# Structured-result schemas choose their reviewed API modifiers (e.g. the
+# synthetic :dual/:pred selectors for grouped destinations).
+function transpile_ledger!(::StructuredLedger, cg::CodeGenState,
+                           inst::Instruction)
+    checked = _instruction_structured_result_schema(cg, inst)
+    checked === nothing && return false
+    modifiers = Tuple("." * string(mod) for mod in checked.mods)
+    dst_expr, dst_names = _render_structured_dst(inst.operands[1], cg)
+    src_strs = [_render_structured_source(op, cg, kind)
+                for (op, kind) in zip(inst.operands[2:end],
+                                      checked.schema.operands)]
+    _emit_schema_call!(cg, inst, modifiers, dst_expr, dst_names, src_strs)
+    true
 end
 
 function _render_structured_dst(op::LabelOperand, cg::CodeGenState)

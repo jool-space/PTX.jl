@@ -324,7 +324,7 @@ function _schema_from_core(form::VectorResultCoreForm,
     VectorResultSchema(form, mods, operands, cache_policy, provenance)
 end
 
-function vector_result_schema(op::Symbol, mods::Tuple{Vararg{Symbol}})
+function schema(::VectorLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
     if op === :atom
         compat_core = get(_VECTOR_ATOM_COMPAT_SPELLINGS, mods, nothing)
         if compat_core !== nothing
@@ -385,16 +385,16 @@ function vector_result_schema(op::Symbol, mods::Tuple{Vararg{Symbol}})
     nothing
 end
 
-function requires_vector_result_schema(op::Symbol,
-                                       mods::Tuple{Vararg{Symbol}})
+function claims(::VectorLedger, op::Symbol,
+                mods::Tuple{Vararg{Symbol}})
     any(mod -> mod in _VECTOR_MARKERS, mods) || return false
     op in (:ld, :atom) && return true
     op === :multimem && :ld_reduce in mods && return true
     false
 end
 
-function vector_result_schema_miss(op::Symbol,
-                                   mods::Tuple{Vararg{Symbol}})
+function miss(::VectorLedger, op::Symbol,
+              mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))
     ArgumentError(
         "ptx\"$spelling\" is inside an audited vector-result grammar " *
@@ -404,18 +404,18 @@ function vector_result_schema_miss(op::Symbol,
         "supply an explicit vector result ABI.")
 end
 
-_vector_integer_immediate(::Type{Val{V}}) where {V} = V isa Integer && !(V isa Bool)
-_vector_integer_immediate(::Type) = false
-
 _vector_address_type(::Type{<:Core.LLVMPtr}) = true
 # `Address` is defined in address_operands.jl, included after this ledger;
 # resolve it in the body (call time), not the signature (definition time).
+# Deliberately NOT unified with the b128/mbarrier address predicates: this
+# one alone accepts Val integer immediates (an absolute address constant is
+# assemblable for these forms), so the accept-set difference is semantic.
 _vector_address_type(::Type{T}) where {T} =
-    T in (UInt32, Int32, UInt64, Int64) || _vector_integer_immediate(T) ||
+    T in (UInt32, Int32, UInt64, Int64) || is_integer_immediate(T) ||
     (T <: Address && is_ptx_address_integer_type(T.parameters[1]))
 
 _vector_cache_policy_type(::Type{T}) where {T} =
-    T in (UInt64, Int64) || _vector_integer_immediate(T)
+    T in (UInt64, Int64) || is_integer_immediate(T)
 
 function validate_vector_result_args(schema::VectorResultSchema, argtypes)
     spelling = string(schema.form.op, ".", join(schema.mods, "."))
@@ -443,6 +443,9 @@ function validate_vector_result_args(schema::VectorResultSchema, argtypes)
     end
     nothing
 end
+
+validate_ledger_args(::VectorLedger, s::VectorResultSchema, argtypes) =
+    validate_vector_result_args(s, argtypes)
 
 function vector_result_operand_roles(schema::VectorResultSchema, nargs::Int)
     # The ISA syntax marks both `.L2::cache_hint` and `cache_policy` optional,

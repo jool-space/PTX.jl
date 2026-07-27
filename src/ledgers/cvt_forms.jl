@@ -175,7 +175,8 @@ _cvt_modifier_spelling(mod::Symbol) = replace(String(mod), "__" => "::")
 _is_cvt_scaled_modifier(mod::Symbol) =
     _cvt_modifier_spelling(mod) == "scaled::n2::ue8m0"
 
-function ordinary_cvt_source_schema_miss(mods::Tuple{Vararg{Symbol}})
+# `op` is always :cvt for a claimed miss; the spelling is fixed.
+function miss(::CvtLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? "cvt" : "cvt." * join(mods, ".")
     ArgumentError(
         "PTX transpiler: ptx\"$spelling\" does not match the reviewed " *
@@ -184,17 +185,25 @@ function ordinary_cvt_source_schema_miss(mods::Tuple{Vararg{Symbol}})
         "scalar-result schema.")
 end
 
-function ordinary_cvt_source_schema(mods::Tuple{Vararg{Symbol}})
+claims(::CvtLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
+    op === :cvt && !(:pack in mods)
+
+# Unlike the CALL_LEDGERS schemas, this lookup throws its own miss for a
+# claimed-but-invalid spelling: every non-pack cvt spelling is claimed, so a
+# key miss is always a hard source-ABI error, never a fall-through (see the
+# CvtLedger note in protocol.jl).
+function schema(::CvtLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
+    op === :cvt || return nothing
     :pack in mods && return nothing
-    length(mods) >= 2 || throw(ordinary_cvt_source_schema_miss(mods))
+    length(mods) >= 2 || throw(miss(CvtLedger(), op, mods))
     destination, source = mods[end - 1], mods[end]
     prefix = mods[1:end - 2]
     stochastic_count = count(==(:rs), prefix)
     scaled_count = count(_is_cvt_scaled_modifier, prefix)
     stochastic_count <= 1 && scaled_count <= 1 ||
-        throw(ordinary_cvt_source_schema_miss(mods))
+        throw(miss(CvtLedger(), op, mods))
     key = (destination, source, stochastic_count == 1, scaled_count == 1)
-    schema = get(_ORDINARY_CVT_SOURCE_SCHEMA_BY_KEY, key, nothing)
-    schema === nothing && throw(ordinary_cvt_source_schema_miss(mods))
-    schema
+    found = get(_ORDINARY_CVT_SOURCE_SCHEMA_BY_KEY, key, nothing)
+    found === nothing && throw(miss(CvtLedger(), op, mods))
+    found
 end

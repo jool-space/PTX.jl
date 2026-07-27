@@ -301,12 +301,14 @@ const _MBARRIER_SCHEMA_BY_FORM =
 length(_MBARRIER_SCHEMA_BY_FORM) == length(MBARRIER_FORM_SCHEMAS) ||
     error("duplicate keys in MBARRIER_FORM_SCHEMAS")
 
-mbarrier_form_schema(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
+schema(::MBarrierLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     op === :mbarrier ? get(_MBARRIER_SCHEMA_BY_FORM, mods, nothing) : nothing
 
-requires_mbarrier_schema(op::Symbol) = op === :mbarrier
+claims(::MBarrierLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
+    op === :mbarrier
 
-function mbarrier_schema_miss(mods::Tuple{Vararg{Symbol}})
+# `op` is always :mbarrier for a claimed miss; the spelling is fixed.
+function miss(::MBarrierLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? "mbarrier" : "mbarrier." * join(mods, ".")
     ArgumentError(
         "ptx\"$spelling\" does not match the reviewed PTX 9.3 mbarrier " *
@@ -329,6 +331,9 @@ _mbarrier_rettype(schema::MBarrierFormSchema) =
 function _mbarrier_operand_accepts(schema::MBarrierFormSchema,
                                    kind::Symbol, ::Type{T}) where {T}
     if kind === :address
+        # Deliberately NOT unified with the vector/b128 address predicates:
+        # mbarrier constrains the LLVMPtr address space per schema and rejects
+        # Val immediates, so the accept-set difference is semantic.
         if T <: Core.LLVMPtr
             as = T.parameters[2]
             return schema.space === :generic ? as == 0 : as == 3
@@ -343,14 +348,16 @@ function _mbarrier_operand_accepts(schema::MBarrierFormSchema,
         # separately translated symbol/alias supplies LLVMPtr evidence.
         return T === UInt32 || T === Int32 || T === UInt64 || T === Int64
     elseif kind === :u32
-        return T === UInt32 || T === Int32 || _integer_immediate(T)
+        return T === UInt32 || T === Int32 || is_integer_immediate(T)
     elseif kind === :u64
-        return T === UInt64 || T === Int64 || _integer_immediate(T)
+        return T === UInt64 || T === Int64 || is_integer_immediate(T)
     end
     error("unknown mbarrier operand kind: ", kind)
 end
 
-function _mbarrier_operand_description(schema::MBarrierFormSchema, kind::Symbol)
+# The schema-carrying method: mbarrier's address description depends on the
+# form's state space.
+function operand_description(schema::MBarrierFormSchema, kind::Symbol)
     kind === :address && return schema.space === :generic ?
         "an address-space-0 LLVMPtr, PTX.Address, or a 32/64-bit integer address carrier" :
         "an address-space-3 LLVMPtr, PTX.Address, or a 32/64-bit integer address carrier"
@@ -371,8 +378,14 @@ function validate_mbarrier_args(schema::MBarrierFormSchema, argtypes)
         _mbarrier_operand_accepts(schema, kind, T) && continue
         throw(ArgumentError(
             "ptx\"mbarrier.$(join(schema.mods, "."))\" operand $i must use " *
-            _mbarrier_operand_description(schema, kind) *
+            operand_description(schema, kind) *
             ", got $T; see $(schema.section)"))
     end
     selected
+end
+
+function validate_ledger_args(::MBarrierLedger, s::MBarrierFormSchema,
+                              argtypes)
+    validate_mbarrier_args(s, argtypes)
+    nothing
 end

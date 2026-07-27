@@ -96,6 +96,11 @@ it on the next backend bump — see `gen/README.md`.
 The ledgers own every chain form whose result/operand ABI the generic
 dtype rule cannot recover:
 
+Every ledger implements the shared protocol in
+`src/ledgers/protocol.jl` (`claims`/`schema`/`miss`/
+`validate_ledger_args` on a singleton handle), and every consumer walks
+the single `CALL_LEDGERS` consultation order defined there.
+
 | Ledger | Owns |
 |---|---|
 | `src/ledgers/scalar_results.jl` | scalar results not named by the tail |
@@ -114,14 +119,38 @@ deliberately independent reconstructions of the grammar — update the
 oracle's generator to *derive* the new expectation; never make it read
 the source ledger.
 
-**Adding a new ledger** is a structural change. The consultation sequence
-currently lives in four places that must all agree — `build_call` in
-`src/dsl/render.jl` and `lowering` in `src/dsl/reflection.jl`,
-`infer_rettype`/`_result_abi_error` in
-`src/ledgers/types.jl`, and the per-ledger adapters in
-`src/codegen/adapters/` — plus the include order in `src/PTX.jl`.
-Budget for all of them, and add the mirrored `lowering` guard so
-reflection and reality cannot drift.
+**Adding a new ledger** is a structural change, but the consultation
+sequence lives in exactly ONE place: `CALL_LEDGERS` in
+`src/ledgers/protocol.jl`. A new ledger is:
+
+1. a singleton handle `struct MyLedger <: FormLedger end` in
+   `protocol.jl`, added to `CALL_LEDGERS` at its reviewed position in
+   the consultation order (this single edit orders it for `build_call`,
+   `lowering`, result-ABI inference, and the transpiler simultaneously);
+2. the protocol methods in the new `src/ledgers/<my_ledger>.jl` file —
+   `claims(::MyLedger, op, mods)`, `schema(::MyLedger, op, mods)`,
+   `miss(::MyLedger, op, mods)`, and
+   `validate_ledger_args(::MyLedger, s, argtypes)` (plus
+   `prevalidates_call(::MyLedger) = true` if arguments must be checked
+   at consult time rather than by a builder);
+3. the four consumer dispatch methods:
+   `build_ledger_call(::MyLedger, s, argtypes, contract)` in
+   `src/dsl/render.jl` (omit it if the form lowers through `build_call`'s
+   generic tail), `ledger_rettype`/`ledger_result_abi_error` methods in
+   `src/ledgers/types.jl` (or the transparent `missing` stubs if the
+   ledger never feeds generic scalar inference), and
+   `transpile_ledger!(::MyLedger, cg, inst)` with its
+   `_instruction_*`-style adapter in `src/codegen/adapters/`;
+4. the include order in `src/PTX.jl` (ledger files load after
+   `protocol.jl`).
+
+`lowering` needs no per-ledger work: it walks `CALL_LEDGERS` through the
+shared `lowering_entry`, so reflection and reality cannot drift. One
+deliberate exception exists: the transpiler's module *preflight*
+(`_validate_exact_schema!` in `src/codegen/contract.jl`) retains its own
+historical adapter order because its rejection messages are pinned;
+emission (`emit_instruction!`) walks `CALL_LEDGERS` and is shielded by
+that preflight.
 
 ## Recipe D: typed-wrapper-only families
 

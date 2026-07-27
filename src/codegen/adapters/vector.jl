@@ -1,33 +1,33 @@
 function _instruction_vector_result_schema(cg::CodeGenState, inst::Instruction)
     op = Symbol(inst.opcode)
     mods = _schema_modifiers(inst.modifiers)
-    schema = vector_result_schema(op, mods)
-    schema === nothing && requires_vector_result_schema(op, mods) &&
-        throw(vector_result_schema_miss(op, mods))
-    schema === nothing && return nothing
+    s = schema(VectorLedger(), op, mods)
+    s === nothing && claims(VectorLedger(), op, mods) &&
+        throw(miss(VectorLedger(), op, mods))
+    s === nothing && return nothing
 
     source_count = max(length(inst.operands) - 1, 0)
-    roles = vector_result_operand_roles(schema, source_count)
+    roles = vector_result_operand_roles(s, source_count)
     roles === nothing && throw(ArgumentError(
         "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) is an audited " *
         "vector-result form with invalid source arity $source_count; " *
-        "see $(schema.form.section)"))
+        "see $(s.form.section)"))
     destination = inst.operands[1]
     # PTX's atom bit bucket replaces the complete vector destination with one
     # `_`; it is not a per-lane vector sink. Preserve the operation by emitting
     # the ordinary tuple-returning chain call as an unused Julia statement.
-    discard_result = schema.form.op === :atom && _is_sink_operand(destination)
-    mask = ntuple(_ -> true, schema.form.lanes)
+    discard_result = s.form.op === :atom && _is_sink_operand(destination)
+    mask = ntuple(_ -> true, s.form.lanes)
     if !discard_result
         destination isa VectorOperand || throw(ArgumentError(
             "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) requires a " *
-            "brace-enclosed v$(schema.form.lanes) destination" *
-            (schema.form.op === :atom ? " or the complete bit bucket `_`" : "")))
-        length(destination.elements) == schema.form.lanes || throw(ArgumentError(
+            "brace-enclosed v$(s.form.lanes) destination" *
+            (s.form.op === :atom ? " or the complete bit bucket `_`" : "")))
+        length(destination.elements) == s.form.lanes || throw(ArgumentError(
             "PTX transpiler: $(inst.opcode)$(join(inst.modifiers)) destination " *
-            "has $(length(destination.elements)) lanes, expected $(schema.form.lanes)"))
+            "has $(length(destination.elements)) lanes, expected $(s.form.lanes)"))
         mask = Tuple(!_is_sink_operand(element) for element in destination.elements)
-        validate_vector_result_mask(schema, mask)
+        validate_vector_result_mask(s, mask)
         for (i, element) in enumerate(destination.elements)
             _is_sink_operand(element) && continue
             element isa RegisterOperand || element isa LabelOperand ||
@@ -45,9 +45,9 @@ function _instruction_vector_result_schema(cg::CodeGenState, inst::Instruction)
         elseif kind === :vector
             operand isa VectorOperand || throw(ArgumentError(
                 "PTX transpiler: vector atom source $i must be brace-enclosed"))
-            length(operand.elements) == schema.form.lanes || throw(ArgumentError(
+            length(operand.elements) == s.form.lanes || throw(ArgumentError(
                 "PTX transpiler: vector atom source has $(length(operand.elements)) " *
-                "lanes, expected $(schema.form.lanes)"))
+                "lanes, expected $(s.form.lanes)"))
             any(_is_sink_operand, operand.elements) && throw(ArgumentError(
                 "PTX transpiler: `_` is not legal in a vector atom input"))
         elseif kind === :cache_policy
@@ -56,9 +56,21 @@ function _instruction_vector_result_schema(cg::CodeGenState, inst::Instruction)
                     "PTX transpiler: cache policy must be a 64-bit register or immediate"))
         end
     end
-    _validate_vector_result_operands!(cg, schema, destination, sources, roles,
+    _validate_vector_result_operands!(cg, s, destination, sources, roles,
                                       discard_result)
-    (; schema, destination, sources, roles, mask, discard_result)
+    (; schema = s, destination, sources, roles, mask, discard_result)
+end
+
+# Close fixed-result grammar islands before any instruction can be erased
+# by pointer-alias absorption. The schema also provides a distinct type
+# hint for every source operand; one terminal hint is wrong for mixed
+# precision, mixed-sign dot products, widened arithmetic, and cvt.pack.
+function transpile_ledger!(::VectorLedger, cg::CodeGenState,
+                           inst::Instruction)
+    checked = _instruction_vector_result_schema(cg, inst)
+    checked === nothing && return false
+    _emit_vector_result!(cg, inst, checked)
+    true
 end
 
 # The vector-result API exposes one exact Julia carrier per PTX lane. PTX `ld`

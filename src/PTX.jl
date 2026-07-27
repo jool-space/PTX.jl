@@ -10,6 +10,7 @@ include("parser/Parser.jl")
 
 include("ledgers/implicit_state.jl")
 
+include("ledgers/protocol.jl")
 include("ledgers/structured_results.jl")
 include("ledgers/immediate_forms.jl")
 include("ledgers/scalar_results.jl")

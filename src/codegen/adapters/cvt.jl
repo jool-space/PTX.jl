@@ -83,20 +83,20 @@ function _instruction_cvt_source_schema(cg::CodeGenState, inst::Instruction,
     scalar_schema === nothing || return nothing
 
     mods = _schema_modifiers(inst.modifiers)
-    schema = ordinary_cvt_source_schema(mods)
-    schema === nothing && throw(ordinary_cvt_source_schema_miss(mods))
+    s = schema(CvtLedger(), :cvt, mods)
+    s === nothing && throw(miss(CvtLedger(), :cvt, mods))
     sources = inst.operands[2:end]
-    length(sources) == length(schema.operands) || throw(ArgumentError(
+    length(sources) == length(s.operands) || throw(ArgumentError(
         "PTX transpiler: cvt.$(join(mods, ".")) has " *
-        "$(length(schema.operands)) reviewed source operand(s), got " *
-        "$(length(sources)); see $(schema.section)"))
+        "$(length(s.operands)) reviewed source operand(s), got " *
+        "$(length(sources)); see $(s.section)"))
 
-    if schema.vector_source
+    if s.vector_source
         vector = first(sources)
         vector isa VectorOperand && length(vector.elements) == 4 ||
             throw(ArgumentError(
-                "PTX transpiler: stochastic cvt to $(schema.destination) " *
-                "requires one four-register source vector; see $(schema.section)"))
+                "PTX transpiler: stochastic cvt to $(s.destination) " *
+                "requires one four-register source vector; see $(s.section)"))
         for element in vector.elements
             decl = (element isa RegisterOperand || element isa LabelOperand) ?
                    _declared_register(cg, element) : nothing
@@ -104,20 +104,35 @@ function _instruction_cvt_source_schema(cg::CodeGenState, inst::Instruction,
                 throw(ArgumentError(
                     "PTX transpiler: stochastic packed-x4 cvt requires four " *
                     "declared .f32/.b32 source registers; see " *
-                    "$(schema.section)"))
+                    "$(s.section)"))
         end
     end
 
     # PTX ISA 9.3 §9.7.9.22 calls rbits a .b32 register operand. Constants
     # have different use-site conversion semantics and are not legal here.
-    if schema.stochastic
+    if s.stochastic
         rbits = last(sources)
         decl = (rbits isa RegisterOperand || rbits isa LabelOperand) ?
                _declared_register(cg, rbits) : nothing
         decl !== nothing && decl.type in _REGISTER_TYPES_32 ||
             throw(ArgumentError(
                 "PTX transpiler: stochastic cvt rbits must be a declared " *
-                ".b32/.u32/.s32 register operand; see $(schema.section)"))
+                ".b32/.u32/.s32 register operand; see $(s.section)"))
     end
-    schema
+    s
+end
+
+# Ordinary cvt sits outside CALL_LEDGERS (see protocol.jl): emit_instruction!
+# consults it explicitly after the shared walk, ret/bra, and alias absorption.
+# cvt.pack never reaches this method — the scalar ledger claims and handles it
+# inside the shared walk.
+function transpile_ledger!(::CvtLedger, cg::CodeGenState, inst::Instruction)
+    s = _instruction_cvt_source_schema(cg, inst, nothing)
+    s === nothing && return false
+    dst_expr, dst_names = render_dst(inst.operands[1], cg)
+    src_strs = [_render_cvt_source(op, cg, kind, s, index)
+                for (index, (op, kind)) in
+                    enumerate(zip(inst.operands[2:end], s.operands))]
+    _emit_schema_call!(cg, inst, inst.modifiers, dst_expr, dst_names, src_strs)
+    true
 end

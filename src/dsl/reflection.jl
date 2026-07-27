@@ -32,6 +32,23 @@ function _walk_intrinsics!(names::Vector{String}, @nospecialize(x))
     return nothing
 end
 
+# One lowering step of the shared cascade. Returns `false` when the chain
+# path must classify the spelling `:forbidden`: a claimed-but-unreviewed miss,
+# or a resolved schema whose argument validation raises ArgumentError. Policy
+# failures only — rendering/constraint bugs (non-ArgumentError) stay visible.
+function lowering_entry(l::FormLedger, op::Symbol,
+                        mods::Tuple{Vararg{Symbol}}, @nospecialize(argts))
+    s = schema(l, op, mods)
+    s === nothing && return !claims(l, op, mods)
+    try
+        validate_ledger_args(l, s, argts)
+    catch err
+        err isa ArgumentError || rethrow()
+        return false
+    end
+    true
+end
+
 """
     lowering(op::Operation, argtypes) -> NamedTuple
 
@@ -67,118 +84,22 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
     m = which(o, Tuple{argts...})
     if m === _CHAIN_METHOD || m === _RAW_CHAIN_METHOD
         raw = m === _RAW_CHAIN_METHOD
-        has_invalid_address_marker(argts) &&
-            return (; tier = :forbidden, method = m, rettype = nothing,
-                      intrinsics = String[], asm = nothing)
-        b128 = b128_form_schema(op, mods)
+        forbidden = (; tier = :forbidden, method = m, rettype = nothing,
+                       intrinsics = String[], asm = nothing)
+        has_invalid_address_marker(argts) && return forbidden
+        b128 = schema(B128Ledger(), op, mods)
         address_rule = has_integer_address(argts) &&
-                       vector_result_schema(op, mods) === nothing &&
+                       schema(VectorLedger(), op, mods) === nothing &&
                        b128 === nothing ?
                        structured_address_fallback_rule(op, mods) : nothing
-        address_rule === nothing ||
-            return (; tier = :forbidden, method = m, rettype = nothing,
-                      intrinsics = String[], asm = nothing)
-        uses_implicit_cc(op, mods) &&
-            return (; tier = :forbidden, method = m, rettype = nothing,
-                      intrinsics = String[], asm = nothing)
-        immediate = immediate_form_contract(op, mods)
-        immediate === nothing && requires_immediate_form_contract(op) &&
-            return (; tier = :forbidden, method = m, rettype = nothing,
-                      intrinsics = String[], asm = nothing)
-        if immediate !== nothing && !immediate.delegated
-            try
-                validate_immediate_form_args(immediate, argts)
-            catch err
-                err isa ArgumentError || rethrow()
-                return (; tier = :forbidden, method = m, rettype = nothing,
-                          intrinsics = String[], asm = nothing)
-            end
+        address_rule === nothing || return forbidden
+        uses_implicit_cc(op, mods) && return forbidden
+        # Same order and same validators as build_call's cascade; every miss
+        # or argument-policy failure is uniformly :forbidden here.
+        for l in CALL_LEDGERS
+            lowering_entry(l, op, mods, argts) || return forbidden
         end
-        if requires_mbarrier_schema(op)
-            mbarrier = mbarrier_form_schema(op, mods)
-            mbarrier === nothing &&
-                return (; tier = :forbidden, method = m, rettype = nothing,
-                          intrinsics = String[], asm = nothing)
-            try
-                validate_mbarrier_args(mbarrier, argts)
-            catch err
-                err isa ArgumentError || rethrow()
-                return (; tier = :forbidden, method = m, rettype = nothing,
-                          intrinsics = String[], asm = nothing)
-            end
-        end
-        structured = structured_result_schema(op, mods)
-        structured === nothing && requires_structured_result_schema(op) &&
-            return (; tier = :forbidden, method = m, rettype = nothing,
-                      intrinsics = String[], asm = nothing)
-        if structured !== nothing
-            try
-                validate_structured_result_args(structured, argts)
-            catch err
-                err isa ArgumentError || rethrow()
-                return (; tier = :forbidden, method = m, rettype = nothing,
-                          intrinsics = String[], asm = nothing)
-            end
-        end
-        vector_result_schema(op, mods) === nothing &&
-            requires_vector_result_schema(op, mods) &&
-            return (; tier = :forbidden, method = m, rettype = nothing,
-                      intrinsics = String[], asm = nothing)
-        vector = vector_result_schema(op, mods)
-        if vector !== nothing
-            try
-                validate_vector_result_args(vector, argts)
-            catch err
-                err isa ArgumentError || rethrow()
-                return (; tier = :forbidden, method = m, rettype = nothing,
-                          intrinsics = String[], asm = nothing)
-            end
-        end
-        b128 === nothing && requires_b128_form_schema(op, mods) &&
-            return (; tier = :forbidden, method = m, rettype = nothing,
-                      intrinsics = String[], asm = nothing)
-        if b128 !== nothing
-            try
-                validate_b128_form_args(b128, argts)
-            catch err
-                err isa ArgumentError || rethrow()
-                return (; tier = :forbidden, method = m, rettype = nothing,
-                          intrinsics = String[], asm = nothing)
-            end
-        end
-        !raw && requires_typed_wrapper(op, mods) &&
-            return (; tier = :forbidden, method = m, rettype = nothing,
-                      intrinsics = String[], asm = nothing)
-        scalar_result_schema(op, mods) === nothing &&
-            requires_scalar_result_schema(op, mods) &&
-            return (; tier = :forbidden, method = m, rettype = nothing,
-                      intrinsics = String[], asm = nothing)
-        clc_schema = op === :clusterlaunchcontrol ?
-                     clc_try_cancel_schema(mods) : nothing
-        if op === :clusterlaunchcontrol
-            clc_schema === nothing && requires_clc_try_cancel_schema(op, mods) &&
-                return (; tier = :forbidden, method = m, rettype = nothing,
-                          intrinsics = String[], asm = nothing)
-            if clc_schema !== nothing
-                try
-                    validate_clc_try_cancel_args(clc_schema, argts)
-                catch err
-                    err isa ArgumentError || rethrow()
-                    return (; tier = :forbidden, method = m, rettype = nothing,
-                              intrinsics = String[], asm = nothing)
-                end
-            end
-        end
-        schema = scalar_result_schema(op, mods)
-        if schema !== nothing
-            try
-                validate_scalar_result_args(schema, argts)
-            catch err
-                err isa ArgumentError || rethrow()
-                return (; tier = :forbidden, method = m, rettype = nothing,
-                          intrinsics = String[], asm = nothing)
-            end
-        end
+        !raw && requires_typed_wrapper(op, mods) && return forbidden
         contract = raw ? RAW_CONTRACT : form_contract(op, mods)
         contract === nothing &&
             return (; tier = :unregistered, method = m, rettype = nothing,

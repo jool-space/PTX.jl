@@ -348,18 +348,18 @@ const B128_FORM_SCHEMAS = let schemas = Dict{Tuple{Symbol,Tuple},B128FormSchema}
     schemas
 end
 
-b128_form_schema(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
+schema(::B128Ledger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     get(B128_FORM_SCHEMAS, (op, mods), nothing)
 
-function requires_b128_form_schema(op::Symbol,
-                                   mods::Tuple{Vararg{Symbol}})
+function claims(::B128Ledger, op::Symbol,
+                mods::Tuple{Vararg{Symbol}})
     :b128 in mods || return false
     op in (:mov, :ld, :ldu, :st, :atom) && return true
     op === :clusterlaunchcontrol && :query_cancel in mods && return true
     false
 end
 
-function b128_form_schema_miss(op::Symbol, mods::Tuple{Vararg{Symbol}})
+function miss(::B128Ledger, op::Symbol, mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))
     ArgumentError(
         "ptx\"$spelling\" is inside the audited scalar-b128 grammar island " *
@@ -369,6 +369,9 @@ function b128_form_schema_miss(op::Symbol, mods::Tuple{Vararg{Symbol}})
         "an explicit 128-bit register ABI either.")
 end
 
+# Deliberately NOT unified with the vector/mbarrier address predicates: b128
+# forms reject Val immediates and any-space LLVMPtr is accepted here, so the
+# accept-set difference is semantic.
 _b128_address_type(::Type{T}) where {T} =
     T <: Core.LLVMPtr || T in (UInt32, Int32, UInt64, Int64) ||
     (T <: Address && is_ptx_address_integer_type(T.parameters[1]))
@@ -393,3 +396,6 @@ function validate_b128_form_args(schema::B128FormSchema, argtypes)
     end
     nothing
 end
+
+validate_ledger_args(::B128Ledger, s::B128FormSchema, argtypes) =
+    validate_b128_form_args(s, argtypes)
