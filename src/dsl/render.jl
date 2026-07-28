@@ -98,10 +98,11 @@ function build_ledger_call(::StructuredLedger, schema::StructuredResultSchema,
 
     head = build_head(schema.op, schema.ptxmods)
     asm = head * " " * join([output_operand; operand_strs], ", ") * ";"
-    nonpure = !contract.pure || has_special_reg(argtypes)
+    observable = contract.effects !== :pure || has_special_reg(argtypes)
+    clobbers = contract.effects === :clobbers || has_special_reg(argtypes)
     cparts = [output_letters; input_letters]
-    nonpure && push!(cparts, "~{memory}")
-    return (; asm, constraints = join(cparts, ","), side_effects = nonpure,
+    clobbers && push!(cparts, "~{memory}")
+    return (; asm, constraints = join(cparts, ","), side_effects = observable,
               convergent = contract.convergent, rettype,
               passthrough_argtypes = Tuple(passthrough),
               passthrough_indices = Tuple(passthrough_ix),
@@ -313,10 +314,11 @@ function build_ledger_call(::B128Ledger, schema::B128FormSchema,
     end
     asm = isempty(declarations) ? instruction :
           "{ " * join([declarations; setup; instruction; teardown], " ") * " }"
-    nonpure = !contract.pure || has_special_reg(argtypes)
+    observable = contract.effects !== :pure || has_special_reg(argtypes)
+    clobbers = contract.effects === :clobbers || has_special_reg(argtypes)
     constraints = [output_letters; input_letters]
-    nonpure && push!(constraints, "~{memory}")
-    (; asm, constraints = join(constraints, ","), side_effects = nonpure,
+    clobbers && push!(constraints, "~{memory}")
+    (; asm, constraints = join(constraints, ","), side_effects = observable,
        convergent = contract.convergent, rettype = schema.result,
        passthrough_argtypes = Tuple(passthrough),
        passthrough_indices = Tuple(passthrough_ix),
@@ -423,7 +425,10 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     # tier, whose generic contract otherwise assumes a scalar result.
     rettype = island isa ImmediateLedger && !s.returns ? Nothing :
               selected_contract.returns ? infer_rettype(op, mods) : Nothing
-    nonpure = !selected_contract.pure || has_special_reg(argtypes)
+    observable = selected_contract.effects !== :pure ||
+                 has_special_reg(argtypes)
+    clobbers = selected_contract.effects === :clobbers ||
+               has_special_reg(argtypes)
     bracket = selected_contract.brackets
     head = build_head(op, mods)
 
@@ -451,10 +456,10 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     cparts = String[]
     rettype === Nothing || push!(cparts, "=" * constraint_letter(rettype))
     append!(cparts, input_letters)
-    nonpure && push!(cparts, "~{memory}")
+    clobbers && push!(cparts, "~{memory}")
     constraints = join(cparts, ",")
 
-    return (; asm, constraints, side_effects = nonpure,
+    return (; asm, constraints, side_effects = observable,
               convergent = selected_contract.convergent, rettype,
               passthrough_argtypes = Tuple(passthrough),
               passthrough_indices  = Tuple(passthrough_ix),

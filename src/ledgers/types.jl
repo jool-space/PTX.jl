@@ -122,7 +122,7 @@ function _result_abi_error(op::Symbol, mods::Tuple{Vararg{Symbol}})
     c !== nothing && !c.returns && return nothing
     op === :cvt && return ledger_result_abi_error(CvtLedger(), op, mods)
     rettype = isempty(mods) ? Nothing : get(DTYPE_RETTYPE, last(mods), Nothing)
-    if rettype === Nothing && c !== nothing && c.pure && c.returns
+    if rettype === Nothing && c !== nothing && c.effects === :pure && c.returns
         spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))
         return ArgumentError(
             "ptx\"$spelling\" is in the reviewed pure-form registry but " *

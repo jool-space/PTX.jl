@@ -279,9 +279,33 @@ end
     @test PTX.form_contract(:tcgen05,
         (:dealloc, Symbol("cta_group::1"))).returns === true
     @test PTX.form_contract(:add, (:f32,)).returns === true
-    @test PTX.form_contract(:add, (:f32,)).pure === true
+    @test PTX.form_contract(:add, (:f32,)).effects === :pure
     # Unregistered opcode → nothing (the chain default errors on it).
     @test PTX.form_contract(:frobnicate, ()) === nothing
+
+    # Three-state effects vocabulary: closed set, hand-pinned reviewed
+    # values (independent of the source table's shorthand names).
+    @test_throws ErrorException PTX.FormContract(effects = :sometimes)
+    @test PTX.form_contract(:membar, (:gl,)).effects === :clobbers
+    @test PTX.form_contract(:mapa,
+        (Symbol("shared::cluster"), :u32)).effects === :observable
+    @test PTX.form_contract(:getctarank,
+        (Symbol("shared::cluster"), :u32)).effects === :clobbers
+    # mma: register-only compute, warp-collective — the reviewed
+    # convergent + :pure combination the old two-state contract forbade.
+    let c = PTX.form_contract(:mma, (:sync, :aligned))
+        @test c.effects === :pure && c.convergent
+    end
+    # tcgen05: single-thread-issue mma/fence are non-convergent overrides;
+    # the family default and every other prefix stay convergent.
+    @test !PTX.form_contract(:tcgen05, (:mma, Symbol("cta_group::1"))).convergent
+    @test !PTX.form_contract(:tcgen05,
+        (Symbol("fence::before_thread_sync"),)).convergent
+    @test !PTX.form_contract(:tcgen05,
+        (Symbol("fence::after_thread_sync"),)).convergent
+    @test PTX.form_contract(:tcgen05, (:alloc,)).convergent
+    @test PTX.form_contract(:tcgen05,
+        (:ld, :sync, :aligned, Symbol("16x64b"), :x2, :b32)).convergent
 end
 
 @testset "blessing boundary: unregistered chains error, raw tier opts in" begin
