@@ -1,8 +1,12 @@
 # TEST_TARGET: requires=gpu evidence=runtime runtime=cc==12
 #
-# Packed 4x8 arithmetic is family-specific at sm_120f. A separate target file
-# prevents CC 10.x devices from compiling these forms while GB10 (CC 12.1)
+# Packed 4x8 arithmetic is family-specific: {sm_107f, sm_120f} families as
+# of PTX ISA 9.4 (sm_120f only before that). A separate target file prevents
+# CC 10.0/10.3 devices from compiling these forms while GB10 (CC 12.1)
 # validates lane arithmetic, saturation, relu, and packed UInt32 carriers.
+# The cc==12 banner stays: the manifest grammar cannot express ">=10.7
+# within the 10.x family", and no CC 10.7 hardware exists to run it anyway;
+# widen the predicate when Rubin hardware enters the evidence ledger.
 
 function _packed_scalar_results_runtime!(out)
     @inbounds begin

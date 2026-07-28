@@ -111,28 +111,28 @@ function _expected_scalar_result_forms()
     for packed_type in (:u16x2, :s16x2)
         add!(:add, (packed_type,), UInt32, (:b32, :b32), v"8.0", v"9.0")
         add!(:add, (:sat, packed_type), UInt32, (:b32, :b32),
-             v"9.2", v"12.0"; feature_set = :family)
+             v"9.2", v"10.7"; feature_set = :family)
     end
     for packed_type in (:u8x4, :s8x4), sat in (false, true)
         mods = sat ? (:sat, packed_type) : (packed_type,)
-        add!(:add, mods, UInt32, (:b32, :b32), v"9.2", v"12.0";
+        add!(:add, mods, UInt32, (:b32, :b32), v"9.2", v"10.7";
              feature_set = :family)
-        add!(:sub, mods, UInt32, (:b32, :b32), v"9.2", v"12.0";
+        add!(:sub, mods, UInt32, (:b32, :b32), v"9.2", v"10.7";
              feature_set = :family)
     end
-    add!(:add, (:s8x4, :sat), UInt32, (:b32, :b32), v"9.2", v"12.0";
+    add!(:add, (:s8x4, :sat), UInt32, (:b32, :b32), v"9.2", v"10.7";
          feature_set = :family, provenance = :ptxas_compat)
-    add!(:neg, (:s8x4,), UInt32, (:b32,), v"9.2", v"12.0";
+    add!(:neg, (:s8x4,), UInt32, (:b32,), v"9.2", v"10.7";
          feature_set = :family)
     for op in (:min, :max)
         add!(op, (:u16x2,), UInt32, (:b32, :b32), v"8.0", v"9.0")
         for mods in ((:s16x2,), (:relu, :s16x2))
             add!(op, mods, UInt32, (:b32, :b32), v"8.0", v"9.0")
         end
-        add!(op, (:u8x4,), UInt32, (:b32, :b32), v"9.2", v"12.0";
+        add!(op, (:u8x4,), UInt32, (:b32, :b32), v"9.2", v"10.7";
              feature_set = :family)
         for mods in ((:s8x4,), (:relu, :s8x4))
-            add!(op, mods, UInt32, (:b32, :b32), v"9.2", v"12.0";
+            add!(op, mods, UInt32, (:b32, :b32), v"9.2", v"10.7";
                  feature_set = :family)
         end
         add!(op, (:relu, :s32), Int32, (:s32, :s32),

@@ -77,8 +77,13 @@ const _PRMT_SECTION =
     "ptx/9-instruction-set/9.7.10.7-data-movement-and-conversion-instructions-prmt.md"
 
 # Packed integer arithmetic uses a 32-bit carrier for every 2x16/4x8 result
-# and source.  The sm_120f families require the Blackwell family feature set;
-# recording only a numeric floor would incorrectly imply baseline sm_120.
+# and source.  The 4x8 (and .sat 2x16) forms are family features; PTX ISA 9.4
+# widened their gate from the sm_120f family alone to {sm_107f or higher in
+# the same family, sm_120f or higher in the same family}.  min_sm records the
+# lowest admitting family floor (10.7); note a single floor cannot express
+# that the sm_110f family is NOT admitted — the spec section is authoritative
+# for the exact set.  Recording a numeric floor with :baseline would be worse:
+# it would incorrectly imply plain sm_120/sm_107 support.
 const _PACKED_ADD_SECTION =
     "ptx/9-instruction-set/9.7.1.1-integer-arithmetic-instructions-add.md"
 const _PACKED_SUB_SECTION =
@@ -178,29 +183,29 @@ const SCALAR_RESULT_SCHEMAS = let schemas = ScalarResultSchema[]
     end
     for packed_type in (:u16x2, :s16x2)
         _scalar_result_schema!(schemas, :add, (:sat, packed_type), UInt32,
-                               (:b32, :b32), v"9.2", v"12.0", :family,
+                               (:b32, :b32), v"9.2", v"10.7", :family,
                                _PACKED_ADD_SECTION)
     end
     for packed_type in (:u8x4, :s8x4), sat in (false, true)
         mods = sat ? (:sat, packed_type) : (packed_type,)
         _scalar_result_schema!(schemas, :add, mods, UInt32, (:b32, :b32),
-                               v"9.2", v"12.0", :family,
+                               v"9.2", v"10.7", :family,
                                _PACKED_ADD_SECTION)
     end
     for packed_type in (:u8x4, :s8x4), sat in (false, true)
         mods = sat ? (:sat, packed_type) : (packed_type,)
         _scalar_result_schema!(schemas, :sub, mods, UInt32, (:b32, :b32),
-                               v"9.2", v"12.0", :family,
+                               v"9.2", v"10.7", :family,
                                _PACKED_SUB_SECTION)
     end
     # The ISA's add example places `.sat` after `.s8x4`, contradicting its
     # canonical prefix grammar. Retain that exact documented spelling only.
     _scalar_result_schema!(schemas, :add, (:s8x4, :sat), UInt32,
-                           (:b32, :b32), v"9.2", v"12.0", :family,
+                           (:b32, :b32), v"9.2", v"10.7", :family,
                            _PACKED_ADD_SECTION;
                            provenance = :ptxas_compat)
     _scalar_result_schema!(schemas, :neg, (:s8x4,), UInt32, (:b32,),
-                           v"9.2", v"12.0", :family, _PACKED_NEG_SECTION)
+                           v"9.2", v"10.7", :family, _PACKED_NEG_SECTION)
 
     for (op, section) in ((:min, _PACKED_MIN_SECTION),
                           (:max, _PACKED_MAX_SECTION))
@@ -211,10 +216,10 @@ const SCALAR_RESULT_SCHEMAS = let schemas = ScalarResultSchema[]
                                    v"8.0", v"9.0", :baseline, section)
         end
         _scalar_result_schema!(schemas, op, (:u8x4,), UInt32, (:b32, :b32),
-                               v"9.2", v"12.0", :family, section)
+                               v"9.2", v"10.7", :family, section)
         for mods in ((:s8x4,), (:relu, :s8x4))
             _scalar_result_schema!(schemas, op, mods, UInt32, (:b32, :b32),
-                                   v"9.2", v"12.0", :family, section)
+                                   v"9.2", v"10.7", :family, section)
         end
 
         # Scalar `.relu.s32` has a conventional terminal result but belongs to

@@ -486,6 +486,71 @@ end
     @test f.directives[1].values == (32,)
 end
 
+@testset "parser: function directive (.minperctamemory, PTX 9.4 §11.4.10)" begin
+    source = """.version 9.4
+.target sm_107
+.address_size 64
+
+.visible .entry foo()
+.minperctamemory 2048
+{
+    .reg .u64 %a;
+    .reg .u32 %b;
+    mov.u64 %a, %perctamemoryoffset;
+    mov.u32 %b, %perctamemorysize;
+    ret;
+}
+"""
+    m = parse_ptx(source)
+    f = first(filter(d -> d isa Function, collect(m.directives)))
+    @test length(f.directives) == 1
+    @test f.directives[1].name == "minperctamemory"
+    @test f.directives[1].values == (2048,)
+    # Structural, not recovery: the entry header must not degrade to a raw
+    # line, and the per-CTA-memory sregs are ordinary scalar sources. The
+    # structural spelling joins function directives onto the header line.
+    @test format(_deep_unraw(m)) ==
+          replace(source, ".visible .entry foo()\n.minperctamemory 2048" =>
+                          ".visible .entry foo() .minperctamemory 2048")
+    @test format(m) == source
+end
+
+@testset "parser: PTX 9.4 intermediate-IR debug surface holds .loc parity" begin
+    # .loc_intermediate (§11.5.5) and .nv_intermediate_source_section
+    # (§11.5.6) are deliberately raw-tier, exactly like .loc/.file and the
+    # .section debug constructs they extend: lossless round-trip, preserved
+    # by canonicalize, no structural model. Promoting them is a separate
+    # decision from 9.4 support; this pins the parity so a parser change
+    # that regresses either path is loud.
+    source = """.version 9.4
+.target sm_107
+.address_size 64
+.file 1 "kernel.py"
+.file 2 "kernel.tile"
+.nv_intermediate_source_section {
+.code_block {
+.ir_name: "TileIR"
+.sourceFileName: 2
+.source_begin
+tile.load %t0
+.source_end
+}
+}
+.entry k()
+{
+    .loc 1 10 5
+    .loc_intermediate 2 4 1
+    ret;
+}
+"""
+    m = parse_ptx(source)
+    @test format(m) == source
+    canon = PTX.IR.canonicalize(m)
+    @test occursin(".loc_intermediate 2 4 1", format(canon))
+    @test occursin(".nv_intermediate_source_section", format(canon))
+    @test occursin(".source_begin", format(canon))
+end
+
 @testset "parser: .func with return params" begin
     m = parse_ptx(""".version 8.0
 .target sm_89
