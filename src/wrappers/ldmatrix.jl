@@ -160,3 +160,26 @@ for (shape, count, nout, trans) in (
                       Tuple{Core.LLVMPtr{T, AS.Shared}}, addr)
     end
 end
+
+# PTX ISA 9.4 sign-extending element-size expansion: `.s8.s4` for `.m8n16`
+# loads signed 4-bit elements expanded to signed 8-bit during the load
+# (contrast `.b8x16.b4x16_p64`, which is unsigned-with-padding). sm_90a plus
+# the sm_100f/sm_110f/sm_120f families; no NVVM intrinsic at 22.1.7, so both
+# state-space spellings are asm — spelled-only until a CUDA 13.4+ ptxas
+# ships. Same one-b32-per-matrix result shape as the other m8n16 forms.
+for (count, nout) in ((:x1, 1), (:x2, 2), (:x4, 4)),
+        space in (:shared, Symbol("shared::cta"))
+    mods = (:sync, :aligned, :m8n16, count, space, :s8, :s4)
+    outs = "{" * join(("\$$i" for i in 0:nout-1), ", ") * "}"
+    asm = "ldmatrix.sync.aligned.m8n16.$count.$space.s8.s4 $outs, [\$$nout];"
+    constraints = join(vcat(fill("=r", nout), ["r", "~{memory}"]), ",")
+    rettype = nout == 1 ? UInt32 : NTuple{nout, UInt32}
+    ir = convergent_asm_ir(asm, constraints, rettype,
+                           (Core.LLVMPtr{UInt8, AS.Shared},))
+    @eval function (::Operation{:ldmatrix, $mods})(
+            addr::Core.LLVMPtr{T, AS.Shared}) where T
+        Base.@inline
+        Base.llvmcall(($ir, "entry"), $rettype,
+                      Tuple{Core.LLVMPtr{T, AS.Shared}}, addr)
+    end
+end
