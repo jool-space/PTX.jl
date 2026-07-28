@@ -173,6 +173,44 @@ const CONVERGENT_OVERLAY_PREFIXES = ("llvm.nvvm.mma.", "llvm.nvvm.wmma.")
 is_convergent(i::Intrinsic) = :convergent in i.props ||
     any(p -> startswith(i.name, p), CONVERGENT_OVERLAY_PREFIXES)
 
+# Memory-side sibling of the convergence overlay: ordering operations whose
+# generated location class understates what they must order. Widening to an
+# unspecified memory effect (= may read/write anything) matches the asm
+# tier's `~{memory}` for fences.
+#
+#   - tcgen05.wait::ld / tcgen05.wait::st (PTX ISA 9.4 §9.7.18.11): waits
+#     until ALL prior tcgen05.ld/st complete; the results are then read and
+#     written through ordinary loads/stores the optimizer tracks. The
+#     generated `inaccessiblememonly` lets those accesses migrate across the
+#     wait.
+#   - fence.proxy.tensormap::generic.acquire.* (PTX ISA 9.4 §9.7.15.4): a
+#     proxy-acquire fence ordering subsequent proxy reads against prior
+#     generic writes; the generated `argmemonly` confines it to the 128-byte
+#     descriptor operand, but the ordering it provides is not operand-scoped.
+#
+# Exact names, not prefixes: each widening is a per-instruction review
+# decision, and a closed-world registry test pins the inventory so a table
+# regeneration cannot silently change what is widened.
+const MEMORY_WIDEN_OVERLAY = (
+    "llvm.nvvm.tcgen05.wait.ld",
+    "llvm.nvvm.tcgen05.wait.st",
+    "llvm.nvvm.fence.proxy.tensormap_generic.acquire.cluster",
+    "llvm.nvvm.fence.proxy.tensormap_generic.acquire.cta",
+    "llvm.nvvm.fence.proxy.tensormap_generic.acquire.gpu",
+    "llvm.nvvm.fence.proxy.tensormap_generic.acquire.sys",
+)
+
+const _MEMORY_LOCATION_PROPS = (:nomem, :argmemonly, :inaccessiblememonly,
+                                :inaccessiblemem_or_argmemonly,
+                                :readmem, :writemem)
+
+# The props `memory_attr` should see for an intrinsic: for widened names the
+# location-class (and direction) claims are stripped so the memory effect is
+# left unspecified — the conservative default an unknown call gets.
+effective_memory_props(i::Intrinsic) =
+    i.name in MEMORY_WIDEN_OVERLAY ?
+        Tuple(p for p in i.props if !(p in _MEMORY_LOCATION_PROPS)) : i.props
+
 # LLVM ≤ 16 (Julia ≤ 1.11) does not derive merge protection from
 # `convergent`: SimplifyCFG can hoist identical convergent calls from both
 # arms of a divergent branch into one pre-branch site. `nomerge` closes that
@@ -202,7 +240,7 @@ function fnattrs(i::Intrinsic)::String
                    (:noreturn, "noreturn"))
         p in i.props && push!(attrs, a)
     end
-    mem = memory_attr(i.props)
+    mem = memory_attr(effective_memory_props(i))
     mem === nothing || push!(attrs, mem)
     # :sideeffects, :commutative, :nocreateundefpoison have no IR-attribute
     # spelling (the first is conveyed by NOT claiming memory(none))

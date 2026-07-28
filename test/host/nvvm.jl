@@ -157,6 +157,44 @@ end
     @test NVVM.memory_attr(pure.props) == expected_nomem
 end
 
+@testset "memory-widen overlay inventory is closed" begin
+    # Independent reviewed inventory of the ordering operations whose
+    # generated location class understates what they order (see
+    # MEMORY_WIDEN_OVERLAY in emit.jl). Hand-entered, not derived from the
+    # emitter constant: a widening is a per-instruction review decision, and
+    # a table regeneration must not silently change what is widened.
+    expected = Set([
+        "llvm.nvvm.tcgen05.wait.ld",
+        "llvm.nvvm.tcgen05.wait.st",
+        "llvm.nvvm.fence.proxy.tensormap_generic.acquire.cluster",
+        "llvm.nvvm.fence.proxy.tensormap_generic.acquire.cta",
+        "llvm.nvvm.fence.proxy.tensormap_generic.acquire.gpu",
+        "llvm.nvvm.fence.proxy.tensormap_generic.acquire.sys",
+    ])
+    @test Set(NVVM.MEMORY_WIDEN_OVERLAY) == expected
+    @test length(NVVM.MEMORY_WIDEN_OVERLAY) == 6
+    for name in expected
+        i = intrinsic(name)   # every widened name must exist in the registry
+        # The raw table props still carry a location class (that divergence
+        # is the point), but the effective props must render no memory
+        # attribute at all — the conservative unspecified default.
+        @test any(p -> p in NVVM._MEMORY_LOCATION_PROPS, i.props)
+        @test NVVM.memory_attr(NVVM.effective_memory_props(i)) === nothing
+        @test !occursin("memory(", NVVM.fnattrs(i))
+        @test !occursin("argmemonly", NVVM.fnattrs(i))
+        @test !occursin("inaccessiblememonly", NVVM.fnattrs(i))
+    end
+
+    # Synthesized-IR spot check: the wait carries convergence but no memory
+    # claim; non-overlaid tcgen05 neighbours keep their precise attributes.
+    wait_ir = NVVM.synthesize("llvm.nvvm.tcgen05.wait.ld", ()).ir
+    @test occursin("convergent", wait_ir)
+    @test !occursin("memory(", wait_ir)
+    alloc = intrinsic("llvm.nvvm.tcgen05.alloc.cg1")
+    @test NVVM.effective_memory_props(alloc) === alloc.props
+    @test NVVM.memory_attr(NVVM.effective_memory_props(alloc)) !== nothing
+end
+
 @testset "hand-verified signatures" begin
     # mbarrier: verified by the original llc experiment and the convergence
     # spike's pipeline
