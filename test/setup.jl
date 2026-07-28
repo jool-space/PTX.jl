@@ -20,7 +20,7 @@ using CUDACore
 using CUDATools
 using CUDACore.GPUCompiler: methodinstance, CompilerJob
 
-# Independent transcription of PTX ISA 9.3 section 11.1.2's target-string
+# Independent transcription of PTX ISA 9.4 section 11.1.2's target-string
 # introduction notes. Besides the direct header oracle, this identifies
 # provenance-preserving external LLVM fixtures whose synthetic header selects
 # a target newer than their declared language dialect. Those originals must
@@ -38,6 +38,7 @@ const TEST_HEADER_TARGET_FLOORS = (
     v"8.8" => ("100f", "101f", "103", "103f", "103a",
                 "120f", "121", "121f", "121a"),
     v"9.0" => ("88", "110", "110f", "110a"),
+    v"9.4" => ("107", "107f", "107a"),
 )
 const TEST_HEADER_TARGET_FLOOR = Dict(
     suffix => floor for (floor, suffixes) in TEST_HEADER_TARGET_FLOORS

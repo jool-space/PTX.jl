@@ -22,9 +22,9 @@ struct ImmediateFormContract
 end
 
 const _SETMAXNREG_SECTION =
-    "ptx/9-instruction-set/9.7.20.5-miscellaneous-instructions-setmaxnreg.md"
+    "ptx/9-instruction-set/9.7.21.5-miscellaneous-instructions-setmaxnreg.md"
 const _PMEVENT_SECTION =
-    "ptx/9-instruction-set/9.7.20.3-miscellaneous-instructions-pmevent.md"
+    "ptx/9-instruction-set/9.7.21.3-miscellaneous-instructions-pmevent.md"
 
 const IMMEDIATE_FORM_CONTRACTS = ImmediateFormContract[
     ImmediateFormContract(

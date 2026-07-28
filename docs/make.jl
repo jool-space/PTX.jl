@@ -25,7 +25,7 @@ function write_coverage_page()
         inventory against the form registry, the typed-wrapper-only rules,
         and the wrapper registry.*
 
-        Every PTX ISA 9.3 instruction family (§9.7.1–§9.7.20) has an explicit
+        Every PTX ISA 9.4 instruction family (§9.7.1–§9.7.21) has an explicit
         disposition, so textual expressibility is never mistaken for reviewed
         coverage. The four statuses:
 

@@ -157,9 +157,9 @@ struct CLCTryCancelSchema
 end
 
 const CLC_TRY_CANCEL_SECTION =
-    "ptx/9-instruction-set/9.7.14.18-parallel-synchronization-and-" *
+    "ptx/9-instruction-set/9.7.15.18-parallel-synchronization-and-" *
     "communication-instructions-clusterlaunchcontrol.try_cancel.md, " *
-    "heading 9.7.14.18 clusterlaunchcontrol.try_cancel"
+    "heading 9.7.15.18 clusterlaunchcontrol.try_cancel"
 const _CLC_COMPLETE_TX = Symbol("mbarrier::complete_tx::bytes")
 const _CLC_MULTICAST_ALL = Symbol("multicast::cluster::all")
 

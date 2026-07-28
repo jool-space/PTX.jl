@@ -257,7 +257,7 @@ end
         @test schema.provenance === want.provenance
         @test Tuple(v.operands for v in schema.variants) == want.variants
         @test schema.section ==
-            "ptx/9-instruction-set/9.7.14.16-parallel-synchronization-and-communication-instructions-mbarrier.md"
+            "ptx/9-instruction-set/9.7.15.16-parallel-synchronization-and-communication-instructions-mbarrier.md"
 
         for operands in want.variants
             argtypes = Tuple(_mb_argtype(kind, want.space) for kind in operands)

@@ -44,11 +44,11 @@ struct VectorResultSchema
 end
 
 const _VECTOR_LD_SECTION =
-    "ptx/9-instruction-set/9.7.9.8-data-movement-and-conversion-instructions-ld.md"
+    "ptx/9-instruction-set/9.7.10.8-data-movement-and-conversion-instructions-ld.md"
 const _VECTOR_ATOM_SECTION =
-    "ptx/9-instruction-set/9.7.14.5-parallel-synchronization-and-communication-instructions-atom.md"
+    "ptx/9-instruction-set/9.7.15.5-parallel-synchronization-and-communication-instructions-atom.md"
 const _VECTOR_MULTIMEM_SECTION =
-    "ptx/9-instruction-set/9.7.9.15-data-movement-and-conversion-instructions-multimem.ld_reduce-multimem.st-multimem.red.md"
+    "ptx/9-instruction-set/9.7.10.15-data-movement-and-conversion-instructions-multimem.ld_reduce-multimem.st-multimem.red.md"
 
 const _VECTOR_LANE_TYPES = Dict{Symbol,Type}(
     :b8 => UInt8, :u8 => UInt8, :s8 => Int8,

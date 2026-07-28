@@ -5,13 +5,13 @@
 # Use the ISA's own `mov.b128` pack/unpack operation to bridge every `.b128`
 # register through one stable Julia carrier: two low-to-high UInt64 words.
 # See PTX ISA 9.3:
-#   ptx/9-instruction-set/9.7.9.4-data-movement-and-conversion-instructions-mov.md
-#   ptx/9-instruction-set/9.7.9.8-data-movement-and-conversion-instructions-ld.md
-#   ptx/9-instruction-set/9.7.9.9-data-movement-and-conversion-instructions-ld.global.nc.md
-#   ptx/9-instruction-set/9.7.9.10-data-movement-and-conversion-instructions-ldu.md
-#   ptx/9-instruction-set/9.7.9.11-data-movement-and-conversion-instructions-st.md
-#   ptx/9-instruction-set/9.7.14.5-parallel-synchronization-and-communication-instructions-atom.md
-#   ptx/9-instruction-set/9.7.14.19-parallel-synchronization-and-communication-instructions-clusterlaunchcontrol.query_cancel.md
+#   ptx/9-instruction-set/9.7.10.4-data-movement-and-conversion-instructions-mov.md
+#   ptx/9-instruction-set/9.7.10.8-data-movement-and-conversion-instructions-ld.md
+#   ptx/9-instruction-set/9.7.10.9-data-movement-and-conversion-instructions-ld.global.nc.md
+#   ptx/9-instruction-set/9.7.10.10-data-movement-and-conversion-instructions-ldu.md
+#   ptx/9-instruction-set/9.7.10.11-data-movement-and-conversion-instructions-st.md
+#   ptx/9-instruction-set/9.7.15.5-parallel-synchronization-and-communication-instructions-atom.md
+#   ptx/9-instruction-set/9.7.15.19-parallel-synchronization-and-communication-instructions-clusterlaunchcontrol.query_cancel.md
 
 """
     B128
@@ -42,19 +42,19 @@ struct B128FormSchema
 end
 
 const _B128_MOV_SECTION =
-    "ptx/9-instruction-set/9.7.9.4-data-movement-and-conversion-instructions-mov.md"
+    "ptx/9-instruction-set/9.7.10.4-data-movement-and-conversion-instructions-mov.md"
 const _B128_LD_SECTION =
-    "ptx/9-instruction-set/9.7.9.8-data-movement-and-conversion-instructions-ld.md"
+    "ptx/9-instruction-set/9.7.10.8-data-movement-and-conversion-instructions-ld.md"
 const _B128_LD_NC_SECTION =
-    "ptx/9-instruction-set/9.7.9.9-data-movement-and-conversion-instructions-ld.global.nc.md"
+    "ptx/9-instruction-set/9.7.10.9-data-movement-and-conversion-instructions-ld.global.nc.md"
 const _B128_LDU_SECTION =
-    "ptx/9-instruction-set/9.7.9.10-data-movement-and-conversion-instructions-ldu.md"
+    "ptx/9-instruction-set/9.7.10.10-data-movement-and-conversion-instructions-ldu.md"
 const _B128_ST_SECTION =
-    "ptx/9-instruction-set/9.7.9.11-data-movement-and-conversion-instructions-st.md"
+    "ptx/9-instruction-set/9.7.10.11-data-movement-and-conversion-instructions-st.md"
 const _B128_ATOM_SECTION =
-    "ptx/9-instruction-set/9.7.14.5-parallel-synchronization-and-communication-instructions-atom.md"
+    "ptx/9-instruction-set/9.7.15.5-parallel-synchronization-and-communication-instructions-atom.md"
 const _B128_QUERY_SECTION =
-    "ptx/9-instruction-set/9.7.14.19-parallel-synchronization-and-communication-instructions-clusterlaunchcontrol.query_cancel.md"
+    "ptx/9-instruction-set/9.7.15.19-parallel-synchronization-and-communication-instructions-clusterlaunchcontrol.query_cancel.md"
 
 const _B128_STATES_LD = Set((
     :const, :global, :local, :param, Symbol("param::entry"),

@@ -541,7 +541,7 @@ end
     for schema in values(PTX.CLC_TRY_CANCEL_FORMS)
         @test schema.introduced == v"8.6"
         @test schema.target_floor == v"10.0"
-        @test occursin("9.7.14.18-parallel", schema.section)
+        @test occursin("9.7.15.18-parallel", schema.section)
         if schema.multicast
             @test schema.multicast_arch_targets ==
                   ("sm_100a", "sm_110a", "sm_120a")

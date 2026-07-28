@@ -34,19 +34,19 @@ function _structured_result_schema!(schemas, op, mods, ptxmods, outputs,
 end
 
 const _GENERAL_SETP_SECTION =
-    "ptx/9-instruction-set/9.7.6.2-comparison-and-selection-instructions-setp.md"
+    "ptx/9-instruction-set/9.7.7.2-comparison-and-selection-instructions-setp.md"
 const _HALF_SETP_SECTION =
-    "ptx/9-instruction-set/9.7.7.2-half-precision-comparison-instructions-setp.md"
+    "ptx/9-instruction-set/9.7.8.2-half-precision-comparison-instructions-setp.md"
 const _LOP3_SECTION =
-    "ptx/9-instruction-set/9.7.8.6-logic-and-shift-instructions-lop3.md"
+    "ptx/9-instruction-set/9.7.9.6-logic-and-shift-instructions-lop3.md"
 const _MATCH_SECTION =
-    "ptx/9-instruction-set/9.7.14.11-parallel-synchronization-and-communication-instructions-match.sync.md"
+    "ptx/9-instruction-set/9.7.15.11-parallel-synchronization-and-communication-instructions-match.sync.md"
 const _ELECT_SECTION =
-    "ptx/9-instruction-set/9.7.14.15-parallel-synchronization-and-communication-instructions-elect.sync.md"
+    "ptx/9-instruction-set/9.7.15.15-parallel-synchronization-and-communication-instructions-elect.sync.md"
 const _TESTP_SECTION =
     "ptx/9-instruction-set/9.7.3.1-floating-point-instructions-testp.md"
 const _ISSPACEP_SECTION =
-    "ptx/9-instruction-set/9.7.9.20-data-movement-and-conversion-instructions-isspacep.md"
+    "ptx/9-instruction-set/9.7.10.22-data-movement-and-conversion-instructions-isspacep.md"
 
 const _SETP_BASIC_CMPS = (:eq, :ne, :lt, :le, :gt, :ge)
 const _SETP_FLOAT_CMPS =

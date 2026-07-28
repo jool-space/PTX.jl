@@ -11,7 +11,7 @@
 # receiving a plausible but wrong Julia carrier.
 
 const ORDINARY_CVT_SECTION =
-    "ptx/9-instruction-set/9.7.9.22-data-movement-and-conversion-instructions-cvt.md"
+    "ptx/9-instruction-set/9.7.10.24-data-movement-and-conversion-instructions-cvt.md"
 
 struct OrdinaryCvtSourceSchema
     destination::Symbol

@@ -2,9 +2,9 @@ using PTX: Operation, RawOperation, build_call
 
 const _IMMEDIATE_SECTIONS = (
     setmaxnreg =
-        "ptx/9-instruction-set/9.7.20.5-miscellaneous-instructions-setmaxnreg.md",
+        "ptx/9-instruction-set/9.7.21.5-miscellaneous-instructions-setmaxnreg.md",
     pmevent =
-        "ptx/9-instruction-set/9.7.20.3-miscellaneous-instructions-pmevent.md",
+        "ptx/9-instruction-set/9.7.21.3-miscellaneous-instructions-pmevent.md",
 )
 
 function _expected_immediate_contracts()

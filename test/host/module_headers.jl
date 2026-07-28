@@ -29,17 +29,17 @@ header(version, target; address = nothing, tail = "") =
     @test !isempty(diff(normalize(module_ir), normalize(explicit)))
 end
 
-@testset "module header: complete PTX 9.3 architecture spelling ledger" begin
+@testset "module header: complete PTX 9.4 architecture spelling ledger" begin
     observed = Set{String}()
     for (_, suffixes) in TEST_HEADER_TARGET_FLOORS, suffix in suffixes
         for prefix in ("sm_", "compute_")
             spelling = prefix * suffix
             push!(observed, spelling)
-            module_ir = parse_ptx(header("9.3", spelling))
+            module_ir = parse_ptx(header("9.4", spelling))
             @test module_ir.target == Target((spelling,))
         end
     end
-    @test length(observed) == 86
+    @test length(observed) == 92
 
     err = try
         parse_ptx(header("8.5", "sm_100a"))
@@ -58,6 +58,8 @@ end
         ("2.0", "compute_20, map_f64_to_f32"),
         ("9.3", "sm_110f"),
         ("9.3", "sm_121a, debug"),
+        ("9.4", "sm_107f"),
+        ("9.4", "sm_107a, debug"),
     )
     for (version, target) in positives
         @test parse_ptx(header(version, target)).target.targets[1] ==
@@ -65,8 +67,9 @@ end
     end
 
     negatives = (
-        ("9.3", "sm_130"),
-        ("9.3", "gfx_90"),
+        ("9.4", "sm_130"),
+        ("9.4", "gfx_90"),
+        ("9.3", "sm_107"),
         ("9.3", "debug, sm_90"),
         ("9.3", "sm_90, sm_89"),
         ("9.3", "sm_90, debug, debug"),
@@ -81,10 +84,10 @@ end
     end
     @test_throws ParseError parse_ptx(".version 9.3\n.target sm_90 debug\n")
 
-    # A bundled 9.3 ledger must not pretend to describe a future ISA.
-    future = parse_ptx(header("9.4", "sm_130f, future_platform_option"))
+    # A bundled 9.4 ledger must not pretend to describe a future ISA.
+    future = parse_ptx(header("9.5", "sm_130f, future_platform_option"))
     @test future.target.targets == ("sm_130f", "future_platform_option")
-    @test_throws ParseError parse_ptx(header("9.4", "sm_130f, sm_131"))
+    @test_throws ParseError parse_ptx(header("9.5", "sm_130f, sm_131"))
 end
 
 @testset "module header: later target directives retain order and structure" begin
