@@ -1,6 +1,9 @@
 """
-Verb-style API over the raw `mbarrier.*` wrappers, plus the
-[`BarrierArray`](@ref MBarriers.BarrierArray) storage type. Mirrors
+Verb-style API over the raw `mbarrier.*` wrappers, plus two storage
+types: [`BarrierArray`](@ref MBarriers.BarrierArray) (one homogeneous
+slot ring) and [`BarrierSet`](@ref MBarriers.BarrierSet) (a typed,
+named layout over a whole SMEM mbarrier arena — the shape a
+warp-specialized kernel's synchronization plan actually has). Mirrors
 `<cuda/barrier>` in scope: init / arrive / arrive_expect_tx / wait /
 cluster-arrive, with the arrive variants covering producer (expect_tx)
 and consumer (plain arrive) sides.
@@ -17,7 +20,8 @@ module MBarriers
 using ..PTX: AS, @ptx_str
 using Republic: @public
 
-@public BarrierArray,
+@public BarrierArray, BarrierSet, BarrierGroup,
+        barrier_bytes, barrier_offset, barrierset_init!,
         barrier_init, barrier_arrive, barrier_arrive_expect_tx,
         barrier_wait, barrier_try_wait, barrier_arrive_cluster
 
@@ -120,6 +124,144 @@ the arrival.
     remote = ptx"mapa.shared::cluster.u32"(mbar, UInt32(remote_rank))
     ptx"mbarrier.arrive.shared::cluster.b64"(remote)
     nothing
+end
+
+# ── BarrierSet: a typed, named SMEM mbarrier arena ─────────────────────
+
+"""
+    BarrierSet{SPEC}(base::Core.LLVMPtr{UInt64, AS.Shared})
+
+Typed, named layout over a contiguous SMEM mbarrier arena. `SPEC` is a
+NamedTuple **value** type parameter mapping each group name to a
+`(shape, count)` pair:
+
+- `shape` — `()` for a single barrier, `(n,)` / `(n, m)` / deeper for
+  indexed groups (row-major, 0-based, matching `BarrierArray`);
+- `count` — the arrival count [`barrierset_init!`](@ref) initializes
+  every barrier of the group with.
+
+Groups are laid out in declaration order, 8 bytes per barrier.
+`bars.name` returns the raw shared-AS pointer for a `()`-shaped group
+and an indexable [`BarrierGroup`](@ref) otherwise; every offset is a
+compile-time constant (the name lookup is a tuple recursion over
+`keys(SPEC)` that constant propagation folds to a literal).
+
+```julia
+const RING = (full = ((4,), 1), free = ((4,), 1),
+              stats = ((2, 2), 128), done = ((), 1))
+bars = BarrierSet{RING}(pointer(smem_bars))
+barrier_wait(bars.full[slot], phase)
+barrier_arrive(bars.stats[stage, parity])
+barrier_arrive_expect_tx(bars.done, tx)
+```
+
+The arena footprint for the enclosing SMEM map is
+`barrier_bytes(typeof(bars))`; per-group offsets are exposed for
+host-side layout assertions via [`barrier_offset`](@ref).
+"""
+struct BarrierSet{SPEC}
+    base::Core.LLVMPtr{UInt64, AS.Shared}
+end
+
+"""
+    BarrierGroup{SHAPE}
+
+Indexed view over one named group of a [`BarrierSet`](@ref). Row-major,
+0-based indexing with one index per shape dimension returns the raw
+shared-AS pointer, like `BarrierArray`. Obtained via `bars.name`; not
+constructed directly.
+"""
+struct BarrierGroup{SHAPE}
+    base::Core.LLVMPtr{UInt64, AS.Shared}
+end
+
+@inline _bs_shape_len(shape::Tuple{Vararg{Int}}) =
+    isempty(shape) ? 1 : prod(shape)
+
+# Compile-time offset walk: tuple recursion over the SPEC keys, so a
+# constant group name folds the whole search to a literal byte offset.
+@inline _bs_offset(name::Symbol, ::Tuple{}, spec) =
+    error("BarrierSet has no group named ", name)
+@inline function _bs_offset(name::Symbol, names::Tuple, spec)
+    k = first(names)
+    name === k ? 0 :
+        8 * _bs_shape_len(getfield(spec, k)[1]) +
+            _bs_offset(name, Base.tail(names), spec)
+end
+
+@inline function Base.getproperty(bs::BarrierSet{SPEC},
+                                  name::Symbol) where {SPEC}
+    name === :base && return getfield(bs, :base)
+    ptr = getfield(bs, :base) + _bs_offset(name, keys(SPEC), SPEC)
+    shape = getfield(SPEC, name)[1]
+    shape === () ? ptr : BarrierGroup{shape}(ptr)
+end
+
+Base.propertynames(::BarrierSet{SPEC}) where {SPEC} = (keys(SPEC)..., :base)
+
+# Row-major fold; the leading multiply hits the zero accumulator, so each
+# index ends up scaled by the product of the dimensions after it.
+@inline _bs_rowmajor(acc::Int, ::Tuple{}, ::Tuple{}) = acc
+@inline _bs_rowmajor(acc::Int, shape::Tuple, I::Tuple) =
+    _bs_rowmajor(acc * first(shape) + Int(first(I)),
+                 Base.tail(shape), Base.tail(I))
+
+@inline function Base.getindex(g::BarrierGroup{SHAPE},
+                               I::Vararg{Integer}) where {SHAPE}
+    length(I) == length(SHAPE) ||
+        error("BarrierGroup expects one index per shape dimension")
+    getfield(g, :base) + 8 * _bs_rowmajor(0, SHAPE, I)
+end
+
+"""
+    barrier_bytes(::Type{<:BarrierSet}) -> Int
+
+Total arena footprint in bytes (8 per barrier, groups in declaration
+order) — for computing the enclosing SMEM map.
+"""
+barrier_bytes(::Type{BarrierSet{SPEC}}) where {SPEC} =
+    sum(8 * _bs_shape_len(g[1]) for g in values(SPEC); init = 0)
+
+"""
+    barrier_offset(::Type{<:BarrierSet}, name::Symbol) -> Int
+
+Byte offset of group `name` from the arena base. Host-side companion to
+the device accessors, for layout assertions in tests.
+"""
+barrier_offset(::Type{BarrierSet{SPEC}}, name::Symbol) where {SPEC} =
+    _bs_offset(name, keys(SPEC), SPEC)
+
+"""
+    barrierset_init!(bs::BarrierSet)
+
+Initialize every barrier in the arena with its group's declared arrival
+count, then publish with `fence.proxy.async.shared::cta`. Same caller
+contract as `PTX.Pipelines.pipeline_init!`: invoke from a single
+thread and follow with `bar.sync`. Ring self-crediting
+pre-arrives remain the caller's job — this initializes counts only.
+
+Body is fully unrolled via `@generated`; the emitted PTX matches the
+hand-rolled init sequence byte-for-byte.
+"""
+@generated function barrierset_init!(bs::BarrierSet{SPEC}) where {SPEC}
+    body = Expr(:block)
+    push!(body.args, Expr(:meta, :inline))
+    off = 0
+    for name in keys(SPEC)
+        shape, count = getfield(SPEC, name)
+        shape isa Tuple{Vararg{Int}} && all(>=(1), shape) ||
+            error("BarrierSet group $name: shape must be a tuple of positive Ints")
+        count isa Int && count >= 1 ||
+            error("BarrierSet group $name: arrival count must be a positive Int")
+        for i in 0:(_bs_shape_len(shape) - 1)
+            push!(body.args, :(barrier_init(getfield(bs, :base) + $(off + 8i),
+                                            UInt32($count))))
+        end
+        off += 8 * _bs_shape_len(shape)
+    end
+    push!(body.args, :(ptx"fence.proxy.async.shared::cta"()))
+    push!(body.args, :(nothing))
+    body
 end
 
 end # module MBarriers
