@@ -67,10 +67,19 @@ result = "every push, both lanes; PTX_REQUIRE_GPU_RUNTIME fails the lane if the 
 # e.g. chunked bf16 output packing / the FA4 f32x2 path), not more
 # register shuffling.
 
+# Reference targets for the FA follow-ups (pyptx, same-box measurements):
+# the pyptx 1-CTA original reports 985–1238 TF bf16 fwd hd128 (headline
+# 1240, 0.92× FA4's 1231–1346) WITH the FMA-pipe exp2 emulation
+# (emu_pairs 8/16) and half-granular split-P that the port deliberately
+# skipped; the PTX.jl port measures 1150 TF without them. The 2-CTA
+# cluster variant was correct but perf-neutral in pyptx; occ2 was an
+# alloc-permit lesson, not a win.
+
 [[queue]]
 device = "B200/B300 (CC 10.x)"
 items = [
     "FA perf follow-ups: port the FA4 f32x2 exp2 emulation (not yet ported — no knob to sweep), then decide the 2-CTA port",
+    "revalidate FA runtime after the BarrierSet arena adoption (PTX-diff-verified: init-order-only change, all other ~4,950 lines byte-identical; compile tier green)",
     "issue #50: fabric spelling sm_100a ptxas evidence + configured-CFT-endpoint semantics",
     "tcgen05 idesc builders: validate i8/f8f6f4/MX instruction-descriptor helpers (only f16bf16_f32 exists)",
 ]

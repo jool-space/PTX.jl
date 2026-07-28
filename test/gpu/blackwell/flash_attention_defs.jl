@@ -79,7 +79,8 @@
 
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
            BlackwellLayout, tensor_map_tile_2d, bf16x2_pack
-using PTX.MBarriers: barrier_init, barrier_arrive, barrier_arrive_expect_tx,
+using PTX.MBarriers: BarrierSet, barrierset_init!, barrier_bytes,
+                     barrier_arrive, barrier_arrive_expect_tx,
                      barrier_try_wait
 using PTX.NVVM                    # @nvvm_str for vote.ballot.sync
 using CUDACore
@@ -106,19 +107,24 @@ const FAB_SMEM_STATS = FAB_SMEM_KV + FAB_KV_SLOTS * FAB_TILE_BYTES  # 196608
 #   alpha[2][128] @ +0 (f32, stage-major), sum[2][128] @ +1024
 const FAB_SMEM_BARS  = FAB_SMEM_STATS + 2048
 
-# mbarrier byte offsets relative to FAB_SMEM_BARS
-const FAB_BAR_Q          = 0     # 2 × 8   (count 1, TMA tx)
-const FAB_BAR_KV_FULL    = 16    # 4 × 8   (count 1, TMA tx)
-const FAB_BAR_KV_FREE    = 48    # 4 × 8   (count 1, tcgen05.commit)
-const FAB_BAR_S_FULL     = 80    # 2 × 8   (count 1, tcgen05.commit)
-const FAB_BAR_P_Q        = 96    # 2 stages × 4 quarters × 8 (count 128)
-const FAB_BAR_O_RESC     = 160   # 2 stages × 2 parities × 8 (count 128)
-const FAB_BAR_O_DONE     = 192   # 8       (count 1, tcgen05.commit)
-const FAB_BAR_STATS_FREE = 200   # 2 × 8   (count 128)
-const FAB_BAR_PV_DONE    = 216   # 2 × 8   (count 1, tcgen05.commit)
-const FAB_BAR_Q_FREE     = 232   # 8       (count 1, tcgen05.commit)
-const FAB_BAR_EPI        = 240   # 8       (count 128, softmax item-start gate)
-const FAB_BAR_BYTES      = 248
+# The synchronization plan as one BarrierSet declaration: shapes and
+# arrival counts here; byte offsets, the thread-0 init sequence, and the
+# arena footprint are all derived. Layout order matches the historical
+# hand-maintained offset table (see PTX.MBarriers.BarrierSet).
+const FAB_BARS = (
+    q          = ((2,),   1),    # per Q subtile; TMA tx
+    kv_full    = ((4,),   1),    # per ring slot; TMA tx
+    kv_free    = ((4,),   1),    # per ring slot; tcgen05.commit
+    s_full     = ((2,),   1),    # per stage; tcgen05.commit
+    p_q        = ((2, 4), 128),  # [stage, quarter]; softmax publishes P
+    o_resc     = ((2, 2), 128),  # [stage, tile parity]; gates PV
+    o_done     = ((),     1),    # tcgen05.commit
+    stats_free = ((2,),   128),  # per stage; paces the alpha/sum slots
+    pv_done    = ((2,),   1),    # per stage; tcgen05.commit
+    q_free     = ((),     1),    # tcgen05.commit
+    epi        = ((),     128),  # softmax item-start gate
+)
+const FAB_BAR_BYTES = barrier_bytes(BarrierSet{FAB_BARS})
 
 const FAB_SMEM_TMEM  = FAB_SMEM_BARS + FAB_BAR_BYTES
 const FAB_SMEM_BYTES = FAB_SMEM_TMEM + 8
@@ -214,12 +220,12 @@ end
 
 # Ring-slot load: wait FREE (uniform accounting — the ring is self-credited
 # once at role start), expect_tx, two stripe loads. Returns advanced row.
-@inline function _fab_load_kv(d::FabDbg, ::Val{SLOT}, kv_ptr, tma, row::UInt32, mb,
+@inline function _fab_load_kv(d::FabDbg, ::Val{SLOT}, kv_ptr, tma, row::UInt32,
+                              bars::BarrierSet{FAB_BARS},
                               ph::UInt32) where {SLOT}
-    _fab_wait(d, mb + (FAB_BAR_KV_FREE + 8 * SLOT), ph, Val(1))
-    barrier_arrive_expect_tx(mb + (FAB_BAR_KV_FULL + 8 * SLOT), FAB_TILE_BYTES)
-    _fab_load_tile(kv_ptr, SLOT * FAB_TILE_BYTES, tma,
-                   row, mb + (FAB_BAR_KV_FULL + 8 * SLOT))
+    _fab_wait(d, bars.kv_free[SLOT], ph, Val(1))
+    barrier_arrive_expect_tx(bars.kv_full[SLOT], FAB_TILE_BYTES)
+    _fab_load_tile(kv_ptr, SLOT * FAB_TILE_BYTES, tma, row, bars.kv_full[SLOT])
     return row + UInt32(FAB_BN), ph ⊻ UInt32(1)
 end
 
@@ -234,14 +240,14 @@ end
 # S(stage) = Q(stage) @ K(k_idx)^T — 8 k16 UMMAs, accumulate within the tile.
 @inline function _fab_qk_mma(::Val{STAGE}, ::Val{KIDX}, tmem::UInt32,
                              dq0::UInt64, dk0::UInt64, idesc::UInt32,
-                             mb) where {STAGE, KIDX}
+                             bars::BarrierSet{FAB_BARS}) where {STAGE, KIDX}
     d = tmem + UInt32(STAGE * 128)
     for kk in 0:7
         da = dq0 + UInt64(STAGE * FAB_SLOT_UNITS) + _fab_kmaj_off(kk)
         db = dk0 + UInt64(KIDX * 2 * FAB_SLOT_UNITS) + _fab_kmaj_off(kk)
         ptx"tcgen05.mma.cta_group::1.kind::f16"(d, da, db, idesc, kk != 0)
     end
-    _fab_commit(mb + (FAB_BAR_S_FULL + 8 * STAGE))
+    _fab_commit(bars.s_full[STAGE])
 end
 
 # O(stage) += P(stage) @ V(v_idx) — A sourced from TMEM, consumed per
@@ -249,13 +255,13 @@ end
 # is gated on O_RESC[stage][tile&1] at the first quarter.
 @inline function _fab_pv_mma(dbg::FabDbg, ::Val{STAGE}, ::Val{VIDX}, first_accum::Bool,
                              ::Val{PAR}, tmem::UInt32, dv0::UInt64,
-                             idesc::UInt32, mb,
+                             idesc::UInt32, bars::BarrierSet{FAB_BARS},
                              ph_pq::UInt32, ph_or::UInt32) where {STAGE, VIDX, PAR}
     d = tmem + UInt32(256 + STAGE * 128)
     for q in 0:3
-        _fab_wait(dbg, mb + (FAB_BAR_P_Q + 32 * STAGE + 8 * q), ph_pq, Val(5))
+        _fab_wait(dbg, bars.p_q[STAGE, q], ph_pq, Val(5))
         if q == 0
-            _fab_wait(dbg, mb + (FAB_BAR_O_RESC + 16 * STAGE + 8 * PAR), ph_or, Val(6))
+            _fab_wait(dbg, bars.o_resc[STAGE, PAR], ph_or, Val(6))
         end
         ptx"tcgen05.fence::after_thread_sync"()
         for kk in (2q, 2q + 1)
@@ -271,7 +277,7 @@ end
     end
     # deferred-rescale handshake: correction may only touch O after this
     # tile's PV has fully accumulated
-    _fab_commit(mb + (FAB_BAR_PV_DONE + 8 * STAGE))
+    _fab_commit(bars.pv_done[STAGE])
     return ph_pq ⊻ UInt32(1), ph_or ⊻ UInt32(1)
 end
 
@@ -407,13 +413,14 @@ end
 # tracks the true completion count — a parity-only wait inside the rare
 # branch could alias an older same-parity completion and race the
 # in-flight PV.
-@inline function _fab_corr_tile(d::FabDbg, ::Val{STAGE}, mb, stats, alpha_idx::Int,
+@inline function _fab_corr_tile(d::FabDbg, ::Val{STAGE}, bars::BarrierSet{FAB_BARS},
+                                stats, alpha_idx::Int,
                                 stats_bar::UInt32, o_addr::UInt32,
                                 ponc::UInt32, ph_pv::UInt32) where {STAGE}
     ptx"bar.sync"(stats_bar, UInt32(64))
     alpha = @inbounds stats[alpha_idx]
-    barrier_arrive(mb + (FAB_BAR_STATS_FREE + 8 * STAGE))
-    _fab_wait(d, mb + (FAB_BAR_PV_DONE + 8 * STAGE), ph_pv, Val(10))
+    barrier_arrive(bars.stats_free[STAGE])
+    _fab_wait(d, bars.pv_done[STAGE], ph_pv, Val(10))
     need = alpha < 1.0f0
     blt = nvvm"vote.ballot.sync"(0xffffffff, need)
     # softmax already released O_RESC when nothing rescales
@@ -427,13 +434,14 @@ end
         end
         ptx"tcgen05.wait::st.sync.aligned"()
         ptx"tcgen05.fence::before_thread_sync"()
-        barrier_arrive(mb + (FAB_BAR_O_RESC + 16 * STAGE) + Int(ponc))
+        barrier_arrive(bars.o_resc[STAGE, 0] + Int(ponc))
     end
     return ph_pv ⊻ UInt32(1)
 end
 
 # Epilogue for one stage: normalize O by the row sum, pack bf16, store.
-@inline function _fab_epi_stage(::Val{STAGE}, mb, stats, alpha_idx::Int,
+@inline function _fab_epi_stage(::Val{STAGE}, bars::BarrierSet{FAB_BARS},
+                                stats, alpha_idx::Int,
                                 stats_bar::UInt32, o_addr::UInt32,
                                 out_row::UInt32, po) where {STAGE}
     ptx"bar.sync"(stats_bar, UInt32(64))          # streaming softmax's row sum
@@ -451,10 +459,10 @@ end
             # (the readout) is done, and the remaining normalize/pack/store
             # is register→global work. Release the next item now so it
             # overlaps the store tail.
-            barrier_arrive(mb + (FAB_BAR_STATS_FREE + 8))
-            barrier_arrive(mb + FAB_BAR_EPI)
-            barrier_arrive(mb + FAB_BAR_O_RESC)          # stage 0, parity 0
-            barrier_arrive(mb + (FAB_BAR_O_RESC + 16))   # stage 1, parity 0
+            barrier_arrive(bars.stats_free[1])
+            barrier_arrive(bars.epi)
+            barrier_arrive(bars.o_resc[0, 0])
+            barrier_arrive(bars.o_resc[1, 0])
         end
         pk = _fab_pack16(ov, Val(0), inv_l)
         for vec in 0:3
@@ -469,7 +477,7 @@ end
     end
     if STAGE == 0
         # stage-0 sums slot consumed: return the credit
-        barrier_arrive(mb + FAB_BAR_STATS_FREE)
+        barrier_arrive(bars.stats_free[0])
     end
 end
 
@@ -496,12 +504,12 @@ function _fab_kernel!(
     smem_kv   = @inbounds CuDynamicSharedArray(UInt16, FAB_KV_SLOTS * FAB_TILE_BYTES ÷ 2,
                                                FAB_SMEM_KV)
     stats     = @inbounds CuDynamicSharedArray(Float32, 512, FAB_SMEM_STATS)
-    bars      = @inbounds CuDynamicSharedArray(UInt64, FAB_BAR_BYTES ÷ 8, FAB_SMEM_BARS)
+    bar_mem   = @inbounds CuDynamicSharedArray(UInt64, FAB_BAR_BYTES ÷ 8, FAB_SMEM_BARS)
     tmem_slot = @inbounds CuDynamicSharedArray(UInt32, 1, FAB_SMEM_TMEM)
 
     q_ptr  = pointer(smem_q)
     kv_ptr = pointer(smem_kv)
-    mb     = pointer(bars)
+    bars   = BarrierSet{FAB_BARS}(pointer(bar_mem))
 
     tid      = ptx"mov.u32"(sreg"tid.x")
     cta_id   = ptx"mov.u32"(sreg"ctaid.x")
@@ -516,26 +524,7 @@ function _fab_kernel!(
 
     # ── init barriers, allocate TMEM ──
     if tid == UInt32(0)
-        for i in 0:1
-            barrier_init(mb + (FAB_BAR_Q + 8i), 1)
-            barrier_init(mb + (FAB_BAR_S_FULL + 8i), 1)
-            for par in 0:1
-                barrier_init(mb + (FAB_BAR_O_RESC + 16i + 8par), 128)
-            end
-            barrier_init(mb + (FAB_BAR_STATS_FREE + 8i), 128)
-            barrier_init(mb + (FAB_BAR_PV_DONE + 8i), 1)
-            for q in 0:3
-                barrier_init(mb + (FAB_BAR_P_Q + 32i + 8q), 128)
-            end
-        end
-        for s in 0:(FAB_KV_SLOTS - 1)
-            barrier_init(mb + (FAB_BAR_KV_FULL + 8s), 1)
-            barrier_init(mb + (FAB_BAR_KV_FREE + 8s), 1)
-        end
-        barrier_init(mb + FAB_BAR_O_DONE, 1)
-        barrier_init(mb + FAB_BAR_Q_FREE, 1)
-        barrier_init(mb + FAB_BAR_EPI, 128)       # arrived by 128 corr threads
-        ptx"fence.proxy.async.shared::cta"()
+        barrierset_init!(bars)
     end
     if warp == UInt32(12)
         ptx"tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32"(
@@ -556,9 +545,9 @@ function _fab_kernel!(
         # (including each work item's prologue) waits FREE first, so the
         # accounting is uniform across persistent iterations
         for s in 0:(FAB_KV_SLOTS - 1)
-            barrier_arrive(mb + (FAB_BAR_KV_FREE + 8s))
+            barrier_arrive(bars.kv_free[s])
         end
-        barrier_arrive(mb + FAB_BAR_Q_FREE)
+        barrier_arrive(bars.q_free)
         ph0 = UInt32(0); ph1 = UInt32(0); ph2 = UInt32(0); ph3 = UInt32(0)
         q_free_ph = UInt32(0)
 
@@ -571,26 +560,26 @@ function _fab_kernel!(
 
             # prologue, ordered by first use: QK(stage 0) needs only
             # Q0+K0, so K0 goes ahead of the second Q tile
-            _fab_wait(d, mb + FAB_BAR_Q_FREE, q_free_ph, Val(2))
+            _fab_wait(d, bars.q_free, q_free_ph, Val(2))
             q_free_ph ⊻= UInt32(1)
-            barrier_arrive_expect_tx(mb + FAB_BAR_Q, FAB_TILE_BYTES)
-            _fab_load_tile(q_ptr, 0, tma_Q, q_row0, mb + FAB_BAR_Q)
-            krow, ph0 = _fab_load_kv(d, Val(0), kv_ptr, tma_K, krow, mb, ph0)
-            barrier_arrive_expect_tx(mb + (FAB_BAR_Q + 8), FAB_TILE_BYTES)
+            barrier_arrive_expect_tx(bars.q[0], FAB_TILE_BYTES)
+            _fab_load_tile(q_ptr, 0, tma_Q, q_row0, bars.q[0])
+            krow, ph0 = _fab_load_kv(d, Val(0), kv_ptr, tma_K, krow, bars, ph0)
+            barrier_arrive_expect_tx(bars.q[1], FAB_TILE_BYTES)
             _fab_load_tile(q_ptr, FAB_TILE_BYTES, tma_Q, q_row0 + UInt32(FAB_BM),
-                           mb + (FAB_BAR_Q + 8))
-            vrow, ph1 = _fab_load_kv(d, Val(1), kv_ptr, tma_V, vrow, mb, ph1)
-            krow, ph2 = _fab_load_kv(d, Val(2), kv_ptr, tma_K, krow, mb, ph2)
-            vrow, ph3 = _fab_load_kv(d, Val(3), kv_ptr, tma_V, vrow, mb, ph3)
+                           bars.q[1])
+            vrow, ph1 = _fab_load_kv(d, Val(1), kv_ptr, tma_V, vrow, bars, ph1)
+            krow, ph2 = _fab_load_kv(d, Val(2), kv_ptr, tma_K, krow, bars, ph2)
+            vrow, ph3 = _fab_load_kv(d, Val(3), kv_ptr, tma_V, vrow, bars, ph3)
 
             # steady state: 4 loads per trip into slots 0..3
             trips = (n_tiles - UInt32(2)) >> 1
             trip = UInt32(0)
             while trip < trips
-                krow, ph0 = _fab_load_kv(d, Val(0), kv_ptr, tma_K, krow, mb, ph0)
-                vrow, ph1 = _fab_load_kv(d, Val(1), kv_ptr, tma_V, vrow, mb, ph1)
-                krow, ph2 = _fab_load_kv(d, Val(2), kv_ptr, tma_K, krow, mb, ph2)
-                vrow, ph3 = _fab_load_kv(d, Val(3), kv_ptr, tma_V, vrow, mb, ph3)
+                krow, ph0 = _fab_load_kv(d, Val(0), kv_ptr, tma_K, krow, bars, ph0)
+                vrow, ph1 = _fab_load_kv(d, Val(1), kv_ptr, tma_V, vrow, bars, ph1)
+                krow, ph2 = _fab_load_kv(d, Val(2), kv_ptr, tma_K, krow, bars, ph2)
+                vrow, ph3 = _fab_load_kv(d, Val(3), kv_ptr, tma_V, vrow, bars, ph3)
                 trip += UInt32(1)
             end
             lw += num_ctas
@@ -627,24 +616,24 @@ function _fab_kernel!(
         while mw < total_work
             # ── prologue: S(0) for stage 0 as soon as Q0+K0 land; the
             # second Q tile's TMA overlaps the first QK ──
-            _fab_wait(d, mb + FAB_BAR_Q, ph_qa, Val(3)); ph_qa ⊻= UInt32(1)
-            _fab_wait(d, mb + FAB_BAR_KV_FULL, kph0, Val(4)); kph0 ⊻= UInt32(1)
-            _fab_qk_mma(Val(0), Val(0), tmem, dq0, dk0, idesc_qk, mb)
-            _fab_wait(d, mb + (FAB_BAR_Q + 8), ph_qb, Val(3)); ph_qb ⊻= UInt32(1)
-            _fab_qk_mma(Val(1), Val(0), tmem, dq0, dk0, idesc_qk, mb)
-            _fab_commit(mb + FAB_BAR_KV_FREE)
+            _fab_wait(d, bars.q[0], ph_qa, Val(3)); ph_qa ⊻= UInt32(1)
+            _fab_wait(d, bars.kv_full[0], kph0, Val(4)); kph0 ⊻= UInt32(1)
+            _fab_qk_mma(Val(0), Val(0), tmem, dq0, dk0, idesc_qk, bars)
+            _fab_wait(d, bars.q[1], ph_qb, Val(3)); ph_qb ⊻= UInt32(1)
+            _fab_qk_mma(Val(1), Val(0), tmem, dq0, dk0, idesc_qk, bars)
+            _fab_commit(bars.kv_free[0])
 
             # ── peeled j=0: PV(0) with V slot 1, S(1) with K slot 2 ──
-            _fab_wait(d, mb + (FAB_BAR_KV_FULL + 8), kph1, Val(4)); kph1 ⊻= UInt32(1)
-            _fab_wait(d, mb + (FAB_BAR_KV_FULL + 16), kph2, Val(4)); kph2 ⊻= UInt32(1)
+            _fab_wait(d, bars.kv_full[1], kph1, Val(4)); kph1 ⊻= UInt32(1)
+            _fab_wait(d, bars.kv_full[2], kph2, Val(4)); kph2 ⊻= UInt32(1)
             ph_pq0, ph_or00 = _fab_pv_mma(d, Val(0), Val(0), true, Val(0),
-                                          tmem, dv0, idesc_pv, mb, ph_pq0, ph_or00)
-            _fab_qk_mma(Val(0), Val(1), tmem, dq0, dk0, idesc_qk, mb)
+                                          tmem, dv0, idesc_pv, bars, ph_pq0, ph_or00)
+            _fab_qk_mma(Val(0), Val(1), tmem, dq0, dk0, idesc_qk, bars)
             ph_pq1, ph_or10 = _fab_pv_mma(d, Val(1), Val(0), true, Val(0),
-                                          tmem, dv0, idesc_pv, mb, ph_pq1, ph_or10)
-            _fab_qk_mma(Val(1), Val(1), tmem, dq0, dk0, idesc_qk, mb)
-            _fab_commit(mb + (FAB_BAR_KV_FREE + 16))
-            _fab_commit(mb + (FAB_BAR_KV_FREE + 8))
+                                          tmem, dv0, idesc_pv, bars, ph_pq1, ph_or10)
+            _fab_qk_mma(Val(1), Val(1), tmem, dq0, dk0, idesc_qk, bars)
+            _fab_commit(bars.kv_free[2])
+            _fab_commit(bars.kv_free[1])
 
             # ── steady: j = 1 .. n_tiles-2, two iterations per trip. KV
             # waits are hoisted ahead of the PV/QK pair: KV normally
@@ -655,43 +644,43 @@ function _fab_kernel!(
             trip = UInt32(0)
             while trip < trips
                 # j odd: V in slot 3, next K in slot 0
-                _fab_wait(d, mb + (FAB_BAR_KV_FULL + 24), kph3, Val(4)); kph3 ⊻= UInt32(1)
-                _fab_wait(d, mb + FAB_BAR_KV_FULL, kph0, Val(4)); kph0 ⊻= UInt32(1)
+                _fab_wait(d, bars.kv_full[3], kph3, Val(4)); kph3 ⊻= UInt32(1)
+                _fab_wait(d, bars.kv_full[0], kph0, Val(4)); kph0 ⊻= UInt32(1)
                 ph_pq0, ph_or01 = _fab_pv_mma(d, Val(0), Val(1), false, Val(1),
-                                              tmem, dv0, idesc_pv, mb, ph_pq0, ph_or01)
-                _fab_qk_mma(Val(0), Val(0), tmem, dq0, dk0, idesc_qk, mb)
+                                              tmem, dv0, idesc_pv, bars, ph_pq0, ph_or01)
+                _fab_qk_mma(Val(0), Val(0), tmem, dq0, dk0, idesc_qk, bars)
                 ph_pq1, ph_or11 = _fab_pv_mma(d, Val(1), Val(1), false, Val(1),
-                                              tmem, dv0, idesc_pv, mb, ph_pq1, ph_or11)
-                _fab_qk_mma(Val(1), Val(0), tmem, dq0, dk0, idesc_qk, mb)
-                _fab_commit(mb + FAB_BAR_KV_FREE)
-                _fab_commit(mb + (FAB_BAR_KV_FREE + 24))
+                                              tmem, dv0, idesc_pv, bars, ph_pq1, ph_or11)
+                _fab_qk_mma(Val(1), Val(0), tmem, dq0, dk0, idesc_qk, bars)
+                _fab_commit(bars.kv_free[0])
+                _fab_commit(bars.kv_free[3])
                 # j even: V in slot 1, next K in slot 2
-                _fab_wait(d, mb + (FAB_BAR_KV_FULL + 8), kph1, Val(4)); kph1 ⊻= UInt32(1)
-                _fab_wait(d, mb + (FAB_BAR_KV_FULL + 16), kph2, Val(4)); kph2 ⊻= UInt32(1)
+                _fab_wait(d, bars.kv_full[1], kph1, Val(4)); kph1 ⊻= UInt32(1)
+                _fab_wait(d, bars.kv_full[2], kph2, Val(4)); kph2 ⊻= UInt32(1)
                 ph_pq0, ph_or00 = _fab_pv_mma(d, Val(0), Val(0), false, Val(0),
-                                              tmem, dv0, idesc_pv, mb, ph_pq0, ph_or00)
-                _fab_qk_mma(Val(0), Val(1), tmem, dq0, dk0, idesc_qk, mb)
+                                              tmem, dv0, idesc_pv, bars, ph_pq0, ph_or00)
+                _fab_qk_mma(Val(0), Val(1), tmem, dq0, dk0, idesc_qk, bars)
                 ph_pq1, ph_or10 = _fab_pv_mma(d, Val(1), Val(0), false, Val(0),
-                                              tmem, dv0, idesc_pv, mb, ph_pq1, ph_or10)
-                _fab_qk_mma(Val(1), Val(1), tmem, dq0, dk0, idesc_qk, mb)
-                _fab_commit(mb + (FAB_BAR_KV_FREE + 16))
-                _fab_commit(mb + (FAB_BAR_KV_FREE + 8))
+                                              tmem, dv0, idesc_pv, bars, ph_pq1, ph_or10)
+                _fab_qk_mma(Val(1), Val(1), tmem, dq0, dk0, idesc_qk, bars)
+                _fab_commit(bars.kv_free[2])
+                _fab_commit(bars.kv_free[1])
                 trip += UInt32(1)
             end
 
             # all QKs for this work item are issued: release the Q buffer
             # so the next item's Q TMA overlaps the final PV and the
             # epilogue
-            _fab_commit(mb + FAB_BAR_Q_FREE)
+            _fab_commit(bars.q_free)
 
             # ── peeled j = n_tiles-1 (odd): PV only, V in slot 3 ──
-            _fab_wait(d, mb + (FAB_BAR_KV_FULL + 24), kph3, Val(4)); kph3 ⊻= UInt32(1)
+            _fab_wait(d, bars.kv_full[3], kph3, Val(4)); kph3 ⊻= UInt32(1)
             ph_pq0, ph_or01 = _fab_pv_mma(d, Val(0), Val(1), false, Val(1),
-                                          tmem, dv0, idesc_pv, mb, ph_pq0, ph_or01)
+                                          tmem, dv0, idesc_pv, bars, ph_pq0, ph_or01)
             ph_pq1, ph_or11 = _fab_pv_mma(d, Val(1), Val(1), false, Val(1),
-                                          tmem, dv0, idesc_pv, mb, ph_pq1, ph_or11)
-            _fab_commit(mb + (FAB_BAR_KV_FREE + 24))
-            _fab_commit(mb + FAB_BAR_O_DONE)
+                                          tmem, dv0, idesc_pv, bars, ph_pq1, ph_or11)
+            _fab_commit(bars.kv_free[3])
+            _fab_commit(bars.o_done)
 
             mw += num_ctas
         end
@@ -701,8 +690,8 @@ function _fab_kernel!(
         # completions per stage guarantee every pending parity test still
         # sees a phase flip after the last real PV
         for _ in 1:8
-            _fab_commit(mb + FAB_BAR_PV_DONE)
-            _fab_commit(mb + (FAB_BAR_PV_DONE + 8))
+            _fab_commit(bars.pv_done[0])
+            _fab_commit(bars.pv_done[1])
         end
     end
 
@@ -717,10 +706,10 @@ function _fab_kernel!(
         stage = (tid & UInt32(128)) >> UInt32(7)
 
         sp_base = tmem + lane_bits + (stage << UInt32(7))
-        sfull   = mb + FAB_BAR_S_FULL + 8 * Int(stage)
-        sfree   = mb + FAB_BAR_STATS_FREE + 8 * Int(stage)
-        pq_ptr  = mb + FAB_BAR_P_Q + 32 * Int(stage)
-        oresc   = mb + FAB_BAR_O_RESC + 16 * Int(stage)
+        sfull   = bars.s_full[stage]
+        sfree   = bars.stats_free[stage]
+        pq_ptr  = bars.p_q[stage, 0]
+        oresc   = bars.o_resc[stage, 0]
         stats_bar = UInt32(1) + wig + (stage << UInt32(2))  # named bar 1+w / 5+w
         alpha_idx = Int(stage) * 128 + Int(row128) + 1
         sum_idx   = alpha_idx + 256
@@ -731,7 +720,7 @@ function _fab_kernel!(
         sw = cta_id
         while sw < total_work
             # gate the item start on the previous epilogue's O readout
-            _fab_wait(d, mb + FAB_BAR_EPI, epi_ph, Val(9))
+            _fab_wait(d, bars.epi, epi_ph, Val(9))
             epi_ph ⊻= UInt32(1)
 
             mneg = 0.0f0
@@ -778,11 +767,11 @@ function _fab_kernel!(
         # first KV tile needs no correction: release both stages once
         # (parity-0 barrier gates PV(0)); also pre-arrive STATS_FREE so
         # the softmax's pre-write wait at tile 1 is already satisfied
-        barrier_arrive(mb + FAB_BAR_O_RESC)
-        barrier_arrive(mb + (FAB_BAR_O_RESC + 16))
-        barrier_arrive(mb + FAB_BAR_STATS_FREE)
-        barrier_arrive(mb + (FAB_BAR_STATS_FREE + 8))
-        barrier_arrive(mb + FAB_BAR_EPI)
+        barrier_arrive(bars.o_resc[0, 0])
+        barrier_arrive(bars.o_resc[1, 0])
+        barrier_arrive(bars.stats_free[0])
+        barrier_arrive(bars.stats_free[1])
+        barrier_arrive(bars.epi)
 
         ph_pv0 = UInt32(0); ph_pv1 = UInt32(0); done_ph = UInt32(0)
         po = pointer(O)
@@ -794,26 +783,26 @@ function _fab_kernel!(
             it = UInt32(0)
             while it < n_tiles - UInt32(1)
                 ponc = ((it + UInt32(1)) & UInt32(1)) << UInt32(3)
-                ph_pv0 = _fab_corr_tile(d, Val(0), mb, stats, alpha_idx0,
+                ph_pv0 = _fab_corr_tile(d, Val(0), bars, stats, alpha_idx0,
                                         stats_bar0, o_addr0, ponc, ph_pv0)
-                ph_pv1 = _fab_corr_tile(d, Val(1), mb, stats, alpha_idx1,
+                ph_pv1 = _fab_corr_tile(d, Val(1), bars, stats, alpha_idx1,
                                         stats_bar1, o_addr1, ponc, ph_pv1)
                 it += UInt32(1)
             end
 
             # drain: consume the last tile's PV_DONE completion so the
             # per-work-item wait/completion counts stay exactly balanced
-            _fab_wait(d, mb + FAB_BAR_PV_DONE, ph_pv0, Val(10)); ph_pv0 ⊻= UInt32(1)
-            _fab_wait(d, mb + (FAB_BAR_PV_DONE + 8), ph_pv1, Val(10)); ph_pv1 ⊻= UInt32(1)
+            _fab_wait(d, bars.pv_done[0], ph_pv0, Val(10)); ph_pv0 ⊻= UInt32(1)
+            _fab_wait(d, bars.pv_done[1], ph_pv1, Val(10)); ph_pv1 ⊻= UInt32(1)
 
             # ── epilogue: wait all PV done, normalize, store bf16 ──
-            _fab_wait(d, mb + FAB_BAR_O_DONE, done_ph, Val(11)); done_ph ⊻= UInt32(1)
+            _fab_wait(d, bars.o_done, done_ph, Val(11)); done_ph ⊻= UInt32(1)
             ptx"tcgen05.fence::after_thread_sync"()
 
             out_row = _fab_q_row0(cw, seqlen, mb_shift, mb_mask) + row128
-            _fab_epi_stage(Val(0), mb, stats, alpha_idx0, stats_bar0,
+            _fab_epi_stage(Val(0), bars, stats, alpha_idx0, stats_bar0,
                            o_addr0, out_row, po)
-            _fab_epi_stage(Val(1), mb, stats, alpha_idx1, stats_bar1,
+            _fab_epi_stage(Val(1), bars, stats, alpha_idx1, stats_bar1,
                            o_addr1, out_row, po)
 
             cw += num_ctas
