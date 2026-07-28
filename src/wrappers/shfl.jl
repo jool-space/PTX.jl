@@ -19,28 +19,32 @@ const SHFL_MODES = (:up, :down, :bfly, :idx)
 
 @inline optype"shfl.sync.idx.b32"(a::UInt32, b::UInt32,
         c::UInt32, membermask::UInt32) =
-    nvvm"shfl.sync.idx.i32"(membermask, a, b, c)
+    ceiled(nvvm"shfl.sync.idx.i32", ptx"shfl.sync.idx.b32")(membermask, a, b, c)
 @inline optype"shfl.sync.idx.b32.pred"(a::UInt32, b::UInt32,
         c::UInt32, membermask::UInt32) =
-    nvvm"shfl.sync.idx.i32p"(membermask, a, b, c)
+    ceiled(nvvm"shfl.sync.idx.i32p",
+           ptx"shfl.sync.idx.b32.pred")(membermask, a, b, c)
 
 @inline optype"shfl.sync.up.b32"(a::UInt32, b::UInt32,
         c::UInt32, membermask::UInt32) =
-    nvvm"shfl.sync.up.i32"(membermask, a, b, c)
+    ceiled(nvvm"shfl.sync.up.i32", ptx"shfl.sync.up.b32")(membermask, a, b, c)
 @inline optype"shfl.sync.up.b32.pred"(a::UInt32, b::UInt32,
         c::UInt32, membermask::UInt32) =
-    nvvm"shfl.sync.up.i32p"(membermask, a, b, c)
+    ceiled(nvvm"shfl.sync.up.i32p",
+           ptx"shfl.sync.up.b32.pred")(membermask, a, b, c)
 
 @inline optype"shfl.sync.down.b32"(a::UInt32, b::UInt32,
         c::UInt32, membermask::UInt32) =
-    nvvm"shfl.sync.down.i32"(membermask, a, b, c)
+    ceiled(nvvm"shfl.sync.down.i32", ptx"shfl.sync.down.b32")(membermask, a, b, c)
 @inline optype"shfl.sync.down.b32.pred"(a::UInt32, b::UInt32,
         c::UInt32, membermask::UInt32) =
-    nvvm"shfl.sync.down.i32p"(membermask, a, b, c)
+    ceiled(nvvm"shfl.sync.down.i32p",
+           ptx"shfl.sync.down.b32.pred")(membermask, a, b, c)
 
 @inline optype"shfl.sync.bfly.b32"(a::UInt32, b::UInt32,
         c::UInt32, membermask::UInt32) =
-    nvvm"shfl.sync.bfly.i32"(membermask, a, b, c)
+    ceiled(nvvm"shfl.sync.bfly.i32", ptx"shfl.sync.bfly.b32")(membermask, a, b, c)
 @inline optype"shfl.sync.bfly.b32.pred"(a::UInt32, b::UInt32,
         c::UInt32, membermask::UInt32) =
-    nvvm"shfl.sync.bfly.i32p"(membermask, a, b, c)
+    ceiled(nvvm"shfl.sync.bfly.i32p",
+           ptx"shfl.sync.bfly.b32.pred")(membermask, a, b, c)

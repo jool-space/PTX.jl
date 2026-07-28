@@ -115,35 +115,47 @@ end
 # --- shift / dealloc / cp -----------------------------------------------------
 
 @inline optype"tcgen05.shift.cta_group::1.down"(taddr::UInt32) =
-    nvvm"tcgen05.shift.down.cg1"(_tmem(taddr))
+    ceiled(nvvm"tcgen05.shift.down.cg1", ptx"tcgen05.shift.cta_group::1.down")(
+        _tmem(taddr))
 @inline optype"tcgen05.shift.cta_group::2.down"(taddr::UInt32) =
-    nvvm"tcgen05.shift.down.cg2"(_tmem(taddr))
+    ceiled(nvvm"tcgen05.shift.down.cg2", ptx"tcgen05.shift.cta_group::2.down")(
+        _tmem(taddr))
 
 @inline optype"tcgen05.dealloc.cta_group::1.sync.aligned.b32"(
         taddr::UInt32, ncols::UInt32) =
-    nvvm"tcgen05.dealloc.cg1"(_tmem(taddr), ncols)
+    ceiled(nvvm"tcgen05.dealloc.cg1",
+           ptx"tcgen05.dealloc.cta_group::1.sync.aligned.b32")(
+        _tmem(taddr), ncols)
 @inline optype"tcgen05.dealloc.cta_group::2.sync.aligned.b32"(
         taddr::UInt32, ncols::UInt32) =
-    nvvm"tcgen05.dealloc.cg2"(_tmem(taddr), ncols)
+    ceiled(nvvm"tcgen05.dealloc.cg2",
+           ptx"tcgen05.dealloc.cta_group::2.sync.aligned.b32")(
+        _tmem(taddr), ncols)
 
 @inline optype"tcgen05.cp.cta_group::1.128x256b"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.128x256b.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.128x256b.cg1",
+           ptx"tcgen05.cp.cta_group::1.128x256b")(_tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.128x256b"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.128x256b.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.128x256b.cg2",
+           ptx"tcgen05.cp.cta_group::2.128x256b")(_tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.4x256b"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.4x256b.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.4x256b.cg1", ptx"tcgen05.cp.cta_group::1.4x256b")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.4x256b"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.4x256b.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.4x256b.cg2", ptx"tcgen05.cp.cta_group::2.4x256b")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.128x128b"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.128x128b.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.128x128b.cg1",
+           ptx"tcgen05.cp.cta_group::1.128x128b")(_tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.128x128b"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.128x128b.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.128x128b.cg2",
+           ptx"tcgen05.cp.cta_group::2.128x128b")(_tmem(taddr), s_desc)
 
 # Multicast shapes (PTX 9.3 §9.7.17.9: `.64x128b` requires one of the
 # `.warpx2::*` pairings, `.32x128b` requires `.warpx4`) and optional
@@ -152,94 +164,152 @@ end
 # (`64x128b_warpx2_02_13`); the notation keeps the ISA's modifier order.
 @inline optype"tcgen05.cp.cta_group::1.128x256b.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.128x256b.b6x16_p32.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.128x256b.b6x16_p32.cg1",
+           ptx"tcgen05.cp.cta_group::1.128x256b.b8x16.b6x16_p32")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.128x256b.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.128x256b.b6x16_p32.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.128x256b.b6x16_p32.cg2",
+           ptx"tcgen05.cp.cta_group::2.128x256b.b8x16.b6x16_p32")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.128x256b.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.128x256b.b4x16_p64.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.128x256b.b4x16_p64.cg1",
+           ptx"tcgen05.cp.cta_group::1.128x256b.b8x16.b4x16_p64")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.128x256b.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.128x256b.b4x16_p64.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.128x256b.b4x16_p64.cg2",
+           ptx"tcgen05.cp.cta_group::2.128x256b.b8x16.b4x16_p64")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.4x256b.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.4x256b.b6x16_p32.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.4x256b.b6x16_p32.cg1",
+           ptx"tcgen05.cp.cta_group::1.4x256b.b8x16.b6x16_p32")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.4x256b.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.4x256b.b6x16_p32.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.4x256b.b6x16_p32.cg2",
+           ptx"tcgen05.cp.cta_group::2.4x256b.b8x16.b6x16_p32")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.4x256b.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.4x256b.b4x16_p64.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.4x256b.b4x16_p64.cg1",
+           ptx"tcgen05.cp.cta_group::1.4x256b.b8x16.b4x16_p64")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.4x256b.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.4x256b.b4x16_p64.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.4x256b.b4x16_p64.cg2",
+           ptx"tcgen05.cp.cta_group::2.4x256b.b8x16.b4x16_p64")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.128x128b.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.128x128b.b6x16_p32.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.128x128b.b6x16_p32.cg1",
+           ptx"tcgen05.cp.cta_group::1.128x128b.b8x16.b6x16_p32")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.128x128b.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.128x128b.b6x16_p32.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.128x128b.b6x16_p32.cg2",
+           ptx"tcgen05.cp.cta_group::2.128x128b.b8x16.b6x16_p32")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.128x128b.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.128x128b.b4x16_p64.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.128x128b.b4x16_p64.cg1",
+           ptx"tcgen05.cp.cta_group::1.128x128b.b8x16.b4x16_p64")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.128x128b.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.128x128b.b4x16_p64.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.128x128b.b4x16_p64.cg2",
+           ptx"tcgen05.cp.cta_group::2.128x128b.b8x16.b4x16_p64")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.64x128b_warpx2_02_13.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_02_13.cg1",
+           ptx"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.64x128b_warpx2_02_13.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_02_13.cg2",
+           ptx"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.64x128b_warpx2_02_13.b6x16_p32.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_02_13.b6x16_p32.cg1",
+           ptx"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13.b8x16.b6x16_p32")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.64x128b_warpx2_02_13.b6x16_p32.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_02_13.b6x16_p32.cg2",
+           ptx"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13.b8x16.b6x16_p32")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.64x128b_warpx2_02_13.b4x16_p64.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_02_13.b4x16_p64.cg1",
+           ptx"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13.b8x16.b4x16_p64")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.64x128b_warpx2_02_13.b4x16_p64.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_02_13.b4x16_p64.cg2",
+           ptx"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13.b8x16.b4x16_p64")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.64x128b_warpx2_01_23.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_01_23.cg1",
+           ptx"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.64x128b_warpx2_01_23.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_01_23.cg2",
+           ptx"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.64x128b_warpx2_01_23.b6x16_p32.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_01_23.b6x16_p32.cg1",
+           ptx"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23.b8x16.b6x16_p32")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.64x128b_warpx2_01_23.b6x16_p32.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_01_23.b6x16_p32.cg2",
+           ptx"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23.b8x16.b6x16_p32")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.64x128b_warpx2_01_23.b4x16_p64.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_01_23.b4x16_p64.cg1",
+           ptx"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23.b8x16.b4x16_p64")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.64x128b_warpx2_01_23.b4x16_p64.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_01_23.b4x16_p64.cg2",
+           ptx"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23.b8x16.b4x16_p64")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.32x128b.warpx4"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.32x128b_warpx4.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.32x128b_warpx4.cg1",
+           ptx"tcgen05.cp.cta_group::1.32x128b.warpx4")(_tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.32x128b.warpx4"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.32x128b_warpx4.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.32x128b_warpx4.cg2",
+           ptx"tcgen05.cp.cta_group::2.32x128b.warpx4")(_tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.32x128b.warpx4.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.32x128b_warpx4.b6x16_p32.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.32x128b_warpx4.b6x16_p32.cg1",
+           ptx"tcgen05.cp.cta_group::1.32x128b.warpx4.b8x16.b6x16_p32")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.32x128b.warpx4.b8x16.b6x16_p32"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.32x128b_warpx4.b6x16_p32.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.32x128b_warpx4.b6x16_p32.cg2",
+           ptx"tcgen05.cp.cta_group::2.32x128b.warpx4.b8x16.b6x16_p32")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::1.32x128b.warpx4.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.32x128b_warpx4.b4x16_p64.cg1"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.32x128b_warpx4.b4x16_p64.cg1",
+           ptx"tcgen05.cp.cta_group::1.32x128b.warpx4.b8x16.b4x16_p64")(
+        _tmem(taddr), s_desc)
 @inline optype"tcgen05.cp.cta_group::2.32x128b.warpx4.b8x16.b4x16_p64"(
         taddr::UInt32, s_desc::UInt64) =
-    nvvm"tcgen05.cp.32x128b_warpx4.b4x16_p64.cg2"(_tmem(taddr), s_desc)
+    ceiled(nvvm"tcgen05.cp.32x128b_warpx4.b4x16_p64.cg2",
+           ptx"tcgen05.cp.cta_group::2.32x128b.warpx4.b8x16.b4x16_p64")(
+        _tmem(taddr), s_desc)
 
 # Integer-address adapters for the literal shift/cp methods above (dealloc
 # takes a bare register per PTX 9.3 §9.7.17.7.1 — no adapter).
@@ -323,25 +393,35 @@ end
 # carrier cannot fall through to generic tcgen05 rendering.
 @inline optype"tcgen05.alloc.cta_group::1.sync.aligned.b32"(
         dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32) =
-    nvvm"tcgen05.alloc.shared.cg1"(dst, ncols)
+    ceiled(nvvm"tcgen05.alloc.shared.cg1",
+           ptx"tcgen05.alloc.cta_group::1.sync.aligned.b32")(dst, ncols)
 @inline optype"tcgen05.alloc.cta_group::2.sync.aligned.b32"(
         dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32) =
-    nvvm"tcgen05.alloc.shared.cg2"(dst, ncols)
+    ceiled(nvvm"tcgen05.alloc.shared.cg2",
+           ptx"tcgen05.alloc.cta_group::2.sync.aligned.b32")(dst, ncols)
 
 @inline optype"tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32"(
         dst::UInt32, ncols::UInt32) =
-    nvvm"tcgen05.alloc.shared.cg1"(_tc_smem(dst), ncols)
+    ceiled(nvvm"tcgen05.alloc.shared.cg1",
+           ptx"tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32")(
+        _tc_smem(dst), ncols)
 @inline optype"tcgen05.alloc.cta_group::2.sync.aligned.shared::cta.b32"(
         dst::UInt32, ncols::UInt32) =
-    nvvm"tcgen05.alloc.shared.cg2"(_tc_smem(dst), ncols)
+    ceiled(nvvm"tcgen05.alloc.shared.cg2",
+           ptx"tcgen05.alloc.cta_group::2.sync.aligned.shared::cta.b32")(
+        _tc_smem(dst), ncols)
 
 @inline optype"tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned"() =
-    nvvm"tcgen05.relinq.alloc.permit.cg1"()
+    ceiled(nvvm"tcgen05.relinq.alloc.permit.cg1",
+           ptx"tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned")()
 @inline optype"tcgen05.relinquish_alloc_permit.cta_group::2.sync.aligned"() =
-    nvvm"tcgen05.relinq.alloc.permit.cg2"()
+    ceiled(nvvm"tcgen05.relinq.alloc.permit.cg2",
+           ptx"tcgen05.relinquish_alloc_permit.cta_group::2.sync.aligned")()
 
-@inline optype"tcgen05.wait::ld.sync.aligned"() = nvvm"tcgen05.wait.ld"()
-@inline optype"tcgen05.wait::st.sync.aligned"() = nvvm"tcgen05.wait.st"()
+@inline optype"tcgen05.wait::ld.sync.aligned"() =
+    ceiled(nvvm"tcgen05.wait.ld", ptx"tcgen05.wait::ld.sync.aligned")()
+@inline optype"tcgen05.wait::st.sync.aligned"() =
+    ceiled(nvvm"tcgen05.wait.st", ptx"tcgen05.wait::st.sync.aligned")()
 
 # Specialized thread-synchronization fences are side-effecting, no-argument
 # code-motion barriers (PTX 9.3 §9.7.17.11.1). Keep them as inline PTX with
@@ -362,30 +442,46 @@ end
 # `.shared::cluster` spelling (see header).
 @inline optype"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64"(
         mbar::Core.LLVMPtr{UInt64, AS.Shared}) =
-    nvvm"tcgen05.commit.shared.cg1"(mbar)
+    ceiled(nvvm"tcgen05.commit.shared.cg1",
+           ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64")(
+        mbar)
 @inline optype"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64"(
         mbar::Core.LLVMPtr{UInt64, AS.Shared}) =
-    nvvm"tcgen05.commit.shared.cg2"(mbar)
+    ceiled(nvvm"tcgen05.commit.shared.cg2",
+           ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64")(
+        mbar)
 
 @inline optype"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cta.b64"(
         mbar::UInt32) =
-    nvvm"tcgen05.commit.shared.cg1"(_tc_smem(mbar))
+    ceiled(nvvm"tcgen05.commit.shared.cg1",
+           ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cta.b64")(
+        _tc_smem(mbar))
 @inline optype"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cta.b64"(
         mbar::UInt32) =
-    nvvm"tcgen05.commit.shared.cg2"(_tc_smem(mbar))
+    ceiled(nvvm"tcgen05.commit.shared.cg2",
+           ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cta.b64")(
+        _tc_smem(mbar))
 @inline optype"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64"(
         mbar::UInt32) =
-    nvvm"tcgen05.commit.shared.cg1"(_tc_smem(mbar))
+    ceiled(nvvm"tcgen05.commit.shared.cg1",
+           ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64")(
+        _tc_smem(mbar))
 @inline optype"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64"(
         mbar::UInt32) =
-    nvvm"tcgen05.commit.shared.cg2"(_tc_smem(mbar))
+    ceiled(nvvm"tcgen05.commit.shared.cg2",
+           ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64")(
+        _tc_smem(mbar))
 
 @inline optype"tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64"(
         mbar::UInt32, mask::Integer) =
-    nvvm"tcgen05.commit.mc.shared.cg1"(_tc_smem(mbar), UInt16(mask))
+    ceiled(nvvm"tcgen05.commit.mc.shared.cg1",
+           ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64")(
+        _tc_smem(mbar), UInt16(mask))
 @inline optype"tcgen05.commit.cta_group::2.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64"(
         mbar::UInt32, mask::Integer) =
-    nvvm"tcgen05.commit.mc.shared.cg2"(_tc_smem(mbar), UInt16(mask))
+    ceiled(nvvm"tcgen05.commit.mc.shared.cg2",
+           ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64")(
+        _tc_smem(mbar), UInt16(mask))
 
 # Integer-address adapters for the literal alloc/commit methods above.
 # The generic-address alloc and pointer commit forms need no entry because
@@ -411,43 +507,45 @@ end
 @inline optype"tcgen05.mma.cta_group::1.kind::f16"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
-    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
-                             Val(0), Val(1), Val(0))
+    ceiled(nvvm"tcgen05.mma.shared", ptx"tcgen05.mma.cta_group::1.kind::f16")(
+        _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(0), Val(1), Val(0))
 @inline optype"tcgen05.mma.cta_group::2.kind::f16"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
-    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
-                             Val(0), Val(2), Val(0))
+    ceiled(nvvm"tcgen05.mma.shared", ptx"tcgen05.mma.cta_group::2.kind::f16")(
+        _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(0), Val(2), Val(0))
 @inline optype"tcgen05.mma.cta_group::1.kind::tf32"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
-    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
-                             Val(1), Val(1), Val(0))
+    ceiled(nvvm"tcgen05.mma.shared", ptx"tcgen05.mma.cta_group::1.kind::tf32")(
+        _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(1), Val(1), Val(0))
 @inline optype"tcgen05.mma.cta_group::2.kind::tf32"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
-    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
-                             Val(1), Val(2), Val(0))
+    ceiled(nvvm"tcgen05.mma.shared", ptx"tcgen05.mma.cta_group::2.kind::tf32")(
+        _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(1), Val(2), Val(0))
 @inline optype"tcgen05.mma.cta_group::1.kind::f8f6f4"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
-    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
-                             Val(2), Val(1), Val(0))
+    ceiled(nvvm"tcgen05.mma.shared",
+           ptx"tcgen05.mma.cta_group::1.kind::f8f6f4")(
+        _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(2), Val(1), Val(0))
 @inline optype"tcgen05.mma.cta_group::2.kind::f8f6f4"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
-    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
-                             Val(2), Val(2), Val(0))
+    ceiled(nvvm"tcgen05.mma.shared",
+           ptx"tcgen05.mma.cta_group::2.kind::f8f6f4")(
+        _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(2), Val(2), Val(0))
 @inline optype"tcgen05.mma.cta_group::1.kind::i8"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
-    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
-                             Val(3), Val(1), Val(0))
+    ceiled(nvvm"tcgen05.mma.shared", ptx"tcgen05.mma.cta_group::1.kind::i8")(
+        _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(3), Val(1), Val(0))
 @inline optype"tcgen05.mma.cta_group::2.kind::i8"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
-    nvvm"tcgen05.mma.shared"(_tmem(d), a_desc, b_desc, idesc, enable_input_d,
-                             Val(3), Val(2), Val(0))
+    ceiled(nvvm"tcgen05.mma.shared", ptx"tcgen05.mma.cta_group::2.kind::i8")(
+        _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(3), Val(2), Val(0))
 
 # --- dense mma completion (generated) -------------------------------------------
 # The remaining PTX 9.3 §9.7.17.10 dense forms are a modifier/operand

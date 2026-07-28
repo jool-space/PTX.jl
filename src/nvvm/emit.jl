@@ -537,14 +537,101 @@ function synthesize(name::String, argtypes)
     return (; ir, rettype, tupletype=Tuple{argtypes[runtime]...}, runtime)
 end
 
+# --- Effect ceiling -----------------------------------------------------------
+#
+# The package's reviewed form contracts are the CEILING on what any lowering
+# route may promise the optimizer: the machine-extracted table attributes may
+# be STRICTER than the contract (a refinement — extra precision like
+# speculatable, !range, param attrs, or a narrower memory location class),
+# but never MORE PERMISSIVE. A permissive-direction divergence means either
+# the table needs a reviewed overlay (CONVERGENT_OVERLAY_PREFIXES,
+# MEMORY_WIDEN_OVERLAY) or the contract needs an ISA review — never a silent
+# pass. The check runs at generation time on every ceiled call site, so a
+# backend bump that relaxes an intrinsic's properties fails loudly at the
+# first use, not in a hardware session.
+#
+# Resolution limit, documented deliberately: within the :memory class the
+# contract cannot rank location claims (argmem vs inaccessiblemem vs
+# unspecified), so a wrong *narrowing* there is invisible to this check —
+# exactly the class the reviewed MEMORY_WIDEN_OVERLAY exists for.
+
+"""
+    observability_class(i::Intrinsic) -> Symbol
+
+The intrinsic's effective (post-overlay) table effects on the contract's
+three-class resolution: `:pure` (deletable), `:observable` (undeletable,
+touches no memory), `:memory` (any location claim, or unspecified).
+"""
+function observability_class(i::Intrinsic)
+    props = effective_memory_props(i)
+    :nomem in props || return :memory
+    return :sideeffects in props ? :observable : :pure
+end
+
+_class_rank(class::Symbol) =
+    class === :pure ? 3 : class === :observable ? 2 : 1   # :memory/:clobbers
+
+"""
+    Ceiling(rank, convergent)
+
+The two ceiling-audited axes of a reviewed form contract, in the isbits
+shape a type parameter requires (`FormContract` carries a `Symbol` field
+and cannot be a type parameter itself). `rank` is the observability class:
+3 = :pure, 2 = :observable, 1 = :clobbers. Constructed PTX-side from a
+`FormContract` (see `_ceiling` in ledgers/forms.jl).
+"""
+struct Ceiling
+    rank::UInt8
+    convergent::Bool
+end
+
+_class_label(rank::UInt8) =
+    rank == 0x03 ? ":pure" : rank == 0x02 ? ":observable" : ":clobbers"
+
+"""
+    check_ceiling(name, ceiling::Union{Ceiling, Nothing}) -> nothing
+
+Error unless the named intrinsic's effective table attributes stay at or
+below the reviewed contract ceiling on both audited axes. `nothing` means
+the call site carries no ceiling (the bare `nvvm""` macro —
+package-internal sites are swept onto `ceiled` by
+test/host/effect_ceiling.jl).
+"""
+function check_ceiling(name::String, ceiling::Union{Ceiling, Nothing})
+    ceiling === nothing && return nothing
+    i = intrinsic(name)
+    tclass = observability_class(i)
+    _class_rank(tclass) <= Int(ceiling.rank) ||
+        error("effect ceiling violated for $name: the backend table renders " *
+              "$(repr(tclass)) but the reviewed contract ceiling is " *
+              "$(_class_label(ceiling.rank)). Either the contract needs an " *
+              "ISA review or the table needs a reviewed overlay (emit.jl).")
+    ceiling.convergent && !is_convergent(i) &&
+        error("effect ceiling violated for $name: the reviewed contract is " *
+              "convergent but the backend table (post-overlay) is not. " *
+              "Either relax the contract with an ISA review or extend " *
+              "CONVERGENT_OVERLAY_PREFIXES (emit.jl).")
+    return nothing
+end
+
 # --- The callable and the macro ---------------------------------------------
 
-struct IntrinsicCall{name} end
+# `contract` is `nothing` (no ceiling — the bare `nvvm""` spelling) or a
+# `Ceiling` value threaded from the call site; it must stay the SECOND
+# parameter (reflection reads `parameters[1]` for the name).
+struct IntrinsicCall{name, contract} end
+
+IntrinsicCall{name}() where {name} = IntrinsicCall{name, nothing}()
 
 Base.show(io::IO, ::IntrinsicCall{name}) where {name} =
     print(io, "nvvm\"", name, "\"")
 
-@generated function (::IntrinsicCall{name})(args...) where {name}
+"Reviewed contract ceiling threaded onto a call site (`nothing` = none)."
+callsite_ceiling(::IntrinsicCall{name, contract}) where {name, contract} =
+    contract
+
+@generated function (::IntrinsicCall{name, contract})(args...) where {name, contract}
+    check_ceiling(String(name), contract)
     s = synthesize(String(name), args)
     call = Expr(:call, GlobalRef(Base, :llvmcall), (s.ir, "entry"),
                 s.rettype, s.tupletype,
@@ -576,5 +663,5 @@ PTX-vocabulary `ptx"..."` notation is the stable surface above this.
 macro nvvm_str(name::String)
     full = startswith(name, "llvm.nvvm.") ? name : "llvm.nvvm." * name
     isintrinsic(full) || error(_miss_message(full))
-    return IntrinsicCall{Symbol(full)}()
+    return IntrinsicCall{Symbol(full), nothing}()
 end
