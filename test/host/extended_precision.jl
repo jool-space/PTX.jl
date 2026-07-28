@@ -106,7 +106,7 @@ end
                        (:mad, (:lo, :s32)), (:mad, (:hi, :sat, :s32)),
                        (:mad24, (:lo, :u32)), (:clmad, (:lo, :u64)))
         @test !PTX.uses_implicit_cc(op, mods)
-        @test PTX.form_contract(op, mods).pure
+        @test PTX.form_contract(op, mods).effects === :pure
     end
 end
 

@@ -277,11 +277,17 @@ end
     @test spec.side_effects == true
     @test occursin("~{memory}", spec.constraints)
 
-    # sm_90 cluster intrinsics — observable cross-CTA visibility.
+    # `mapa` — pure address computation, kept observable (undeletable) but
+    # with no memory clobber: the chain now matches the typed wrapper's
+    # long-standing sideeffect-without-~{memory} rendering.
     spec = build_call(:mapa, (Symbol("shared::cluster",), :u32), (UInt32, UInt32))
     @test spec.side_effects == true
+    @test !occursin("~{memory}", spec.constraints)
+    # getctarank deliberately stays at the full-clobber default pending its
+    # own review.
     spec = build_call(:getctarank, (Symbol("shared::cluster",), :u32), (UInt32,))
     @test spec.side_effects == true
+    @test occursin("~{memory}", spec.constraints)
 
     # `griddepcontrol.wait` — inter-launch dependency, needs barrier.
     spec = build_call(:griddepcontrol, (:wait,), ())
@@ -1352,7 +1358,7 @@ end
     # :fakeop is deliberately unregistered — rendering is exercised with an
     # explicit permissive contract (the registry gate itself is tested in
     # host/inst.jl).
-    fake = PTX.FormContract(pure = true)
+    fake = PTX.FormContract(effects = :pure)
 
     # Hypothetical fma form taking a 4-lane tuple of f32s as the first
     # operand. Not a real PTX op — we just want to exercise the braced

@@ -7,11 +7,21 @@
 # place and one diff. A promise is only ever a *permission* granted to the
 # optimizer:
 #
-#   pure       — safe to delete if unused, CSE duplicates, reorder freely
-#                (false ⇒ asm `sideeffect` + `~{memory}` clobber)
+#   effects    — three-state observability class:
+#                  :pure       safe to delete if unused, CSE duplicates,
+#                              reorder freely (asm: no sideeffect flag)
+#                  :observable never deletable/duplicable, but touches no
+#                              memory LLVM tracks — reorderable past loads
+#                              and stores (asm: `sideeffect`, no `~{memory}`;
+#                              precedent: extended_precision's CC.CF blocks,
+#                              mapa's address computation)
+#                  :clobbers   full memory barrier (asm: `sideeffect` +
+#                              `~{memory}`); the only safe default
 #   convergent — NOT safe to duplicate or merge across divergent branches:
 #                warp-/warpgroup-collective (emitted via convergent_asm_ir
-#                so the call carries `convergent nomerge`; implies !pure)
+#                so the call carries `convergent nomerge`; the renderer
+#                clamps rendered effects to ≥ :observable because that
+#                route structurally always sets `sideeffect`)
 #   brackets   — pointer operands render as `[%addr]` (memory-op syntax)
 #   returns    — scalar result inference may reserve a `$0` output register
 #                (false for sink forms whose dtype tail names an *operand*)
@@ -27,15 +37,22 @@
 # an operand.
 
 struct FormContract
-    pure::Bool
+    effects::Symbol
     convergent::Bool
     brackets::Bool
     returns::Bool
-    function FormContract(; pure::Bool = false, convergent::Bool = false,
+    function FormContract(; effects::Symbol = :clobbers,
+                          convergent::Bool = false,
                           brackets::Bool = false, returns::Bool = true)
-        convergent && pure &&
-            error("FormContract: convergent implies !pure (a collective op is observable)")
-        new(pure, convergent, brackets, returns)
+        effects in (:pure, :observable, :clobbers) ||
+            error("FormContract: effects must be :pure, :observable, or " *
+                  ":clobbers, got $(repr(effects))")
+        # convergent && effects === :pure is a legal *contract* (mma is
+        # register-only compute yet warp-collective); the convergent_asm_ir
+        # route structurally renders it as observable (it always sets
+        # `sideeffect`), so a convergent call can never be DCE'd regardless
+        # of its effects class.
+        new(effects, convergent, brackets, returns)
     end
 end
 
@@ -47,7 +64,7 @@ end
 # `[%addr]`); a raw chain that needs a bare pointer operand should pass the
 # address as an integer instead — either way the failure is a loud ptxas reject,
 # never a miscompile.
-const RAW_CONTRACT = FormContract(pure = false, convergent = true,
+const RAW_CONTRACT = FormContract(effects = :clobbers, convergent = true,
                                   brackets = true, returns = true)
 
 struct FormFamily
@@ -59,7 +76,7 @@ FormFamily(default::FormContract) =
     FormFamily(default, Pair{Tuple{Vararg{Symbol}}, FormContract}[])
 
 # Shorthands for table legibility.
-const _PURE      = FormContract(pure = true)
+const _PURE      = FormContract(effects = :pure)
 const _SIDEFX    = FormContract()                          # sideeffect + clobber
 const _SINK      = FormContract(returns = false)           # sideeffect, no output
 const _MEM       = FormContract(brackets = true)           # memory op, returns
@@ -184,7 +201,14 @@ const FORMS = Dict{Symbol, FormFamily}(
     # sm_90 cluster address queries: observable cross-CTA visibility.
     # (`barrier.cluster` and `clusterlaunchcontrol` carry their own opcode
     # heads; the ISA defines no bare `cluster` instruction — see SURFACE.toml.)
-    :mapa              => FormFamily(_SIDEFX),
+    # `mapa{.space}.u32/.u64 d, a, b;` (PTX 9.4 §9.7.10.13) computes the
+    # corresponding address in another CTA of the cluster: a pure address
+    # calculation with no memory access or ordering effect. :observable
+    # (not :pure) keeps the call undeletable while allowing reordering past
+    # memory ops — matching the shipped typed wrapper in wrappers/mapa.jl,
+    # which already emits sideeffect without ~{memory}. Reviewed relaxation
+    # (was _SIDEFX; the full clobber contradicted the typed wrapper).
+    :mapa              => FormFamily(FormContract(effects = :observable)),
     :getctarank        => FormFamily(_SIDEFX),
 
     # ── Memory ops (bracketed pointer operands) ──────────────────────────
@@ -234,7 +258,14 @@ const FORMS = Dict{Symbol, FormFamily}(
     :bar        => FormFamily(_COLL),           # bar.red returns; bar.sync tail is an id
     :barrier    => FormFamily(_COLL),
     :wgmma      => FormFamily(_COLL),
-    :mma        => FormFamily(_COLL),
+    # `mma.sync` (PTX 9.4 §9.7.16.5.14) is register-only compute: no memory
+    # operand or effect (LLVM's mma surface is nomem), but warp-collective.
+    # convergent + :pure is the reviewed ISA-true contract — CSE within a
+    # block stays legal while duplication across divergence stays forbidden.
+    # Unreachable from the chain tier (typed-wrapper-only); the live
+    # consumer is the effect ceiling on the wrapper-emitted intrinsics.
+    :mma        => FormFamily(FormContract(effects = :pure,
+                                           convergent = true)),
     :setmaxnreg => FormFamily(FormContract(convergent = true, returns = false)),
     :ldmatrix   => FormFamily(_COLLMEM),
     :stmatrix   => FormFamily(FormContract(convergent = true, brackets = true,
@@ -244,6 +275,18 @@ const FORMS = Dict{Symbol, FormFamily}(
         (:commit,) => FormContract(convergent = true, brackets = true, returns = false),
         (:relinquish_alloc_permit,) =>
             FormContract(convergent = true, brackets = true, returns = false),
+        # tcgen05.mma and tcgen05.fence::{before,after}_thread_sync have
+        # SINGLE-THREAD issue semantics (PTX 9.4 §9.7.18.10, §9.7.18.11) —
+        # one thread launches the MMA / orders its own accesses; there is
+        # no cross-lane execution requirement. Reviewed relaxation from the
+        # family-wide convergent default, matching both the .td records and
+        # the deliberate NVVM-tier decision (emit.jl's convergence overlay
+        # explicitly excludes tcgen05.mma).
+        (:mma,) => FormContract(brackets = true, returns = false),
+        (Symbol("fence::before_thread_sync"),) =>
+            FormContract(returns = false),
+        (Symbol("fence::after_thread_sync"),) =>
+            FormContract(returns = false),
     ]),
 )
 

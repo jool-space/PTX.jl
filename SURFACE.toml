@@ -244,7 +244,7 @@ section = "9.7.10.26"
 title = "Data Movement and Conversion Instructions: mapa"
 status = "generic"
 opcodes = ["mapa"]
-notes = "Cluster CTA address mapping (observable cross-CTA visibility, hence not pure); typed wrappers handle the shared::cluster addrspace bookkeeping."
+notes = "Cluster CTA address mapping — a pure address computation held at :observable (undeletable, but no memory clobber; PTX 9.4 §9.7.10.13), matching the typed wrapper's rendering; typed wrappers handle the shared::cluster addrspace bookkeeping."
 owner = ["src/ledgers/forms.jl", "src/wrappers/mapa.jl"]
 
 [[family]]
@@ -436,7 +436,7 @@ section = "9.7.16.5"
 title = "Warp Level Matrix Multiply-Accumulate Instructions: mma"
 status = "strict"
 opcodes = ["mma"]
-notes = "Typed-wrapper-only (shape-dependent grouped fragment operands and results); covers mma.sync dense, block-scaled, .sp/.sp::ordered_metadata sparse, and the b1 forms via generated wrapper families."
+notes = "Typed-wrapper-only (shape-dependent grouped fragment operands and results); covers mma.sync dense, block-scaled, .sp/.sp::ordered_metadata sparse, and the b1 forms via generated wrapper families. Contract is convergent + :pure — register-only compute, warp-collective."
 owner = ["src/wrappers/mma.jl", "src/wrappers/mma_scaled.jl"]
 
 [[family]]
