@@ -439,7 +439,7 @@ end
          (S16,), :intrinsic, NTuple{2, UInt32}),
         (ptx"stmatrix.sync.aligned.m8n8.x2.shared.b16",
          (S16, NTuple{2, UInt32}), :intrinsic, Nothing),
-        (ptx"mbarrier.init.shared.b64", (S64, UInt32), :intrinsic, Nothing),
+        (ptx"mbarrier.init.shared.b64", (S64, UInt32), :asm, Nothing),
         (ptx"cp.async.ca.shared.global",
          (S16, G32, Val{16}), :asm, Nothing),
         (ptx"cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes",

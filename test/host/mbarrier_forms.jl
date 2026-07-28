@@ -495,12 +495,12 @@ end
     for (i, (mods, args)) in enumerate(carrier_misses)
         @test_throws ArgumentError build_call(:mbarrier, mods, args)
         @test_throws ArgumentError build_call(:mbarrier, mods, args; raw = true)
-        # Existing high-level intrinsic wrappers intentionally accept Integer
+        # Existing high-level exact wrappers intentionally accept Integer
         # for u32 counts/u64 states and normalize internally. The schema pins
         # the instruction-at-a-time fallback and raw surfaces; address-space
         # mistakes and forms without that wrapper remain forbidden.
         if i in (3, 5)
-            @test PTX.lowering(Operation{:mbarrier, mods}(), args).tier === :intrinsic
+            @test PTX.lowering(Operation{:mbarrier, mods}(), args).tier === :asm
         else
             @test PTX.lowering(Operation{:mbarrier, mods}(), args).tier === :forbidden
         end

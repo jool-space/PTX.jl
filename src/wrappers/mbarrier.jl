@@ -1,31 +1,30 @@
-# mbarrier (PTX 9.3 §9.7.14.16) — second family migrated to tier-2
-# intrinsic lowering for common pre-9.3 forms. Their sink/state/predicate
-# return shapes fall out of the intrinsic signatures; the complete family,
-# including u32 pending counts and grouped reports, is closed by the exact
-# schema in mbarrier_forms.jl.
+# mbarrier (PTX 9.3 §9.7.14.16) — single-route family: every form lowers
+# through the exact schema in mbarrier_forms.jl to convergent inline asm.
+# The family previously split ten pre-9.3 forms onto NVVM intrinsics; that
+# split was retired deliberately:
+#   - every mbarrier operation is an observable sync effect — there is no
+#     CSE/LICM for intrinsic attributes to unlock, so the second route
+#     bought bookkeeping (ISel cap-floor selection between legacy
+#     `*.shared` and scoped `*.scope.cta.space.cta` names, typed-pointee
+#     compat entries, per-intrinsic selection probes) and no optimization;
+#   - the PTX 9.3 layout/phase_type/report forms and the cluster-space
+#     forms were already asm (no intrinsics / `ptr addrspace(7)` ABI
+#     mismatch at 22.1.7), and the PTX 9.4 multicast::cluster::32b forms
+#     have no upstream intrinsic either — one route instead of three.
+# Emitted-PTX delta vs the intrinsic route, reviewed at demotion: the
+# standalone expect_tx spells legacy `mbarrier.expect_tx.shared.b64` (ISel
+# printed the scoped `.relaxed.cta` spelling — semantically identical per
+# ISA), and static-SMEM symbols materialize through mov/cvt instead of
+# folding into the operand (ptxas folds these in SASS).
 #
-# Intrinsic choice per form is dictated by the cap floor: the new-style
-# scoped intrinsics (`*.scope.cta.space.cta`) carry ISel predicates, and a
-# form with an sm_90 operand cannot select below it — the count-form
-# `arrive.scope.cta.space.cta` fails at sm_80 (verified against llc
-# 22.1.7). So:
-#   - sm_80 forms (init, inval, arrive, arrive.noComplete, test_wait) use
-#     the legacy `*.shared` intrinsics, preserving the sm_80 floor;
-#   - the parity waits use the scoped intrinsics (no legacy form exists at
-#     22.1.7) — these select the unqualified sm_80 spelling, floor intact;
-#   - sm_90-only forms (expect_tx, arrive.expect_tx, try_wait*) use the
-#     scoped intrinsics.
-#
-# Cluster-space (`shared::cluster`) sink-destination forms stay on the asm
-# tier below: their intrinsics take `ptr addrspace(7)` and the package
-# currently models cluster-mapped addresses (from mapa.shared::cluster) as
-# AS 3 — they migrate together with proper AS-7 modeling.
+# Cluster-mapped addresses (from mapa.shared::cluster) are modeled as AS 3
+# throughout the package; see the sink-destination forms below.
 
-# Exact asm-tier methods retain their integer-normalizing convenience
-# signatures, but delegate construction to the same closed schema as the
-# generic and raw paths. In particular, this routes every one through
-# `convergent_asm_ir`, keeping the call-site `convergent nomerge` contract
-# consistent with all llvm.nvvm.mbarrier.* intrinsics.
+# Exact methods retain their integer-normalizing convenience signatures
+# (the ledger deliberately rejects Int64 at :u32 operand positions), but
+# delegate construction to the same closed schema as the generic and raw
+# paths. This routes every form through `convergent_asm_ir`, so the whole
+# family carries one call-site `convergent nomerge` + `~{memory}` contract.
 @generated function _mbarrier_schema_call(
         ::Operation{:mbarrier, mods}, args::Vararg{Any,N}) where {mods,N}
     _chain_call_expr(build_call(:mbarrier, mods, args))
@@ -33,54 +32,61 @@ end
 
 @inline optype"mbarrier.init.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, count::Integer) where T =
-    nvvm"mbarrier.init.shared"(mbar, UInt32(count))
+    _mbarrier_schema_call(ptx"mbarrier.init.shared.b64", mbar, UInt32(count))
 
 @inline optype"mbarrier.inval.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"mbarrier.inval.shared"(mbar)
+    _mbarrier_schema_call(ptx"mbarrier.inval.shared.b64", mbar)
 
 @inline optype"mbarrier.arrive.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"mbarrier.arrive.shared"(mbar)
+    _mbarrier_schema_call(ptx"mbarrier.arrive.shared.b64", mbar)
 
 # `count` is a per-thread arrive count (same as calling arrive `count`
 # times). The caller must choose it so this noComplete operation cannot finish
 # the phase; reaching completion is undefined behavior.
 @inline optype"mbarrier.arrive.noComplete.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, count::Integer) where T =
-    nvvm"mbarrier.arrive.noComplete.shared"(mbar, UInt32(count))
+    _mbarrier_schema_call(ptx"mbarrier.arrive.noComplete.shared.b64",
+                          mbar, UInt32(count))
 
 # (sm_90+) Fused expect+arrive: first increments tx-count by `tx_count`, then
 # performs one arrive-on operation, decrementing pending arrivals by 1.
 @inline optype"mbarrier.arrive.expect_tx.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, tx_count::Integer) where T =
-    nvvm"mbarrier.arrive.expect.tx.scope.cta.space.cta"(mbar, UInt32(tx_count))
+    _mbarrier_schema_call(ptx"mbarrier.arrive.expect_tx.shared.b64",
+                          mbar, UInt32(tx_count))
 
 # (sm_90+) Standalone form: no arrive, no state output.
 @inline optype"mbarrier.expect_tx.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, tx_count::Integer) where T =
-    nvvm"mbarrier.expect.tx.scope.cta.space.cta"(mbar, UInt32(tx_count))
+    _mbarrier_schema_call(ptx"mbarrier.expect_tx.shared.b64",
+                          mbar, UInt32(tx_count))
 
 # Token form: pass the UInt64 returned by a prior arrive on the same mbar.
 @inline optype"mbarrier.test_wait.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, state::Integer) where T =
-    nvvm"mbarrier.test.wait.shared"(mbar, UInt64(state))
+    _mbarrier_schema_call(ptx"mbarrier.test_wait.shared.b64",
+                          mbar, UInt64(state))
 
 # Phase form: pass a 0/1 phase parity bit; returns true once a full arrive
 # cycle has completed.
 @inline optype"mbarrier.test_wait.parity.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, phase::Integer) where T =
-    nvvm"mbarrier.test.wait.parity.scope.cta.space.cta"(mbar, UInt32(phase))
+    _mbarrier_schema_call(ptx"mbarrier.test_wait.parity.shared.b64",
+                          mbar, UInt32(phase))
 
 # (sm_90+) Suspend-allowing wait — hardware may park the warp on miss
 # instead of returning false immediately.
 @inline optype"mbarrier.try_wait.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, state::Integer) where T =
-    nvvm"mbarrier.try.wait.scope.cta.space.cta"(mbar, UInt64(state))
+    _mbarrier_schema_call(ptx"mbarrier.try_wait.shared.b64",
+                          mbar, UInt64(state))
 
 @inline optype"mbarrier.try_wait.parity.shared.b64"(
         mbar::Core.LLVMPtr{T, AS.Shared}, phase::Integer) where T =
-    nvvm"mbarrier.try.wait.parity.scope.cta.space.cta"(mbar, UInt32(phase))
+    _mbarrier_schema_call(ptx"mbarrier.try_wait.parity.shared.b64",
+                          mbar, UInt32(phase))
 
 # --- Cluster-scope variants (sm_90+), asm tier ------------------------------
 # `mbarrier.arrive.shared::cluster.b64` requires a `_` (sink) destination

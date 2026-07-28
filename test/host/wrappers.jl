@@ -513,46 +513,47 @@ end
     end
 end
 
-@testset "mbarrier wrapper (tier-2 intrinsic lowering)" begin
-    # Second migrated family: the ten ::cta forms lower through
-    # llvm.nvvm.mbarrier.* — legacy *.shared intrinsics where the form is
-    # sm_80 (the scoped count-form arrive can't ISel below sm_90), scoped
-    # *.scope.cta.space.cta for parity waits (no legacy exists) and the
-    # sm_90 forms. Goldens: test/golden/mbarrier@sm{80,90}.ptx. The
-    # cluster-space sink forms stay asm-tier pending AS-7 modeling.
+@testset "mbarrier wrapper (single-route asm lowering)" begin
+    # The whole family lowers through the mbarrier_forms schema to
+    # convergent inline asm — the ten former tier-2 forms were demoted
+    # (observable sync effects gain nothing from intrinsic attributes, and
+    # the 9.3 report forms, cluster-space sinks, and 9.4 multicast forms
+    # have no intrinsics anyway). Every call site carries the family-wide
+    # sideeffect + ~{memory} + convergent nomerge contract. Goldens:
+    # test/golden/mbarrier@sm{80,90}.ptx.
     pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
     cases = [
         ((:init, :shared, :b64),                (pS, UInt32), Nothing,
-            "llvm.nvvm.mbarrier.init.shared"),
+            "mbarrier.init.shared.b64 ["),
         ((:inval, :shared, :b64),               (pS,),        Nothing,
-            "llvm.nvvm.mbarrier.inval.shared"),
+            "mbarrier.inval.shared.b64 ["),
         ((:arrive, :shared, :b64),              (pS,),        UInt64,
-            "llvm.nvvm.mbarrier.arrive.shared"),
+            "mbarrier.arrive.shared.b64 "),
         ((:arrive, :noComplete, :shared, :b64), (pS, UInt32), UInt64,
-            "llvm.nvvm.mbarrier.arrive.noComplete.shared"),
+            "mbarrier.arrive.noComplete.shared.b64 "),
         ((:arrive, :expect_tx, :shared, :b64),  (pS, UInt32), UInt64,
-            "llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta"),
+            "mbarrier.arrive.expect_tx.shared.b64 "),
         ((:expect_tx, :shared, :b64),           (pS, UInt32), Nothing,
-            "llvm.nvvm.mbarrier.expect.tx.scope.cta.space.cta"),
+            "mbarrier.expect_tx.shared.b64 ["),
         ((:test_wait, :shared, :b64),           (pS, UInt64), Bool,
-            "llvm.nvvm.mbarrier.test.wait.shared"),
+            "mbarrier.test_wait.shared.b64 "),
         ((:test_wait, :parity, :shared, :b64),  (pS, UInt32), Bool,
-            "llvm.nvvm.mbarrier.test.wait.parity.scope.cta.space.cta"),
+            "mbarrier.test_wait.parity.shared.b64 "),
         ((:try_wait, :shared, :b64),            (pS, UInt64), Bool,
-            "llvm.nvvm.mbarrier.try.wait.scope.cta.space.cta"),
+            "mbarrier.try_wait.shared.b64 "),
         ((:try_wait, :parity, :shared, :b64),   (pS, UInt32), Bool,
-            "llvm.nvvm.mbarrier.try.wait.parity.scope.cta.space.cta"),
+            "mbarrier.try_wait.parity.shared.b64 "),
     ]
-    for (mods, argts, rettype, intr) in cases
-        # the intrinsic is registered and convergent
-        @test PTX.NVVM.isintrinsic(intr)
-        @test :convergent in PTX.NVVM.intrinsic(intr).props
-        # the method dispatches and routes to that intrinsic
+    for (mods, argts, rettype, asm) in cases
         op = Operation{:mbarrier, mods}()
         @test which(op, argts).module == PTX
         ci, rt = first(Base.code_typed(op, argts))
+        code = string(ci)
         @test rt === rettype
-        @test occursin(intr, string(ci))
+        @test occursin(asm, code)
+        # single-route contract: no intrinsic call, full asm effect set
+        @test !occursin("llvm.nvvm.mbarrier", code)
+        @test occursin("~{memory}", code)
     end
 
     # integer-flexible signatures still convert (count::Integer etc.)

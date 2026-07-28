@@ -131,9 +131,10 @@ end
 
 # --- mbarrier: ::cta forms at their cap floors -------------------------------
 # Two goldens: the sm_80 subset pins the cap floor (no sm_90-only forms),
-# sm_90 adds expect_tx and try_wait. Cluster-space (`shared::cluster`) sink
-# forms are not in the goldens: they stay asm-tier until cluster addresses
-# are modeled as addrspace(7) (see wrappers/mbarrier.jl).
+# sm_90 adds expect_tx and try_wait. The family is single-route asm (see
+# wrappers/mbarrier.jl): the goldens pin the ledger's legacy spellings and
+# the static-SMEM address materialization the asm route implies.
+# Cluster-space (`shared::cluster`) sink forms are not in the goldens.
 
 function _golden_mbarrier_sm80!(out::CuDeviceVector{UInt64, 1})
     bar = CuStaticSharedArray(Int64, 1)

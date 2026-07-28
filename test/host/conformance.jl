@@ -183,29 +183,13 @@ const PROBES = Tuple{String, Tuple, String, String, Regex}[
         (pS8, UInt32, UInt32, UInt32, UInt32), "sm_100a", "+ptx86",
         r"stmatrix\.sync\.aligned\.m16n8\.x4\.trans\.shared\.b8 \s*\[%rd?\d+\], \{%r\d+, %r\d+, %r\d+, %r\d+\};"),
 
-    # mbarrier (wrappers/mbarrier.jl) — legacy intrinsics at the sm_80
-    # floor, scoped ones for parity and the sm_90 forms; expected spellings
-    # per the golden diffs (expect_tx emits its explicit default)
-    ("llvm.nvvm.mbarrier.init.shared",
-        (pS, UInt32), "sm_80", "+ptx71", r"mbarrier\.init\.shared\.b64"),
-    ("llvm.nvvm.mbarrier.inval.shared",
-        (pS,), "sm_80", "+ptx71", r"mbarrier\.inval\.shared\.b64"),
-    ("llvm.nvvm.mbarrier.arrive.shared",
-        (pS,), "sm_80", "+ptx71", r"mbarrier\.arrive\.shared\.b64"),
-    ("llvm.nvvm.mbarrier.arrive.noComplete.shared",
-        (pS, UInt32), "sm_80", "+ptx71", r"mbarrier\.arrive\.noComplete\.shared\.b64"),
-    ("llvm.nvvm.mbarrier.test.wait.shared",
-        (pS, UInt64), "sm_80", "+ptx71", r"mbarrier\.test_wait\.shared\.b64"),
-    ("llvm.nvvm.mbarrier.test.wait.parity.scope.cta.space.cta",
-        (pS, UInt32), "sm_80", "+ptx71", r"mbarrier\.test_wait\.parity\.shared\.b64"),
-    ("llvm.nvvm.mbarrier.expect.tx.scope.cta.space.cta",
-        (pS, UInt32), "sm_90", "+ptx80", r"mbarrier\.expect_tx\.relaxed\.cta\.shared\.b64"),
+    # mbarrier is single-route asm since the demotion (see
+    # wrappers/mbarrier.jl); no src literal remains, so no probes are
+    # required. This one intrinsic keeps a probe because
+    # test/ptxas/nvvm.jl exercises it directly as a tier-2 registry
+    # regression fixture.
     ("llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta",
         (pS, UInt32), "sm_90", "+ptx80", r"mbarrier\.arrive\.expect_tx\.shared\.b64"),
-    ("llvm.nvvm.mbarrier.try.wait.scope.cta.space.cta",
-        (pS, UInt64), "sm_90", "+ptx80", r"mbarrier\.try_wait\.shared\.b64"),
-    ("llvm.nvvm.mbarrier.try.wait.parity.scope.cta.space.cta",
-        (pS, UInt32), "sm_90", "+ptx80", r"mbarrier\.try_wait\.parity\.shared\.b64"),
 
     # TMA (wrappers/tma.jl) — g2s takes (dst p7, mbar p3, tmap p0, coords,
     # mc i16, ch i64, flag_mc, flag_ch, cta_group); g2s.cta and s2g drop the
