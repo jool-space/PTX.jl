@@ -22,7 +22,8 @@ function _render_cvt_source(op::Operand, cg::CodeGenState, kind::Symbol,
         op = RegisterOperand(op.name)
     end
 
-    data_operand = !(schema.scaled && index == length(schema.operands)) &&
+    data_operand = !(schema.scaled !== :none &&
+                     index == length(schema.operands)) &&
                    !(schema.stochastic && index == length(schema.operands))
     predefined = op isa LabelOperand &&
                  _predefined_immediate_expr(op.name) !== nothing

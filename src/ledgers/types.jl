@@ -37,6 +37,7 @@ const DTYPE_RETTYPE = Dict{Symbol, Type}(
     :e2m3x4 => UInt32, :e3m2x4 => UInt32,
     :ue8m0x2 => UInt16,
     :s2f6x2  => UInt16,
+    :ue5m3x2 => UInt16,       # PTX ISA 9.4 (sm_107f): two ue5m3 in b16
 )
 
 # Ordinary `cvt` grammar is `cvt.<modifiers...>.<dst>.<src>` — destination is

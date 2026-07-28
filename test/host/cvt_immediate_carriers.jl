@@ -1,5 +1,5 @@
 # Independent test-side reconstruction of the ordinary-cvt source ABI from
-# PTX ISA 9.3 §9.7.9.22. The expected keys and operand roles are not derived
+# PTX ISA 9.4 §9.7.10.24. The expected keys and operand roles are not derived
 # from ORDINARY_CVT_SOURCE_SCHEMAS, so a production-ledger edit cannot narrow
 # its own oracle.
 
@@ -14,6 +14,8 @@ const _EXPECTED_CVT_SOURCE_CARRIERS = Dict(
     :e2m1x2 => :b16,
     :e2m3x2 => :b16, :e3m2x2 => :b16,
     :ue8m0x2 => :b16, :s2f6x2 => :b16,
+    # ue5m3x2 (PTX ISA 9.4, sm_107f): two ue5m3 packed in b16.
+    :ue5m3x2 => :b16,
 )
 
 @testset "PTX integer constant evaluator uses fixed s64/u64 semantics" begin
@@ -40,9 +42,9 @@ const _EXPECTED_CVT_SOURCE_CARRIERS = Dict(
 end
 
 function _expected_ordinary_cvt_source_schemas()
-    expected = Dict{Tuple{Symbol,Symbol,Bool,Bool},NamedTuple}()
+    expected = Dict{Tuple{Symbol,Symbol,Bool,Symbol},NamedTuple}()
     add!(destination, source, operands;
-         stochastic = false, scaled = false, vector_source = false) = begin
+         stochastic = false, scaled = :none, vector_source = false) = begin
         key = (destination, source, stochastic, scaled)
         @assert !haskey(expected, key)
         expected[key] = (; operands, vector_source)
@@ -63,8 +65,9 @@ function _expected_ordinary_cvt_source_schemas()
     end
     add!(:tf32, :f32, (:f32,))
 
-    # FP8, FP4, and FP6 x2 down/up-conversion cross-products.
-    narrow_x2 = (:e4m3x2, :e5m2x2, :e2m1x2, :e2m3x2, :e3m2x2)
+    # FP8, FP4, FP6, and (PTX ISA 9.4) UE5M3 x2 down/up-conversion
+    # cross-products.
+    narrow_x2 = (:e4m3x2, :e5m2x2, :e2m1x2, :e2m3x2, :e3m2x2, :ue5m3x2)
     for destination in narrow_x2
         add!(destination, :f32, (:f32, :f32))
         for source in (:f16x2, :bf16x2)
@@ -85,14 +88,26 @@ function _expected_ordinary_cvt_source_schemas()
     add!(:s2f6x2, :bf16x2, (:b32,))
     add!(:bf16x2, :s2f6x2, (:b16,))
 
-    # Optional packed ue8m0 scaling is a trailing b16 source role.
+    # Optional packed ue8m0 scaling (.scaled::n2::ue8m0) is a trailing b16
+    # source role.
     for source in (:e4m3x2, :e5m2x2, :e2m1x2,
-                   :e2m3x2, :e3m2x2, :s2f6x2)
+                   :e2m3x2, :e3m2x2, :s2f6x2, :ue5m3x2)
         add!(:bf16x2, source,
-             (_EXPECTED_CVT_SOURCE_CARRIERS[source], :b16); scaled = true)
+             (_EXPECTED_CVT_SOURCE_CARRIERS[source], :b16); scaled = :n2)
     end
-    add!(:s2f6x2, :f32, (:f32, :f32, :b16); scaled = true)
-    add!(:s2f6x2, :bf16x2, (:b32, :b16); scaled = true)
+    add!(:s2f6x2, :f32, (:f32, :f32, :b16); scaled = :n2)
+    add!(:s2f6x2, :bf16x2, (:b32, :b16); scaled = :n2)
+
+    # Single-scale .scaled::n1::ue8m0 (PTX ISA 9.4, sm_107f): every narrow
+    # down-convert destination from f32 or either packed 16-bit float. The
+    # scale factor is physically b8, carried as b16 (no i8 constraint).
+    for destination in narrow_x2
+        add!(destination, :f32, (:f32, :f32, :b16); scaled = :n1)
+        for source in (:f16x2, :bf16x2)
+            add!(destination, source,
+                 (_EXPECTED_CVT_SOURCE_CARRIERS[source], :b16); scaled = :n1)
+        end
+    end
 
     # Stochastic packed-x4 forms take one four-register f32 vector plus a
     # separately declared b32 random-bits register.
@@ -104,7 +119,7 @@ function _expected_ordinary_cvt_source_schemas()
 end
 
 @testset "ordinary cvt source-carrier ledger" begin
-    @test length(_EXPECTED_CVT_SOURCE_CARRIERS) == 21
+    @test length(_EXPECTED_CVT_SOURCE_CARRIERS) == 22
     @test Dict(PTX.ORDINARY_CVT_SOURCE_CARRIERS) ==
           _EXPECTED_CVT_SOURCE_CARRIERS
 
@@ -113,8 +128,8 @@ end
         (schema.destination, schema.source, schema.stochastic, schema.scaled) =>
             schema
         for schema in PTX.ORDINARY_CVT_SOURCE_SCHEMAS)
-    @test length(expected) == 193
-    @test length(actual) == 193
+    @test length(expected) == 217
+    @test length(actual) == 217
     @test Set(keys(actual)) == Set(keys(expected))
     @test count(key -> key[1] in
                 (:u8, :u16, :u32, :u64, :s8, :s16, :s32, :s64,
@@ -123,7 +138,9 @@ end
                 (:u8, :u16, :u32, :u64, :s8, :s16, :s32, :s64,
                  :bf16, :f16, :f32, :f64), keys(actual)) == 144
     @test count(key -> key[3], keys(actual)) == 7
-    @test count(key -> key[4], keys(actual)) == 8
+    @test count(key -> key[4] === :n2, keys(actual)) == 9
+    @test count(key -> key[4] === :n1, keys(actual)) == 18
+    @test count(key -> key[4] === :none, keys(actual)) == 190
 
     for (key, want) in expected
         schema = actual[key]
@@ -146,6 +163,26 @@ end
         (:rn, :scaled__n2__ue8m0, :bf16x2, :e4m3x2))
     @test parsed_scaled === direct_scaled
     @test parsed_scaled.operands == (:b16, :b16)
+    @test parsed_scaled.scaled === :n2
+
+    # PTX ISA 9.4: single-scale n1 selects its own schema (extra b16 role);
+    # rounding-mode and .pzo prefixes stay structural pass-throughs.
+    n1 = PTX.schema(PTX.CvtLedger(), :cvt,
+        (:rz, :satfinite, :pzo, Symbol("scaled::n1::ue8m0"), :e4m3x2, :f32))
+    @test n1.scaled === :n1
+    @test n1.operands == (:f32, :f32, :b16)
+    n1_16 = PTX.schema(PTX.CvtLedger(), :cvt,
+        (:rn, :satfinite, :scaled__n1__ue8m0, :ue5m3x2, :bf16x2))
+    @test n1_16.operands == (:b32, :b16)
+
+    # PTX ISA 9.4 ue5m3x2: ordinary down/up-convert schemas.
+    ue5m3 = PTX.schema(PTX.CvtLedger(), :cvt, (:rp, :ue5m3x2, :f32))
+    @test ue5m3.operands == (:f32, :f32)
+    @test PTX.schema(PTX.CvtLedger(), :cvt,
+        (:rn, :f16x2, :ue5m3x2)).operands == (:b16,)
+    @test PTX.schema(PTX.CvtLedger(), :cvt,
+        (:rn, :scaled__n2__ue8m0, :bf16x2, :ue5m3x2)).operands ==
+        (:b16, :b16)
 
     # The ledger closes terminal destination/source pairs and structural
     # rs/scaled operand roles. It intentionally leaves the large legal prefix
@@ -163,6 +200,12 @@ end
          :bf16x2, :e4m3x2),
         (:rs, :f32, :s32),
         (:rn, :scaled__n2__ue8m0, :f32, :s32),
+        # n1 and n2 cannot combine, and n1 has no fundamental-pair forms.
+        (:rn, :scaled__n1__ue8m0, :scaled__n2__ue8m0, :bf16x2, :e4m3x2),
+        (:rn, :scaled__n1__ue8m0, :f32, :s32),
+        # n1 up-converts and n2 down-converts do not exist in the ISA.
+        (:rn, :scaled__n1__ue8m0, :f16x2, :ue5m3x2),
+        (:rn, :satfinite, :scaled__n2__ue8m0, :e4m3x2, :f32),
     )
         @test_throws ArgumentError PTX.schema(PTX.CvtLedger(), :cvt, mods)
     end
