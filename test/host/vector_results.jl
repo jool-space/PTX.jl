@@ -145,7 +145,7 @@ end
     # rejected by CUDA 13.3 ptxas with "Unknown modifier '.b16x2'".
     rejected = (:global, :v4, :b16x2, :min, :noftz)
     @test PTX.schema(PTX.VectorLedger(), :atom, rejected) === nothing
-    @test PTX.claims(PTX.VectorLedger(), :atom, rejected)
+    @test PTX.island_of(:atom, rejected) === PTX.VectorLedger()
     @test_throws ArgumentError PTX.build_call(
         :atom, rejected,
         (Core.LLVMPtr{UInt8,PTX.AS.Global}, NTuple{4,UInt32}))

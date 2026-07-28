@@ -258,26 +258,8 @@ length(_SCALAR_RESULT_SCHEMA_BY_FORM) == length(SCALAR_RESULT_SCHEMAS) ||
 schema(::ScalarLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     get(_SCALAR_RESULT_SCHEMA_BY_FORM, (op, mods), nothing)
 
-function claims(::ScalarLedger, op::Symbol,
-                mods::Tuple{Vararg{Symbol}})
-    op in (:popc, :clz, :dp2a, :dp4a) && return true
-    op in (:mul, :mad) && :wide in mods && return true
-    op === :cvt && :pack in mods && return true
-    # Base `prmt.b32` is terminal-inference-safe. Every mode suffix changes the
-    # terminal token away from the b32 result, so only that exact base spelling
-    # may bypass the closed six-mode ledger.
-    op === :prmt && mods != (:b32,) && return true
-    op in (:add, :sub, :neg, :min, :max) &&
-        any(t -> t in (:u16x2, :s16x2, :u8x4, :s8x4), mods) && return true
-    op in (:min, :max) && :relu in mods && return true
-    if op in (:add, :sub, :fma)
-        # Any permutation containing both the fixed f32 result token and a
-        # narrow multiplicand token belongs to this island, so malformed
-        # modifier orders cannot fall back to terminal inference.
-        :f32 in mods && any(t -> t in (:f16, :bf16), mods) && return true
-    end
-    false
-end
+# The scalar island's routing predicate lives in `island_of`
+# (src/ledgers/protocol.jl); this file owns the schemas it routes to.
 
 function miss(::ScalarLedger, op::Symbol,
               mods::Tuple{Vararg{Symbol}})

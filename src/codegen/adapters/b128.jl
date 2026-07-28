@@ -18,7 +18,7 @@ function _instruction_b128_schema(cg::CodeGenState, inst::Instruction)
     op = Symbol(inst.opcode)
     mods = _schema_modifiers(inst.modifiers)
     s = schema(B128Ledger(), op, mods)
-    s === nothing && claims(B128Ledger(), op, mods) &&
+    s === nothing && island_of(op, mods) isa B128Ledger &&
         throw(miss(B128Ledger(), op, mods))
     s === nothing && return nothing
 

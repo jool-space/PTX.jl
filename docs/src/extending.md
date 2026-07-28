@@ -122,9 +122,11 @@ The ledgers own every chain form whose result/operand ABI the generic
 dtype rule cannot recover:
 
 Every ledger implements the shared protocol in
-`src/ledgers/protocol.jl` (`claims`/`schema`/`miss`/
-`validate_ledger_args` on a singleton handle), and every consumer walks
-the single `CALL_LEDGERS` consultation order defined there.
+`src/ledgers/protocol.jl` (`schema`/`miss`/`validate_ledger_args` on a
+singleton handle), and every consumer routes through the single
+`island_of(op, mods)` partition function defined there: each spelling
+belongs to at most one island, and a routed spelling either resolves a
+schema or fails loud with that island's `miss`.
 
 | Ledger | Owns |
 |---|---|
@@ -144,20 +146,20 @@ deliberately independent reconstructions of the grammar — update the
 oracle's generator to *derive* the new expectation; never make it read
 the source ledger.
 
-**Adding a new ledger** is a structural change, but the consultation
-sequence lives in exactly ONE place: `CALL_LEDGERS` in
-`src/ledgers/protocol.jl`. A new ledger is:
+**Adding a new ledger** is a structural change, but the routing lives
+in exactly ONE place: `island_of` in `src/ledgers/protocol.jl`. A new
+ledger is:
 
 1. a singleton handle `struct MyLedger <: FormLedger end` in
-   `protocol.jl`, added to `CALL_LEDGERS` at its reviewed position in
-   the consultation order (this single edit orders it for `build_call`,
-   `lowering`, result-ABI inference, and the transpiler simultaneously);
+   `protocol.jl`, plus an arm in `island_of` naming the opcodes (and
+   any modifier markers) that belong to the island (this single edit
+   routes it for `build_call`, `lowering`, result-ABI inference, and
+   the transpiler simultaneously — and its placement decides any
+   overlap with existing islands explicitly, rather than by consult
+   order);
 2. the protocol methods in the new `src/ledgers/<my_ledger>.jl` file —
-   `claims(::MyLedger, op, mods)`, `schema(::MyLedger, op, mods)`,
-   `miss(::MyLedger, op, mods)`, and
-   `validate_ledger_args(::MyLedger, s, argtypes)` (plus
-   `prevalidates_call(::MyLedger) = true` if arguments must be checked
-   at consult time rather than by a builder);
+   `schema(::MyLedger, op, mods)`, `miss(::MyLedger, op, mods)`, and
+   `validate_ledger_args(::MyLedger, s, argtypes)`;
 3. the four consumer dispatch methods:
    `build_ledger_call(::MyLedger, s, argtypes, contract)` in
    `src/dsl/render.jl` (omit it if the form lowers through `build_call`'s
@@ -167,15 +169,18 @@ sequence lives in exactly ONE place: `CALL_LEDGERS` in
    `transpile_ledger!(::MyLedger, cg, inst)` with its
    `_instruction_*`-style adapter in `src/codegen/adapters/`;
 4. the include order in `src/PTX.jl` (ledger files load after
-   `protocol.jl`).
+   `protocol.jl`), and the routing-invariant testset in
+   `test/host/fallback_boundary.jl` ("island partition covers every
+   reviewed schema key"), which pins that every schema key routes back
+   to the island that owns it.
 
-`lowering` needs no per-ledger work: it walks `CALL_LEDGERS` through the
-shared `lowering_entry`, so reflection and reality cannot drift. The
-transpiler consults the same order twice: the module *preflight*
-(`_validate_exact_schema!` in `src/codegen/contract.jl`) walks it with
-the scalar boundary check deferred to the tail (`mov.b128`-class forms
-must reach the b128 consult first), and emission (`emit_instruction!`)
-walks it shielded by that preflight.
+`lowering` needs no per-ledger work: it routes through `island_of` into
+the shared `lowering_entry`, so reflection and reality cannot drift.
+The transpiler routes twice: the module *preflight*
+(`_validate_exact_schema!` in `src/codegen/contract.jl`) probes each
+island's adapter with the scalar boundary check deferred to the tail
+(`mov.b128`-class forms have no scalar result ABI), and emission
+(`emit_instruction!`) routes shielded by that preflight.
 
 ## Recipe D: typed-wrapper-only families
 

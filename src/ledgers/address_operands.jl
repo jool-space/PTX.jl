@@ -185,10 +185,7 @@ schema(::CLCLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     op === :clusterlaunchcontrol ? get(CLC_TRY_CANCEL_FORMS, mods, nothing) :
     nothing
 
-claims(::CLCLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    op === :clusterlaunchcontrol && (:try_cancel in mods)
-
-# `op` is always :clusterlaunchcontrol for a claimed miss; spelling is fixed.
+# `op` is always :clusterlaunchcontrol for a routed miss; spelling is fixed.
 function miss(::CLCLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? "clusterlaunchcontrol" :
                "clusterlaunchcontrol." * join(mods, ".")

@@ -233,14 +233,6 @@ const B128_FORM_SCHEMAS = _b128_form_schemas()
 schema(::B128Ledger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     get(B128_FORM_SCHEMAS, (op, mods), nothing)
 
-function claims(::B128Ledger, op::Symbol,
-                mods::Tuple{Vararg{Symbol}})
-    :b128 in mods || return false
-    op in (:mov, :ld, :ldu, :st, :atom) && return true
-    op === :clusterlaunchcontrol && :query_cancel in mods && return true
-    false
-end
-
 function miss(::B128Ledger, op::Symbol, mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))
     ArgumentError(

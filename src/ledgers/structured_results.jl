@@ -206,11 +206,8 @@ length(STRUCTURED_RESULT_SCHEMAS) == 1134 ||
 schema(::StructuredLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     get(_STRUCTURED_RESULT_SCHEMA_BY_FORM, (op, mods), nothing)
 
-# The claim is opcode-wide: every setp/lop3/match/elect/testp/isspacep
-# spelling must hit an exact reviewed form, whatever its mods.
-claims(::StructuredLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    op in (:setp, :lop3, :match, :elect, :testp, :isspacep)
-
+# The island is opcode-wide (see `island_of`): every setp/lop3/match/elect/
+# testp/isspacep spelling must hit an exact reviewed form, whatever its mods.
 function miss(::StructuredLedger, op::Symbol,
               mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))

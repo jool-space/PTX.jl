@@ -103,14 +103,12 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
         "that dependency. Use PTX.add_with_carry, PTX.sub_with_borrow, or " *
         "PTX.mul_wide in Julia source."))
 
-    # The closed grammar islands, consulted in the shared CALL_LEDGERS order.
-    # This selection is behavior-shielded by the module preflight
+    # The closed grammar islands, routed by `island_of` (protocol.jl). This
+    # selection is behavior-shielded by the module preflight
     # (_validate_exact_schema! in contract.jl): emission only ever sees
-    # instructions whose unique exact schema already validated, so at most one
-    # ledger handles each instruction here.
-    for l in CALL_LEDGERS
-        transpile_ledger!(l, cg, inst) && return
-    end
+    # instructions whose unique exact schema already validated.
+    island = island_of(Symbol(inst.opcode), _schema_modifiers(inst.modifiers))
+    island !== nothing && transpile_ledger!(island, cg, inst) && return
 
     # Keep the parser/transpiler on the same result-ABI boundary as direct
     # calls. This catches noncanonical cvt and any reviewed pure form that
@@ -146,8 +144,9 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     # structured forms never reach this point — their ledger emitted above.
     inst.predicate === nothing && _try_alias_def!(cg, inst) && return
 
-    # Ordinary cvt's source-carrier ledger sits outside CALL_LEDGERS (see
-    # protocol.jl); cvt.pack was already handled by the scalar ledger above.
+    # Ordinary cvt's source-carrier ledger sits outside the island partition
+    # (see protocol.jl); cvt.pack was already handled by the scalar island
+    # above.
     transpile_ledger!(CvtLedger(), cg, inst) && return
 
     # Exact-schema islands above retain their specialized emission. Every

@@ -185,11 +185,8 @@ function miss(::CvtLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
         "scalar-result schema.")
 end
 
-claims(::CvtLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    op === :cvt && !(:pack in mods)
-
-# Unlike the CALL_LEDGERS schemas, this lookup throws its own miss for a
-# claimed-but-invalid spelling: every non-pack cvt spelling is claimed, so a
+# Unlike the island schemas, this lookup throws its own miss for an invalid
+# spelling: every non-pack cvt spelling is inside this ledger's domain, so a
 # key miss is always a hard source-ABI error, never a fall-through (see the
 # CvtLedger note in protocol.jl).
 function schema(::CvtLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})

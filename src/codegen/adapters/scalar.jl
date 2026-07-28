@@ -1,14 +1,14 @@
 # `result_boundary` controls the miss-side result-ABI check: the module
 # preflight (contract.jl) keeps it here so noncanonical cvt and void-inferring
-# pure forms fail at their historical position, while emit_instruction!'s
-# CALL_LEDGERS walk runs the same check itself *after* the b128 ledger (a
-# valid `.b128` spelling has no DTYPE_RETTYPE entry and must not trip it).
+# pure forms fail at their historical position, while emit_instruction! runs
+# the same check itself after island routing (a valid `.b128` spelling has no
+# DTYPE_RETTYPE entry and must not trip it).
 function _instruction_scalar_result_schema(inst::Instruction;
                                            result_boundary::Bool = true)
     op = Symbol(inst.opcode)
     mods = _schema_modifiers(inst.modifiers)
     s = schema(ScalarLedger(), op, mods)
-    s === nothing && claims(ScalarLedger(), op, mods) &&
+    s === nothing && island_of(op, mods) isa ScalarLedger &&
         throw(miss(ScalarLedger(), op, mods))
     if s === nothing
         # Keep the parser/transpiler on the same result-ABI boundary as direct

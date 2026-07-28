@@ -304,10 +304,7 @@ length(_MBARRIER_SCHEMA_BY_FORM) == length(MBARRIER_FORM_SCHEMAS) ||
 schema(::MBarrierLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     op === :mbarrier ? get(_MBARRIER_SCHEMA_BY_FORM, mods, nothing) : nothing
 
-claims(::MBarrierLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    op === :mbarrier
-
-# `op` is always :mbarrier for a claimed miss; the spelling is fixed.
+# `op` is always :mbarrier for a routed miss; the spelling is fixed.
 function miss(::MBarrierLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? "mbarrier" : "mbarrier." * join(mods, ".")
     ArgumentError(

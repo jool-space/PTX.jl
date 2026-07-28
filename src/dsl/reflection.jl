@@ -32,14 +32,15 @@ function _walk_intrinsics!(names::Vector{String}, @nospecialize(x))
     return nothing
 end
 
-# One lowering step of the shared cascade. Returns `false` when the chain
-# path must classify the spelling `:forbidden`: a claimed-but-unreviewed miss,
-# or a resolved schema whose argument validation raises ArgumentError. Policy
-# failures only — rendering/constraint bugs (non-ArgumentError) stay visible.
+# The chain path's island gate. Returns `false` when the spelling must be
+# classified `:forbidden`: a routed-but-unreviewed miss, or a resolved schema
+# whose argument validation raises ArgumentError. Policy failures only —
+# rendering/constraint bugs (non-ArgumentError) stay visible. Only ever called
+# with the island `island_of` routed the spelling to.
 function lowering_entry(l::FormLedger, op::Symbol,
                         mods::Tuple{Vararg{Symbol}}, @nospecialize(argts))
     s = schema(l, op, mods)
-    s === nothing && return !claims(l, op, mods)
+    s === nothing && return false
     try
         validate_ledger_args(l, s, argts)
     catch err
@@ -94,11 +95,11 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
                        structured_address_fallback_rule(op, mods) : nothing
         address_rule === nothing || return forbidden
         uses_implicit_cc(op, mods) && return forbidden
-        # Same order and same validators as build_call's cascade; every miss
-        # or argument-policy failure is uniformly :forbidden here.
-        for l in CALL_LEDGERS
-            lowering_entry(l, op, mods, argts) || return forbidden
-        end
+        # Same routing and same validators as build_call; every miss or
+        # argument-policy failure is uniformly :forbidden here.
+        island = island_of(op, mods)
+        island === nothing || lowering_entry(island, op, mods, argts) ||
+            return forbidden
         !raw && requires_typed_wrapper(op, mods) && return forbidden
         contract = raw ? RAW_CONTRACT : form_contract(op, mods)
         contract === nothing &&
