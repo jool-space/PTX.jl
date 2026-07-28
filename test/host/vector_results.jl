@@ -252,20 +252,22 @@ end
     mods = (:global, Symbol("L2::evict_last"), :v8, :u32)
     schema = PTX.schema(PTX.VectorLedger(), :ld, mods)
     mask = (true, false, true, true, false, true, true, true)
-    spec = PTX._build_vector_result_call(
-        schema, (PtrG,), PTX.form_contract(:ld, mods); sink_mask = mask)
+    spec = PTX.build_ledger_call(
+        PTX.VectorLedger(), schema, (PtrG,), PTX.form_contract(:ld, mods);
+        sink_mask = mask)
     @test spec.rettype === NTuple{6,UInt32}
     @test spec.asm ==
         "ld.global.L2::evict_last.v8.u32 {\$0, _, \$1, \$2, _, \$3, \$4, \$5}, [\$6];"
     @test spec.constraints == "=r,=r,=r,=r,=r,=r,l,~{memory}"
 
-    @test_throws ArgumentError PTX._build_vector_result_call(
-        schema, (PtrG,), PTX.form_contract(:ld, mods);
+    @test_throws ArgumentError PTX.build_ledger_call(
+        PTX.VectorLedger(), schema, (PtrG,), PTX.form_contract(:ld, mods);
         sink_mask = ntuple(_ -> false, 8))
     @test_throws ArgumentError vector_load(
         PTX.Operation{:ld, mods}(), UInt64(0),
         Val(ntuple(_ -> false, 8)))
-    @test_throws ArgumentError PTX._build_vector_result_call(
+    @test_throws ArgumentError PTX.build_ledger_call(
+        PTX.VectorLedger(),
         PTX.schema(PTX.VectorLedger(), :ld, (:global, :v4, :u32)),
         (PtrG,), PTX.form_contract(:ld, (:global, :v4, :u32));
         sink_mask = (true, false, true, true))

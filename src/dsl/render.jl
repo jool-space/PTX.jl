@@ -64,12 +64,12 @@ end
 build_head(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     isempty(mods) ? string(op) : string(op) * "." * join(string.(mods), ".")
 
-function _build_structured_result_call(schema::StructuredResultSchema,
-                                       @nospecialize(argtypes),
-                                       contract::FormContract)
+function build_ledger_call(::StructuredLedger, schema::StructuredResultSchema,
+                           @nospecialize(argtypes),
+                           contract::FormContract)
     validate_structured_result_args(schema, argtypes)
     output_types = map(_structured_output_type, schema.outputs)
-    rettype = structured_result_type(schema)
+    rettype = result_type(schema)
     output_operand = length(output_types) == 1 ? "\$0" :
                      join(("\$" * string(i - 1) for i in eachindex(output_types)), "|")
     output_letters = ["=" * constraint_letter(T) for T in output_types]
@@ -108,11 +108,11 @@ function _build_structured_result_call(schema::StructuredResultSchema,
               passthrough_unwrap_address = Tuple(passthrough_unwrap))
 end
 
-function _build_mbarrier_call(schema::MBarrierFormSchema,
-                              @nospecialize(argtypes),
-                              contract::FormContract)
+function build_ledger_call(::MBarrierLedger, schema::MBarrierFormSchema,
+                           @nospecialize(argtypes),
+                           contract::FormContract)
     variant = validate_mbarrier_args(schema, argtypes)
-    rettype = _mbarrier_rettype(schema)
+    rettype = result_type(schema)
     output_operands, output_letters, slot =
         schema.destination === :none ? (String[], String[], 0) :
         schema.destination in (:sink, :remote_sink) ? (["_"], String[], 0) :
@@ -170,10 +170,10 @@ function _build_mbarrier_call(schema::MBarrierFormSchema,
               passthrough_unwrap_address = Tuple(passthrough_unwrap))
 end
 
-function _build_vector_result_call(schema::VectorResultSchema,
-                                   @nospecialize(argtypes),
-                                   contract::FormContract;
-                                   sink_mask = nothing)
+function build_ledger_call(::VectorLedger, schema::VectorResultSchema,
+                           @nospecialize(argtypes),
+                           contract::FormContract;
+                           sink_mask = nothing)
     validate_vector_result_args(schema, argtypes)
     n = schema.form.lanes
     mask = sink_mask === nothing ? ntuple(_ -> true, n) :
@@ -248,8 +248,8 @@ function _build_vector_result_call(schema::VectorResultSchema,
               passthrough_unwrap_address = Tuple(passthrough_unwrap))
 end
 
-function _build_b128_call(schema::B128FormSchema, @nospecialize(argtypes),
-                          contract::FormContract)
+function build_ledger_call(::B128Ledger, schema::B128FormSchema,
+                           @nospecialize(argtypes), contract::FormContract)
     validate_b128_form_args(schema, argtypes)
     output_types = schema.result === Nothing ? Type[] :
                    schema.result === B128 ? Type[UInt64, UInt64] :
@@ -323,25 +323,14 @@ function _build_b128_call(schema::B128FormSchema, @nospecialize(argtypes),
        passthrough_unwrap_address = Tuple(passthrough_unwrap))
 end
 
-# Builder dispatch family: the reviewed schema-specific renderers. Islands
-# without a method here (immediate, CLC, scalar) lower through build_call's
-# generic tail. The builder dispatch order in build_call exists only to keep
-# the non-island guards (integer-Address fallback rule, registry contract
-# check, explicit-address bracket check) at their historical positions
-# between specific builders — `island_of` already guarantees at most one
-# builder can fire.
-build_ledger_call(::MBarrierLedger, s::MBarrierFormSchema,
-                  @nospecialize(argtypes), contract::FormContract) =
-    _build_mbarrier_call(s, argtypes, contract)
-build_ledger_call(::B128Ledger, s::B128FormSchema,
-                  @nospecialize(argtypes), contract) =
-    _build_b128_call(s, argtypes, contract)
-build_ledger_call(::StructuredLedger, s::StructuredResultSchema,
-                  @nospecialize(argtypes), contract::FormContract) =
-    _build_structured_result_call(s, argtypes, contract)
-build_ledger_call(::VectorLedger, s::VectorResultSchema,
-                  @nospecialize(argtypes), contract::FormContract; kwargs...) =
-    _build_vector_result_call(s, argtypes, contract; kwargs...)
+# The `build_ledger_call` methods above are the builder dispatch family: the
+# reviewed schema-specific renderers, defined directly on their island
+# handles. Islands without a method (immediate, CLC, scalar) lower through
+# build_call's generic tail. The builder dispatch order in build_call exists
+# only to keep the non-island guards (integer-Address fallback rule, registry
+# contract check, explicit-address bracket check) at their historical
+# positions between specific builders — `island_of` already guarantees at
+# most one builder can fire.
 
 # Pure: no LLVM, no GPU, no @asmcall. Used by both the runtime call site and
 # host-side golden tests. `contract` defaults to the registry lookup; pass one

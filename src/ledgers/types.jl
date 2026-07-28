@@ -95,32 +95,20 @@ ledger_result_abi_error(::CvtLedger, op::Symbol,
                         mods::Tuple{Vararg{Symbol}}) =
     _ordinary_cvt_result_abi_error(mods)
 
+# The result-bearing islands all answer through the uniform `result_type`
+# schema accessor (protocol.jl); only the transparency stubs above and the
+# explicitly-consulted cvt fallback need their own methods.
+function ledger_rettype(l::FormLedger, op::Symbol,
+                        mods::Tuple{Vararg{Symbol}})
+    s = schema(l, op, mods)
+    s === nothing ? missing : result_type(s)
+end
 ledger_rettype(::ImmediateLedger, op::Symbol,
                mods::Tuple{Vararg{Symbol}}) = missing
 ledger_rettype(::CLCLedger, op::Symbol,
                mods::Tuple{Vararg{Symbol}}) = missing
 ledger_rettype(::B128Ledger, op::Symbol,
                mods::Tuple{Vararg{Symbol}}) = missing
-function ledger_rettype(::MBarrierLedger, op::Symbol,
-                        mods::Tuple{Vararg{Symbol}})
-    s = schema(MBarrierLedger(), op, mods)
-    s === nothing ? missing : _mbarrier_rettype(s)
-end
-function ledger_rettype(::StructuredLedger, op::Symbol,
-                        mods::Tuple{Vararg{Symbol}})
-    s = schema(StructuredLedger(), op, mods)
-    s === nothing ? missing : structured_result_type(s)
-end
-function ledger_rettype(::VectorLedger, op::Symbol,
-                        mods::Tuple{Vararg{Symbol}})
-    s = schema(VectorLedger(), op, mods)
-    s === nothing ? missing : vector_result_type(s)
-end
-function ledger_rettype(::ScalarLedger, op::Symbol,
-                        mods::Tuple{Vararg{Symbol}})
-    s = schema(ScalarLedger(), op, mods)
-    s === nothing ? missing : s.rettype
-end
 ledger_rettype(::CvtLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     ordinary_cvt_result_type(mods)
 

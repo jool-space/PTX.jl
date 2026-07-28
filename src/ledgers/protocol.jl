@@ -10,6 +10,11 @@
 #   validate_ledger_args(l, s, argtypes) — the island's argument/carrier
 #                                     validator for a resolved schema `s`
 #                                     (throws ArgumentError on a violation).
+#   result_type(s)                  — the Julia result type of a resolved
+#                                     schema, for the result-bearing islands
+#                                     (structured/vector/scalar/mbarrier);
+#                                     the sink/128-bit islands stay out of
+#                                     scalar inference (see types.jl).
 #
 # `island_of(op, mods)` is the single routing site: it assigns every spelling
 # to at most one island. A routed spelling either resolves to a schema or
@@ -35,6 +40,7 @@ struct CvtLedger        <: FormLedger end   # src/ledgers/cvt_forms.jl — NOT
 function schema end
 function miss end
 function validate_ledger_args end
+function result_type end
 
 # Vector-result markers live here because the partition keys on them; the
 # vector ledger's schema resolver shares this set.

@@ -225,7 +225,7 @@ _structured_output_type(kind::Symbol) =
     kind === :b32  ? UInt32 :
     error("unknown structured-result output kind: $kind")
 
-function structured_result_type(schema::StructuredResultSchema)
+function result_type(schema::StructuredResultSchema)
     types = map(_structured_output_type, schema.outputs)
     length(types) == 1 ? only(types) : Core.apply_type(Tuple, types...)
 end

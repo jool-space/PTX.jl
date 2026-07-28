@@ -316,7 +316,7 @@ function miss(::MBarrierLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
         "see $_MBARRIER_SECTION")
 end
 
-_mbarrier_rettype(schema::MBarrierFormSchema) =
+result_type(schema::MBarrierFormSchema) =
     schema.destination in (:none, :sink, :remote_sink) ? Nothing :
     schema.destination === :state ? UInt64 :
     schema.destination === :predicate ? Bool :

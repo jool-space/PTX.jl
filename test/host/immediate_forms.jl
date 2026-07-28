@@ -5,8 +5,6 @@ const _IMMEDIATE_SECTIONS = (
         "ptx/9-instruction-set/9.7.20.5-miscellaneous-instructions-setmaxnreg.md",
     pmevent =
         "ptx/9-instruction-set/9.7.20.3-miscellaneous-instructions-pmevent.md",
-    lop3 =
-        "ptx/9-instruction-set/9.7.8.6-logic-and-shift-instructions-lop3.md",
 )
 
 function _expected_immediate_contracts()
@@ -15,30 +13,24 @@ function _expected_immediate_contracts()
     [
         (op = :setmaxnreg, forms = ((:inc, :sync, :aligned, :u32),),
          operand_index = 1, minimum = 24, maximum = 256, multiple = 8,
-         returns = false, side_effect = true, delegated = false,
+         returns = false, side_effect = true,
          ptx_version = v"8.0", min_sm = v"9.0", feature_set = :arch,
          target_note = setmax_target, section = _IMMEDIATE_SECTIONS.setmaxnreg),
         (op = :setmaxnreg, forms = ((:dec, :sync, :aligned, :u32),),
          operand_index = 1, minimum = 24, maximum = 256, multiple = 8,
-         returns = false, side_effect = true, delegated = false,
+         returns = false, side_effect = true,
          ptx_version = v"8.0", min_sm = v"9.0", feature_set = :arch,
          target_note = setmax_target, section = _IMMEDIATE_SECTIONS.setmaxnreg),
         (op = :pmevent, forms = ((),), operand_index = 1,
          minimum = 0, maximum = 15, multiple = 1, returns = false,
-         side_effect = true, delegated = false, ptx_version = v"1.4",
+         side_effect = true, ptx_version = v"1.4",
          min_sm = nothing, feature_set = :baseline, target_note = "all targets",
          section = _IMMEDIATE_SECTIONS.pmevent),
         (op = :pmevent, forms = ((:mask,),), operand_index = 1,
          minimum = 0, maximum = 0xffff, multiple = 1, returns = false,
-         side_effect = true, delegated = false, ptx_version = v"3.0",
+         side_effect = true, ptx_version = v"3.0",
          min_sm = v"2.0", feature_set = :baseline,
          target_note = "sm_20 or higher", section = _IMMEDIATE_SECTIONS.pmevent),
-        (op = :lop3, forms = ((:b32,), (:or, :b32), (:and, :b32)),
-         operand_index = 4, minimum = 0, maximum = 255, multiple = 1,
-         returns = true, side_effect = false, delegated = true,
-         ptx_version = v"4.3", min_sm = v"5.0", feature_set = :baseline,
-         target_note = "base form: sm_50 or higher; BoolOp forms: PTX 8.2, sm_70 or higher",
-         section = _IMMEDIATE_SECTIONS.lop3),
     ]
 end
 
@@ -48,7 +40,7 @@ end
                         for field in fieldnames(typeof(contract))))
               for contract in PTX.IMMEDIATE_FORM_CONTRACTS]
     @test actual == _expected_immediate_contracts()
-    @test length(actual) == 5
+    @test length(actual) == 4
 
     expanded = Set((contract.op, mods) for contract in actual
                    for mods in contract.forms)
@@ -56,24 +48,24 @@ end
         (:setmaxnreg, (:inc, :sync, :aligned, :u32)),
         (:setmaxnreg, (:dec, :sync, :aligned, :u32)),
         (:pmevent, ()), (:pmevent, (:mask,)),
-        (:lop3, (:b32,)), (:lop3, (:or, :b32)),
-        (:lop3, (:and, :b32)),
     ))
 
-    # lop3 remains single-sourced in the structured-result ledger. This
-    # independent oracle pins the exact delegation boundary and ISA deltas.
-    lop3 = only(filter(c -> c.op === :lop3, actual))
-    @test lop3.delegated
-    @test Set(lop3.forms) == Set(schema.mods for schema in
-        PTX.STRUCTURED_RESULT_SCHEMAS if schema.op === :lop3)
-    @test all(schema.operands[lop3.operand_index] === :imm8 for schema in
-              PTX.STRUCTURED_RESULT_SCHEMAS if schema.op === :lop3)
-    @test Dict(schema.mods => (schema.ptx_version, schema.min_sm) for schema in
-               PTX.STRUCTURED_RESULT_SCHEMAS if schema.op === :lop3) == Dict(
-        (:b32,) => (v"4.3", v"5.0"),
-        (:or, :b32) => (v"8.2", v"7.0"),
-        (:and, :b32) => (v"8.2", v"7.0"),
-    )
+    # lop3's ISA-required immLut constant (0:255) is owned by the structured
+    # island as the `:imm8` operand kind — there is deliberately NO immediate
+    # record for it. This oracle pins that boundary: exactly three lop3
+    # forms, immLut as `:imm8` at operand 4 in each, their ISA deltas, and
+    # the absence of any immediate-island resolution.
+    lop3_schemas = [s for s in PTX.STRUCTURED_RESULT_SCHEMAS if s.op === :lop3]
+    @test Set(s.mods for s in lop3_schemas) ==
+          Set(((:b32,), (:or, :b32), (:and, :b32)))
+    @test all(s.operands[4] === :imm8 for s in lop3_schemas)
+    for s in lop3_schemas
+        @test PTX.schema(PTX.ImmediateLedger(), s.op, s.mods) === nothing
+    end
+    @test Dict(s.mods => (s.ptx_version, s.min_sm) for s in lop3_schemas) ==
+          Dict((:b32,) => (v"4.3", v"5.0"),
+               (:or, :b32) => (v"8.2", v"7.0"),
+               (:and, :b32) => (v"8.2", v"7.0"))
 end
 
 @testset "immediate direct/raw shape and exact domains" begin

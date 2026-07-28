@@ -158,16 +158,18 @@ ledger is:
    overlap with existing islands explicitly, rather than by consult
    order);
 2. the protocol methods in the new `src/ledgers/<my_ledger>.jl` file —
-   `schema(::MyLedger, op, mods)`, `miss(::MyLedger, op, mods)`, and
-   `validate_ledger_args(::MyLedger, s, argtypes)`;
-3. the four consumer dispatch methods:
+   `schema(::MyLedger, op, mods)`, `miss(::MyLedger, op, mods)`,
+   `validate_ledger_args(::MyLedger, s, argtypes)`, and (for a
+   result-bearing island) `result_type(::MySchema)`;
+3. the consumer dispatch methods:
    `build_ledger_call(::MyLedger, s, argtypes, contract)` in
    `src/dsl/render.jl` (omit it if the form lowers through `build_call`'s
-   generic tail), `ledger_rettype`/`ledger_result_abi_error` methods in
-   `src/ledgers/types.jl` (or the transparent `missing` stubs if the
-   ledger never feeds generic scalar inference), and
-   `transpile_ledger!(::MyLedger, cg, inst)` with its
-   `_instruction_*`-style adapter in `src/codegen/adapters/`;
+   generic tail), and `transpile_ledger!(::MyLedger, cg, inst)` with its
+   `_instruction_*`-style adapter in `src/codegen/adapters/`. Result-ABI
+   inference needs no new method — the generic `ledger_rettype` in
+   `src/ledgers/types.jl` consults `result_type`; add transparent
+   `missing` stubs there instead if the island never feeds generic
+   scalar inference;
 4. the include order in `src/PTX.jl` (ledger files load after
    `protocol.jl`), and the routing-invariant testset in
    `test/host/fallback_boundary.jl` ("island partition covers every

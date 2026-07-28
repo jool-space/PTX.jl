@@ -356,13 +356,8 @@ end
     for mods in keys(PTX._MBARRIER_SCHEMA_BY_FORM)
         @test PTX.island_of(:mbarrier, mods) === PTX.MBarrierLedger()
     end
-    # The delegated lop3 record is owned by the structured island; only the
-    # enforced setmaxnreg/pmevent contracts route to the immediate island.
-    for (key, contract) in PTX._IMMEDIATE_FORM_CONTRACT_BY_FORM
-        op, mods = key
-        expected = contract.delegated ? PTX.StructuredLedger() :
-                                        PTX.ImmediateLedger()
-        @test PTX.island_of(op, mods) === expected
+    for (op, mods) in keys(PTX._IMMEDIATE_FORM_CONTRACT_BY_FORM)
+        @test PTX.island_of(op, mods) === PTX.ImmediateLedger()
     end
     # The vector resolver parses optional prefixes around a finite core, so
     # the core spellings and the eight ptxas-compat spellings are its key set.
