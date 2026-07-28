@@ -210,6 +210,44 @@ const MBARRIER_FORM_SCHEMAS = let schemas = MBarrierFormSchema[]
                     (_mb_variant((:address, :u32), v"8.6", v"9.0"),),
                     :cta; provenance = :ptxas_compat)
 
+    # §9.7.15.16.14-.17 (PTX ISA 9.4, sm_107f family): `.multicast::
+    # cluster::32b` performs the operation on the mbarrier at the same
+    # CTA-relative shared-memory offset in every cluster CTA selected by a
+    # 32-bit ctaMask (bit i = %cluster_ctarank i — a CTA mask, not a lane
+    # mask; the 32-bit width is what admits >16-CTA clusters). The syntax
+    # block places .multicast after the state space, only .shared::cluster
+    # admits it, and the mask is a mandatory trailing b32 operand (carried
+    # u32). Spelled-only until a CUDA 13.4+ ptxas ships.
+    let multicast = Symbol("multicast::cluster::32b"),
+        cluster = Symbol("shared::cluster")
+        for subop in (:expect_tx, :complete_tx),
+            (sem, semp, _) in _MB_TX_SEM_SCOPES
+            mods = (subop, sem..., cluster, multicast, :b64)
+            _mbarrier_form!(schemas, mods, mods, :none,
+                            (_mb_variant((:address, :u32, :u32),
+                                         _mb_max_version(v"9.4", semp),
+                                         v"10.7"),),
+                            :cluster)
+        end
+        for subop in (:arrive, :arrive_drop),
+            (sem, semp, _) in _MB_ARRIVE_SEM_SCOPES
+            pv = _mb_max_version(v"9.4", semp)
+            mods = (subop, sem..., cluster, multicast, :b64)
+            # (address, mask) or (address, count, mask); the multicast
+            # arrive keeps the remote sink `_` destination.
+            _mbarrier_form!(schemas, mods, mods, :remote_sink,
+                            (_mb_variant((:address, :u32), pv, v"10.7"),
+                             _mb_variant((:address, :u32, :u32), pv,
+                                         v"10.7")),
+                            :cluster)
+            mods = (subop, :expect_tx, sem..., cluster, multicast, :b64)
+            _mbarrier_form!(schemas, mods, mods, :remote_sink,
+                            (_mb_variant((:address, :u32, :u32), pv,
+                                         v"10.7"),),
+                            :cluster)
+        end
+    end
+
     # §9.7.14.16.19: single-predicate waits plus PTX.jl's explicit
     # `:report_pred` / `:report` selections for the otherwise
     # operand-overloaded primary-phase head. try_wait alone admits the optional
