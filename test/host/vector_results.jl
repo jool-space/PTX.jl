@@ -43,6 +43,9 @@ function _expected_vector_core()
     for lanes in (2, 4)
         add!(:atom, (:add, Symbol("v", lanes), :f32), lanes, :f32,
              v"8.1", v"9.0")
+        # PTX ISA 9.4: subnormal-preserving f32 vector adds; sm_90 floor.
+        add!(:atom, (:add, :noftz, Symbol("v", lanes), :f32), lanes, :f32,
+             v"9.4", v"9.0")
     end
     for lanes in (2, 4, 8), kind in (:f16, :bf16), op in (:add, :min, :max)
         add!(:atom, (op, :noftz, Symbol("v", lanes), kind), lanes, kind,
@@ -105,11 +108,11 @@ const _VECTOR_ATOM_COMPAT_EXAMPLES = Set((
     expected = _expected_vector_core()
     actual = Dict((form.op, form.coremods) => form
                   for form in PTX.VECTOR_RESULT_CORE_FORMS)
-    @test length(expected) == 210
-    @test length(actual) == 210
+    @test length(expected) == 212
+    @test length(actual) == 212
     @test Set(keys(actual)) == Set(keys(expected))
     @test count(k -> k[1] === :ld, keys(actual)) == 32
-    @test count(k -> k[1] === :atom, keys(actual)) == 32
+    @test count(k -> k[1] === :atom, keys(actual)) == 34
     @test count(k -> k[1] === :multimem, keys(actual)) == 146
     @test count(k -> k[1] === :multimem && Symbol("acc::f32") in k[2],
                 keys(actual)) == 30

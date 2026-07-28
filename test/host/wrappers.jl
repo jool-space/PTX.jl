@@ -1942,3 +1942,32 @@ end
     @test which(Operation{:shfl, (:sync, :bfly, :b32, :pred)}(),
                 (UInt32, UInt32, UInt32, UInt32)).module == PTX
 end
+
+@testset "PTX ISA 9.4 chain pass-throughs (sm_90+, spelled-only)" begin
+    # These 9.4 qualifiers need zero ledger work by design — they are
+    # prefix modifiers under opcodes whose FORMS contracts already carry
+    # the right effects — but the coverage is pinned so a future grammar
+    # tightening cannot silently drop them. None are family-gated.
+    G32 = Core.LLVMPtr{Float32, PTX.AS.Global}
+
+    # atom/red `.add.noftz.f32`: subnormal-preserving f32 adds (§9.7.15.5).
+    spec = build_call(:atom, (:add, :noftz, :f32), (G32, Float32))
+    @test spec.asm == "atom.add.noftz.f32 \$0, [\$1], \$2;"
+    @test spec.rettype === Float32
+    spec = build_call(:red, (:add, :noftz, :f32), (G32, Float32))
+    @test spec.asm == "red.add.noftz.f32 [\$0], \$1;"
+    @test spec.rettype === Nothing
+
+    # ld `.proxy::readonly` (§9.7.10.8): the readonly-proxy load.
+    spec = build_call(:ld, (Symbol("proxy::readonly"), :global, :u32),
+                      (Core.LLVMPtr{UInt32, PTX.AS.Global},))
+    @test spec.asm == "ld.proxy::readonly.global.u32 \$0, [\$1];"
+    @test spec.rettype === UInt32
+
+    # prefetch `.L1::32B.valid_addr` (§9.7.10.16): the trailing qualifier
+    # is not a dtype token, so no phantom output register is reserved.
+    spec = build_call(:prefetch, (:global, Symbol("L1::32B"), :valid_addr),
+                      (Core.LLVMPtr{UInt8, PTX.AS.Global},))
+    @test spec.asm == "prefetch.global.L1::32B.valid_addr [\$0];"
+    @test spec.rettype === Nothing
+end

@@ -105,11 +105,18 @@ const VECTOR_RESULT_CORE_FORMS = let forms = VectorResultCoreForm[]
                              v"8.8", _TARGET_SM100, _VECTOR_LD_SECTION)
     end
 
-    # atom: 2 f32 + 18 half-word + 12 packed = 32.
+    # atom: 4 f32 + 18 half-word + 12 packed = 34.
     for lanes in (2, 4)
         vec = Symbol("v", lanes)
         _vector_result_core!(forms, :atom, (:add, vec, :f32), lanes, :f32,
                              v"8.1", _TARGET_SM90, _VECTOR_ATOM_SECTION)
+        # PTX ISA 9.4 extends `.noftz` to `.f32`: subnormal inputs and
+        # results are preserved instead of the global-memory flush. Plain
+        # sm_90 floor (not family-gated); spelled-only until a CUDA 13.4+
+        # ptxas ships.
+        _vector_result_core!(forms, :atom, (:add, :noftz, vec, :f32), lanes,
+                             :f32, v"9.4", _TARGET_SM90,
+                             _VECTOR_ATOM_SECTION)
     end
     for lanes in (2, 4, 8), lane_kind in (:f16, :bf16), atomop in (:add, :min, :max)
         vec = Symbol("v", lanes)
@@ -163,7 +170,7 @@ const VECTOR_RESULT_CORE_FORMS = let forms = VectorResultCoreForm[]
             end
         end
     end
-    length(forms) == 210 || error("vector-result core ledger drift: ", length(forms))
+    length(forms) == 212 || error("vector-result core ledger drift: ", length(forms))
     # Deliberately a Vector, not Tuple(...): a several-hundred-element NTuple
     # constant makes every downstream generator/Dict build specialize on the
     # full tuple type. Those inference+codegen bombs tripled package

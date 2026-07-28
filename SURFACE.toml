@@ -444,7 +444,7 @@ section = "9.7.16.5.15"
 title = "Warp-level matrix load instruction: ldmatrix"
 status = "strict"
 opcodes = ["ldmatrix"]
-notes = "Typed-wrapper-only: shape/count-dependent grouped results (two registers per matrix for m16n16) and format-specific arity."
+notes = "Typed-wrapper-only: shape/count-dependent grouped results (two registers per matrix for m16n16) and format-specific arity. The PTX ISA 9.4 sign-extending .s8.s4 m8n16 forms (sm_90a + 100f/110f/120f families) are asm-tier, spelled-only until a CUDA 13.4+ ptxas ships."
 owner = ["src/wrappers/ldmatrix.jl"]
 
 [[family]]
