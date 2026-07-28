@@ -26,6 +26,26 @@ PTX.MBarriers.barrier_try_wait
 PTX.MBarriers.barrier_arrive_cluster
 ```
 
+### Barrier arenas
+
+A warp-specialized kernel's synchronization plan is rarely one
+homogeneous ring — it is a dozen named barrier groups of different
+shapes and arrival counts packed into one SMEM region, historically
+maintained as a hand-computed byte-offset table plus a thread-0 init
+block that must agree with it. [`BarrierSet`](@ref
+MBarriers.BarrierSet) makes that plan a single declaration: shapes and
+counts in one NamedTuple, offsets/total size/init all derived, every
+access a compile-time-constant pointer offset (pinned byte-identical
+to the hand-rolled arithmetic by the ptxas-tier tests).
+
+```@docs
+PTX.MBarriers.BarrierSet
+PTX.MBarriers.BarrierGroup
+PTX.MBarriers.barrier_bytes
+PTX.MBarriers.barrier_offset
+PTX.MBarriers.barrierset_init!
+```
+
 ## Pipelines
 
 ```@docs

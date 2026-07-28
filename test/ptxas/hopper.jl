@@ -611,7 +611,8 @@ end
 # and confirm the emitted PTX matches the same sequence as the
 # hand-rolled callers used to produce.
 
-using PTX.MBarriers: BarrierArray, barrier_init, barrier_arrive,
+using PTX.MBarriers: BarrierArray, BarrierSet, barrierset_init!,
+                     barrier_init, barrier_arrive,
                      barrier_arrive_expect_tx, barrier_wait,
                      barrier_arrive_cluster
 using PTX.Pipelines: Pipeline, pipeline_cursor, pipeline_stage,
@@ -709,4 +710,74 @@ end
     ptx = emit_ptx(_bf16x2_pack_compile!, types;
                    cap = v"8.0", feature_set = :baseline)
     @test occursin("cvt.rn.bf16x2.f32", ptx)
+end
+
+# ── BarrierSet: zero-cost pin against the hand-rolled arena ────────────
+#
+# The typed arena must be free abstraction: same init sequence, same
+# literal barrier offsets, same PTX. The two kernels below differ only
+# in whether the arena is addressed through BarrierSet or through raw
+# pointer arithmetic; their PTX must match byte-for-byte after
+# normalizing the kernel name.
+
+const _BSET_RING = (full = ((2,), 1), stats = ((2, 2), 128), done = ((), 1))
+
+function _bset_smoke!(C::CuDeviceVector{UInt64, 1})
+    smem = CuStaticSharedArray(UInt64, 7)
+    bars = BarrierSet{_BSET_RING}(pointer(smem))
+    tid = ptx"mov.u32"(sreg"tid.x")
+    if tid == UInt32(0)
+        barrierset_init!(bars)
+    end
+    ptx"bar.sync"(Val(0))
+    if tid == UInt32(0)
+        barrier_arrive_expect_tx(bars.full[1], 64)
+        barrier_arrive(bars.stats[1, 1])
+        barrier_wait(bars.done, UInt32(0))
+        C[1] = UInt64(1)
+    end
+    return nothing
+end
+
+function _bset_smoke_hand!(C::CuDeviceVector{UInt64, 1})
+    smem = CuStaticSharedArray(UInt64, 7)
+    mb = pointer(smem)
+    tid = ptx"mov.u32"(sreg"tid.x")
+    if tid == UInt32(0)
+        barrier_init(mb + 0,  UInt32(1))
+        barrier_init(mb + 8,  UInt32(1))
+        barrier_init(mb + 16, UInt32(128))
+        barrier_init(mb + 24, UInt32(128))
+        barrier_init(mb + 32, UInt32(128))
+        barrier_init(mb + 40, UInt32(128))
+        barrier_init(mb + 48, UInt32(1))
+        ptx"fence.proxy.async.shared::cta"()
+    end
+    ptx"bar.sync"(Val(0))
+    if tid == UInt32(0)
+        barrier_arrive_expect_tx(mb + 8, 64)
+        barrier_arrive(mb + (16 + (1 * 2 + 1) * 8))
+        barrier_wait(mb + 48, UInt32(0))
+        C[1] = UInt64(1)
+    end
+    return nothing
+end
+
+function _bset_normalized_ptx(f, tt)
+    ptx = emit_ptx(f, tt; cap = v"9.0", feature_set = :arch)
+    m = match(r"\.visible \.entry ([A-Za-z0-9_$]+)", ptx)
+    m === nothing && error("no .entry in emitted PTX")
+    body = replace(ptx[m.offset:end], m.captures[1] => "KERNEL")
+    # Instruction-stream comparison: strip the two non-semantic artifacts
+    # that differ between any two Julia functions — source-line-derived
+    # basic-block label comments and gensym suffixes on runtime callees.
+    body = replace(body, r"// %L\d+" => "// %L")
+    replace(body, r"(julia_[A-Za-z_]+)_\d+" => s"\1")
+end
+
+@testset "BarrierSet lowers byte-identically to the hand-rolled arena" begin
+    types = Tuple{CuDeviceVector{UInt64, 1}}
+    @test ptxas_compiles(_bset_smoke!, types; cap = v"9.0", feature_set = :arch)
+    @test _bset_normalized_ptx(_bset_smoke!, types) ==
+          _bset_normalized_ptx(_bset_smoke_hand!, types)
 end
