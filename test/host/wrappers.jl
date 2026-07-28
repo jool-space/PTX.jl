@@ -1738,6 +1738,26 @@ end
     spec = build_call(:cvt, (:rn, :scaled__n2__ue8m0, :bf16x2, :e4m3x2),
                       (UInt16, UInt16))
     @test spec.rettype === UInt32
+
+    # PTX ISA 9.4 (sm_107f, spelled-only until a CUDA 13.4+ ptxas ships):
+    # ue5m3x2 destination/source, single-scale n1 with its b16-carried b8
+    # scale factor, and .pzo/.rz as structural prefix pass-throughs.
+    @test format_call(ptx"cvt.rp.satfinite.ue5m3x2.f32",
+                      Tuple{Float32, Float32}) ==
+          "cvt.rp.satfinite.ue5m3x2.f32 \$0, \$1, \$2;"
+    spec94 = build_call(:cvt, (:rp, :satfinite, :ue5m3x2, :f32),
+                        (Float32, Float32))
+    @test spec94.rettype === UInt16
+    @test spec94.constraints == "=h,f,f"
+    @test format_call(ptx"cvt.rn.f16x2.ue5m3x2", Tuple{UInt16}) ==
+          "cvt.rn.f16x2.ue5m3x2 \$0, \$1;"
+    @test format_call(
+        ptx"cvt.rz.satfinite.pzo.scaled::n1::ue8m0.e4m3x2.f32",
+        Tuple{Float32, Float32, UInt16}) ==
+        "cvt.rz.satfinite.pzo.scaled::n1::ue8m0.e4m3x2.f32 \$0, \$1, \$2, \$3;"
+    @test format_call(ptx"cvt.rn.scaled::n2::ue8m0.bf16x2.ue5m3x2",
+                      Tuple{UInt16, UInt16}) ==
+          "cvt.rn.scaled::n2::ue8m0.bf16x2.ue5m3x2 \$0, \$1, \$2;"
     @test spec.constraints == "=r,h,h"
 
     # cvt is a pure ALU op — no memory clobber, no side effects.

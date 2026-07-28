@@ -236,7 +236,7 @@ section = "9.7.10.24"
 title = "Data Movement and Conversion Instructions: cvt"
 status = "generic"
 opcodes = ["cvt"]
-notes = "Destination is the penultimate type token (audited in infer_rettype); source carriers for ordinary cvt and cvt.pack (§9.7.9.23) come from the closed cvt ledger, with exact wrappers for the microfloat/stochastic forms."
+notes = "Destination is the penultimate type token (audited in infer_rettype); source carriers for ordinary cvt and cvt.pack (§9.7.10.25) come from the closed cvt ledger, with exact wrappers for the microfloat/stochastic forms. PTX ISA 9.4 additions (ue5m3x2, scaled::n1::ue8m0, .pzo/.rz widenings; sm_107f) are spelled-only until a CUDA 13.4+ ptxas ships; the n1 scale factor is physically b8, carried as b16 (no i8 constraint) — exact b8-bridging wrappers are deferred to hardware validation."
 owner = ["src/ledgers/forms.jl", "src/ledgers/cvt_forms.jl", "src/wrappers/cvt.jl"]
 
 [[family]]
