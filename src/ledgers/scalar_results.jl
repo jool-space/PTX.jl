@@ -261,6 +261,8 @@ schema(::ScalarLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
 # The scalar island's routing predicate lives in `island_of`
 # (src/ledgers/protocol.jl); this file owns the schemas it routes to.
 
+result_type(schema::ScalarResultSchema) = schema.rettype
+
 function miss(::ScalarLedger, op::Symbol,
               mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))

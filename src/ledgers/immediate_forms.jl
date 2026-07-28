@@ -1,9 +1,9 @@
 # Closed PTX 9.3 contracts for instructions whose source operand is required
-# to be an integer constant in an instruction-specific domain.  The first four
-# records are enforced here.  The fifth deliberately delegates lop3's three
-# exact result/operand spellings to structured_results.jl, which already owns
-# their grouped ABI and immLut validation; keeping a contract here makes the
-# shared immediate audit and ISA provenance explicit without duplicating it.
+# to be an integer constant in an instruction-specific domain — the immediate
+# island is exactly setmaxnreg/pmevent. lop3's immLut (also an ISA-required
+# integer constant, 0:255) is NOT recorded here: it lives as the `:imm8`
+# operand kind inside the structured island's three lop3 schemas, which own
+# lop3's grouped ABI and validate the constant through `operand_accepts`.
 
 struct ImmediateFormContract
     op::Symbol
@@ -14,7 +14,6 @@ struct ImmediateFormContract
     multiple::Int
     returns::Bool
     side_effect::Bool
-    delegated::Bool
     ptx_version::VersionNumber
     min_sm::Union{Nothing,VersionNumber}
     feature_set::Symbol
@@ -30,30 +29,25 @@ const _PMEVENT_SECTION =
 const IMMEDIATE_FORM_CONTRACTS = ImmediateFormContract[
     ImmediateFormContract(
         :setmaxnreg, ((:inc, :sync, :aligned, :u32),), 1,
-        24, 256, 8, false, true, false, v"8.0", v"9.0", :arch,
+        24, 256, 8, false, true, v"8.0", v"9.0", :arch,
         "sm_90a/sm_100a/sm_110a/sm_120a; PTX 8.8 also admits " *
         "sm_100f/sm_110f/sm_120f and later targets in the same family",
         _SETMAXNREG_SECTION),
     ImmediateFormContract(
         :setmaxnreg, ((:dec, :sync, :aligned, :u32),), 1,
-        24, 256, 8, false, true, false, v"8.0", v"9.0", :arch,
+        24, 256, 8, false, true, v"8.0", v"9.0", :arch,
         "sm_90a/sm_100a/sm_110a/sm_120a; PTX 8.8 also admits " *
         "sm_100f/sm_110f/sm_120f and later targets in the same family",
         _SETMAXNREG_SECTION),
     ImmediateFormContract(
-        :pmevent, ((),), 1, 0, 15, 1, false, true, false,
+        :pmevent, ((),), 1, 0, 15, 1, false, true,
         v"1.4", nothing, :baseline, "all targets", _PMEVENT_SECTION),
     ImmediateFormContract(
-        :pmevent, ((:mask,),), 1, 0, 0xffff, 1, false, true, false,
+        :pmevent, ((:mask,),), 1, 0, 0xffff, 1, false, true,
         v"3.0", v"2.0", :baseline, "sm_20 or higher", _PMEVENT_SECTION),
-    ImmediateFormContract(
-        :lop3, ((:b32,), (:or, :b32), (:and, :b32)), 4,
-        0, 255, 1, true, false, true, v"4.3", v"5.0", :baseline,
-        "base form: sm_50 or higher; BoolOp forms: PTX 8.2, sm_70 or higher",
-        _LOP3_SECTION),
 ]
 
-length(IMMEDIATE_FORM_CONTRACTS) == 5 ||
+length(IMMEDIATE_FORM_CONTRACTS) == 4 ||
     error("immediate-form contract count changed; re-audit PTX 9.3 grammar")
 
 const _IMMEDIATE_FORM_CONTRACT_BY_FORM = let by_form = Dict()
@@ -68,9 +62,6 @@ end
 schema(::ImmediateLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     get(_IMMEDIATE_FORM_CONTRACT_BY_FORM, (op, mods), nothing)
 
-# lop3's delegated contract is resolvable by `schema`, but `island_of` routes
-# lop3 to the structured-result island, which owns its grammar and immLut
-# validation; only setmaxnreg/pmevent route here.
 function miss(::ImmediateLedger, op::Symbol,
               mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))
@@ -95,8 +86,6 @@ end
 
 function validate_immediate_form_args(contract::ImmediateFormContract,
                                       argtypes)
-    contract.delegated && error(
-        "delegated immediate contract must use its owning schema validator")
     length(argtypes) == 1 || throw(ArgumentError(
         "ptx immediate form requires exactly one source operand, got " *
         "$(length(argtypes)); see $(contract.section)"))
@@ -110,19 +99,5 @@ function validate_immediate_form_args(contract::ImmediateFormContract,
     nothing
 end
 
-# lop3's delegated record is validated by its owning structured-result schema.
 validate_ledger_args(::ImmediateLedger, c::ImmediateFormContract, argtypes) =
-    c.delegated ? nothing : validate_immediate_form_args(c, argtypes)
-
-# Prove that the delegated lop3 record names exactly the forms and immediate
-# position owned by the structured-result ledger.  A future schema edit must
-# update one reviewed contract rather than create two drifting validators.
-let contract = schema(ImmediateLedger(), :lop3, (:b32,))
-    contract !== nothing && contract.delegated ||
-        error("missing delegated lop3 immediate contract")
-    forms = Set((schema.mods, findfirst(==(:imm8), schema.operands))
-                for schema in STRUCTURED_RESULT_SCHEMAS if schema.op === :lop3)
-    expected = Set((mods, contract.operand_index) for mods in contract.forms)
-    forms == expected || error(
-        "lop3 structured-result and immediate contracts disagree")
-end
+    validate_immediate_form_args(c, argtypes)

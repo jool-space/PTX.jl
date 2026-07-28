@@ -451,7 +451,7 @@ function vector_result_operand_roles(schema::VectorResultSchema, nargs::Int)
     schema.operands
 end
 
-vector_result_type(schema::VectorResultSchema) =
+result_type(schema::VectorResultSchema) =
     NTuple{schema.form.lanes, schema.form.lane_type}
 
 function validate_vector_result_mask(schema::VectorResultSchema, mask)
