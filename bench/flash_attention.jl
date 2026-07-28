@@ -9,10 +9,12 @@
 #     include("bench/flash_attention.jl")
 #     fab_check(cfg)                     # correctness gate, rescale-heavy input
 #     fab_time(cfg; H = 16, S = 4096)    # → (; ms, tflops)
+#     fab_check((; FAB_CFG_DEFAULT..., emu = (1, 3, 5, 7)))  # emu sweep entry
 #     fab_sweep()                        # default vs scoreboard, all shapes
 #     fab_hang_debug(cfg; H = 2, S = 512)  # beacon run + site decode
 #
-# Configs are `(scoreboard = ..., beacon = ..., nreg = (...))` NamedTuples
+# Configs are `(scoreboard = ..., beacon = ..., nreg = (...), emu = (...))`
+# NamedTuples
 # (see the defs header); each distinct config compiles a fresh kernel
 # specialization (~15 s first call).
 
@@ -127,7 +129,7 @@ end
 function fab_sweep(; cfgs = [
         "default"    => FAB_CFG_DEFAULT,
         "scoreboard" => (scoreboard = true, beacon = false,
-                         nreg = (144, 80, 144)),
+                         nreg = (144, 80, 144), emu = ()),
     ], shapes = [(1, 16, 1024), (1, 16, 2048), (1, 16, 4096), (1, 8, 8192)])
     for (name, cfg) in cfgs
         fab_check(cfg) || (println("  skipping $name (failed check)"); continue)
@@ -149,7 +151,8 @@ end
 # A healthy run prints "no beacons".
 function fab_hang_debug(cfg = FAB_CFG_DEFAULT; B = 1, H = 2, S = 512,
                         input_scale = 2.0f0)
-    bcfg = (scoreboard = cfg.scoreboard, beacon = true, nreg = cfg.nreg)
+    bcfg = (scoreboard = cfg.scoreboard, beacon = true, nreg = cfg.nreg,
+            emu = cfg.emu)
     p = fab_setup(B, H, S; input_scale, cfg = bcfg)
     p.launch!(); CUDACore.synchronize()
     hits = fab_decode_beacons(Array(p.dbg_d))

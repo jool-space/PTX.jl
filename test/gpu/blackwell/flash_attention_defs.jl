@@ -24,6 +24,13 @@
 #       mma/load warpgroup). Constraint: 256a + 128b + 128c ≤ 65536.
 #       Default (144, 80, 144) — B200 sweep winner 2026-07-28 (+6% over
 #       pyptx's (136, 96, 144); producer floor is 72 — n2=64 fails ptxas).
+#   emu        :: NTuple{N,Int} — softmax exp2 pairs (0-based, of 16 per
+#       32-column chunk) computed by the FMA-pipe f32x2 polynomial
+#       emulation instead of ex2.approx (pyptx `emu_pairs`; rebalances
+#       SFU vs FMA pipe pressure — pyptx's headline 1240 TF config uses
+#       (1, 3, 5, 7)). Default () — ex2 everywhere, pending a B200
+#       sweep; the emulation changes numerics (poly + round-to-int
+#       exponent inject), so fab_check gates each swept config.
 #
 # Structure (faithful to pyptx):
 #   * 256 query rows per CTA as two 128-row subtiles ("stages"); BN=128 KV
@@ -68,9 +75,10 @@
 #     `dbg_scoreboard_ld=True` drops it and leans on the SASS register
 #     scoreboard, matching FA4's 0 wait::ld). Correct-by-spec first; the
 #     scoreboard variant is a measured-perf follow-up.
-#   * The FMA-pipe f32x2 exp2 emulation (`emu_pairs`) is skipped — all 16
-#     pairs use `ex2.approx.ftz.f32`. Pure port-simplicity; the emu trick
-#     only rebalances SFU/FMA pipe pressure.
+#   * The FMA-pipe f32x2 exp2 emulation (`emu_pairs`) is ported behind
+#     the `emu` config knob but defaults OFF (all 16 pairs use
+#     `ex2.approx.ftz.f32`) until a B200 session sweeps it; the trick
+#     rebalances SFU/FMA pipe pressure.
 #   * Debug scaffolding (waitmap / beacons / lockstep / s_f16) not ported.
 #   * Shape parameters (seqlen, n_tiles, total_work, ...) are runtime
 #     kernel arguments — one compiled kernel serves every shape (pyptx
@@ -144,7 +152,7 @@ const FAB_LOAD_TID = UInt32(448)   # warp 14 lane 0
 # n2=64 candidate fails ptxas. Correctness re-gated by fab_check at each
 # candidate (rescale-heavy input, scale=2.0).
 const FAB_CFG_DEFAULT = (scoreboard = false, beacon = false,
-                         nreg = (144, 80, 144))
+                         nreg = (144, 80, 144), emu = ())
 
 function fab_check_cfg(cfg)
     a, b, c = cfg.nreg
@@ -153,6 +161,8 @@ function fab_check_cfg(cfg)
         error("nreg $(cfg.nreg): 256*$a + 128*$b + 128*$c = $pool > 65536")
     all(x -> 24 <= x <= 256 && x % 8 == 0, cfg.nreg) ||
         error("nreg values must be multiples of 8 in [24, 256]")
+    all(x -> x isa Int && 0 <= x <= 15, cfg.emu) && allunique(cfg.emu) ||
+        error("emu pairs must be unique Ints in 0:15")
     cfg
 end
 
@@ -283,10 +293,69 @@ end
 
 # ── softmax helpers (per-thread full row, 32-column chunks) ─────────────
 
-@inline _fab_exp_chunk(v::NTuple{32, UInt32}, qk_scale::Float32, mneg::Float32) =
-    ntuple(Val(32)) do i
-        ptx"ex2.approx.ftz.f32"(fma(reinterpret(Float32, v[i]), qk_scale, mneg))
+# FMA-pipe exp2 emulation (pyptx `exp_pair_emu`, ported bit-for-bit):
+# clamp → packed fma (scale + stale-basis bias) → round-to-int via the
+# 2^23+2^22 add/sub trick (add.rm keeps the fraction in [-0.5, 0.5)) →
+# degree-3 poly in the fraction → inject the integer part into the
+# exponent field with a bit-shift/add. Constants are pyptx's exact bit
+# patterns (examples/blackwell/flash_attention_blackwell.py:106-111).
+const FAB_EX2_CLAMP = reinterpret(Float32, 0xC2FE0000)   # -127.0
+@inline _fab_pack2(lo::Float32, hi::Float32) =
+    (UInt64(reinterpret(UInt32, hi)) << 32) | UInt64(reinterpret(UInt32, lo))
+const FAB_EX2_BIG2 = _fab_pack2(reinterpret(Float32, 0x4B400000),
+                                reinterpret(Float32, 0x4B400000))
+const FAB_EX2_C32  = _fab_pack2(reinterpret(Float32, 0x3D9DF09D),
+                                reinterpret(Float32, 0x3D9DF09D))
+const FAB_EX2_C22  = _fab_pack2(reinterpret(Float32, 0x3E6906A4),
+                                reinterpret(Float32, 0x3E6906A4))
+const FAB_EX2_C12  = _fab_pack2(reinterpret(Float32, 0x3F31F519),
+                                reinterpret(Float32, 0x3F31F519))
+const FAB_EX2_C02  = _fab_pack2(1.0f0, 1.0f0)
+
+@inline function _fab_exp_pair_emu(v0::UInt32, v1::UInt32,
+                                   qk2::UInt64, m2::UInt64)
+    a0 = ptx"max.ftz.f32"(reinterpret(Float32, v0), FAB_EX2_CLAMP)
+    a1 = ptx"max.ftz.f32"(reinterpret(Float32, v1), FAB_EX2_CLAMP)
+    x  = ptx"fma.rn.ftz.f32x2"(_fab_pack2(a0, a1), qk2, m2)
+    bi = ptx"add.rm.ftz.f32x2"(x, FAB_EX2_BIG2)
+    f  = ptx"sub.rn.ftz.f32x2"(x, ptx"sub.rn.ftz.f32x2"(bi, FAB_EX2_BIG2))
+    pl = ptx"fma.rn.ftz.f32x2"(f, FAB_EX2_C32, FAB_EX2_C22)
+    pl = ptx"fma.rn.ftz.f32x2"(pl, f, FAB_EX2_C12)
+    pl = ptx"fma.rn.ftz.f32x2"(pl, f, FAB_EX2_C02)
+    r0 = ((bi % UInt32) << 23) + (pl % UInt32)
+    r1 = (((bi >> 32) % UInt32) << 23) + ((pl >> 32) % UInt32)
+    reinterpret(Float32, r0), reinterpret(Float32, r1)
+end
+
+# @generated: the emu/ex2 split is per-pair compile-time state; explicit
+# unrolled assignments keep every lane in registers (a 32-wide closure
+# would escape the inliner and become a real device CALL).
+@generated function _fab_exp_chunk(::Val{EMU}, v::NTuple{32, UInt32},
+                                   qk_scale::Float32, mneg::Float32,
+                                   qk2::UInt64) where {EMU}
+    stmts = Expr[]
+    isempty(EMU) || push!(stmts, :(m2 = _fab_pack2(mneg, mneg)))
+    lanes = Symbol[]
+    for pair in 0:15
+        i = 2pair + 1
+        w0 = Symbol(:w, i); w1 = Symbol(:w, i + 1)
+        if pair in EMU
+            push!(stmts, :(($w0, $w1) =
+                _fab_exp_pair_emu(v[$i], v[$(i + 1)], qk2, m2)))
+        else
+            push!(stmts, :($w0 = ptx"ex2.approx.ftz.f32"(
+                fma(reinterpret(Float32, v[$i]), qk_scale, mneg))))
+            push!(stmts, :($w1 = ptx"ex2.approx.ftz.f32"(
+                fma(reinterpret(Float32, v[$(i + 1)]), qk_scale, mneg))))
+        end
+        push!(lanes, w0, w1)
     end
+    quote
+        Base.@inline
+        $(stmts...)
+        tuple($(lanes...))
+    end
+end
 
 # Fold a chunk into 4 strided accumulators (pyptx chunk_reduce shape).
 # Written as explicit tuple expressions: an `ntuple ... do` closure of this
@@ -304,11 +373,12 @@ end
 
 # exp → pack bf16 → store P quarter → publish BAR_P_Q[C] → fold accs.
 # The wait::st round trip hides under the next chunk's in-flight load.
-@inline function _fab_softmax_chunk(::Val{C}, v::NTuple{32, UInt32},
+@inline function _fab_softmax_chunk(::Val{C}, emu::Val, v::NTuple{32, UInt32},
                                     macc::NTuple{4, Float32}, sacc::NTuple{4, Float32},
                                     sp_base::UInt32, pq_ptr,
-                                    qk_scale::Float32, mneg::Float32) where {C}
-    w = _fab_exp_chunk(v, qk_scale, mneg)
+                                    qk_scale::Float32, qk2::UInt64,
+                                    mneg::Float32) where {C}
+    w = _fab_exp_chunk(emu, v, qk_scale, mneg, qk2)
     pk = ntuple(k -> bf16x2_pack(w[2k - 1], w[2k]), Val(16))
     ptx"tcgen05.st.sync.aligned.32x32b.x16.b32"(sp_base + UInt32(C * 16), pk)
     ptx"tcgen05.wait::st.sync.aligned"()
@@ -326,10 +396,11 @@ end
 
 # One KV tile of the softmax stream. Returns the updated per-thread state
 # (ph_s, ph_stats, mneg, pmax_pend, sums_pend, l_run).
-@inline function _fab_softmax_body(d::FabDbg, sb::Bool, first::Bool, oresc_par_ptr,
+@inline function _fab_softmax_body(d::FabDbg, sb::Bool, emu::Val, first::Bool,
+                                   oresc_par_ptr,
                                    sp_base::UInt32, sfull, sfree, pq_ptr,
                                    stats, alpha_idx::Int, stats_bar::UInt32,
-                                   qk_scale::Float32,
+                                   qk_scale::Float32, qk2::UInt64,
                                    ph_s::UInt32, ph_stats::UInt32, mneg::Float32,
                                    pmax::Float32, sums::Float32, l_run::Float32)
     _fab_wait(d, sfull, ph_s, Val(7))
@@ -370,20 +441,20 @@ end
     # under exp/pack/store(c) ──
     sb || ptx"tcgen05.wait::ld.sync.aligned"()
     v1 = ptx"tcgen05.ld.sync.aligned.32x32b.x32.b32"(sp_base + UInt32(32))
-    macc, sacc = _fab_softmax_chunk(Val(0), v0, ntuple(_ -> 0.0f0, Val(4)),
+    macc, sacc = _fab_softmax_chunk(Val(0), emu, v0, ntuple(_ -> 0.0f0, Val(4)),
                                     ntuple(_ -> 0.0f0, Val(4)),
-                                    sp_base, pq_ptr, qk_scale, mneg)
+                                    sp_base, pq_ptr, qk_scale, qk2, mneg)
     sb || ptx"tcgen05.wait::ld.sync.aligned"()
     v2 = ptx"tcgen05.ld.sync.aligned.32x32b.x32.b32"(sp_base + UInt32(64))
-    macc, sacc = _fab_softmax_chunk(Val(1), v1, macc, sacc,
-                                    sp_base, pq_ptr, qk_scale, mneg)
+    macc, sacc = _fab_softmax_chunk(Val(1), emu, v1, macc, sacc,
+                                    sp_base, pq_ptr, qk_scale, qk2, mneg)
     sb || ptx"tcgen05.wait::ld.sync.aligned"()
     v3 = ptx"tcgen05.ld.sync.aligned.32x32b.x32.b32"(sp_base + UInt32(96))
-    macc, sacc = _fab_softmax_chunk(Val(2), v2, macc, sacc,
-                                    sp_base, pq_ptr, qk_scale, mneg)
+    macc, sacc = _fab_softmax_chunk(Val(2), emu, v2, macc, sacc,
+                                    sp_base, pq_ptr, qk_scale, qk2, mneg)
     sb || ptx"tcgen05.wait::ld.sync.aligned"()
-    macc, sacc = _fab_softmax_chunk(Val(3), v3, macc, sacc,
-                                    sp_base, pq_ptr, qk_scale, mneg)
+    macc, sacc = _fab_softmax_chunk(Val(3), emu, v3, macc, sacc,
+                                    sp_base, pq_ptr, qk_scale, qk2, mneg)
 
     # horizontal reduce into the pending carries
     pmax = max(max(macc[1], macc[2], macc[3]), macc[4])
@@ -714,6 +785,8 @@ function _fab_kernel!(
         alpha_idx = Int(stage) * 128 + Int(row128) + 1
         sum_idx   = alpha_idx + 256
 
+        emu = Val(CFG.emu)
+        qk2 = _fab_pack2(qk_scale, qk_scale)
         ph_s = UInt32(0); ph_stats = UInt32(0); epi_ph = UInt32(0)
         pmax = 0.0f0; sums = 0.0f0
 
@@ -726,14 +799,15 @@ function _fab_kernel!(
             mneg = 0.0f0
             l_run = 0.0f0
             ph_s, ph_stats, mneg, pmax, sums, l_run = _fab_softmax_body(
-                d, sb, true, oresc, sp_base, sfull, sfree, pq_ptr, stats, alpha_idx,
-                stats_bar, qk_scale, ph_s, ph_stats, mneg, pmax, sums, l_run)
+                d, sb, emu, true, oresc, sp_base, sfull, sfree, pq_ptr,
+                stats, alpha_idx,
+                stats_bar, qk_scale, qk2, ph_s, ph_stats, mneg, pmax, sums, l_run)
             it = UInt32(1)
             while it < n_tiles
                 po = (it & UInt32(1)) << UInt32(3)
                 ph_s, ph_stats, mneg, pmax, sums, l_run = _fab_softmax_body(
-                    d, sb, false, oresc + Int(po), sp_base, sfull, sfree, pq_ptr,
-                    stats, alpha_idx, stats_bar, qk_scale,
+                    d, sb, emu, false, oresc + Int(po), sp_base, sfull, sfree, pq_ptr,
+                    stats, alpha_idx, stats_bar, qk_scale, qk2,
                     ph_s, ph_stats, mneg, pmax, sums, l_run)
                 it += UInt32(1)
             end

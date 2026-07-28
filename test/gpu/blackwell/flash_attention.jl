@@ -63,7 +63,7 @@ include("flash_attention_defs.jl")
     # config variants: the workbench's knobs must stay compilable, and
     # each must actually change the emitted PTX the way it claims.
     sb_cfg = fab_check_cfg((scoreboard = true, beacon = false,
-                            nreg = (144, 80, 144)))
+                            nreg = (144, 80, 144), emu = ()))
     @test ptxas_compiles(_fab_kernel!, types(sb_cfg);
                          cap = v"10.0", feature_set = :arch, minthreads = 512)
     sb_ptx = emit_ptx(_fab_kernel!, types(sb_cfg);
@@ -75,16 +75,32 @@ include("flash_attention_defs.jl")
     @test 0 < n_waits(sb_ptx) < n_waits(ptx)
 
     bc_cfg = fab_check_cfg((scoreboard = false, beacon = true,
-                            nreg = (144, 80, 144)))
+                            nreg = (144, 80, 144), emu = ()))
     @test ptxas_compiles(_fab_kernel!, types(bc_cfg);
                          cap = v"10.0", feature_set = :arch, minthreads = 512)
 
     nr_cfg = fab_check_cfg((scoreboard = false, beacon = false,
-                            nreg = (144, 88, 128)))
+                            nreg = (144, 88, 128), emu = ()))
     nr_ptx = emit_ptx(_fab_kernel!, types(nr_cfg);
                       cap = v"10.0", feature_set = :arch, minthreads = 512)
     @test occursin("setmaxnreg.inc.sync.aligned.u32 144", nr_ptx)
     @test occursin("setmaxnreg.dec.sync.aligned.u32 88", nr_ptx)
+
+    # emu: pyptx's headline pair set moves 8 of 16 exp2 pairs per chunk
+    # onto the packed-f32 FMA pipe; the other 8 stay on the SFU. The
+    # default config must emit NO f32x2 arithmetic.
+    emu_cfg = fab_check_cfg((scoreboard = false, beacon = false,
+                             nreg = (144, 80, 144), emu = (1, 3, 5, 7)))
+    @test ptxas_compiles(_fab_kernel!, types(emu_cfg);
+                         cap = v"10.0", feature_set = :arch, minthreads = 512)
+    emu_ptx = emit_ptx(_fab_kernel!, types(emu_cfg);
+                       cap = v"10.0", feature_set = :arch, minthreads = 512)
+    @test occursin("fma.rn.ftz.f32x2", emu_ptx)
+    @test occursin("add.rm.ftz.f32x2", emu_ptx)
+    @test occursin("sub.rn.ftz.f32x2", emu_ptx)
+    @test occursin("max.ftz.f32", emu_ptx)
+    @test occursin("ex2.approx.ftz.f32", emu_ptx)
+    @test !occursin("f32x2", ptx)
 end
 
 # ── Runtime — datacenter Blackwell only (banner: cc==10) ────────────────
