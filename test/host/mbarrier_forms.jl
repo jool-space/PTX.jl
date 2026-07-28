@@ -92,6 +92,22 @@ function _expected_mbarrier_forms()
           :relaxed, :cluster, :b64), canonical, :sink,
          ((:address, :u32),), :cta; provenance = :ptxas_compat)
 
+    # PTX ISA 9.4 multicast::cluster::32b: shared::cluster only, mask is
+    # the mandatory trailing u32; multicast arrive keeps the `_` sink.
+    multicast = Symbol("multicast::cluster::32b")
+    cluster_space = Symbol("shared::cluster")
+    for subop in (:expect_tx, :complete_tx), sem in tx_pairs
+        mods = (subop, sem..., cluster_space, multicast, :b64)
+        add!(mods, mods, :none, ((:address, :u32, :u32),), :cluster)
+    end
+    for subop in (:arrive, :arrive_drop), sem in arrive_pairs
+        mods = (subop, sem..., cluster_space, multicast, :b64)
+        add!(mods, mods, :remote_sink,
+             ((:address, :u32), (:address, :u32, :u32)), :cluster)
+        mods = (subop, :expect_tx, sem..., cluster_space, multicast, :b64)
+        add!(mods, mods, :remote_sink, ((:address, :u32, :u32),), :cluster)
+    end
+
     for wait in (:test_wait, :try_wait), sem in wait_pairs,
         (space, kind) in local_spaces
         for phase in ((), (Symbol("phase_type::primary"),))
@@ -230,6 +246,9 @@ function _isa_mbarrier_floor(schema, variant)
         advance!(v"9.3", v"9.0")
     schema.destination in (:report_pred, :report) &&
         advance!(v"9.3", v"9.0")
+    # PTX ISA 9.4: multicast::cluster::32b is an sm_107f family feature
+    # (10.7 is the lowest admitting family floor).
+    Symbol("multicast::cluster::32b") in mods && advance!(v"9.4", v"10.7")
 
     (; ptx, sm)
 end
@@ -237,13 +256,13 @@ end
 @testset "closed mbarrier grammar and ABI ledger" begin
     expected = _expected_mbarrier_forms()
     actual = Dict(schema.mods => schema for schema in PTX.MBARRIER_FORM_SCHEMAS)
-    @test length(expected) == 480
-    @test length(actual) == 480
+    @test length(expected) == 506
+    @test length(actual) == 506
     @test Set(keys(actual)) == Set(keys(expected))
     @test count(k -> first(k) === :init, keys(actual)) == 9
     @test count(k -> first(k) === :inval, keys(actual)) == 3
-    @test count(k -> first(k) in (:expect_tx, :complete_tx), keys(actual)) == 24
-    @test count(k -> first(k) in (:arrive, :arrive_drop), keys(actual)) == 168
+    @test count(k -> first(k) in (:expect_tx, :complete_tx), keys(actual)) == 30
+    @test count(k -> first(k) in (:arrive, :arrive_drop), keys(actual)) == 188
     @test count(k -> first(k) in (:test_wait, :try_wait), keys(actual)) == 270
     @test count(k -> first(k) === :pending_count, keys(actual)) == 2
     @test count(k -> first(k) === :check_layout, keys(actual)) == 4
@@ -315,8 +334,8 @@ end
 end
 
 @testset "independent exhaustive mbarrier history floors" begin
-    @test length(PTX.MBARRIER_FORM_SCHEMAS) == 480
-    @test sum(length(s.variants) for s in PTX.MBARRIER_FORM_SCHEMAS) == 687
+    @test length(PTX.MBARRIER_FORM_SCHEMAS) == 506
+    @test sum(length(s.variants) for s in PTX.MBARRIER_FORM_SCHEMAS) == 723
     for schema in PTX.MBARRIER_FORM_SCHEMAS, variant in schema.variants
         want = _isa_mbarrier_floor(schema, variant)
         label = "mbarrier.$(join(schema.mods, '.')) $(variant.operands)"
@@ -334,6 +353,7 @@ end
     conditional = Symbol("phase_type::conditional")
     cluster = Symbol("shared::cluster")
     cta = Symbol("shared::cta")
+    multicast32 = Symbol("multicast::cluster::32b")
     expected = Set((
         (:init, :shared, :b64),
         (:inval, :shared, :b64),
@@ -357,18 +377,22 @@ end
         (:try_wait, :report, :parity, primary, :shared, :b64),
         (:test_wait, :parity, conditional, :shared, :b64),
         (:try_wait, :parity, conditional, :shared, :b64),
+        # PTX ISA 9.4 cluster multicast (sm_107f, spelled-only).
+        (:arrive, cluster, multicast32, :b64),
+        (:arrive, :expect_tx, cluster, multicast32, :b64),
+        (:expect_tx, cluster, multicast32, :b64),
     ))
     actual = Set{Tuple}()
     PTX._visit_operation_methods() do _, op, mods
         op === :mbarrier && push!(actual, mods)
     end
-    @test length(expected) == 22
+    @test length(expected) == 25
     @test actual == expected
     for mods in actual
         @test PTX.schema(PTX.MBarrierLedger(), :mbarrier, mods) !== nothing
     end
 
-    # These twelve wrappers have no NVVM spelling. Their convenience methods
+    # These fifteen wrappers have no NVVM spelling. Their convenience methods
     # normalize Integer inputs, then delegate back to the schema emitter. Pin
     # the actual typed body so a future hand-written @asmcall cannot silently
     # lose the call-site optimizer barrier again.
@@ -388,8 +412,12 @@ end
          (pS, UInt32)),
         ((:test_wait, :parity, conditional, :shared, :b64), (pS, UInt32)),
         ((:try_wait, :parity, conditional, :shared, :b64), (pS, Int)),
+        ((:arrive, cluster, multicast32, :b64), (pS, UInt32)),
+        ((:arrive, :expect_tx, cluster, multicast32, :b64),
+         (pS, UInt32, Int)),
+        ((:expect_tx, cluster, multicast32, :b64), (pS, Int, UInt32)),
     )
-    @test length(asm_wrappers) == 12
+    @test length(asm_wrappers) == 15
     for (mods, argtypes) in asm_wrappers
         ci, rettype = first(Base.code_typed(Operation{:mbarrier, mods}(),
                                             argtypes))
@@ -516,6 +544,17 @@ end
                             (UInt32, UInt32))
     @test sharedaddr.asm == "mbarrier.init.shared.b64 [\$0], \$1;"
     @test sharedaddr.constraints == "r,r,~{memory}"
+
+    # PTX ISA 9.4 multicast: spelled exactly as the ISA example
+    # (`..._, [remoteAddr32], 0xa;`), remote sink `_`, mask trailing.
+    mc = build_call(:mbarrier,
+                    (:arrive, :release, :cta, Symbol("shared::cluster"),
+                     Symbol("multicast::cluster::32b"), :b64),
+                    (UInt32, UInt32))
+    @test mc.asm ==
+          "mbarrier.arrive.release.cta.shared::cluster.multicast::cluster::32b.b64 _, [\$0], \$1;"
+    @test mc.constraints == "r,r,~{memory}"
+    @test mc.rettype === Nothing
 
     # Explicit integer address roles compose with the mbarrier schema instead
     # of falling through to the generic address contract. Pin a state result,
