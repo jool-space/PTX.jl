@@ -418,10 +418,21 @@ end
     ceiled(nvvm"tcgen05.relinq.alloc.permit.cg2",
            ptx"tcgen05.relinquish_alloc_permit.cta_group::2.sync.aligned")()
 
-@inline optype"tcgen05.wait::ld.sync.aligned"() =
-    ceiled(nvvm"tcgen05.wait.ld", ptx"tcgen05.wait::ld.sync.aligned")()
-@inline optype"tcgen05.wait::st.sync.aligned"() =
-    ceiled(nvvm"tcgen05.wait.st", ptx"tcgen05.wait::st.sync.aligned")()
+# Demoted to asm (free): after the MEMORY_WIDEN_OVERLAY (#109) the wait
+# intrinsics render no memory attribute — semantically the same conservative
+# barrier as `sideeffect + ~{memory}` — so the intrinsic route bought only
+# its two selection probes. The waits order ALL prior tcgen05.ld/st results
+# against subsequent ordinary loads/stores, hence the full clobber.
+let ir = convergent_asm_ir("tcgen05.wait::ld.sync.aligned;", "~{memory}",
+                           Nothing, ())
+    @eval @inline optype"tcgen05.wait::ld.sync.aligned"() =
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{})
+end
+let ir = convergent_asm_ir("tcgen05.wait::st.sync.aligned;", "~{memory}",
+                           Nothing, ())
+    @eval @inline optype"tcgen05.wait::st.sync.aligned"() =
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{})
+end
 
 # Specialized thread-synchronization fences are side-effecting, no-argument
 # code-motion barriers (PTX 9.3 §9.7.17.11.1). Keep them as inline PTX with
@@ -482,6 +493,102 @@ end
     ceiled(nvvm"tcgen05.commit.mc.shared.cg2",
            ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64")(
         _tc_smem(mbar), UInt16(mask))
+
+# --- PTX ISA 9.4 alloc/dealloc/commit forms, asm tier -------------------------
+# No NVVM intrinsics exist for any of these at 22.1.7; spelled-only until a
+# CUDA 13.4+ ptxas ships. All are convergent per their form contracts, so
+# they go through convergent_asm_ir like the other tcgen05 asm forms; the
+# conservative ~{memory} clobber matches the family's asm tier today.
+#
+# `.exclusive` (sm_100f/sm_110f families; nCols up to 576 on sm_107f) claims
+# sole ownership of the allocation permit: no other allocation may coexist,
+# nCols may be a non-power-of-two multiple of 32, and the deallocation must
+# be the matching `.exclusive` form.
+#
+# The 9.4 commit qualifiers follow the syntax-block canonical order — state
+# space, then multicast — matching the mbarrier 9.4 forms. The 16b spelling
+# is the explicit form of the pre-9.4 default (b16 mask); ::32b widens the
+# CTA mask to b32 for >16-CTA clusters. `.sync_restrict::shared::read::mma::a`
+# arrives on the mbarrier once all prior tcgen05.mma reads of the A matrix
+# from shared memory complete — the early-SMEM-release primitive; it does
+# NOT signal MMA completion.
+
+for cg in 1:2
+    cta = Symbol("cta_group::", cg)
+    head = "tcgen05.alloc.exclusive.cta_group::$cg.sync.aligned"
+
+    mods = (:alloc, :exclusive, cta, :sync, :aligned, :b32)
+    ir = convergent_asm_ir("$head.b32 [\$0], \$1;", "r,r,~{memory}",
+                           Nothing, (Core.LLVMPtr{UInt32, AS.Shared}, UInt32))
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32)
+        Base.llvmcall(($ir, "entry"), Nothing,
+                      Tuple{Core.LLVMPtr{UInt32, AS.Shared}, UInt32},
+                      dst, ncols)
+    end
+
+    mods = (:alloc, :exclusive, cta, :sync, :aligned,
+            Symbol("shared::cta"), :b32)
+    ir = convergent_asm_ir("$head.shared::cta.b32 [\$0], \$1;",
+                           "r,r,~{memory}", Nothing, (UInt32, UInt32))
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            dst::UInt32, ncols::UInt32)
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt32},
+                      dst, ncols)
+    end
+
+    mods = (:dealloc, :exclusive, cta, :sync, :aligned, :b32)
+    ir = convergent_asm_ir(
+        "tcgen05.dealloc.exclusive.cta_group::$cg.sync.aligned.b32 \$0, \$1;",
+        "r,r,~{memory}", Nothing, (UInt32, UInt32))
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            taddr::UInt32, ncols::UInt32)
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt32},
+                      taddr, ncols)
+    end
+end
+
+for cg in 1:2
+    cta = Symbol("cta_group::", cg)
+    arrive = Symbol("mbarrier::arrive::one")
+    cluster = Symbol("shared::cluster")
+    syncres = Symbol("sync_restrict::shared::read::mma::a")
+    chead = "tcgen05.commit.cta_group::$cg.mbarrier::arrive::one"
+
+    for (mc, maskT, letter) in
+            ((Symbol("multicast::cluster::16b"), UInt16, "h"),
+             (Symbol("multicast::cluster::32b"), UInt32, "r"))
+        mods = (:commit, cta, arrive, cluster, mc, :b64)
+        ir = convergent_asm_ir("$chead.shared::cluster.$mc.b64 [\$0], \$1;",
+                               "r,$letter,~{memory}", Nothing,
+                               (UInt32, maskT))
+        @eval @inline function (::Operation{:tcgen05, $mods})(
+                mbar::UInt32, mask::Integer)
+            Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, $maskT},
+                          mbar, $maskT(mask))
+        end
+    end
+
+    mods = (:commit, cta, arrive, syncres, cluster, :b64)
+    ir = convergent_asm_ir(
+        "$chead.sync_restrict::shared::read::mma::a.shared::cluster.b64 [\$0];",
+        "r,~{memory}", Nothing, (UInt32,))
+    @eval @inline function (::Operation{:tcgen05, $mods})(mbar::UInt32)
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32}, mbar)
+    end
+
+    mods = (:commit, cta, arrive, syncres, cluster,
+            Symbol("multicast::cluster::32b"), :b64)
+    ir = convergent_asm_ir(
+        "$chead.sync_restrict::shared::read::mma::a.shared::cluster" *
+        ".multicast::cluster::32b.b64 [\$0], \$1;",
+        "r,r,~{memory}", Nothing, (UInt32, UInt32))
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            mbar::UInt32, mask::Integer)
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt32},
+                      mbar, UInt32(mask))
+    end
+end
 
 # Integer-address adapters for the literal alloc/commit methods above.
 # The generic-address alloc and pointer commit forms need no entry because

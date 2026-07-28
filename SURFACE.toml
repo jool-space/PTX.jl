@@ -480,7 +480,7 @@ section = "9.7.18"
 title = "TensorCore 5th Generation Family Instructions"
 status = "strict"
 opcodes = ["tcgen05"]
-notes = "Typed-wrapper-only: one head spans address destinations, register vectors, sinks, fences, and matrix descriptors (alloc/dealloc, ld/st grids, cp, mma dense/sp/ws/mx, commit, fences); ~120/200 intrinsics remain unwrapped — see the tcgen05 coverage-gap plan."
+notes = "Typed-wrapper-only: one head spans address destinations, register vectors, sinks, fences, and matrix descriptors (alloc/dealloc, ld/st grids, cp, mma dense/sp/ws/mx, commit, fences); ~120/200 intrinsics remain unwrapped — see the tcgen05 coverage-gap plan. PTX ISA 9.4 additions (.exclusive alloc/dealloc, commit multicast::cluster::{16b,32b} and sync_restrict::shared::read::mma::a) are asm-tier, spelled-only until a CUDA 13.4+ ptxas ships; wait::ld/st demoted to asm (attribute-equivalent post-#109); ti16/collector::b/decompress::lut::b/idesc bits stay deferred pending the 9.4-GA defect recheck."
 owner = ["src/wrappers/tcgen05.jl", "src/lib/tcgen05_descriptor.jl",
          "src/lib/tcgen05_layout.jl"]
 
