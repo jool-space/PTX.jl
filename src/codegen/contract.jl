@@ -585,14 +585,13 @@ end
 
 function _validate_exact_schema!(state::_TranspileContractState,
                                  inst::Instruction, path::String)
-    # Consults the ledgers in the shared CALL_LEDGERS order
-    # (src/ledgers/protocol.jl): immediate → mbarrier → structured → clc →
-    # vector → scalar → b128, with the ordinary-cvt source gate after the
-    # walk (its ledgers/types.jl slot; scalar owns cvt.pack, and no cvt
-    # spelling reaches b128). Probe order is throw order: when two ledgers
-    # claim one spelling (vector/b128 overlap on .b128 tails), the first
-    # consulted ledger's miss is the one a TranspilerError carries — the
-    # same choice `build_call` makes.
+    # Each `_instruction_*` consult below is gated on `island_of`
+    # (src/ledgers/protocol.jl), so at most one can resolve or throw a miss;
+    # the probe sequence is just evaluation order, not a priority. The
+    # ordinary-cvt source gate runs after the islands (its ledgers/types.jl
+    # slot; scalar owns cvt.pack, and no cvt spelling reaches b128). Which
+    # island a contested spelling belongs to (`ld.v2.b128`-class) is decided
+    # inside `island_of` — the same choice `build_call` makes.
     immediate = _instruction_immediate_form_contract(inst)
     immediate === nothing || return true
     mbarrier = _instruction_mbarrier_schema(state.cg, inst)

@@ -1,7 +1,7 @@
 function _instruction_immediate_form_contract(inst::Instruction)
     op = Symbol(inst.opcode)
     mods = _schema_modifiers(inst.modifiers)
-    claims(ImmediateLedger(), op, mods) || return nothing
+    island_of(op, mods) isa ImmediateLedger || return nothing
     contract = schema(ImmediateLedger(), op, mods)
     contract === nothing && throw(miss(ImmediateLedger(), op, mods))
     length(inst.operands) == 1 || throw(ArgumentError(

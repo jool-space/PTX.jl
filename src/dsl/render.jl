@@ -323,35 +323,13 @@ function _build_b128_call(schema::B128FormSchema, @nospecialize(argtypes),
        passthrough_unwrap_address = Tuple(passthrough_unwrap))
 end
 
-# One consult step of the shared cascade: throw the ledger's miss for a
-# claimed-but-invalid spelling, then run its consult-time argument validation
-# where the ledger prevalidates (immediate/CLC/b128 — exactly where the
-# historical hand-written cascade validated).
-function _consult_ledger(l::FormLedger, op::Symbol,
-                         mods::Tuple{Vararg{Symbol}}, @nospecialize(argtypes))
-    s = schema(l, op, mods)
-    s === nothing && claims(l, op, mods) && throw(miss(l, op, mods))
-    s === nothing || !prevalidates_call(l) || validate_ledger_args(l, s, argtypes)
-    s
-end
-
-# Walk a ledger tuple front-to-back (recursion keeps the throw/validation
-# order exact), returning the tuple of schema lookups.
-_consult_ledgers(::Tuple{}, op::Symbol, mods::Tuple{Vararg{Symbol}},
-                 @nospecialize(argtypes)) = ()
-function _consult_ledgers(ledgers::Tuple, op::Symbol,
-                          mods::Tuple{Vararg{Symbol}}, @nospecialize(argtypes))
-    s = _consult_ledger(first(ledgers), op, mods, argtypes)
-    (s, _consult_ledgers(Base.tail(ledgers), op, mods, argtypes)...)
-end
-
-# Builder dispatch family: the reviewed schema-specific renderers. Ledgers
+# Builder dispatch family: the reviewed schema-specific renderers. Islands
 # without a method here (immediate, CLC, scalar) lower through build_call's
-# generic tail. The builder *order* in build_call is not CALL_LEDGERS order:
-# schema ownership is opcode-disjoint across these families, and the
-# non-ledger guards (integer-Address fallback rule, registry contract check,
-# explicit-address bracket check) must keep their historical positions
-# between specific builders.
+# generic tail. The builder dispatch order in build_call exists only to keep
+# the non-island guards (integer-Address fallback rule, registry contract
+# check, explicit-address bracket check) at their historical positions
+# between specific builders — `island_of` already guarantees at most one
+# builder can fire.
 build_ledger_call(::MBarrierLedger, s::MBarrierFormSchema,
                   @nospecialize(argtypes), contract::FormContract) =
     _build_mbarrier_call(s, argtypes, contract)
@@ -375,17 +353,30 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     raw && contract !== missing && throw(ArgumentError(
         "PTX.build_call: raw=true selects RAW_CONTRACT internally; " *
         "do not also pass contract=" * repr(contract)))
-    # THE cascade (protocol.jl). The invalid-Address-marker guard predates the
-    # CLC/vector/scalar/b128 consults, so the walk splits around it.
-    immediate, mbarrier, structured =
-        _consult_ledgers(CALL_LEDGERS[1:3], op, mods, argtypes)
+    # THE island partition (protocol.jl). Historical throw order is kept: the
+    # immediate/mbarrier/structured misses (and the immediate island's
+    # consult-time argument validation) precede the invalid-Address-marker
+    # guard; the CLC/vector/scalar/b128 misses and the CLC/b128 consult-time
+    # validations follow it. Consult-time validation runs exactly where the
+    # historical hand-written cascade validated (immediate/CLC/b128); the
+    # other islands validate inside their dedicated builders or, for scalar,
+    # at the generic tail below.
+    island = island_of(op, mods)
+    s = island === nothing ? nothing : schema(island, op, mods)
+    if island isa Union{ImmediateLedger, MBarrierLedger, StructuredLedger}
+        s === nothing && throw(miss(island, op, mods))
+        island isa ImmediateLedger && validate_ledger_args(island, s, argtypes)
+    end
     has_invalid_address_marker(argtypes) && throw(ArgumentError(
         "PTX.Address is reserved for Int32, UInt32, Int64, and UInt64; " *
         "Core.LLVMPtr already preserves its address role and exact typed " *
         "dispatch, so call address(pointer) instead of constructing " *
         "Address{<:Core.LLVMPtr}"))
-    _clc, vector, scalar, b128_schema =
-        _consult_ledgers(CALL_LEDGERS[4:7], op, mods, argtypes)
+    if island !== nothing
+        s === nothing && throw(miss(island, op, mods))
+        island isa Union{CLCLedger, B128Ledger} &&
+            validate_ledger_args(island, s, argtypes)
+    end
     selected_contract = raw ? RAW_CONTRACT :
                         contract === missing ? form_contract(op, mods) : contract
     uses_implicit_cc(op, mods) && throw(ArgumentError(
@@ -405,19 +396,19 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     # The closed mbarrier schema is authoritative for its result and operand
     # roles. Only non-mbarrier chain fallbacks reach the generic structured-
     # address and contract checks below.
-    if mbarrier !== nothing
+    if island isa MBarrierLedger
         selected_contract === nothing && error(
             "mbarrier is missing its reviewed form contract")
-        return build_ledger_call(MBarrierLedger(), mbarrier, argtypes,
+        return build_ledger_call(MBarrierLedger(), s, argtypes,
                                  selected_contract)
     end
-    b128_schema === nothing ||
-        return build_ledger_call(B128Ledger(), b128_schema, argtypes,
+    island isa B128Ledger &&
+        return build_ledger_call(B128Ledger(), s, argtypes,
                                  selected_contract)
     # The audited vector-result schema is likewise authoritative: it validates
     # and brackets its address operand itself, so an integer Address routed to
     # a reviewed vector form must not hit the exact-wrapper-only fallback rule.
-    address_rule = has_integer_address(argtypes) && vector === nothing ?
+    address_rule = has_integer_address(argtypes) && !(island isa VectorLedger) ?
                    structured_address_fallback_rule(op, mods) : nothing
     address_rule === nothing ||
         throw(structured_address_fallback_error(op, mods, address_rule))
@@ -427,21 +418,21 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
         "memory, convergence) that must be reviewed per form — add a registry " *
         "entry, or use ptx\"...\"raw for the maximally-conservative contract " *
         "(sideeffect + memory clobber + convergent; pointer operands bracketed).")
-    structured === nothing ||
-        return build_ledger_call(StructuredLedger(), structured, argtypes,
+    island isa StructuredLedger &&
+        return build_ledger_call(StructuredLedger(), s, argtypes,
                                  selected_contract)
-    vector === nothing ||
-        return build_ledger_call(VectorLedger(), vector, argtypes,
+    island isa VectorLedger &&
+        return build_ledger_call(VectorLedger(), s, argtypes,
                                  selected_contract)
     has_explicit_address(argtypes) && !selected_contract.brackets &&
         throw(ArgumentError(
             "ptx\"$(build_head(op, mods))\" has no reviewed bracketed-address " *
              "operand role; PTX.address(...) is only accepted by memory/address " *
              "forms. Passing it here would emit invalid square brackets."))
-    scalar === nothing || validate_scalar_result_args(scalar, argtypes)
+    island isa ScalarLedger && validate_scalar_result_args(s, argtypes)
     # Immediate side-effect forms have no PTX destination even on the raw
     # tier, whose generic contract otherwise assumes a scalar result.
-    rettype = immediate !== nothing && !immediate.returns ? Nothing :
+    rettype = island isa ImmediateLedger && !s.returns ? Nothing :
               selected_contract.returns ? infer_rettype(op, mods) : Nothing
     nonpure = !selected_contract.pure || has_special_reg(argtypes)
     bracket = selected_contract.brackets

@@ -122,7 +122,8 @@ function _instruction_cvt_source_schema(cg::CodeGenState, inst::Instruction,
     s
 end
 
-# Ordinary cvt sits outside CALL_LEDGERS (see protocol.jl): emit_instruction!
+# Ordinary cvt sits outside the island partition (see protocol.jl):
+# emit_instruction!
 # consults it explicitly after the shared walk, ret/bra, and alias absorption.
 # cvt.pack never reaches this method — the scalar ledger claims and handles it
 # inside the shared walk.

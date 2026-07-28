@@ -196,7 +196,7 @@ const _VECTOR_ATOM_COMPAT_SPELLINGS = let spellings = Dict{Tuple,Tuple}()
     spellings
 end
 
-const _VECTOR_MARKERS = Set((:v2, :v4, :v8))
+# _VECTOR_MARKERS is owned by the island partition (src/ledgers/protocol.jl).
 const _VECTOR_STATE_SPACES = Set((
     :const, :global, :local, :param, Symbol("param::entry"), Symbol("param::func"),
     :shared, Symbol("shared::cta"), Symbol("shared::cluster"),
@@ -383,14 +383,6 @@ function schema(::VectorLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
         return _schema_from_core(form, mods, info)
     end
     nothing
-end
-
-function claims(::VectorLedger, op::Symbol,
-                mods::Tuple{Vararg{Symbol}})
-    any(mod -> mod in _VECTOR_MARKERS, mods) || return false
-    op in (:ld, :atom) && return true
-    op === :multimem && :ld_reduce in mods && return true
-    false
 end
 
 function miss(::VectorLedger, op::Symbol,

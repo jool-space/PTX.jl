@@ -3,7 +3,7 @@ function _instruction_clc_try_cancel_schema(inst::Instruction)
     op = :clusterlaunchcontrol
     mods = _schema_modifiers(inst.modifiers)
     s = schema(CLCLedger(), op, mods)
-    s === nothing && claims(CLCLedger(), op, mods) &&
+    s === nothing && island_of(op, mods) isa CLCLedger &&
         throw(miss(CLCLedger(), op, mods))
     s === nothing && return nothing
     length(inst.operands) == 2 || throw(ArgumentError(

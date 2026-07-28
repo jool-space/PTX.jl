@@ -1,30 +1,24 @@
-# The result-ABI ledger protocol: one protocol, one consultation order.
+# The result-ABI island partition: one partition function, one lookup.
 #
 # Every closed grammar island ("ledger") that owns a chain form's result or
-# operand ABI implements the same three-method surface on a singleton handle:
+# operand ABI implements the same surface on a singleton handle:
 #
-#   claims(l, op, mods) -> Bool     — does this spelling belong to the ledger's
-#                                     closed island? A claimed spelling must
-#                                     either resolve to a schema or fail loud;
-#                                     it never falls through to the generic
-#                                     terminal-modifier rule or the raw tier.
-#   schema(l, op, mods)             — the ledger's schema object for an exact
+#   schema(l, op, mods)             — the island's schema object for an exact
 #                                     reviewed form, or `nothing`.
-#   miss(l, op, mods)               — the ArgumentError for a claimed-but-
-#                                     invalid spelling.
-#   validate_ledger_args(l, s, argtypes) — the ledger's argument/carrier
+#   miss(l, op, mods)               — the ArgumentError for a spelling routed
+#                                     to the island with no reviewed schema.
+#   validate_ledger_args(l, s, argtypes) — the island's argument/carrier
 #                                     validator for a resolved schema `s`
 #                                     (throws ArgumentError on a violation).
 #
-# All methods are normalized to `(op, mods)` even where a ledger keys on only
-# one of the two (mbarrier ignores `op === :mbarrier`'s mods-independent claim,
-# the CLC ledger keys its schema table on mods, ...).
-#
-# Consumers never hand-write the cascade: `CALL_LEDGERS` below is the single
-# ordering site, shared by `build_call` (src/dsl/render.jl), result-ABI
-# inference (src/ledgers/types.jl), `lowering` reflection
-# (src/dsl/reflection.jl), and the transpiler's instruction emitter
-# (src/codegen/instruction.jl + src/codegen/adapters/*.jl).
+# `island_of(op, mods)` is the single routing site: it assigns every spelling
+# to at most one island. A routed spelling either resolves to a schema or
+# fails loud with that island's `miss`; it never falls through to the generic
+# terminal-modifier rule or the raw tier. Consumers never probe islands they
+# were not routed to — `build_call` (src/dsl/render.jl), result-ABI inference
+# (src/ledgers/types.jl), `lowering` reflection (src/dsl/reflection.jl), and
+# the transpiler (src/codegen/instruction.jl + src/codegen/adapters/*.jl)
+# all route through `island_of`.
 
 abstract type FormLedger end
 
@@ -35,45 +29,89 @@ struct CLCLedger        <: FormLedger end   # src/ledgers/address_operands.jl
 struct VectorLedger     <: FormLedger end   # src/ledgers/vector_results.jl
 struct ScalarLedger     <: FormLedger end   # src/ledgers/scalar_results.jl
 struct B128Ledger       <: FormLedger end   # src/ledgers/b128_forms.jl
-struct CvtLedger        <: FormLedger end   # src/ledgers/cvt_forms.jl — NOT in
-                                            # CALL_LEDGERS; see below.
+struct CvtLedger        <: FormLedger end   # src/ledgers/cvt_forms.jl — NOT
+                                            # partitioned; see below.
 
-function claims end
 function schema end
 function miss end
 function validate_ledger_args end
 
-# THE consultation order. It matches the historical `build_call` cascade
-# exactly: immediate → mbarrier → structured → CLC → vector → scalar → b128.
-# (The invalid-Address-marker guard historically sat between the structured
-# and CLC consults; `build_call` splits its walk there to preserve it.)
+# Vector-result markers live here because the partition keys on them; the
+# vector ledger's schema resolver shares this set.
+const _VECTOR_MARKERS = Set((:v2, :v4, :v8))
+
+# THE partition. It replaces the historical consultation cascade (immediate →
+# mbarrier → structured → CLC → vector → scalar → b128): the islands' claim
+# sets were opcode-disjoint, so at most one island ever claimed a spelling and
+# the cascade order decided nothing — except at two spots, which are now
+# explicit rules instead of consult-order accidents:
 #
-# `CvtLedger` is deliberately NOT part of this order: it gates ordinary cvt
+#   * a vector-marked `ld`/`atom` spelling belongs to the vector island even
+#     when a `.b128` token is present (`ld.v2.b128`-class spellings get the
+#     vector island's miss, exactly as the old vector-before-b128 consult
+#     order chose);
+#   * a `clusterlaunchcontrol` spelling with `.try_cancel` belongs to the CLC
+#     island even if `.query_cancel`/`.b128` also appear (the old CLC-before-
+#     b128 order).
+#
+# The scalar arm reproduces the scalar ledger's historical claim predicate
+# verbatim; see src/ledgers/scalar_results.jl for the per-pattern rationale.
+#
+# `CvtLedger` is deliberately NOT part of the partition: it gates ordinary cvt
 # *source carriers* for the transpiler (cvt_forms.jl) and the ordinary-cvt
-# *result* fallback in types.jl — not the call cascade. It is consulted
-# explicitly where `op === :cvt` reaches those two consumers, after every
-# CALL_LEDGERS island (cvt.pack belongs to the scalar ledger) and after the
-# form registry's `returns` gate. Unlike the other ledgers, its `schema`
-# throws its own `miss` for a claimed-but-invalid spelling: every non-pack
-# cvt spelling is claimed, so a lookup miss is never a fall-through.
-const CALL_LEDGERS = (ImmediateLedger(), MBarrierLedger(), StructuredLedger(),
-                      CLCLedger(), VectorLedger(), ScalarLedger(), B128Ledger())
-
-# First ledger in `CALL_LEDGERS` claiming `(op, mods)`, or `nothing`.
-function first_claiming(op::Symbol, mods::Tuple{Vararg{Symbol}})
-    for l in CALL_LEDGERS
-        claims(l, op, mods) && return l
+# *result* fallback in types.jl — not call routing. It is consulted explicitly
+# where `op === :cvt` reaches those two consumers, after the partition
+# (cvt.pack belongs to the scalar island) and after the form registry's
+# `returns` gate. Unlike the islands, its `schema` throws its own `miss` for
+# an invalid spelling: every non-pack cvt spelling is inside its domain, so a
+# lookup miss is never a fall-through.
+function island_of(op::Symbol, mods::Tuple{Vararg{Symbol}})
+    if op === :setmaxnreg || op === :pmevent
+        ImmediateLedger()
+    elseif op === :mbarrier
+        MBarrierLedger()
+    elseif op === :setp || op === :lop3 || op === :match || op === :elect ||
+           op === :testp || op === :isspacep
+        StructuredLedger()
+    elseif op === :clusterlaunchcontrol
+        :try_cancel in mods                  ? CLCLedger()  :
+        :query_cancel in mods && :b128 in mods ? B128Ledger() : nothing
+    elseif op === :ld || op === :atom
+        any(m -> m in _VECTOR_MARKERS, mods) ? VectorLedger() :
+        :b128 in mods                        ? B128Ledger()   : nothing
+    elseif op === :multimem
+        :ld_reduce in mods && any(m -> m in _VECTOR_MARKERS, mods) ?
+            VectorLedger() : nothing
+    elseif (op === :mov || op === :ldu || op === :st) && :b128 in mods
+        B128Ledger()
+    elseif op === :popc || op === :clz || op === :dp2a || op === :dp4a
+        ScalarLedger()
+    elseif (op === :mul || op === :mad) && :wide in mods
+        ScalarLedger()
+    elseif op === :cvt && :pack in mods
+        ScalarLedger()
+    elseif op === :prmt && mods != (:b32,)
+        # Base `prmt.b32` is terminal-inference-safe; every mode suffix moves
+        # the terminal token off the b32 result, so only that exact base
+        # spelling bypasses the closed six-mode island.
+        ScalarLedger()
+    elseif (op === :add || op === :sub || op === :neg ||
+            op === :min || op === :max) &&
+           any(t -> t === :u16x2 || t === :s16x2 ||
+                    t === :u8x4  || t === :s8x4, mods)
+        ScalarLedger()
+    elseif (op === :min || op === :max) && :relu in mods
+        ScalarLedger()
+    elseif (op === :add || op === :sub || op === :fma) && :f32 in mods &&
+           any(t -> t === :f16 || t === :bf16, mods)
+        # Any permutation containing both the fixed f32 result token and a
+        # narrow multiplicand token, so malformed modifier orders cannot fall
+        # back to terminal inference.
+        ScalarLedger()
+    else
+        nothing
     end
-    nothing
 end
-
-# Ledgers whose argument validation runs at consult time in `build_call`
-# (immediately after their miss check, as the historical cascade did) rather
-# than inside a dedicated builder or the generic tail.
-prevalidates_call(::FormLedger)      = false
-prevalidates_call(::ImmediateLedger) = true
-prevalidates_call(::CLCLedger)       = true
-prevalidates_call(::B128Ledger)      = true
 
 # --- Shared operand predicates -----------------------------------------------
 

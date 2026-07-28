@@ -72,7 +72,7 @@ end
 # the spelling and its ABI is sound, or the ArgumentError to raise.
 # `ledger_rettype(l, op, mods)` returns `missing` or the Julia result type.
 #
-# The immediate, CLC, and b128 ledgers are deliberately transparent: their
+# The immediate, CLC, and b128 islands are deliberately transparent: their
 # calls are dispatched to dedicated builders/adapters before the generic tail
 # ever asks for a scalar rettype, and their sink/128-bit results never came
 # from DTYPE_RETTYPE. Consulting them here would change what
@@ -90,7 +90,7 @@ ledger_result_abi_error(::B128Ledger, op::Symbol,
                         mods::Tuple{Vararg{Symbol}}) = missing
 # The ordinary-cvt fallback is consulted explicitly by _result_abi_error at
 # its historical position (after the registry's `returns` gate), not through
-# CALL_LEDGERS.
+# the island partition.
 ledger_result_abi_error(::CvtLedger, op::Symbol,
                         mods::Tuple{Vararg{Symbol}}) =
     _ordinary_cvt_result_abi_error(mods)
@@ -125,7 +125,7 @@ ledger_rettype(::CvtLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     ordinary_cvt_result_type(mods)
 
 function _result_abi_error(op::Symbol, mods::Tuple{Vararg{Symbol}})
-    l = first_claiming(op, mods)
+    l = island_of(op, mods)
     if l !== nothing
         r = ledger_result_abi_error(l, op, mods)
         r === missing || return r
@@ -149,7 +149,7 @@ end
 function infer_rettype(op::Symbol, mods::Tuple{Vararg{Symbol}})
     err = _result_abi_error(op, mods)
     err === nothing || throw(err)
-    l = first_claiming(op, mods)
+    l = island_of(op, mods)
     if l !== nothing
         t = ledger_rettype(l, op, mods)
         t === missing || return t

@@ -332,3 +332,48 @@ end
     @test_throws ArgumentError build_call(:tcgen05, tcmods, tcargs;
                                           raw = true, contract = PTX.RAW_CONTRACT)
 end
+
+# Routing-invariant check, not an inventory oracle: the per-island form
+# inventories keep their independent oracles in each island's own test file.
+# This testset pins the *partition* — every reviewed schema key must route
+# back to the island that owns it under `island_of`, because a key that
+# routes elsewhere (or nowhere) is dead review: consumers would never consult
+# the schema, and the spelling would fall through to terminal inference or
+# another island's miss.
+@testset "island partition covers every reviewed schema key" begin
+    for (op, mods) in keys(PTX._SCALAR_RESULT_SCHEMA_BY_FORM)
+        @test PTX.island_of(op, mods) === PTX.ScalarLedger()
+    end
+    for (op, mods) in keys(PTX._STRUCTURED_RESULT_SCHEMA_BY_FORM)
+        @test PTX.island_of(op, mods) === PTX.StructuredLedger()
+    end
+    for (op, mods) in keys(PTX.B128_FORM_SCHEMAS)
+        @test PTX.island_of(op, mods) === PTX.B128Ledger()
+    end
+    for mods in keys(PTX.CLC_TRY_CANCEL_FORMS)
+        @test PTX.island_of(:clusterlaunchcontrol, mods) === PTX.CLCLedger()
+    end
+    for mods in keys(PTX._MBARRIER_SCHEMA_BY_FORM)
+        @test PTX.island_of(:mbarrier, mods) === PTX.MBarrierLedger()
+    end
+    # The delegated lop3 record is owned by the structured island; only the
+    # enforced setmaxnreg/pmevent contracts route to the immediate island.
+    for (key, contract) in PTX._IMMEDIATE_FORM_CONTRACT_BY_FORM
+        op, mods = key
+        expected = contract.delegated ? PTX.StructuredLedger() :
+                                        PTX.ImmediateLedger()
+        @test PTX.island_of(op, mods) === expected
+    end
+    # The vector resolver parses optional prefixes around a finite core, so
+    # the core spellings and the eight ptxas-compat spellings are its key set.
+    for form in PTX.VECTOR_RESULT_CORE_FORMS
+        @test PTX.island_of(form.op, form.coremods) === PTX.VectorLedger()
+    end
+    for compat in PTX.VECTOR_RESULT_COMPAT_FORMS, mods in compat.spellings
+        @test PTX.island_of(:atom, mods) === PTX.VectorLedger()
+    end
+    # The two historically order-decided overlaps are now explicit rules.
+    @test PTX.island_of(:ld, (:global, :v2, :b128)) === PTX.VectorLedger()
+    @test PTX.island_of(:atom, (:exch, :v2, :b128)) === PTX.VectorLedger()
+    @test PTX.island_of(:atom, (:exch, :b128)) === PTX.B128Ledger()
+end

@@ -171,7 +171,7 @@ function _instruction_structured_result_schema(cg::CodeGenState,
                                                inst::Instruction)
     op = Symbol(inst.opcode)
     mods = _structured_api_modifiers(inst)
-    claims(StructuredLedger(), op, mods) || return nothing
+    island_of(op, mods) isa StructuredLedger || return nothing
     s = schema(StructuredLedger(), op, mods)
     s === nothing && throw(miss(StructuredLedger(), op, mods))
     isempty(inst.operands) && throw(ArgumentError(

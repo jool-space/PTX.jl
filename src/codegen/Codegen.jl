@@ -10,7 +10,7 @@ using ..IR: Module, Function, Instruction, Label, RegDecl, VarDecl, Param,
             AddressOperand, ParenthesizedOperand, NegatedOperand, PipeOperand,
             ScalarType, StateSpace, LinkingDirective, ptx
 using ..Parser: parse as parse_ptx, tokenize, TokenKind, LexError
-using ..PTX: uses_implicit_cc, claims, schema, miss, CALL_LEDGERS,
+using ..PTX: uses_implicit_cc, island_of, schema, miss,
              ImmediateLedger, MBarrierLedger, StructuredLedger,
              CLCLedger, VectorLedger, ScalarLedger, B128Ledger, CvtLedger,
              validate_immediate_value, validate_vector_result_mask,

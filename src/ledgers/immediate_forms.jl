@@ -68,11 +68,9 @@ end
 schema(::ImmediateLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
     get(_IMMEDIATE_FORM_CONTRACT_BY_FORM, (op, mods), nothing)
 
-# lop3's delegated contract is resolvable by `schema` but not claimed here:
-# the structured-result ledger owns lop3's grammar and immLut validation.
-claims(::ImmediateLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    op in (:setmaxnreg, :pmevent)
-
+# lop3's delegated contract is resolvable by `schema`, but `island_of` routes
+# lop3 to the structured-result island, which owns its grammar and immLut
+# validation; only setmaxnreg/pmevent route here.
 function miss(::ImmediateLedger, op::Symbol,
               mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))

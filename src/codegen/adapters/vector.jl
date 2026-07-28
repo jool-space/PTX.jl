@@ -2,7 +2,7 @@ function _instruction_vector_result_schema(cg::CodeGenState, inst::Instruction)
     op = Symbol(inst.opcode)
     mods = _schema_modifiers(inst.modifiers)
     s = schema(VectorLedger(), op, mods)
-    s === nothing && claims(VectorLedger(), op, mods) &&
+    s === nothing && island_of(op, mods) isa VectorLedger &&
         throw(miss(VectorLedger(), op, mods))
     s === nothing && return nothing
 
