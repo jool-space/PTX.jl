@@ -62,8 +62,10 @@ provenance-marked aliases and normalized to canonical emitted PTX. Ordinary
 mbarrier addresses accept base-plus-constant-offset syntax, but reject TMA
 coordinate lists. PTX's opaque report value is one byte. Because NVPTX has no
 i8 inline-asm constraint, the full-result call carries it in the low byte of a
-zero-extended `UInt16`. Every mbarrier lowering route also carries a call-site
-`convergent nomerge` barrier, matching the complete NVVM mbarrier surface.
+zero-extended `UInt16`. The family is single-route: every form lowers through
+the schema to convergent inline asm, and every call site carries the same
+`convergent nomerge` barrier (matching what LLVM's own mbarrier intrinsic
+surface declares).
 
 `setp`, `lop3`, `match.sync`, `elect.sync`, `testp`, and `isspacep` use a
 second closed schema boundary for structured results. The PTX 9.3 ledger

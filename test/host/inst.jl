@@ -430,10 +430,16 @@ end
     @test r.tier === :chain_asm
 
     # tier 2: wrapper binds to an intrinsic, name recovered structurally
-    r = L(ptx"mbarrier.init.shared.b64", (pS, UInt32))
+    r = L(ptx"bar.warp.sync", (UInt32,))
     @test r.tier === :intrinsic
-    @test r.intrinsics == ["llvm.nvvm.mbarrier.init.shared"]
+    @test r.intrinsics == ["llvm.nvvm.bar.warp.sync"]
     @test PTX.NVVM.isintrinsic(only(r.intrinsics))
+
+    # mbarrier is single-route: the former tier-2 forms are asm now, like
+    # the cluster sinks below
+    r = L(ptx"mbarrier.init.shared.b64", (pS, UInt32))
+    @test r.tier === :asm
+    @test isempty(r.intrinsics)
 
     # tier 1: core IR, no intrinsic, no asm
     @test L(ptx"fence.sc.cta", ()).tier === :core

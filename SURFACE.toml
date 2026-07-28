@@ -410,7 +410,7 @@ section = "9.7.15.16"
 title = "Parallel Synchronization and Communication Instructions: mbarrier"
 status = "strict"
 opcodes = ["mbarrier"]
-notes = "Every mbarrier chain is gated by the closed §9.7.14.16 grammar/ABI ledger (the terminal .b64 is never a result type; destinations span sink/state/pred/count/report groups); the FORMS entry supplies only conservative optimizer attributes, and MBarriers/Pipelines build on the wrappers."
+notes = "Every mbarrier chain is gated by the closed §9.7.15.16 grammar/ABI ledger (the terminal .b64 is never a result type; destinations span sink/state/pred/count/report groups); the family is single-route asm — the former tier-2 intrinsic forms were demoted — and MBarriers/Pipelines build on the wrappers."
 owner = ["src/ledgers/mbarrier_forms.jl", "src/wrappers/mbarrier.jl",
          "src/lib/mbarriers.jl", "src/lib/pipelines.jl"]
 

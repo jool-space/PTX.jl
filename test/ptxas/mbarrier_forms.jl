@@ -78,19 +78,20 @@ end
         llvm, "mbarrier.init.shared::cta.b64")
 end
 
-@noinline function _mbarrier_intrinsic_convergence_probe(
+@noinline function _mbarrier_wrapper_convergence_probe(
         mbar::Core.LLVMPtr{UInt64, PTX.AS.Shared})
     ptx"mbarrier.init.shared.b64"(mbar, UInt32(1))
     return nothing
 end
 
-@testset "mbarrier intrinsic call-site convergence at sm_80" begin
+@testset "mbarrier exact-wrapper call-site convergence at sm_80" begin
+    # Single-route asm: the exact wrapper's call site must carry the same
+    # convergent nomerge group as the schema route it delegates to.
     types = Tuple{Core.LLVMPtr{UInt64, PTX.AS.Shared}}
-    llvm = emit_llvm(_mbarrier_intrinsic_convergence_probe, types;
+    llvm = emit_llvm(_mbarrier_wrapper_convergence_probe, types;
                      cap = v"8.0")
-    @test _mbarrier_callsite_is_convergent(
-        llvm, "llvm.nvvm.mbarrier.init.shared")
-    @test ptxas_compiles(_mbarrier_intrinsic_convergence_probe, types;
+    @test _mbarrier_callsite_is_convergent(llvm, "mbarrier.init.shared.b64")
+    @test ptxas_compiles(_mbarrier_wrapper_convergence_probe, types;
                          cap = v"8.0")
 end
 

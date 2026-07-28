@@ -282,13 +282,11 @@ end
 # folds the cast away). Unknown intrinsics — the modern families — accept
 # any pointee. Keyed (intrinsic name, 1-based param position); anything
 # absent uses i8. Dies together with Julia ≤ 1.11 support.
-const TYPED_POINTEE = Dict{Tuple{String,Int},String}(
-    ("llvm.nvvm.mbarrier.init.shared", 1)               => "i64",
-    ("llvm.nvvm.mbarrier.inval.shared", 1)              => "i64",
-    ("llvm.nvvm.mbarrier.arrive.shared", 1)             => "i64",
-    ("llvm.nvvm.mbarrier.arrive.noComplete.shared", 1)  => "i64",
-    ("llvm.nvvm.mbarrier.test.wait.shared", 1)          => "i64",
-)
+# Currently empty: the only known-to-old-LLVM intrinsics the package called
+# were the legacy mbarrier `*.shared` family, demoted to the asm tier when
+# mbarrier became single-route. The mechanism stays for the next wrapper
+# that reaches back to a 15/16-era intrinsic.
+const TYPED_POINTEE = Dict{Tuple{String,Int},String}()
 
 _typed_pointee(name::String, pos::Int) = get(TYPED_POINTEE, (name, pos), "i8")
 
