@@ -50,12 +50,12 @@ end
 
         acquire_ir = NVVM.synthesize(acquire.name, (p0, Val{128})).ir
         release_ir = NVVM.synthesize(release.name, ()).ir
-        if Base.libllvm_version < v"16"
-            @test occursin("argmemonly", acquire_ir)
-        else
-            @test occursin("memory(argmem: readwrite)", acquire_ir)
-        end
-        @test !occursin("memory(none)", acquire_ir)
+        # The table's argmemonly is widened away by MEMORY_WIDEN_OVERLAY: the
+        # proxy-acquire fence orders more than its 128-byte descriptor
+        # operand, so the rendered memory effect stays unspecified — like the
+        # release side, and like the asm tier's ~{memory}.
+        @test !occursin("argmemonly", acquire_ir)
+        @test !occursin("memory(", acquire_ir)
         @test !occursin("readnone", acquire_ir)
         @test !occursin("memory(", release_ir)
         @test !occursin("readnone", release_ir)
