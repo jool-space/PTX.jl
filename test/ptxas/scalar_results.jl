@@ -1,8 +1,8 @@
-# Assembly coverage for the fixed-scalar-result ledger. PTX ISA 9.3 floors:
+# Assembly coverage for the fixed-scalar-result ledger. PTX ISA 9.4 floors:
 # popc/clz sm_20 (§§9.7.1.15-.16), dp2a/dp4a sm_61 (§§9.7.1.24-.25),
-# cvt.pack sm_72 (sub-byte forms sm_75; §9.7.9.23), mixed-precision
-# add/sub/fma sm_100 (§§9.7.5.1-.3), and packed 4x8 arithmetic on
-# family-specific sm_120f (§§9.7.1.1-.2, .12-.14).
+# cvt.pack sm_72 (sub-byte forms sm_75; §9.7.10.25), mixed-precision
+# add/sub/fma sm_100 (§§9.7.5.1-.3), and packed 4x8 arithmetic on the
+# {sm_107f, sm_120f} families (§§9.7.1.1-.2, .12-.14; sm_120f-only pre-9.4).
 #
 # CUDA 13 ptxas no longer accepts targets below sm_75, so older families
 # assemble at that retained floor. The ledger is partitioned by target metadata
@@ -26,7 +26,10 @@ _scalar_ptxas_arg(kind) =
 function _scalar_ptxas_partition(schema)
     label = string(schema.op, ".", join(schema.mods, "."))
     if schema.feature_set === :family
-        schema.min_sm == v"12.0" || error(
+        # 10.7 is the packed-integer gate {sm_107f, sm_120f families} (PTX
+        # ISA 9.4). The offline assembler does not back sm_107 yet, so both
+        # partitions assemble under the sm_120f member of the gate set.
+        schema.min_sm in (v"10.7", v"12.0") || error(
             "$label has family feature_set but unpartitioned min_sm=" *
             repr(schema.min_sm) * "; add an exact ptxas target partition")
         return :sm120f

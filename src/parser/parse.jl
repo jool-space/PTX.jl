@@ -836,6 +836,7 @@ end
 const _FUNCTION_DIRECTIVE_NAMES = Set{String}((
     ".maxnreg", ".maxntid", ".reqntid",
     ".minnctapersm", ".maxnctapersm",
+    ".minperctamemory",
     ".noreturn", ".pragma",
     ".explicitcluster", ".reqnctapercluster", ".cluster_dim",
 ))

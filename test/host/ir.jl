@@ -790,8 +790,8 @@ end
     @test canon(a) != canon(d)
 end
 
-@testset "PTX 9.3 special-register ledger and canonicalization" begin
-    # Independent PTX 9.3 manifest. Keep this separate from the reviewed
+@testset "PTX 9.4 special-register ledger and canonicalization" begin
+    # Independent PTX 9.4 manifest. Keep this separate from the reviewed
     # source ledger so a future table edit cannot silently narrow the oracle.
     v4_roots = (
         "%tid", "%ntid", "%ctaid", "%nctaid",
@@ -808,6 +808,7 @@ end
         "%reserved_smem_offset_cap", "%reserved_smem_offset_0",
         "%reserved_smem_offset_1", "%total_smem_size", "%aggr_smem_size",
         "%dynamic_smem_size", "%current_graph_exec",
+        "%perctamemoryoffset", "%perctamemorysize",
     ))
     for root in v4_roots, component in v4_components
         push!(expected_scalar, root * component)
@@ -821,8 +822,8 @@ end
     end
     expected_all = union(copy(expected_scalar), Set(v4_roots))
 
-    @test length(expected_scalar) == 141
-    @test length(expected_all) == 149
+    @test length(expected_scalar) == 143
+    @test length(expected_all) == 151
     @test PTX.IR.SCALAR_SPECIAL_REGS == expected_scalar
     @test PTX.IR.SPECIAL_REGS == expected_all
     @test !("%warpsize" in PTX.IR.SPECIAL_REGS)
@@ -841,6 +842,8 @@ end
             ("%aggr_smem_size", Version(8, 1), 90, "10.31"),
             ("%current_graph_exec", Version(8, 0), 50, "10.33"),
             ("%cluster_ctaid.a", Version(7, 8), 90, "10.12"),
+            ("%perctamemoryoffset", Version(9, 4), 80, "10.34"),
+            ("%perctamemorysize", Version(9, 4), 80, "10.35"),
         )
         family = family_for(name)
         @test family.introduced == introduced

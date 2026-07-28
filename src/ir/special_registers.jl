@@ -159,6 +159,13 @@ const SPECIAL_REGISTER_FAMILIES = (
     # ptx/10-special-registers/10.33-special-registers-current_graph_exec.md
     _special_register_family("PTX 9.3 §10.33", Version(8, 0), 50,
                              ("%current_graph_exec",)),
+    # ptx/10-special-registers/10.34-special-registers-perctamemoryoffset.md
+    # Only readable in entries that declare .minperctamemory (§11.4.10).
+    _special_register_family("PTX 9.4 §10.34", Version(9, 4), 80,
+                             ("%perctamemoryoffset",)),
+    # ptx/10-special-registers/10.35-special-registers-perctamemorysize.md
+    _special_register_family("PTX 9.4 §10.35", Version(9, 4), 80,
+                             ("%perctamemorysize",)),
 )
 
 function _special_register_set(field::Symbol)
@@ -172,7 +179,7 @@ function _special_register_set(field::Symbol)
     names
 end
 
-# PTX 9.3 §10 inventory: 149 spellings = 8 vector roots + 141 scalar or
+# PTX 9.4 §10 inventory: 151 spellings = 8 vector roots + 143 scalar or
 # projected spellings. The scalar subset is intentionally what codegen uses
 # until vector-valued PTX operands have structured lowering support.
 const SPECIAL_REGS = _special_register_set(:spellings)
