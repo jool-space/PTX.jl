@@ -99,17 +99,17 @@ const SURFACE_STATUSES = ("strict", "generic", "raw-only", "out-of-scope")
         end
     end
 
-    @testset "(d) all 20 ISA §9.7.x families are covered" begin
+    @testset "(d) all 21 ISA §9.7.x families are covered" begin
         present = Set{Int}()
         for e in entries
             parts = split(e["section"], '.')
             length(parts) >= 3 && push!(present, parse(Int, parts[3]))
         end
-        missing_sections = sort!([n for n in 1:20 if !(n in present)])
+        missing_sections = sort!([n for n in 1:21 if !(n in present)])
         @test isempty(missing_sections) ||
               error("ISA sections with no SURFACE.toml entry: " *
                     join(("9.7.$n" for n in missing_sections), ", "))
-        stray = sort!(collect(setdiff(present, 1:20)))
+        stray = sort!(collect(setdiff(present, 1:21)))
         @test isempty(stray) ||
               error("SURFACE.toml entries for nonexistent §9.7.x sections: $stray")
     end

@@ -136,10 +136,10 @@ The parser captures three layers of source text:
   fields. It is distinct from an opaque `RawLine` statement.
 
 Subsequent module-scope `.target` directives are represented as ordered
-`TargetDirective` statements. The parser validates the PTX 9.3 target ledger,
+`TargetDirective` statements. The parser validates the PTX 9.4 target ledger,
 target and option introduction versions, duplicate options, and the
 module-wide texturing-mode invariant. For a declared PTX version newer than
-9.3 the parser retains the grammar invariants but accepts syntactically valid
+9.4 the parser retains the grammar invariants but accepts syntactically valid
 future architectures and options rather than claiming that the bundled ledger
 describes a future ISA. CUDA 12.9 and 13.3 `ptxas` independently confirm the
 version/target boundary by rejecting `.version 8.5` with `.target sm_100a`.

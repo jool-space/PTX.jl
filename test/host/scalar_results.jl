@@ -23,7 +23,7 @@ const _EXPECTED_SCALAR_SECTIONS = Dict(
     :mad =>
         "ptx/9-instruction-set/9.7.1.4-integer-arithmetic-instructions-mad.md",
     :prmt =>
-        "ptx/9-instruction-set/9.7.9.7-data-movement-and-conversion-instructions-prmt.md",
+        "ptx/9-instruction-set/9.7.10.7-data-movement-and-conversion-instructions-prmt.md",
     :packed_add =>
         "ptx/9-instruction-set/9.7.1.1-integer-arithmetic-instructions-add.md",
     :packed_sub =>
@@ -35,7 +35,7 @@ const _EXPECTED_SCALAR_SECTIONS = Dict(
     :max =>
         "ptx/9-instruction-set/9.7.1.14-integer-arithmetic-instructions-max.md",
     :cvt =>
-        "ptx/9-instruction-set/9.7.9.23-data-movement-and-conversion-instructions-cvt.pack.md",
+        "ptx/9-instruction-set/9.7.10.25-data-movement-and-conversion-instructions-cvt.pack.md",
 )
 
 function _expected_scalar_section(op, mods)

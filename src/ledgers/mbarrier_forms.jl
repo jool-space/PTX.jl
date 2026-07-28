@@ -34,7 +34,7 @@ struct MBarrierFormSchema
 end
 
 const _MBARRIER_SECTION =
-    "ptx/9-instruction-set/9.7.14.16-parallel-synchronization-and-communication-instructions-mbarrier.md"
+    "ptx/9-instruction-set/9.7.15.16-parallel-synchronization-and-communication-instructions-mbarrier.md"
 
 _mb_max_version(xs...) = maximum(xs)
 

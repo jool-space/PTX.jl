@@ -2,7 +2,7 @@
 # Copyright 2026 Patrick Toulmé. Licensed under the Apache License, Version 2.0
 # (http://www.apache.org/licenses/LICENSE-2.0). Translated to Julia and adapted.
 
-const _PTX_93 = Version(9, 3)
+const _PTX_94 = Version(9, 4)
 
 const _TARGET_INTRODUCED = let entries = Pair{String,Version}[]
     function add!(version::Version, names...)
@@ -30,6 +30,7 @@ const _TARGET_INTRODUCED = let entries = Pair{String,Version}[]
     add!(Version(8, 8), "100f", "101f", "103", "103f", "103a",
                            "120f", "121", "121f", "121a")
     add!(Version(9, 0), "88", "110", "110f", "110a")
+    add!(Version(9, 4), "107", "107f", "107a")
     Dict(entries)
 end
 
@@ -39,7 +40,7 @@ const _TEXTURE_MODES = Set(("texmode_unified", "texmode_independent"))
 
 _version_tuple(v::Version) = (v.major, v.minor)
 _version_at_least(v::Version, floor::Version) = _version_tuple(v) >= _version_tuple(floor)
-_known_ptx_version(v::Version) = _version_tuple(v) <= _version_tuple(_PTX_93)
+_known_ptx_version(v::Version) = _version_tuple(v) <= _version_tuple(_PTX_94)
 _architecture_match(value::String) = match(r"^(sm|compute)_([0-9]+)([af]?)$", value)
 
 function _target_floor(value::String)
@@ -59,7 +60,7 @@ function _validate_target!(s::ParserState, target::Target, version::Version)
     floor = _target_floor(arch)
     if floor === nothing
         _known_ptx_version(version) &&
-            throw(_err(s, "target architecture $(repr(arch)) is not defined by PTX ISA 9.3"))
+            throw(_err(s, "target architecture $(repr(arch)) is not defined by PTX ISA 9.4"))
     elseif !_version_at_least(version, floor)
         throw(_err(s, "target architecture $(repr(arch)) requires PTX ISA $(floor.major).$(floor.minor) or later"))
     end
@@ -76,7 +77,7 @@ function _validate_target!(s::ParserState, target::Target, version::Version)
         elseif _architecture_match(option) !== nothing
             throw(_err(s, ".target specifies more than one architecture"))
         elseif _known_ptx_version(version)
-            throw(_err(s, "unknown PTX 9.3 .target option $(repr(option))"))
+            throw(_err(s, "unknown PTX 9.4 .target option $(repr(option))"))
         end
     end
     count(in(_TEXTURE_MODES), options) <= 1 ||

@@ -130,7 +130,7 @@ end
         @test schema.operands == want.operands
         @test schema.vector_source == want.vector_source
         @test schema.section ==
-              "ptx/9-instruction-set/9.7.9.22-data-movement-and-conversion-instructions-cvt.md"
+              "ptx/9-instruction-set/9.7.10.24-data-movement-and-conversion-instructions-cvt.md"
     end
 end
 

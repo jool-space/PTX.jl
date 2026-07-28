@@ -74,7 +74,7 @@ const _MAD_SECTION =
 # result and three b32 sources of base prmt, but their terminal tokens are
 # mode selectors rather than result types.
 const _PRMT_SECTION =
-    "ptx/9-instruction-set/9.7.9.7-data-movement-and-conversion-instructions-prmt.md"
+    "ptx/9-instruction-set/9.7.10.7-data-movement-and-conversion-instructions-prmt.md"
 
 # Packed integer arithmetic uses a 32-bit carrier for every 2x16/4x8 result
 # and source.  The sm_120f families require the Blackwell family feature set;
@@ -93,7 +93,7 @@ const _PACKED_MAX_SECTION =
 # PTX ISA 9.3 §9.7.9.23: every cvt.pack form writes u32.  The conversion
 # type, source type, and optional cType are all input descriptors.
 const _CVTPACK_SECTION =
-    "ptx/9-instruction-set/9.7.9.23-data-movement-and-conversion-instructions-cvt.pack.md"
+    "ptx/9-instruction-set/9.7.10.25-data-movement-and-conversion-instructions-cvt.pack.md"
 
 const SCALAR_RESULT_SCHEMAS = let schemas = ScalarResultSchema[]
     narrow_carrier = Dict(:f16 => :f16, :bf16 => :bf16)
