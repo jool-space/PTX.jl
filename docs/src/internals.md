@@ -32,6 +32,7 @@ PTX.wrapper_intrinsic_names
 PTX.wrapper_asm_forms
 PTX.wrapper_missing_intrinsics
 PTX.wrapper_intrinsic_call
+PTX.ceiled
 ```
 
 ## Lowering reflection
