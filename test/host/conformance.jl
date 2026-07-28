@@ -365,10 +365,9 @@ for cg in (1, 2)
                        "sm_100a", "+ptx86", Regex(re)))
     end
 end
-for w in ("ld", "st")
-    push!(PROBES, ("llvm.nvvm.tcgen05.wait.$w", (), "sm_100a", "+ptx86",
-                   Regex("tcgen05\\.wait::$w\\.sync\\.aligned")))
-end
+# tcgen05.wait::ld/st are single-route asm since the free demotion (their
+# post-overlay attributes render the same conservative barrier as the asm
+# clobber) — no src literal remains, so no probes are required.
 # Every shape×count is probed with both values of the pack/unpack i1
 # immarg, pinning the flag→qualifier rendering rather than just intrinsic
 # name selection. 16x32bx2 threads its i64 immHalfSplitoff immarg through
