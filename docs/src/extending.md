@@ -11,23 +11,38 @@ matrix, rebase hazards) live in the repository-root `CLAUDE.md`.
 
 ## First: which tier?
 
-Decide where the new spelling belongs before touching anything:
+The tier is chosen by **semantic class** — what LLVM can genuinely do for
+the operation — not by whether an intrinsic happens to exist at the pinned
+backend (availability-driven choice is what used to manufacture split
+families with two lowering routes to keep in sync):
 
-1. **A recognized NVVM intrinsic exists** (`NVVM.isintrinsic` on the name;
-   the registry in `src/nvvm/table.jl` is the authority) — write a tier-2
-   wrapper method that emits `NVVM.IntrinsicCall`. Recipe B.
-2. **No intrinsic, but the generic chain grammar fits** — the opcode's
-   result is the terminal dtype modifier (or void), operands are scalars
-   or addresses in PTX order. Bless it with a `FORMS` entry. Recipe A.
-3. **No intrinsic and the result ABI is *not* generic** — the tail names
-   an operand, the destination is grouped/vector/predicate, or operands
-   have immediate/carrier restrictions. Add entries to the matching result
-   ledger. Recipe C.
-4. **The form cannot be a chain at all** (shape-dependent register groups,
-   descriptor operands, one opcode spanning many ABIs — the mma/wgmma/
-   tcgen05 class) — typed wrapper methods only, plus a
-   `TYPED_WRAPPER_ONLY_RULES` entry so a dispatch miss fails before LLVM.
-   Recipe D.
+1. **Core LLVM IR where expressible** (plain loads/stores/fences with the
+   right scopes and orderings): the vec_ldst / generic-fence class. LLVM
+   understands these fully; no table, no probes.
+2. **NVVM intrinsic where the mid-end or regalloc does real work**: sreg
+   reads (CSE + `!range`), pure value-producing ops (shfl, queries), and
+   register-fragment mma (LLVM allocates the fragments; ISel dispatches
+   arch variants). Write a tier-2 wrapper that emits a *ceiled*
+   `NVVM.IntrinsicCall` — via `wrapper_intrinsic_call` for generated
+   families or `ceiled(nvvm"...", ptx"...")` at literal sites. Recipe B.
+3. **Inline asm for everything effectful-exotic** (sync ops, async
+   initiators, and every ISA feature the backend hasn't caught up to):
+   the mbarrier/TMA-residue/wgmma/fabric class. An observable sync effect
+   gains nothing from intrinsic attributes — a second route is pure
+   bookkeeping. Sub-cases:
+   - generic chain grammar fits → `FORMS` entry, Recipe A;
+   - non-generic result ABI → the matching result ledger, Recipe C;
+   - not expressible as a chain (shape-dependent register groups,
+     descriptor operands, one opcode spanning many ABIs) → typed wrapper
+     methods plus a `TYPED_WRAPPER_ONLY_RULES` entry, Recipe D.
+
+Whichever route lowers it, the **effect authority is the same**: the
+reviewed contract (FORMS or the owning ledger) is the ceiling on what the
+optimizer may be promised. On the asm tier the contract renders directly;
+on the NVVM tier the machine-extracted table attributes may refine below
+the ceiling but a permissive-direction divergence fails at generation
+(see `check_ceiling` in `src/nvvm/emit.jl` and
+`test/host/effect_ceiling.jl`).
 
 Every recipe ends the same way: run the affected suites with
 `julia --project=test test/runtests.jl <names...>` and update the

@@ -35,20 +35,21 @@
 # generic-proxy ops (regular load/store, mma) need this fence to observe
 # async-proxy writes (and vice versa). sm_90+ only.
 @inline optype"fence.proxy.async"() =
-    nvvm"fence.proxy.async"()
+    ceiled(nvvm"fence.proxy.async", ptx"fence.proxy.async")()
 
 # `fence.proxy.async.shared::cta;` — the shared-CTA-scoped async proxy fence
 # the producer/consumer GEMM pipelines emit after staging into shared memory
 # (used across the Hopper/Blackwell kernels). Intrinsic spells the space
 # with an underscore (shared_cta); the emitted PTX is `shared::cta`.
 @inline optype"fence.proxy.async.shared::cta"() =
-    nvvm"fence.proxy.async.shared_cta"()
+    ceiled(nvvm"fence.proxy.async.shared_cta", ptx"fence.proxy.async.shared::cta")()
 
 # `fence.mbarrier_init.release.cluster;` — release-fence after
 # `mbarrier.init` so other CTAs in the cluster observe the initialized
 # mbarrier state before reading/arriving on it. sm_90+ (cluster scope).
 @inline optype"fence.mbarrier_init.release.cluster"() =
-    nvvm"fence.mbarrier_init.release.cluster"()
+    ceiled(nvvm"fence.mbarrier_init.release.cluster",
+           ptx"fence.mbarrier_init.release.cluster")()
 
 # --- Tensor-map proxy fences (PTX 8.3, sm_90+) -----------------------------
 #
@@ -74,35 +75,43 @@
 
 @inline function optype"fence.proxy.tensormap::generic.acquire.cta"(
         addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
-    nvvm"fence.proxy.tensormap_generic.acquire.cta"(addr, Val(128))
+    ceiled(nvvm"fence.proxy.tensormap_generic.acquire.cta",
+           ptx"fence.proxy.tensormap::generic.acquire.cta")(addr, Val(128))
 end
 
 @inline function optype"fence.proxy.tensormap::generic.acquire.cluster"(
         addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
-    nvvm"fence.proxy.tensormap_generic.acquire.cluster"(addr, Val(128))
+    ceiled(nvvm"fence.proxy.tensormap_generic.acquire.cluster",
+           ptx"fence.proxy.tensormap::generic.acquire.cluster")(addr, Val(128))
 end
 
 @inline function optype"fence.proxy.tensormap::generic.acquire.gpu"(
         addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
-    nvvm"fence.proxy.tensormap_generic.acquire.gpu"(addr, Val(128))
+    ceiled(nvvm"fence.proxy.tensormap_generic.acquire.gpu",
+           ptx"fence.proxy.tensormap::generic.acquire.gpu")(addr, Val(128))
 end
 
 @inline function optype"fence.proxy.tensormap::generic.acquire.sys"(
         addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
-    nvvm"fence.proxy.tensormap_generic.acquire.sys"(addr, Val(128))
+    ceiled(nvvm"fence.proxy.tensormap_generic.acquire.sys",
+           ptx"fence.proxy.tensormap::generic.acquire.sys")(addr, Val(128))
 end
 
 @inline optype"fence.proxy.tensormap::generic.release.cta"() =
-    nvvm"fence.proxy.tensormap_generic.release.cta"()
+    ceiled(nvvm"fence.proxy.tensormap_generic.release.cta",
+           ptx"fence.proxy.tensormap::generic.release.cta")()
 
 @inline optype"fence.proxy.tensormap::generic.release.cluster"() =
-    nvvm"fence.proxy.tensormap_generic.release.cluster"()
+    ceiled(nvvm"fence.proxy.tensormap_generic.release.cluster",
+           ptx"fence.proxy.tensormap::generic.release.cluster")()
 
 @inline optype"fence.proxy.tensormap::generic.release.gpu"() =
-    nvvm"fence.proxy.tensormap_generic.release.gpu"()
+    ceiled(nvvm"fence.proxy.tensormap_generic.release.gpu",
+           ptx"fence.proxy.tensormap::generic.release.gpu")()
 
 @inline optype"fence.proxy.tensormap::generic.release.sys"() =
-    nvvm"fence.proxy.tensormap_generic.release.sys"()
+    ceiled(nvvm"fence.proxy.tensormap_generic.release.sys",
+           ptx"fence.proxy.tensormap::generic.release.sys")()
 
 # --- generic memory fences (tier-1 core IR) ---------------------------------
 

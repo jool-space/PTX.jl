@@ -23,15 +23,19 @@
 # scans for `nvvm"..."` literals and requires a probe for each.
 
 @inline optype"barrier.cluster.arrive"() =
-    nvvm"barrier.cluster.arrive"()
+    ceiled(nvvm"barrier.cluster.arrive", ptx"barrier.cluster.arrive")()
 @inline optype"barrier.cluster.arrive.relaxed"() =
-    nvvm"barrier.cluster.arrive.relaxed"()
+    ceiled(nvvm"barrier.cluster.arrive.relaxed",
+           ptx"barrier.cluster.arrive.relaxed")()
 @inline optype"barrier.cluster.wait"() =
-    nvvm"barrier.cluster.wait"()
+    ceiled(nvvm"barrier.cluster.wait", ptx"barrier.cluster.wait")()
 
 @inline optype"barrier.cluster.arrive.aligned"() =
-    nvvm"barrier.cluster.arrive.aligned"()
+    ceiled(nvvm"barrier.cluster.arrive.aligned",
+           ptx"barrier.cluster.arrive.aligned")()
 @inline optype"barrier.cluster.arrive.relaxed.aligned"() =
-    nvvm"barrier.cluster.arrive.relaxed.aligned"()
+    ceiled(nvvm"barrier.cluster.arrive.relaxed.aligned",
+           ptx"barrier.cluster.arrive.relaxed.aligned")()
 @inline optype"barrier.cluster.wait.aligned"() =
-    nvvm"barrier.cluster.wait.aligned"()
+    ceiled(nvvm"barrier.cluster.wait.aligned",
+           ptx"barrier.cluster.wait.aligned")()

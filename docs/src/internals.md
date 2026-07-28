@@ -32,6 +32,7 @@ PTX.wrapper_intrinsic_names
 PTX.wrapper_asm_forms
 PTX.wrapper_missing_intrinsics
 PTX.wrapper_intrinsic_call
+PTX.ceiled
 ```
 
 ## Lowering reflection
@@ -51,6 +52,20 @@ committed as source, so a backend bump is a reviewable diff. The
 attribute groups — the in-process LLVM doesn't know these names, so the
 attributes here are the only effect/convergence information the
 optimizer gets.
+
+The attributes are bounded by the package's own review: the FORMS/ledger
+contract for the PTX form being emitted is the **ceiling** on optimizer
+permissiveness for *both* lowering tiers. Table attributes may refine
+below it (`speculatable`, return ranges, param attrs, narrower memory
+location classes); a permissive-direction divergence — the table claiming
+purity, reorderability, or non-convergence the reviewed contract does not
+grant — fails at generation time (`check_ceiling`), and is resolved only
+by a reviewed overlay (`CONVERGENT_OVERLAY_PREFIXES`,
+`MEMORY_WIDEN_OVERLAY`) or a reviewed contract change. Every package call
+site carries its ceiling (`ceiled(nvvm"...", ptx"...")`,
+`wrapper_intrinsic_call`, the sreg fast path); the bare `nvvm""` macro is
+unceiled plumbing, and `test/host/effect_ceiling.jl` keeps it out of
+`src/`.
 
 ```@autodocs
 Modules = [PTX.NVVM]

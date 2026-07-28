@@ -48,7 +48,8 @@
 @inline function optype"cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.1d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.1d",
+           ptx"cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1),
         UInt16(0), UInt64(0), Val(false), Val(false), Val(0))
 end
@@ -57,7 +58,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.2d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.2d",
+           ptx"cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1), Int32(c2),
         UInt16(0), UInt64(0), Val(false), Val(false), Val(0))
 end
@@ -66,7 +68,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.3d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.3d",
+           ptx"cp.async.bulk.tensor.3d.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3),
         UInt16(0), UInt64(0), Val(false), Val(false), Val(0))
@@ -76,7 +79,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer, c4::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.4d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.4d",
+           ptx"cp.async.bulk.tensor.4d.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3), Int32(c4),
         UInt16(0), UInt64(0), Val(false), Val(false), Val(0))
@@ -86,7 +90,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer, c4::Integer, c5::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.5d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.5d",
+           ptx"cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3), Int32(c4), Int32(c5),
         UInt16(0), UInt64(0), Val(false), Val(false), Val(0))
@@ -99,7 +104,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, mbar::Core.LLVMPtr{U, AS.Shared},
         mask::Integer) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.1d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.1d",
+           ptx"cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1),
         UInt16(mask), UInt64(0), Val(true), Val(false), Val(0))
 end
@@ -108,7 +114,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, mbar::Core.LLVMPtr{U, AS.Shared},
         mask::Integer) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.2d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.2d",
+           ptx"cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1), Int32(c2),
         UInt16(mask), UInt64(0), Val(true), Val(false), Val(0))
 end
@@ -117,7 +124,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}, mask::Integer) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.3d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.3d",
+           ptx"cp.async.bulk.tensor.3d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3),
         UInt16(mask), UInt64(0), Val(true), Val(false), Val(0))
@@ -127,7 +135,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer, c4::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}, mask::Integer) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.4d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.4d",
+           ptx"cp.async.bulk.tensor.4d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3), Int32(c4),
         UInt16(mask), UInt64(0), Val(true), Val(false), Val(0))
@@ -137,7 +146,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer, c4::Integer, c5::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}, mask::Integer) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.5d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.5d",
+           ptx"cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3), Int32(c4), Int32(c5),
         UInt16(mask), UInt64(0), Val(true), Val(false), Val(0))
@@ -149,7 +159,8 @@ end
 @inline function optype"cp.async.bulk.tensor.1d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.1d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.1d",
+           ptx"cp.async.bulk.tensor.1d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1),
         UInt16(0), UInt64(0), Val(false), Val(false), Val(2))
 end
@@ -158,7 +169,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.2d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.2d",
+           ptx"cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1), Int32(c2),
         UInt16(0), UInt64(0), Val(false), Val(false), Val(2))
 end
@@ -167,7 +179,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.3d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.3d",
+           ptx"cp.async.bulk.tensor.3d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3),
         UInt16(0), UInt64(0), Val(false), Val(false), Val(2))
@@ -177,7 +190,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer, c4::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.4d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.4d",
+           ptx"cp.async.bulk.tensor.4d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3), Int32(c4),
         UInt16(0), UInt64(0), Val(false), Val(false), Val(2))
@@ -187,7 +201,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer, c4::Integer, c5::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.5d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.5d",
+           ptx"cp.async.bulk.tensor.5d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3), Int32(c4), Int32(c5),
         UInt16(0), UInt64(0), Val(false), Val(false), Val(2))
@@ -199,7 +214,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, mbar::Core.LLVMPtr{U, AS.Shared},
         mask::Integer) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.1d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.1d",
+           ptx"cp.async.bulk.tensor.1d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1),
         UInt16(mask), UInt64(0), Val(true), Val(false), Val(2))
 end
@@ -208,7 +224,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, mbar::Core.LLVMPtr{U, AS.Shared},
         mask::Integer) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.2d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.2d",
+           ptx"cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1), Int32(c2),
         UInt16(mask), UInt64(0), Val(true), Val(false), Val(2))
 end
@@ -217,7 +234,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}, mask::Integer) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.3d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.3d",
+           ptx"cp.async.bulk.tensor.3d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3),
         UInt16(mask), UInt64(0), Val(true), Val(false), Val(2))
@@ -227,7 +245,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer, c4::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}, mask::Integer) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.4d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.4d",
+           ptx"cp.async.bulk.tensor.4d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3), Int32(c4),
         UInt16(mask), UInt64(0), Val(true), Val(false), Val(2))
@@ -237,7 +256,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer, c4::Integer, c5::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}, mask::Integer) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.tile.5d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.5d",
+           ptx"cp.async.bulk.tensor.5d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
         _tma_cluster(dst), mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3), Int32(c4), Int32(c5),
         UInt16(mask), UInt64(0), Val(true), Val(false), Val(2))
@@ -248,7 +268,8 @@ end
 @inline function optype"cp.async.bulk.tensor.1d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.cta.tile.1d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.cta.tile.1d",
+           ptx"cp.async.bulk.tensor.1d.shared::cta.global.tile.mbarrier::complete_tx::bytes")(
         dst, mbar, _tma_tmap(tmap), Int32(c1), UInt64(0), Val(false))
 end
 
@@ -256,7 +277,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.cta.tile.2d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.cta.tile.2d",
+           ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes")(
         dst, mbar, _tma_tmap(tmap), Int32(c1), Int32(c2),
         UInt64(0), Val(false))
 end
@@ -265,7 +287,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.cta.tile.3d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.cta.tile.3d",
+           ptx"cp.async.bulk.tensor.3d.shared::cta.global.tile.mbarrier::complete_tx::bytes")(
         dst, mbar, _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3),
         UInt64(0), Val(false))
 end
@@ -274,7 +297,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer, c4::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.cta.tile.4d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.cta.tile.4d",
+           ptx"cp.async.bulk.tensor.4d.shared::cta.global.tile.mbarrier::complete_tx::bytes")(
         dst, mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3), Int32(c4),
         UInt64(0), Val(false))
@@ -284,7 +308,8 @@ end
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer, c4::Integer, c5::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    nvvm"cp.async.bulk.tensor.g2s.cta.tile.5d"(
+    ceiled(nvvm"cp.async.bulk.tensor.g2s.cta.tile.5d",
+           ptx"cp.async.bulk.tensor.5d.shared::cta.global.tile.mbarrier::complete_tx::bytes")(
         dst, mbar, _tma_tmap(tmap),
         Int32(c1), Int32(c2), Int32(c3), Int32(c4), Int32(c5),
         UInt64(0), Val(false))
@@ -295,21 +320,24 @@ end
 @inline function optype"cp.async.bulk.tensor.1d.global.shared::cta.tile.bulk_group"(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer,
         src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
-    nvvm"cp.async.bulk.tensor.s2g.tile.1d"(
+    ceiled(nvvm"cp.async.bulk.tensor.s2g.tile.1d",
+           ptx"cp.async.bulk.tensor.1d.global.shared::cta.tile.bulk_group")(
         src, _tma_tmap(tmap), Int32(c1), UInt64(0), Val(false))
 end
 
 @inline function optype"cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group"(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
         src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
-    nvvm"cp.async.bulk.tensor.s2g.tile.2d"(
+    ceiled(nvvm"cp.async.bulk.tensor.s2g.tile.2d",
+           ptx"cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group")(
         src, _tma_tmap(tmap), Int32(c1), Int32(c2), UInt64(0), Val(false))
 end
 
 @inline function optype"cp.async.bulk.tensor.3d.global.shared::cta.tile.bulk_group"(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
         c3::Integer, src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
-    nvvm"cp.async.bulk.tensor.s2g.tile.3d"(
+    ceiled(nvvm"cp.async.bulk.tensor.s2g.tile.3d",
+           ptx"cp.async.bulk.tensor.3d.global.shared::cta.tile.bulk_group")(
         src, _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3),
         UInt64(0), Val(false))
 end
@@ -318,7 +346,8 @@ end
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
         c3::Integer, c4::Integer,
         src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
-    nvvm"cp.async.bulk.tensor.s2g.tile.4d"(
+    ceiled(nvvm"cp.async.bulk.tensor.s2g.tile.4d",
+           ptx"cp.async.bulk.tensor.4d.global.shared::cta.tile.bulk_group")(
         src, _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
         UInt64(0), Val(false))
 end
@@ -327,7 +356,8 @@ end
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
         c3::Integer, c4::Integer, c5::Integer,
         src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
-    nvvm"cp.async.bulk.tensor.s2g.tile.5d"(
+    ceiled(nvvm"cp.async.bulk.tensor.s2g.tile.5d",
+           ptx"cp.async.bulk.tensor.5d.global.shared::cta.tile.bulk_group")(
         src, _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
         Int32(c5), UInt64(0), Val(false))
 end
@@ -343,20 +373,23 @@ end
 
 @inline function optype"cp.async.bulk.prefetch.tensor.1d.L2.global.tile"(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer) where {S}
-    nvvm"cp.async.bulk.tensor.prefetch.tile.1d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.1d",
+           ptx"cp.async.bulk.prefetch.tensor.1d.L2.global.tile")(
         _tma_tmap(tmap), Int32(c1), UInt64(0), Val(false))
 end
 
 @inline function optype"cp.async.bulk.prefetch.tensor.2d.L2.global.tile"(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer) where {S}
-    nvvm"cp.async.bulk.tensor.prefetch.tile.2d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.2d",
+           ptx"cp.async.bulk.prefetch.tensor.2d.L2.global.tile")(
         _tma_tmap(tmap), Int32(c1), Int32(c2), UInt64(0), Val(false))
 end
 
 @inline function optype"cp.async.bulk.prefetch.tensor.3d.L2.global.tile"(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
         c3::Integer) where {S}
-    nvvm"cp.async.bulk.tensor.prefetch.tile.3d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.3d",
+           ptx"cp.async.bulk.prefetch.tensor.3d.L2.global.tile")(
         _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3),
         UInt64(0), Val(false))
 end
@@ -364,7 +397,8 @@ end
 @inline function optype"cp.async.bulk.prefetch.tensor.4d.L2.global.tile"(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
         c3::Integer, c4::Integer) where {S}
-    nvvm"cp.async.bulk.tensor.prefetch.tile.4d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.4d",
+           ptx"cp.async.bulk.prefetch.tensor.4d.L2.global.tile")(
         _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
         UInt64(0), Val(false))
 end
@@ -372,7 +406,8 @@ end
 @inline function optype"cp.async.bulk.prefetch.tensor.5d.L2.global.tile"(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
         c3::Integer, c4::Integer, c5::Integer) where {S}
-    nvvm"cp.async.bulk.tensor.prefetch.tile.5d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.5d",
+           ptx"cp.async.bulk.prefetch.tensor.5d.L2.global.tile")(
         _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
         Int32(c5), UInt64(0), Val(false))
 end
@@ -382,14 +417,16 @@ end
 @inline function optype"cp.async.bulk.prefetch.tensor.1d.L2.global.tile.L2::cache_hint"(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer,
         cache_policy::UInt64) where {S}
-    nvvm"cp.async.bulk.tensor.prefetch.tile.1d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.1d",
+           ptx"cp.async.bulk.prefetch.tensor.1d.L2.global.tile.L2::cache_hint")(
         _tma_tmap(tmap), Int32(c1), UInt64(cache_policy), Val(true))
 end
 
 @inline function optype"cp.async.bulk.prefetch.tensor.2d.L2.global.tile.L2::cache_hint"(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
         cache_policy::UInt64) where {S}
-    nvvm"cp.async.bulk.tensor.prefetch.tile.2d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.2d",
+           ptx"cp.async.bulk.prefetch.tensor.2d.L2.global.tile.L2::cache_hint")(
         _tma_tmap(tmap), Int32(c1), Int32(c2),
         UInt64(cache_policy), Val(true))
 end
@@ -397,7 +434,8 @@ end
 @inline function optype"cp.async.bulk.prefetch.tensor.3d.L2.global.tile.L2::cache_hint"(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
         c3::Integer, cache_policy::UInt64) where {S}
-    nvvm"cp.async.bulk.tensor.prefetch.tile.3d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.3d",
+           ptx"cp.async.bulk.prefetch.tensor.3d.L2.global.tile.L2::cache_hint")(
         _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3),
         UInt64(cache_policy), Val(true))
 end
@@ -405,7 +443,8 @@ end
 @inline function optype"cp.async.bulk.prefetch.tensor.4d.L2.global.tile.L2::cache_hint"(
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
         c3::Integer, c4::Integer, cache_policy::UInt64) where {S}
-    nvvm"cp.async.bulk.tensor.prefetch.tile.4d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.4d",
+           ptx"cp.async.bulk.prefetch.tensor.4d.L2.global.tile.L2::cache_hint")(
         _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
         UInt64(cache_policy), Val(true))
 end
@@ -414,7 +453,8 @@ end
         tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
         c3::Integer, c4::Integer, c5::Integer,
         cache_policy::UInt64) where {S}
-    nvvm"cp.async.bulk.tensor.prefetch.tile.5d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.5d",
+           ptx"cp.async.bulk.prefetch.tensor.5d.L2.global.tile.L2::cache_hint")(
         _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
         Int32(c5), UInt64(cache_policy), Val(true))
 end
@@ -428,7 +468,8 @@ end
 @inline function optype"cp.async.bulk.prefetch.tensor.3d.L2.global.im2col"(
         tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32, c3::Int32,
         o1::Int16)
-    nvvm"cp.async.bulk.tensor.prefetch.im2col.3d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.im2col.3d",
+           ptx"cp.async.bulk.prefetch.tensor.3d.L2.global.im2col")(
         _tma_tmap(tmap), c1, c2, c3, o1, UInt64(0), Val(false))
 end
 
@@ -436,7 +477,8 @@ end
         tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32,
         c3::Int32, c4::Int32,
         o1::Int16, o2::Int16)
-    nvvm"cp.async.bulk.tensor.prefetch.im2col.4d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.im2col.4d",
+           ptx"cp.async.bulk.prefetch.tensor.4d.L2.global.im2col")(
         _tma_tmap(tmap), c1, c2, c3, c4, o1, o2,
         UInt64(0), Val(false))
 end
@@ -445,7 +487,8 @@ end
         tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32,
         c3::Int32, c4::Int32,
         c5::Int32, o1::Int16, o2::Int16, o3::Int16)
-    nvvm"cp.async.bulk.tensor.prefetch.im2col.5d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.im2col.5d",
+           ptx"cp.async.bulk.prefetch.tensor.5d.L2.global.im2col")(
         _tma_tmap(tmap), c1, c2, c3, c4, c5, o1, o2, o3,
         UInt64(0), Val(false))
 end
@@ -455,7 +498,8 @@ end
 @inline function optype"cp.async.bulk.prefetch.tensor.3d.L2.global.im2col.L2::cache_hint"(
         tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32, c3::Int32,
         o1::Int16, cache_policy::UInt64)
-    nvvm"cp.async.bulk.tensor.prefetch.im2col.3d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.im2col.3d",
+           ptx"cp.async.bulk.prefetch.tensor.3d.L2.global.im2col.L2::cache_hint")(
         _tma_tmap(tmap), c1, c2, c3, o1, cache_policy, Val(true))
 end
 
@@ -463,7 +507,8 @@ end
         tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32,
         c3::Int32, c4::Int32,
         o1::Int16, o2::Int16, cache_policy::UInt64)
-    nvvm"cp.async.bulk.tensor.prefetch.im2col.4d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.im2col.4d",
+           ptx"cp.async.bulk.prefetch.tensor.4d.L2.global.im2col.L2::cache_hint")(
         _tma_tmap(tmap), c1, c2, c3, c4, o1, o2, cache_policy, Val(true))
 end
 
@@ -472,7 +517,8 @@ end
         c3::Int32, c4::Int32,
         c5::Int32, o1::Int16, o2::Int16, o3::Int16,
         cache_policy::UInt64)
-    nvvm"cp.async.bulk.tensor.prefetch.im2col.5d"(
+    ceiled(nvvm"cp.async.bulk.tensor.prefetch.im2col.5d",
+           ptx"cp.async.bulk.prefetch.tensor.5d.L2.global.im2col.L2::cache_hint")(
         _tma_tmap(tmap), c1, c2, c3, c4, c5, o1, o2, o3,
         cache_policy, Val(true))
 end
