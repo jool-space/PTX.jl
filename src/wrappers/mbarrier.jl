@@ -106,6 +106,34 @@ end
                           mbar, UInt32(tx_count))
 end
 
+# --- PTX 9.4 cluster multicast (sm_107f), spelled-only until 13.4 ptxas ----
+# `.multicast::cluster::32b` runs the operation on the mbarrier at the same
+# CTA-relative offset in every cluster CTA selected by `cta_mask` (bit i =
+# %cluster_ctarank i). The mask is the mandatory trailing operand.
+
+@inline function optype"mbarrier.arrive.shared::cluster.multicast::cluster::32b.b64"(
+        mbar::Core.LLVMPtr{T, AS.Shared}, cta_mask::Integer) where T
+    _mbarrier_schema_call(
+        ptx"mbarrier.arrive.shared::cluster.multicast::cluster::32b.b64",
+        mbar, UInt32(cta_mask))
+end
+
+@inline function optype"mbarrier.arrive.expect_tx.shared::cluster.multicast::cluster::32b.b64"(
+        mbar::Core.LLVMPtr{T, AS.Shared},
+        tx_count::Integer, cta_mask::Integer) where T
+    _mbarrier_schema_call(
+        ptx"mbarrier.arrive.expect_tx.shared::cluster.multicast::cluster::32b.b64",
+        mbar, UInt32(tx_count), UInt32(cta_mask))
+end
+
+@inline function optype"mbarrier.expect_tx.shared::cluster.multicast::cluster::32b.b64"(
+        mbar::Core.LLVMPtr{T, AS.Shared},
+        tx_count::Integer, cta_mask::Integer) where T
+    _mbarrier_schema_call(
+        ptx"mbarrier.expect_tx.shared::cluster.multicast::cluster::32b.b64",
+        mbar, UInt32(tx_count), UInt32(cta_mask))
+end
+
 # --- PTX 9.3 extensions (layout / phase_type / report), asm tier ------------
 # No NVVM intrinsics exist for any of these at 22.1.7 — asm tier by
 # necessity, same as the cluster-space forms above.

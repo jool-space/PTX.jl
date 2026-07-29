@@ -43,7 +43,9 @@ const NVVM_SREG_U32 = Dict{Symbol, String}(
     suffix = get(NVVM_SREG_U32, S, nothing)
     if suffix !== nothing
         intr = "llvm.nvvm.read.ptx.sreg." * suffix
-        return :( $(NVVM.IntrinsicCall{Symbol(intr)}())() )
+        # Ceiling: invariant sreg reads are :pure (the table refines with
+        # speculatable/noundef/!range below that ceiling).
+        return :( $(NVVM.IntrinsicCall{Symbol(intr), _ceiling(_PURE)}())() )
     end
     spec = build_call(:mov, (:u32,), (SpecialReg{S},))
     quote

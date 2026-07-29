@@ -15,6 +15,21 @@ function _vr_partition(form)
     error("unpartitioned vector-result form $(form.op).$(join(form.coremods, '.'))")
 end
 
+# The managed assembler tops out at PTX ISA 9.3 (CUDA 13.3); ledger forms
+# introduced by 9.4 are spelled-only and excluded from every assembly
+# partition. Bump this gate when CUDA_Compiler_jll ships 13.4+ — the pinned
+# skip count below fails loudly if the exclusion drifts.
+const _VR_SPELLED_ONLY_FLOOR = v"9.4"
+_vr_spelled_only(form) = form.ptx_version >= _VR_SPELLED_ONLY_FLOOR
+
+@testset "spelled-only 9.4 forms are excluded, and counted" begin
+    skipped = [form for form in PTX.VECTOR_RESULT_CORE_FORMS
+               if _vr_spelled_only(form)]
+    @test length(skipped) == 2
+    @test all(f -> f.coremods[1] === :add && :noftz in f.coremods &&
+                   f.lane_kind === :f32, skipped)
+end
+
 function _vr_representative_mods(form)
     form.op === :ld && return form.target.min_sm == v"10.0" ?
         (:global, Symbol("L2::evict_last"), form.coremods...) :
@@ -40,6 +55,7 @@ function _vr_partition_body(partition; compat = false,
         error("unknown vector-result compiler status: $compiler_status")
     body = Expr(:block)
     for form in PTX.VECTOR_RESULT_CORE_FORMS
+        _vr_spelled_only(form) && continue
         _vr_partition(form) === partition || continue
         (_vr_ptxas_rejects_acc(form) == (compiler_status === :rejected)) || continue
         push!(body.args, _vr_call_expr(form))
@@ -139,7 +155,8 @@ end
         (_vr_multimem_fp8!, :multimem_fp8, 56, v"10.0", :arch),
     )
     for (kernel, partition, expected_count, cap, feature_set) in partitions
-        forms = filter(form -> _vr_partition(form) === partition &&
+        forms = filter(form -> !_vr_spelled_only(form) &&
+                             _vr_partition(form) === partition &&
                              !_vr_ptxas_rejects_acc(form),
                        PTX.VECTOR_RESULT_CORE_FORMS)
         @test length(forms) == expected_count

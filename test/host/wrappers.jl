@@ -1285,7 +1285,6 @@ end
              (UInt32, UInt32), "tcgen05.alloc.shared.cg1"),
             ((:relinquish_alloc_permit, cg1, :sync, :aligned), (),
              "tcgen05.relinq.alloc.permit.cg1"),
-            ((Symbol("wait::ld"), :sync, :aligned), (), "tcgen05.wait.ld"),
             ((:commit, cg1, Symbol("mbarrier::arrive::one"),
               Symbol("shared::cta"), :b64), (UInt32,),
              "tcgen05.commit.shared.cg1"),
@@ -1296,6 +1295,56 @@ end
         ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), argts))
         @test rt === Nothing
         @test occursin(intr, string(ci))
+    end
+
+    # The waits were demoted to asm (free: post-#109 their intrinsic
+    # attributes render the same conservative barrier as the clobber).
+    for w in ("ld", "st")
+        mods = (Symbol("wait::$w"), :sync, :aligned)
+        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), ()))
+        code = string(ci)
+        @test rt === Nothing
+        @test occursin("tcgen05.wait::$w.sync.aligned;", code)
+        @test occursin("~{memory}", code)
+        @test !occursin("llvm.nvvm.tcgen05.wait", code)
+    end
+
+    # PTX ISA 9.4 alloc/dealloc/commit forms (sm_100f+/sm_107f,
+    # spelled-only): asm tier by necessity, convergent, full clobber.
+    pS32 = Core.LLVMPtr{UInt32, PTX.AS.Shared}
+    syncres = Symbol("sync_restrict::shared::read::mma::a")
+    mc16 = Symbol("multicast::cluster::16b")
+    mc32 = Symbol("multicast::cluster::32b")
+    cluster = Symbol("shared::cluster")
+    arrive1 = Symbol("mbarrier::arrive::one")
+    for (mods, argts, asm) in (
+            ((:alloc, :exclusive, cg1, :sync, :aligned, :b32),
+             (pS32, UInt32),
+             "tcgen05.alloc.exclusive.cta_group::1.sync.aligned.b32 ["),
+            ((:alloc, :exclusive, cg2, :sync, :aligned,
+              Symbol("shared::cta"), :b32), (UInt32, UInt32),
+             "tcgen05.alloc.exclusive.cta_group::2.sync.aligned.shared::cta.b32 ["),
+            ((:dealloc, :exclusive, cg1, :sync, :aligned, :b32),
+             (UInt32, UInt32),
+             "tcgen05.dealloc.exclusive.cta_group::1.sync.aligned.b32 "),
+            ((:commit, cg1, arrive1, cluster, mc16, :b64),
+             (UInt32, UInt16),
+             "tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.multicast::cluster::16b.b64 ["),
+            ((:commit, cg2, arrive1, cluster, mc32, :b64),
+             (UInt32, Int),
+             "tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.multicast::cluster::32b.b64 ["),
+            ((:commit, cg1, arrive1, syncres, cluster, :b64), (UInt32,),
+             "tcgen05.commit.cta_group::1.mbarrier::arrive::one.sync_restrict::shared::read::mma::a.shared::cluster.b64 ["),
+            ((:commit, cg2, arrive1, syncres, cluster, mc32, :b64),
+             (UInt32, UInt32),
+             "tcgen05.commit.cta_group::2.mbarrier::arrive::one.sync_restrict::shared::read::mma::a.shared::cluster.multicast::cluster::32b.b64 ["))
+        @test which(Operation{:tcgen05, mods}(), argts).module == PTX
+        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), argts))
+        code = string(ci)
+        @test rt === Nothing
+        @test occursin(asm, code)
+        @test occursin("~{memory}", code)
+        @test !occursin("llvm.nvvm", code)
     end
 
     # ld/st: the full Table-52 grid (plain and pack/unpack variants) —
@@ -1738,6 +1787,26 @@ end
     spec = build_call(:cvt, (:rn, :scaled__n2__ue8m0, :bf16x2, :e4m3x2),
                       (UInt16, UInt16))
     @test spec.rettype === UInt32
+
+    # PTX ISA 9.4 (sm_107f, spelled-only until a CUDA 13.4+ ptxas ships):
+    # ue5m3x2 destination/source, single-scale n1 with its b16-carried b8
+    # scale factor, and .pzo/.rz as structural prefix pass-throughs.
+    @test format_call(ptx"cvt.rp.satfinite.ue5m3x2.f32",
+                      Tuple{Float32, Float32}) ==
+          "cvt.rp.satfinite.ue5m3x2.f32 \$0, \$1, \$2;"
+    spec94 = build_call(:cvt, (:rp, :satfinite, :ue5m3x2, :f32),
+                        (Float32, Float32))
+    @test spec94.rettype === UInt16
+    @test spec94.constraints == "=h,f,f"
+    @test format_call(ptx"cvt.rn.f16x2.ue5m3x2", Tuple{UInt16}) ==
+          "cvt.rn.f16x2.ue5m3x2 \$0, \$1;"
+    @test format_call(
+        ptx"cvt.rz.satfinite.pzo.scaled::n1::ue8m0.e4m3x2.f32",
+        Tuple{Float32, Float32, UInt16}) ==
+        "cvt.rz.satfinite.pzo.scaled::n1::ue8m0.e4m3x2.f32 \$0, \$1, \$2, \$3;"
+    @test format_call(ptx"cvt.rn.scaled::n2::ue8m0.bf16x2.ue5m3x2",
+                      Tuple{UInt16, UInt16}) ==
+          "cvt.rn.scaled::n2::ue8m0.bf16x2.ue5m3x2 \$0, \$1, \$2;"
     @test spec.constraints == "=r,h,h"
 
     # cvt is a pure ALU op — no memory clobber, no side effects.
@@ -1872,4 +1941,33 @@ end
                 (UInt32, UInt32, UInt32, UInt32)).module == PTX
     @test which(Operation{:shfl, (:sync, :bfly, :b32, :pred)}(),
                 (UInt32, UInt32, UInt32, UInt32)).module == PTX
+end
+
+@testset "PTX ISA 9.4 chain pass-throughs (sm_90+, spelled-only)" begin
+    # These 9.4 qualifiers need zero ledger work by design — they are
+    # prefix modifiers under opcodes whose FORMS contracts already carry
+    # the right effects — but the coverage is pinned so a future grammar
+    # tightening cannot silently drop them. None are family-gated.
+    G32 = Core.LLVMPtr{Float32, PTX.AS.Global}
+
+    # atom/red `.add.noftz.f32`: subnormal-preserving f32 adds (§9.7.15.5).
+    spec = build_call(:atom, (:add, :noftz, :f32), (G32, Float32))
+    @test spec.asm == "atom.add.noftz.f32 \$0, [\$1], \$2;"
+    @test spec.rettype === Float32
+    spec = build_call(:red, (:add, :noftz, :f32), (G32, Float32))
+    @test spec.asm == "red.add.noftz.f32 [\$0], \$1;"
+    @test spec.rettype === Nothing
+
+    # ld `.proxy::readonly` (§9.7.10.8): the readonly-proxy load.
+    spec = build_call(:ld, (Symbol("proxy::readonly"), :global, :u32),
+                      (Core.LLVMPtr{UInt32, PTX.AS.Global},))
+    @test spec.asm == "ld.proxy::readonly.global.u32 \$0, [\$1];"
+    @test spec.rettype === UInt32
+
+    # prefetch `.L1::32B.valid_addr` (§9.7.10.16): the trailing qualifier
+    # is not a dtype token, so no phantom output register is reserved.
+    spec = build_call(:prefetch, (:global, Symbol("L1::32B"), :valid_addr),
+                      (Core.LLVMPtr{UInt8, PTX.AS.Global},))
+    @test spec.asm == "prefetch.global.L1::32B.valid_addr [\$0];"
+    @test spec.rettype === Nothing
 end

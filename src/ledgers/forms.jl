@@ -56,6 +56,13 @@ struct FormContract
     end
 end
 
+# The ceiling-audited projection of a contract, in the isbits shape the
+# NVVM call-site type parameter requires (FormContract's Symbol field
+# disqualifies it). Rank: 3 = :pure, 2 = :observable, 1 = :clobbers.
+_ceiling(c::FormContract) = NVVM.Ceiling(
+    c.effects === :pure ? 0x03 : c.effects === :observable ? 0x02 : 0x01,
+    c.convergent)
+
 # Maximally conservative: every restriction, no promises. What eligible
 # `ptx"..."raw` calls get, and the only safe contract for a form nobody has
 # reviewed. Semantic guards can still forbid raw lowering when even this
