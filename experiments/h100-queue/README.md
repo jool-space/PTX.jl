@@ -1,6 +1,6 @@
 # H100 standing-queue experiments (issues #52, #49)
 
-The two `[[queue]]` items in `EVIDENCE.toml` for the H100/H200 device class,
+The two standing H100/H200 experiments (tracked as issues #52 and #49),
 packaged turnkey. Run from the repo root on the box:
 
 ```bash

@@ -57,6 +57,13 @@ if args.list === nothing
                                       "test support file loaded by each worker"))
             return false
         end
+        # Not a test: the manual session-close utility (it errors without its
+        # command-line argument). Skipped even when named explicitly.
+        if test == "close_hardware_session"
+            push!(manifest, PlanEntry(test, :skip, requirements[test],
+                                      "hardware-session utility, run directly"))
+            return false
+        end
         if test == "ptxas/golden" && Base.JLOptions().check_bounds == 1 &&
            apply_default_routing
             # Golden comparison is byte-exact, and forced bounds checks
@@ -83,10 +90,31 @@ if args.list === nothing
 
     # Hardware-evidence staleness: when a manual-evidence tier's runtime
     # sections are all skipped in this run, say when that tier last actually
-    # executed on hardware and on which tree (EVIDENCE.toml), so green output
-    # is never mistaken for runtime evidence the run didn't produce.
+    # executed on hardware (test/EVIDENCE.toml) and what has drifted under
+    # src/ and test/gpu/ since that tree, so green output is never mistaken
+    # for runtime evidence the run didn't produce.
+    function evidence_drift(tree)
+        root = normpath(joinpath(@__DIR__, ".."))
+        git(args...) = readchomp(pipeline(Cmd(["git", "-C", root, args...]);
+                                          stderr = devnull))
+        try
+            commits = git("rev-list", "--count", "$tree..HEAD")
+            commits == "0" && return "tree is current"
+            files = git("diff", "--name-only", tree, "HEAD",
+                        "--", "src", "test/gpu")
+            n = count(!isempty, split(files, '\n'))
+            changed = n == 0 ? "none touching src/ or test/gpu/" :
+                      "$n file$(n == 1 ? "" : "s") under src/ or test/gpu/"
+            return "$commits commit$(commits == "1" ? "" : "s") since; " *
+                   "changed: $changed"
+        catch
+            # No git, or a clone too shallow to contain `tree` (CI checkouts):
+            # fall back to the bare record.
+            return nothing
+        end
+    end
     if apply_default_routing
-        evidence = TOML.parsefile(joinpath(@__DIR__, "..", "EVIDENCE.toml"))
+        evidence = TOML.parsefile(joinpath(@__DIR__, "EVIDENCE.toml"))
         for tier in get(evidence, "tier", [])
             tier["evidence"] == "manual" || continue
             prefix = tier["tests"] * "/"
@@ -94,9 +122,11 @@ if args.list === nothing
             isempty(entries) && continue
             any(e -> e.action === :execute && e.requirement.requires === :gpu,
                 entries) && continue
-            println("  evidence: $(tier["tests"]) runtime last validated ",
-                    "$(tier["last_validated"]) on $(tier["device"]) — ",
-                    tier["tree"])
+            drift = evidence_drift(tier["tree"])
+            println("  evidence: $(tier["tests"]) runtime last executed ",
+                    "$(tier["last_validated"]) on $(tier["device"]) ",
+                    "(tree $(tier["tree"]), suite $(tier["suite"]))",
+                    drift === nothing ? "" : " — $drift")
         end
     end
 

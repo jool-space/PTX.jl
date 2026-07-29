@@ -11,7 +11,7 @@
 
 using TOML
 
-const SURFACE_PATH = joinpath(pkgdir(PTX), "SURFACE.toml")
+const SURFACE_PATH = joinpath(pkgdir(PTX), "docs", "SURFACE.toml")
 const SURFACE_STATUSES = ("strict", "generic", "raw-only", "out-of-scope")
 
 @testset "SURFACE.toml: the instruction-surface inventory" begin
