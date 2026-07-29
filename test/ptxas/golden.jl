@@ -232,6 +232,11 @@ end
 # relinquish, cp, shift, ld/st (scalar and multi-register shapes), waits,
 # commit (cta + cluster spellings, multicast), dense mma (f16 + tf32,
 # both cg1), and one MX kind with its complete block-scale operand schema.
+# The management verbs are single-route asm (see wrappers/tcgen05.jl): the
+# golden pins their reviewed renders (commit always spells
+# `.shared::cluster` — §9.7.18.12.1 admits no ::cta form — and keeps the
+# multicast-first order) and the SMEM-offset operand materialization the
+# asm route implies.
 
 function _golden_tcgen05_sm100a!(out::CuDeviceVector{UInt32, 1},
                                  s_desc::UInt64, idesc::UInt32)

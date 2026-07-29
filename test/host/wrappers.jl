@@ -1267,34 +1267,63 @@ end
     end
 end
 
-@testset "tcgen05 wrapper (tier-2 intrinsic lowering)" begin
-    # Fourth migrated family — see wrappers/tcgen05.jl for the mapping.
-    # The notation surface keeps raw UInt32 taddr/SMEM-offset operands;
-    # bodies must route to the intrinsic literals. mx mma kinds stay
-    # asm-tier (block-scale operands are not in the notation surface).
+@testset "tcgen05 wrapper (mixed-route lowering)" begin
+    # See wrappers/tcgen05.jl for the mapping. The notation surface keeps
+    # raw UInt32 taddr/SMEM-offset operands. shift, ld/st, and dense mma
+    # stay tier-2 intrinsic; the management verbs (alloc/dealloc/
+    # relinquish_alloc_permit/commit/cp) are single-route asm since the
+    # demotion. mx mma kinds stay asm-tier (block-scale operands are not
+    # in the notation surface).
     cg1 = Symbol("cta_group::1")
     cg2 = Symbol("cta_group::2")
 
     for (mods, argts, intr) in (
-            ((:shift, cg1, :down), (UInt32,), "tcgen05.shift.down.cg1"),
-            ((:dealloc, cg2, :sync, :aligned, :b32), (UInt32, UInt32),
-             "tcgen05.dealloc.cg2"),
-            ((:cp, cg1, Symbol("128x128b")), (UInt32, UInt64),
-             "tcgen05.cp.128x128b.cg1"),
-            ((:alloc, cg1, :sync, :aligned, Symbol("shared::cta"), :b32),
-             (UInt32, UInt32), "tcgen05.alloc.shared.cg1"),
-            ((:relinquish_alloc_permit, cg1, :sync, :aligned), (),
-             "tcgen05.relinq.alloc.permit.cg1"),
-            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
-              Symbol("shared::cta"), :b64), (UInt32,),
-             "tcgen05.commit.shared.cg1"),
-            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
-              Symbol("multicast::cluster"), Symbol("shared::cluster"), :b64),
-             (UInt32, UInt16), "tcgen05.commit.mc.shared.cg1"))
+            ((:shift, cg1, :down), (UInt32,), "tcgen05.shift.down.cg1"),)
         @test which(Operation{:tcgen05, mods}(), argts).module == PTX
         ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), argts))
         @test rt === Nothing
         @test occursin(intr, string(ci))
+    end
+
+    # Management verbs: single-route asm — the pins spell the reviewed
+    # render (commit keeps the multicast-first modifier order but ALWAYS
+    # renders `.shared::cluster` — §9.7.18.12.1 admits no ::cta spelling,
+    # the ::cta-modified wrapper is an address-species surface; alloc's
+    # generic-address form omits `.shared::cta`), no intrinsic call, full
+    # clobber.
+    for (mods, argts, asm) in (
+            ((:dealloc, cg2, :sync, :aligned, :b32), (UInt32, UInt32),
+             "tcgen05.dealloc.cta_group::2.sync.aligned.b32 "),
+            ((:cp, cg1, Symbol("128x128b")), (UInt32, UInt64),
+             "tcgen05.cp.cta_group::1.128x128b ["),
+            ((:cp, cg2, Symbol("64x128b"), Symbol("warpx2::02_13"),
+              :b8x16, :b6x16_p32), (UInt32, UInt64),
+             "tcgen05.cp.cta_group::2.64x128b.warpx2::02_13.b8x16.b6x16_p32 ["),
+            ((:alloc, cg1, :sync, :aligned, :b32),
+             (Core.LLVMPtr{UInt32, PTX.AS.Shared}, UInt32),
+             "tcgen05.alloc.cta_group::1.sync.aligned.b32 ["),
+            ((:alloc, cg1, :sync, :aligned, Symbol("shared::cta"), :b32),
+             (UInt32, UInt32),
+             "tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32 ["),
+            ((:relinquish_alloc_permit, cg1, :sync, :aligned), (),
+             "tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned;"),
+            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
+              Symbol("shared::cta"), :b64), (UInt32,),
+             "tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64 ["),
+            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
+              Symbol("shared::cluster"), :b64), (UInt32,),
+             "tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64 ["),
+            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
+              Symbol("multicast::cluster"), Symbol("shared::cluster"), :b64),
+             (UInt32, UInt16),
+             "tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64 ["))
+        @test which(Operation{:tcgen05, mods}(), argts).module == PTX
+        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), argts))
+        code = string(ci)
+        @test rt === Nothing
+        @test occursin(asm, code)
+        @test occursin("~{memory}", code)
+        @test !occursin("llvm.nvvm", code)
     end
 
     # The waits were demoted to asm (free: post-#109 their intrinsic

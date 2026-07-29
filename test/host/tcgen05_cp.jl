@@ -24,11 +24,16 @@ const _T5_CP_FMTS = [((), ""), ((:b8x16, :b6x16_p32), "b6x16_p32"),
                                 "llvm.nvvm.tcgen05.cp.$stem.$fmt.cg$cg"
         push!(reviewed, intrinsic)
         mods = (:cp, Symbol("cta_group::", cg), shapemods..., fmtmods...)
+        # Single-route asm since the demotion (see wrappers/tcgen05.jl):
+        # every form is convergent inline asm with the full clobber.
         info = lowering(Operation{:tcgen05, mods}(), (UInt32, UInt64))
-        @test info.tier === :intrinsic
+        @test info.tier === :asm
         @test info.rettype === Nothing
-        @test intrinsic in info.intrinsics
+        @test isempty(info.intrinsics)
 
+        # The unwrapped intrinsic records stay in the pinned registry; the
+        # attribute review below is what the demotion walked away from
+        # (convergent + argmem — no stronger promise than the asm route).
         record = PTX.NVVM.intrinsic(intrinsic)
         @test record.ret === ()
         @test :convergent in record.props

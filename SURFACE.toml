@@ -480,7 +480,7 @@ section = "9.7.18"
 title = "TensorCore 5th Generation Family Instructions"
 status = "strict"
 opcodes = ["tcgen05"]
-notes = "Typed-wrapper-only: one head spans address destinations, register vectors, sinks, fences, and matrix descriptors (alloc/dealloc, ld/st grids, cp, mma dense/sp/ws/mx, commit, fences); ~120/200 intrinsics remain unwrapped — see the tcgen05 coverage-gap plan. PTX ISA 9.4 additions (.exclusive alloc/dealloc, commit multicast::cluster::{16b,32b} and sync_restrict::shared::read::mma::a) are asm-tier, spelled-only until a CUDA 13.4+ ptxas ships; wait::ld/st demoted to asm (attribute-equivalent post-#109); ti16/collector::b/decompress::lut::b/idesc bits stay deferred pending the 9.4-GA defect recheck."
+notes = "Typed-wrapper-only: one head spans address destinations, register vectors, sinks, fences, and matrix descriptors (alloc/dealloc, ld/st grids, cp, mma dense/sp/ws/mx, commit, fences); ~120/200 intrinsics remain unwrapped — see the tcgen05 coverage-gap plan. The management verbs (alloc/dealloc/relinquish_alloc_permit/commit/cp) are single-route asm — the former tier-2 intrinsic forms were demoted (observable lifecycle effects; the argmem-widen A/B on B200 showed the conservative clobber is codegen-free) — as are the waits (attribute-equivalent post-#109) and the PTX ISA 9.4 additions (.exclusive alloc/dealloc, commit multicast::cluster::{16b,32b} and sync_restrict::shared::read::mma::a; spelled-only until a CUDA 13.4+ ptxas ships); ld/st, shift, and dense/sp/ws mma stay tier-2 intrinsic; ti16/collector::b/decompress::lut::b/idesc bits stay deferred pending the 9.4-GA defect recheck."
 owner = ["src/wrappers/tcgen05.jl", "src/lib/tcgen05_descriptor.jl",
          "src/lib/tcgen05_layout.jl"]
 
