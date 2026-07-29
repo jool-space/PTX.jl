@@ -87,6 +87,14 @@ locally; the runtime PASS is the evidence the real `tcgen05_instr_desc_i8`
 split. FAIL output prints the unique values seen (a wrong dtype encoding
 shows up as a recognizable wrong constant, e.g. e4m3 bits read as e5m2).
 
+**Device caveat (learned on the 2026-07-29 B300 session)**: `.kind::i8` is
+a-variant-exclusive — §9.7.18.10 lists sm_100a/sm_110a only and the family
+note excludes i8 by name; ptxas rejects sm_100f/103a/103f, and the external
+llc's "Cannot select" at sm_103a is correct arch dispatch, not a bug. On a
+**B300 (CC 10.3) only the e4m3 case runs**; the i8 runtime verdict needs a
+CC 10.0 **B200** (or a Thor sm_110a device). The probe gates and prints
+this itself.
+
 ## Already resolved — do NOT spend box time on these
 
 - **argmem-widen A/B** (`agent/argmem-widen-b200`): widening every tcgen05

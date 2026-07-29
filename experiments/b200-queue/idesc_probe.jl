@@ -39,6 +39,14 @@ using Test, Random
 using PTX, CUDACore, CUDATools
 using PTX: smem_addr_u32, tcgen05_descriptor, BlackwellLayout, tmem_lane_addr
 using PTX.MBarriers: barrier_try_wait
+# TARGET GATE (learned on the 2026-07-29 B300 session): `.kind::i8` is
+# a-variant-exclusive — §9.7.18.10 lists sm_100a/sm_101a/sm_110a and the
+# family-extension note excludes i8 by name; ptxas 13.3 rejects it on
+# sm_100f/sm_103a/sm_103f. A CC 10.3 B300 cannot run tcgen05 integer MMA at
+# all: the external llc's "Cannot select llvm.nvvm.tcgen05.mma.shared" at
+# sm_103a was CORRECT arch dispatch, not a bug (asm-routing it merely moves
+# the same refusal to ptxas). The i8 legs below run at sm_100a only and the
+# i8 runtime case needs a CC 10.0 device (B200); e4m3 runs on 10.0 and 10.3.
 
 include(joinpath(dirname(dirname(@__DIR__)), "test", "setup.jl"))
 
@@ -191,31 +199,41 @@ function _idp_e4m3_kernel!(O::CuDeviceVector{Float32, 1})
     return nothing
 end
 
+# caps = compile targets for the emit/ptxas legs; runs(cc) = runtime gate.
+# i8 is sm_100a-exclusive (see the target-gate note above).
 const _IDP_CASES = (
     ("kind::i8  s8×s8→s32   ", _idp_i8_kernel!, Tuple{CuDeviceVector{Int32, 1}},
-     Int32, Int32(IDP_BK), "tcgen05.mma.cta_group::1.kind::i8"),
+     Int32, Int32(IDP_BK), "tcgen05.mma.cta_group::1.kind::i8",
+     (v"10.0",), cc -> cc.major == 10 && cc.minor == 0,
+     "kind::i8 is sm_100a-exclusive — needs a CC 10.0 device (B200)"),
     ("kind::f8f6f4 e4m3→f32 ", _idp_e4m3_kernel!, Tuple{CuDeviceVector{Float32, 1}},
-     Float32, Float32(IDP_BK), "tcgen05.mma.cta_group::1.kind::f8f6f4"),
+     Float32, Float32(IDP_BK), "tcgen05.mma.cta_group::1.kind::f8f6f4",
+     (v"10.0", v"10.3"), cc -> v"10.0" <= cc < v"12.0",
+     "needs a CC 10.x/11.x device"),
 )
 
+_target_name(cap) = "sm_$(cap.major * 10 + cap.minor)a"
+
 println("=" ^ 72)
-println("[emit] sm_100a — mma spelling and hand-encoded idesc reach the PTX")
-for (label, f, tt, _, _, needle) in _IDP_CASES
-    ptx = emit_ptx(f, tt; cap = v"10.0", feature_set = :arch)
-    println("  ", label, ": mma spelled = ", occursin(needle, ptx),
+println("[emit] mma spelling and hand-encoded idesc reach the PTX")
+for (label, f, tt, _, _, needle, caps, _, _) in _IDP_CASES, cap in caps
+    ptx = emit_ptx(f, tt; cap, feature_set = :arch)
+    println("  ", _target_name(cap), " ", label,
+            ": mma spelled = ", occursin(needle, ptx),
             ", alloc/commit present = ",
             occursin("tcgen05.alloc", ptx) && occursin("tcgen05.commit", ptx))
 end
 
 println("=" ^ 72)
-println("[ptxas] sm_100a assembly")
-for (label, f, tt, _, _, _) in _IDP_CASES
+println("[ptxas] assembly")
+for (label, f, tt, _, _, _, caps, _, _) in _IDP_CASES, cap in caps
     accepted, err = try
-        ptxas_compiles(f, tt; cap = v"10.0", feature_set = :arch), ""
+        ptxas_compiles(f, tt; cap, feature_set = :arch), ""
     catch e
         false, sprint(showerror, e)
     end
-    println("  ", label, ": ", accepted ? "ACCEPTED" : "REJECTED")
+    println("  ", _target_name(cap), " ", label, ": ",
+            accepted ? "ACCEPTED" : "REJECTED")
     accepted || println(err)
 end
 
@@ -225,11 +243,15 @@ devcap = try
 catch
     nothing
 end
-if devcap === nothing || !(v"10.0" <= devcap < v"12.0")
-    println("[runtime] SKIPPED — no functional CC 10.x/11.x device (found: $devcap)")
+if devcap === nothing
+    println("[runtime] SKIPPED — no functional device")
 else
     println("[runtime] device = ", CUDACore.name(CUDACore.device()), " CC ", devcap)
-    for (label, f, _, elt, expected, _) in _IDP_CASES
+    for (label, f, _, elt, expected, _, _, runs, skipmsg) in _IDP_CASES
+        if !runs(devcap)
+            println("  ", label, ": SKIP — ", skipmsg, " (found CC $devcap)")
+            continue
+        end
         O = CUDACore.zeros(elt, 32 * 64)
         @cuda blocks = 1 threads = 128 f(O)
         CUDACore.synchronize()
