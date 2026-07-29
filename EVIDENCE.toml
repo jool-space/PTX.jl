@@ -26,10 +26,10 @@ result = "full default-routing suite 97,518/97,518 — first hopper runtime exec
 tests = "gpu/blackwell"
 runtime = "cc==10|cc==11"
 evidence = "manual"
-last_validated = "2026-07-28"
-device = "B200 (CC 10.0)"
-tree = "post-redesign main (c6c3ba5; #88–#97)"
-result = "full default-routing suite 91,870/91,870 incl. all tcgen05 runtime probes and blackwell GEMMs — run via Pkg.test, so the golden tier was filter-skipped (goldens run in CI). Prior records: B300 CC 10.3 2026-07-14 and B200 2026-07-12, both pre-redesign trees"
+last_validated = "2026-07-29"
+device = "B300 SXM6 (CC 10.3) + B200 (CC 10.0), separate spot instances"
+tree = "agent/b200-queue (tcgen05-flash @ 6e56298 + main @ 740d28d merged)"
+result = "full default-routing suite 97,413/97,413 via runtests.jl (goldens included) on BOTH chips — first Blackwell runtime execution of the effect-ceiling arc #109–#112 (mbarrier all-asm demotion, memory-widen overlay, ceiling) and the 9.4 feature PRs #113–#116, covering both the sm_103a recompile path (B300) and sm_100a (B200). Also covers the post-BarrierSet FA revalidation (maxdiff 5.9e-4–7.7e-4, rescale 1.55e-2 — matches pre-BarrierSet records) and both hand-encoded idesc probes: kind::f8f6f4 e4m3 PASS on B300+B200 (all 32.0), kind::i8 PASS on B200 (all 32; sm_100a-exclusive — B300 correctly self-gated). Prior record: B200 CC 10.0 2026-07-28 on main c6c3ba5 (91,870 via Pkg.test, goldens filter-skipped)"
 
 [[tier]]
 tests = "gpu"
@@ -74,14 +74,30 @@ result = "every push, both lanes; PTX_REQUIRE_GPU_RUNTIME fails the lane if the 
 # skipped; the PTX.jl port measures 1150 TF without them. The 2-CTA
 # cluster variant was correct but perf-neutral in pyptx; occ2 was an
 # alloc-permit lesson, not a win.
+#
+# emu sweep (2026-07-29, B300 CC 10.3 + B200 CC 10.0): FALSIFIED on both
+# chips — monotonically worse with density. B300 at B=1 H=8 S=8192:
+# baseline 1114 TF, emu=(1,3,5,7) 1088, 8-pair 1004, all-16 832 (negative
+# at every fab_sweep shape); B200: baseline 1057–1075, emu4 1008–1011
+# (~-6%). fab_check maxdiff identical (1.55e-2) across configs — bf16
+# output quantization rounds the dominant-error element identically; the
+# knob is live (perf differs). Like the scoreboard knob, a pyptx win that
+# doesn't transfer without its half-granular split-P companion. Per the
+# decision rule the 2-CTA port stays skipped; the remaining FA perf lever
+# is the half-granular split-P port.
+#
+# Perf-attribution check (same B200 box, 2026-07-29): pre-merge
+# tcgen05-flash reads 1059–1075 TF — identical to the merged tree, so the
+# #110 mbarrier demotion's codegen deltas (legacy expect_tx spelling,
+# static-SMEM mov/cvt prologues) are perf-NEUTRAL on the FA hot path. The
+# 1150 TF record vs today's ~1065 is spot-box variance (different
+# provider/clocks), not a tree regression; treat cross-box TF deltas
+# under ~8% as noise unless same-box A/B'd.
 
 [[queue]]
 device = "B200/B300 (CC 10.x)"
 items = [
-    "FA perf follow-ups: sweep the now-ported f32x2 exp2 emulation knob (emu = (1, 3, 5, 7) is pyptx's headline set; fab_check gates each candidate — the poly changes numerics), then decide the 2-CTA port",
-    "revalidate FA runtime after the BarrierSet arena adoption (PTX-diff-verified: init-order-only change, all other ~4,950 lines byte-identical; compile tier green)",
-    "issue #50: fabric spelling sm_100a ptxas evidence + configured-CFT-endpoint semantics",
-    "tcgen05 idesc builders: validate i8/f8f6f4/MX instruction-descriptor helpers (only f16bf16_f32 exists)",
+    "FA perf: port pyptx's half-granular split-P (the last unported piece of its headline config; emu and scoreboard both measured negative without it)",
 ]
 
 [[queue]]
