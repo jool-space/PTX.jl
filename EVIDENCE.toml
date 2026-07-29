@@ -103,7 +103,7 @@ result = "every push, both lanes; PTX_REQUIRE_GPU_RUNTIME fails the lane if the 
 [[queue]]
 device = "B200/B300 (CC 10.x)"
 items = [
-    "FA perf: port pyptx's half-granular split-P (the last unported piece of its headline config; emu and scoreboard both measured negative without it)",
+    "FA perf: sweep the now-ported half-granular split-P knob (splitp = true; fab_check gates first — the rescale-heavy scale=2.0 input — then fab_time B=1 and B=8 bands; afterwards RETEST emu on top of splitp: pyptx pairs them, and both the emu and scoreboard falsifications were measured without it)",
 ]
 
 [[queue]]

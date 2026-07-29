@@ -31,6 +31,18 @@
 #       (1, 3, 5, 7)). Default () — ex2 everywhere, pending a B200
 #       sweep; the emulation changes numerics (poly + round-to-int
 #       exponent inject), so fab_check gates each swept config.
+#   splitp     :: Bool — half-granular split-P (pyptx's 2-CTA "stage E"
+#       mechanism, commit 4d2aa00, mapped onto the 1-CTA kernel): the
+#       softmax still stores P per 32-column chunk, but the publish
+#       (wait::st → fence → mbarrier arrive) happens per 64-column HALF
+#       — half the wait::st round trips — and the PV consumer waits per
+#       half instead of per quarter: kk 0-3 issue under half 0 while
+#       the softmax still streams half 1 (which gates kk 4-7). The P
+#       barrier group reshapes [stage, quarter] → [stage, half].
+#       Default false — quarter-granular, byte-identical PTX to the
+#       pre-port tree; numerics are UNCHANGED either way (same stores,
+#       same values — only publish granularity moves), but fab_check
+#       still gates the sweep like every knob.
 #
 # Structure (faithful to pyptx):
 #   * 256 query rows per CTA as two 128-row subtiles ("stages"); BN=128 KV
@@ -45,7 +57,8 @@
 #   * Stale-basis softmax: each tile exps against the PREVIOUS tile's
 #     basis immediately; the row max / basis decision defers one tile and
 #     runs in the next tile's TMEM-load shadow. Each 32-column quarter of
-#     P publishes immediately (BAR_P_Q), so PV starts after 32 columns.
+#     P publishes immediately (BAR_P_Q), so PV starts after 32 columns
+#     (per 64-column half under `splitp` — see the knob above).
 #   * FA4 "skip correction": O is rescaled in TMEM only when the running
 #     row max moved by more than RESCALE_THRESHOLD in scaled-log2 units.
 #     In the common no-rescale case the softmax warps release the O
@@ -79,6 +92,12 @@
 #     the `emu` config knob but defaults OFF (all 16 pairs use
 #     `ex2.approx.ftz.f32`) until a B200 session sweeps it; the trick
 #     rebalances SFU/FMA pipe pressure.
+#   * Half-granular split-P (pyptx ships it only in the 2-CTA variant,
+#     commit 4d2aa00) is ported onto this 1-CTA kernel behind the
+#     `splitp` knob, default OFF (quarter-granular, the B200-validated
+#     scheme) until a B200 session sweeps it — pyptx's headline pairs
+#     it with `emu`, and the 2026-07-29 emu falsification was measured
+#     WITHOUT it.
 #   * Debug scaffolding (waitmap / beacons / lockstep / s_f16) not ported.
 #   * Shape parameters (seqlen, n_tiles, total_work, ...) are runtime
 #     kernel arguments — one compiled kernel serves every shape (pyptx
@@ -134,6 +153,19 @@ const FAB_BARS = (
 )
 const FAB_BAR_BYTES = barrier_bytes(BarrierSet{FAB_BARS})
 
+# splitp=true table: the P publish group reshapes to [stage, half]
+# (pyptx 4d2aa00's B2_P_FULL [stage][half]); every other group is
+# unchanged. The arena SHRINKS by 4 barriers, so the splitp=false
+# footprint (FAB_BAR_BYTES) is the layout maximum — the SMEM map keeps
+# the splitp=false offsets for both configs and the splitp=true arena
+# simply leaves its last 32 bytes unused.
+const FAB_BARS_SP = (; FAB_BARS..., p_q = ((2, 2), 128))
+
+# Dispatch-based table selection (kernel-path validation must be
+# dispatch, not runtime membership — see CLAUDE.md's 1.10 note).
+@inline _fab_barset(::Val{false}, base) = BarrierSet{FAB_BARS}(base)
+@inline _fab_barset(::Val{true},  base) = BarrierSet{FAB_BARS_SP}(base)
+
 const FAB_SMEM_TMEM  = FAB_SMEM_BARS + FAB_BAR_BYTES
 const FAB_SMEM_BYTES = FAB_SMEM_TMEM + 8
 
@@ -152,7 +184,7 @@ const FAB_LOAD_TID = UInt32(448)   # warp 14 lane 0
 # n2=64 candidate fails ptxas. Correctness re-gated by fab_check at each
 # candidate (rescale-heavy input, scale=2.0).
 const FAB_CFG_DEFAULT = (scoreboard = false, beacon = false,
-                         nreg = (144, 80, 144), emu = ())
+                         nreg = (144, 80, 144), emu = (), splitp = false)
 
 function fab_check_cfg(cfg)
     a, b, c = cfg.nreg
@@ -163,6 +195,7 @@ function fab_check_cfg(cfg)
         error("nreg values must be multiples of 8 in [24, 256]")
     all(x -> x isa Int && 0 <= x <= 15, cfg.emu) && allunique(cfg.emu) ||
         error("emu pairs must be unique Ints in 0:15")
+    cfg.splitp isa Bool || error("splitp must be a Bool")
     cfg
 end
 
@@ -231,7 +264,7 @@ end
 # Ring-slot load: wait FREE (uniform accounting — the ring is self-credited
 # once at role start), expect_tx, two stripe loads. Returns advanced row.
 @inline function _fab_load_kv(d::FabDbg, ::Val{SLOT}, kv_ptr, tma, row::UInt32,
-                              bars::BarrierSet{FAB_BARS},
+                              bars::BarrierSet,
                               ph::UInt32) where {SLOT}
     _fab_wait(d, bars.kv_free[SLOT], ph, Val(1))
     barrier_arrive_expect_tx(bars.kv_full[SLOT], FAB_TILE_BYTES)
@@ -250,7 +283,7 @@ end
 # S(stage) = Q(stage) @ K(k_idx)^T — 8 k16 UMMAs, accumulate within the tile.
 @inline function _fab_qk_mma(::Val{STAGE}, ::Val{KIDX}, tmem::UInt32,
                              dq0::UInt64, dk0::UInt64, idesc::UInt32,
-                             bars::BarrierSet{FAB_BARS}) where {STAGE, KIDX}
+                             bars::BarrierSet) where {STAGE, KIDX}
     d = tmem + UInt32(STAGE * 128)
     for kk in 0:7
         da = dq0 + UInt64(STAGE * FAB_SLOT_UNITS) + _fab_kmaj_off(kk)
@@ -261,28 +294,49 @@ end
 end
 
 # O(stage) += P(stage) @ V(v_idx) — A sourced from TMEM, consumed per
-# 32-column quarter as the softmax publishes it (4-way split-P). PV(tile)
-# is gated on O_RESC[stage][tile&1] at the first quarter.
-@inline function _fab_pv_mma(dbg::FabDbg, ::Val{STAGE}, ::Val{VIDX}, first_accum::Bool,
+# 32-column quarter as the softmax publishes it (4-way split-P), or per
+# 64-column half under splitp (kk 0-3 issue under half 0 while the
+# softmax still streams half 1, which gates kk 4-7 — pyptx 4d2aa00's
+# pv_mma). PV(tile) is gated on O_RESC[stage][tile&1] at the first
+# quarter/half.
+@inline function _fab_pv_mma(dbg::FabDbg, ::Val{SPLITP}, ::Val{STAGE}, ::Val{VIDX},
+                             first_accum::Bool,
                              ::Val{PAR}, tmem::UInt32, dv0::UInt64,
-                             idesc::UInt32, bars::BarrierSet{FAB_BARS},
-                             ph_pq::UInt32, ph_or::UInt32) where {STAGE, VIDX, PAR}
+                             idesc::UInt32, bars::BarrierSet,
+                             ph_pq::UInt32, ph_or::UInt32) where {SPLITP, STAGE,
+                                                                  VIDX, PAR}
     d = tmem + UInt32(256 + STAGE * 128)
-    for q in 0:3
-        _fab_wait(dbg, bars.p_q[STAGE, q], ph_pq, Val(5))
-        if q == 0
-            _fab_wait(dbg, bars.o_resc[STAGE, PAR], ph_or, Val(6))
+    if SPLITP
+        for h in 0:1
+            _fab_wait(dbg, bars.p_q[STAGE, h], ph_pq, Val(5))
+            if h == 0
+                _fab_wait(dbg, bars.o_resc[STAGE, PAR], ph_or, Val(6))
+            end
+            ptx"tcgen05.fence::after_thread_sync"()
+            for kk in (4h, 4h + 1, 4h + 2, 4h + 3)
+                a = tmem + ((STAGE * 128 + kk * 8) % UInt32)
+                db = dv0 + ((VIDX * 2 * FAB_SLOT_UNITS + kk * 128) % UInt64)
+                ptx"tcgen05.mma.cta_group::1.kind::f16"(d, a, db, idesc,
+                                                        !(first_accum & (kk == 0)))
+            end
         end
-        ptx"tcgen05.fence::after_thread_sync"()
-        for kk in (2q, 2q + 1)
-            # `% UInt32`: kk is loop-carried through a tuple iteration, so
-            # the checked UInt32() truncation survives LLVM's range
-            # analysis as a live InexactError branch; the unchecked
-            # conversion is exact by construction (kk ∈ 0:7).
-            a = tmem + ((STAGE * 128 + kk * 8) % UInt32)
-            db = dv0 + ((VIDX * 2 * FAB_SLOT_UNITS + kk * 128) % UInt64)
-            ptx"tcgen05.mma.cta_group::1.kind::f16"(d, a, db, idesc,
-                                                    !(first_accum & (kk == 0)))
+    else
+        for q in 0:3
+            _fab_wait(dbg, bars.p_q[STAGE, q], ph_pq, Val(5))
+            if q == 0
+                _fab_wait(dbg, bars.o_resc[STAGE, PAR], ph_or, Val(6))
+            end
+            ptx"tcgen05.fence::after_thread_sync"()
+            for kk in (2q, 2q + 1)
+                # `% UInt32`: kk is loop-carried through a tuple iteration,
+                # so the checked UInt32() truncation survives LLVM's range
+                # analysis as a live InexactError branch; the unchecked
+                # conversion is exact by construction (kk ∈ 0:7).
+                a = tmem + ((STAGE * 128 + kk * 8) % UInt32)
+                db = dv0 + ((VIDX * 2 * FAB_SLOT_UNITS + kk * 128) % UInt64)
+                ptx"tcgen05.mma.cta_group::1.kind::f16"(d, a, db, idesc,
+                                                        !(first_accum & (kk == 0)))
+            end
         end
     end
     # deferred-rescale handshake: correction may only touch O after this
@@ -373,17 +427,31 @@ end
 
 # exp → pack bf16 → store P quarter → publish BAR_P_Q[C] → fold accs.
 # The wait::st round trip hides under the next chunk's in-flight load.
-@inline function _fab_softmax_chunk(::Val{C}, emu::Val, v::NTuple{32, UInt32},
+# Under splitp the store stays per-chunk but the publish coarsens to the
+# 64-column half: chunks 0/2 store and move on (their st completes under
+# the half-mate's exp/pack), chunks 1/3 wait::st (covering BOTH stores),
+# fence, and arrive the half barrier — pyptx 4d2aa00's `c == 1 or c == 3`
+# publish, with [stage, half] granularity on the consumer side.
+@inline function _fab_softmax_chunk(::Val{C}, ::Val{SPLITP}, emu::Val,
+                                    v::NTuple{32, UInt32},
                                     macc::NTuple{4, Float32}, sacc::NTuple{4, Float32},
                                     sp_base::UInt32, pq_ptr,
                                     qk_scale::Float32, qk2::UInt64,
-                                    mneg::Float32) where {C}
+                                    mneg::Float32) where {C, SPLITP}
     w = _fab_exp_chunk(emu, v, qk_scale, mneg, qk2)
     pk = ntuple(k -> bf16x2_pack(w[2k - 1], w[2k]), Val(16))
     ptx"tcgen05.st.sync.aligned.32x32b.x16.b32"(sp_base + UInt32(C * 16), pk)
-    ptx"tcgen05.wait::st.sync.aligned"()
-    ptx"tcgen05.fence::before_thread_sync"()
-    barrier_arrive(pq_ptr + 8 * C)
+    if SPLITP
+        if C == 1 || C == 3
+            ptx"tcgen05.wait::st.sync.aligned"()
+            ptx"tcgen05.fence::before_thread_sync"()
+            barrier_arrive(pq_ptr + 8 * (C >> 1))
+        end
+    else
+        ptx"tcgen05.wait::st.sync.aligned"()
+        ptx"tcgen05.fence::before_thread_sync"()
+        barrier_arrive(pq_ptr + 8 * C)
+    end
     cm = _fab_chunk_max(w)
     cs = _fab_chunk_sum(w)
     if C == 0
@@ -396,7 +464,8 @@ end
 
 # One KV tile of the softmax stream. Returns the updated per-thread state
 # (ph_s, ph_stats, mneg, pmax_pend, sums_pend, l_run).
-@inline function _fab_softmax_body(d::FabDbg, sb::Bool, emu::Val, first::Bool,
+@inline function _fab_softmax_body(d::FabDbg, sb::Bool, sp::Val, emu::Val,
+                                   first::Bool,
                                    oresc_par_ptr,
                                    sp_base::UInt32, sfull, sfree, pq_ptr,
                                    stats, alpha_idx::Int, stats_bar::UInt32,
@@ -441,19 +510,19 @@ end
     # under exp/pack/store(c) ──
     sb || ptx"tcgen05.wait::ld.sync.aligned"()
     v1 = ptx"tcgen05.ld.sync.aligned.32x32b.x32.b32"(sp_base + UInt32(32))
-    macc, sacc = _fab_softmax_chunk(Val(0), emu, v0, ntuple(_ -> 0.0f0, Val(4)),
+    macc, sacc = _fab_softmax_chunk(Val(0), sp, emu, v0, ntuple(_ -> 0.0f0, Val(4)),
                                     ntuple(_ -> 0.0f0, Val(4)),
                                     sp_base, pq_ptr, qk_scale, qk2, mneg)
     sb || ptx"tcgen05.wait::ld.sync.aligned"()
     v2 = ptx"tcgen05.ld.sync.aligned.32x32b.x32.b32"(sp_base + UInt32(64))
-    macc, sacc = _fab_softmax_chunk(Val(1), emu, v1, macc, sacc,
+    macc, sacc = _fab_softmax_chunk(Val(1), sp, emu, v1, macc, sacc,
                                     sp_base, pq_ptr, qk_scale, qk2, mneg)
     sb || ptx"tcgen05.wait::ld.sync.aligned"()
     v3 = ptx"tcgen05.ld.sync.aligned.32x32b.x32.b32"(sp_base + UInt32(96))
-    macc, sacc = _fab_softmax_chunk(Val(2), emu, v2, macc, sacc,
+    macc, sacc = _fab_softmax_chunk(Val(2), sp, emu, v2, macc, sacc,
                                     sp_base, pq_ptr, qk_scale, qk2, mneg)
     sb || ptx"tcgen05.wait::ld.sync.aligned"()
-    macc, sacc = _fab_softmax_chunk(Val(3), emu, v3, macc, sacc,
+    macc, sacc = _fab_softmax_chunk(Val(3), sp, emu, v3, macc, sacc,
                                     sp_base, pq_ptr, qk_scale, qk2, mneg)
 
     # horizontal reduce into the pending carries
@@ -484,7 +553,7 @@ end
 # tracks the true completion count — a parity-only wait inside the rare
 # branch could alias an older same-parity completion and race the
 # in-flight PV.
-@inline function _fab_corr_tile(d::FabDbg, ::Val{STAGE}, bars::BarrierSet{FAB_BARS},
+@inline function _fab_corr_tile(d::FabDbg, ::Val{STAGE}, bars::BarrierSet,
                                 stats, alpha_idx::Int,
                                 stats_bar::UInt32, o_addr::UInt32,
                                 ponc::UInt32, ph_pv::UInt32) where {STAGE}
@@ -511,7 +580,7 @@ end
 end
 
 # Epilogue for one stage: normalize O by the row sum, pack bf16, store.
-@inline function _fab_epi_stage(::Val{STAGE}, bars::BarrierSet{FAB_BARS},
+@inline function _fab_epi_stage(::Val{STAGE}, bars::BarrierSet,
                                 stats, alpha_idx::Int,
                                 stats_bar::UInt32, o_addr::UInt32,
                                 out_row::UInt32, po) where {STAGE}
@@ -580,7 +649,7 @@ function _fab_kernel!(
 
     q_ptr  = pointer(smem_q)
     kv_ptr = pointer(smem_kv)
-    bars   = BarrierSet{FAB_BARS}(pointer(bar_mem))
+    bars   = _fab_barset(Val(CFG.splitp), pointer(bar_mem))
 
     tid      = ptx"mov.u32"(sreg"tid.x")
     cta_id   = ptx"mov.u32"(sreg"ctaid.x")
@@ -677,9 +746,10 @@ function _fab_kernel!(
                                  leading_bytes = 16384, stride_bytes = 1024,
                                  swizzle = BlackwellLayout.B128)
 
+        sp = Val(CFG.splitp)
         kph0 = UInt32(0); kph1 = UInt32(0); kph2 = UInt32(0); kph3 = UInt32(0)
         ph_qa = UInt32(0); ph_qb = UInt32(0)
-        ph_pq0 = UInt32(0); ph_pq1 = UInt32(0)      # all 4 quarters flip together
+        ph_pq0 = UInt32(0); ph_pq1 = UInt32(0)      # all quarters/halves flip together
         ph_or00 = UInt32(0); ph_or01 = UInt32(0)    # [stage][parity]
         ph_or10 = UInt32(0); ph_or11 = UInt32(0)
 
@@ -697,10 +767,10 @@ function _fab_kernel!(
             # ── peeled j=0: PV(0) with V slot 1, S(1) with K slot 2 ──
             _fab_wait(d, bars.kv_full[1], kph1, Val(4)); kph1 ⊻= UInt32(1)
             _fab_wait(d, bars.kv_full[2], kph2, Val(4)); kph2 ⊻= UInt32(1)
-            ph_pq0, ph_or00 = _fab_pv_mma(d, Val(0), Val(0), true, Val(0),
+            ph_pq0, ph_or00 = _fab_pv_mma(d, sp, Val(0), Val(0), true, Val(0),
                                           tmem, dv0, idesc_pv, bars, ph_pq0, ph_or00)
             _fab_qk_mma(Val(0), Val(1), tmem, dq0, dk0, idesc_qk, bars)
-            ph_pq1, ph_or10 = _fab_pv_mma(d, Val(1), Val(0), true, Val(0),
+            ph_pq1, ph_or10 = _fab_pv_mma(d, sp, Val(1), Val(0), true, Val(0),
                                           tmem, dv0, idesc_pv, bars, ph_pq1, ph_or10)
             _fab_qk_mma(Val(1), Val(1), tmem, dq0, dk0, idesc_qk, bars)
             _fab_commit(bars.kv_free[2])
@@ -717,10 +787,10 @@ function _fab_kernel!(
                 # j odd: V in slot 3, next K in slot 0
                 _fab_wait(d, bars.kv_full[3], kph3, Val(4)); kph3 ⊻= UInt32(1)
                 _fab_wait(d, bars.kv_full[0], kph0, Val(4)); kph0 ⊻= UInt32(1)
-                ph_pq0, ph_or01 = _fab_pv_mma(d, Val(0), Val(1), false, Val(1),
+                ph_pq0, ph_or01 = _fab_pv_mma(d, sp, Val(0), Val(1), false, Val(1),
                                               tmem, dv0, idesc_pv, bars, ph_pq0, ph_or01)
                 _fab_qk_mma(Val(0), Val(0), tmem, dq0, dk0, idesc_qk, bars)
-                ph_pq1, ph_or11 = _fab_pv_mma(d, Val(1), Val(1), false, Val(1),
+                ph_pq1, ph_or11 = _fab_pv_mma(d, sp, Val(1), Val(1), false, Val(1),
                                               tmem, dv0, idesc_pv, bars, ph_pq1, ph_or11)
                 _fab_qk_mma(Val(1), Val(0), tmem, dq0, dk0, idesc_qk, bars)
                 _fab_commit(bars.kv_free[0])
@@ -728,10 +798,10 @@ function _fab_kernel!(
                 # j even: V in slot 1, next K in slot 2
                 _fab_wait(d, bars.kv_full[1], kph1, Val(4)); kph1 ⊻= UInt32(1)
                 _fab_wait(d, bars.kv_full[2], kph2, Val(4)); kph2 ⊻= UInt32(1)
-                ph_pq0, ph_or00 = _fab_pv_mma(d, Val(0), Val(0), false, Val(0),
+                ph_pq0, ph_or00 = _fab_pv_mma(d, sp, Val(0), Val(0), false, Val(0),
                                               tmem, dv0, idesc_pv, bars, ph_pq0, ph_or00)
                 _fab_qk_mma(Val(0), Val(1), tmem, dq0, dk0, idesc_qk, bars)
-                ph_pq1, ph_or10 = _fab_pv_mma(d, Val(1), Val(0), false, Val(0),
+                ph_pq1, ph_or10 = _fab_pv_mma(d, sp, Val(1), Val(0), false, Val(0),
                                               tmem, dv0, idesc_pv, bars, ph_pq1, ph_or10)
                 _fab_qk_mma(Val(1), Val(1), tmem, dq0, dk0, idesc_qk, bars)
                 _fab_commit(bars.kv_free[2])
@@ -746,9 +816,9 @@ function _fab_kernel!(
 
             # ── peeled j = n_tiles-1 (odd): PV only, V in slot 3 ──
             _fab_wait(d, bars.kv_full[3], kph3, Val(4)); kph3 ⊻= UInt32(1)
-            ph_pq0, ph_or01 = _fab_pv_mma(d, Val(0), Val(1), false, Val(1),
+            ph_pq0, ph_or01 = _fab_pv_mma(d, sp, Val(0), Val(1), false, Val(1),
                                           tmem, dv0, idesc_pv, bars, ph_pq0, ph_or01)
-            ph_pq1, ph_or11 = _fab_pv_mma(d, Val(1), Val(1), false, Val(1),
+            ph_pq1, ph_or11 = _fab_pv_mma(d, sp, Val(1), Val(1), false, Val(1),
                                           tmem, dv0, idesc_pv, bars, ph_pq1, ph_or11)
             _fab_commit(bars.kv_free[3])
             _fab_commit(bars.o_done)
@@ -785,6 +855,7 @@ function _fab_kernel!(
         alpha_idx = Int(stage) * 128 + Int(row128) + 1
         sum_idx   = alpha_idx + 256
 
+        sp  = Val(CFG.splitp)
         emu = Val(CFG.emu)
         qk2 = _fab_pack2(qk_scale, qk_scale)
         ph_s = UInt32(0); ph_stats = UInt32(0); epi_ph = UInt32(0)
@@ -799,14 +870,15 @@ function _fab_kernel!(
             mneg = 0.0f0
             l_run = 0.0f0
             ph_s, ph_stats, mneg, pmax, sums, l_run = _fab_softmax_body(
-                d, sb, emu, true, oresc, sp_base, sfull, sfree, pq_ptr,
+                d, sb, sp, emu, true, oresc, sp_base, sfull, sfree, pq_ptr,
                 stats, alpha_idx,
                 stats_bar, qk_scale, qk2, ph_s, ph_stats, mneg, pmax, sums, l_run)
             it = UInt32(1)
             while it < n_tiles
                 po = (it & UInt32(1)) << UInt32(3)
                 ph_s, ph_stats, mneg, pmax, sums, l_run = _fab_softmax_body(
-                    d, sb, emu, false, oresc + Int(po), sp_base, sfull, sfree, pq_ptr,
+                    d, sb, sp, emu, false, oresc + Int(po), sp_base, sfull, sfree,
+                    pq_ptr,
                     stats, alpha_idx, stats_bar, qk_scale, qk2,
                     ph_s, ph_stats, mneg, pmax, sums, l_run)
                 it += UInt32(1)

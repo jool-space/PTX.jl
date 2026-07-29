@@ -63,7 +63,7 @@ include("flash_attention_defs.jl")
     # config variants: the workbench's knobs must stay compilable, and
     # each must actually change the emitted PTX the way it claims.
     sb_cfg = fab_check_cfg((scoreboard = true, beacon = false,
-                            nreg = (144, 80, 144), emu = ()))
+                            nreg = (144, 80, 144), emu = (), splitp = false))
     @test ptxas_compiles(_fab_kernel!, types(sb_cfg);
                          cap = v"10.0", feature_set = :arch, minthreads = 512)
     sb_ptx = emit_ptx(_fab_kernel!, types(sb_cfg);
@@ -75,12 +75,12 @@ include("flash_attention_defs.jl")
     @test 0 < n_waits(sb_ptx) < n_waits(ptx)
 
     bc_cfg = fab_check_cfg((scoreboard = false, beacon = true,
-                            nreg = (144, 80, 144), emu = ()))
+                            nreg = (144, 80, 144), emu = (), splitp = false))
     @test ptxas_compiles(_fab_kernel!, types(bc_cfg);
                          cap = v"10.0", feature_set = :arch, minthreads = 512)
 
     nr_cfg = fab_check_cfg((scoreboard = false, beacon = false,
-                            nreg = (144, 88, 128), emu = ()))
+                            nreg = (144, 88, 128), emu = (), splitp = false))
     nr_ptx = emit_ptx(_fab_kernel!, types(nr_cfg);
                       cap = v"10.0", feature_set = :arch, minthreads = 512)
     @test occursin("setmaxnreg.inc.sync.aligned.u32 144", nr_ptx)
@@ -90,7 +90,8 @@ include("flash_attention_defs.jl")
     # onto the packed-f32 FMA pipe; the other 8 stay on the SFU. The
     # default config must emit NO f32x2 arithmetic.
     emu_cfg = fab_check_cfg((scoreboard = false, beacon = false,
-                             nreg = (144, 80, 144), emu = (1, 3, 5, 7)))
+                             nreg = (144, 80, 144), emu = (1, 3, 5, 7),
+                             splitp = false))
     @test ptxas_compiles(_fab_kernel!, types(emu_cfg);
                          cap = v"10.0", feature_set = :arch, minthreads = 512)
     emu_ptx = emit_ptx(_fab_kernel!, types(emu_cfg);
@@ -101,6 +102,34 @@ include("flash_attention_defs.jl")
     @test occursin("max.ftz.f32", emu_ptx)
     @test occursin("ex2.approx.ftz.f32", emu_ptx)
     @test !occursin("f32x2", ptx)
+
+    # splitp: half-granular split-P (pyptx's 2-CTA stage-E mechanism on
+    # the 1-CTA kernel). Stores stay per 32-column chunk (same x16 count),
+    # but the publish coarsens to the 64-column half: the softmax drops
+    # its chunk-0/2 wait::st→fence→arrive round trips (2 of 4 per tile,
+    # ×2 inlined bodies), and the P barrier group shrinks from [2,4]
+    # quarters to [2,2] halves (4 fewer mbarrier.init sites). The
+    # default's quarter-granular structure is pinned by the same counts
+    # (splitp=false PTX is instruction-identical to the pre-port tree —
+    # proven offline, see the port commit).
+    sp_cfg = fab_check_cfg((scoreboard = false, beacon = false,
+                            nreg = (144, 80, 144), emu = (), splitp = true))
+    @test ptxas_compiles(_fab_kernel!, types(sp_cfg);
+                         cap = v"10.0", feature_set = :arch, minthreads = 512)
+    @test ptxas_compiles(_fab_kernel!, types(sp_cfg);
+                         cap = v"10.3", feature_set = :arch, minthreads = 512)
+    sp_ptx = emit_ptx(_fab_kernel!, types(sp_cfg);
+                      cap = v"10.0", feature_set = :arch, minthreads = 512)
+    n_st_waits(p) = length(collect(eachmatch(r"tcgen05\.wait::st", p)))
+    n_bar_inits(p) = length(collect(eachmatch(r"mbarrier\.init", p)))
+    @test n_st_waits(ptx) == 10           # 4/tile ×2 bodies + 2 correction
+    @test n_st_waits(sp_ptx) == n_st_waits(ptx) - 4
+    @test n_bar_inits(ptx) == 31          # the FAB_BARS arena, one init each
+    @test n_bar_inits(sp_ptx) == n_bar_inits(ptx) - 4
+    # store granularity is UNCHANGED (same values land in TMEM — the knob
+    # is publish granularity, not data): same x16 store count both ways
+    n_p_sts(p) = length(collect(eachmatch(r"tcgen05\.st\.sync\.aligned\.32x32b\.x16", p)))
+    @test n_p_sts(sp_ptx) == n_p_sts(ptx)
 end
 
 # ── Runtime — datacenter Blackwell only (banner: cc==10) ────────────────
