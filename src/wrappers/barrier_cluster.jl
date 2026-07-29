@@ -1,6 +1,6 @@
-# `barrier.cluster.{arrive,wait}` (PTX 9.2 §9.7.12.3), sm_90+ — first
-# slice of the barrier-family tier-2 migration (the CTA-scope slice
-# followed 2026-07-06; see wrappers/barrier.jl).
+# `barrier.cluster.{arrive,wait}` (PTX 9.2 §9.7.12.3), sm_90+ — the
+# cluster-scope sibling of the CTA-scope tier-2 family in
+# wrappers/barrier.jl.
 #
 # Two reasons this family doesn't ride the chain default (asm):
 #   - The intrinsics carry `convergent` from the registry; the chain's
@@ -13,7 +13,7 @@
 #     on Julia ≤ 1.11 (LLVM ≤ 16, which predates the cluster barrier
 #     intrinsics) the call is demoted to a runtime trap, silently. The
 #     tier-2 declare+call form passes unknown names through to the
-#     external backend on every version (verified 2026-07-05).
+#     external backend on every version.
 #
 # `.aligned` asserts all warps of all CTAs execute the same instruction;
 # `.relaxed` drops the release/acquire ordering of arrive.

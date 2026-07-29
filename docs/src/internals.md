@@ -95,3 +95,18 @@ narrow semantic boundary before emitting any Julia source.
 ```@docs
 PTX.Codegen.validate_transpilable
 ```
+
+## Evidence archaeology
+
+One-off validation scripts lived in `spikes/` until their findings were
+baked into code, tests, and goldens; the directory was then deleted.
+Comments citing a `spikes/*.jl` script refer to these — view any of them
+with `git show ccdfb8a~1:spikes/`. The load-bearing ones:
+
+- `spikes/convergence.jl` — reproduces the divergent-duplication
+  miscompile class that motivates `convergent` on collective ops.
+- `spikes/raw_asm_attrs.jl` — proves a `convergent` attribute group on an
+  inline-asm call site parses through `Base.llvmcall` and survives the
+  optimized module (the `convergent_asm_ir` mechanism).
+- `spikes/aggregate_return.jl` — hardware validation of the ldmatrix
+  aggregate-return repack and mangled overloaded-callsite names.

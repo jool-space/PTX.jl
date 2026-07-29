@@ -10,9 +10,9 @@ CORPUS_FILES = sort(filter(p -> endswith(p, ".ptx"),
                            readdir(CORPUS_DIR; join = true)))
 
 # A byte-loss smoke is intentionally weaker than the structural and semantic
-# checks below. Most curated inputs must stay within the historical 3% limit.
-# Tracked in issue #48: `less_slow_sm90a` currently needs 3.1%
-# after raw snapshots are removed. Header-inline comments, comma-packed
+# checks below. Most curated inputs must stay within the historical 3% limit;
+# `less_slow_sm90a` needs 3.1% after raw snapshots are removed. Header-inline
+# comments, comma-packed
 # register declarations, and multiple statements on one physical line are not
 # all represented by the current IR. Keep this exception local and reviewable
 # rather than weakening the corpus gate as a whole.

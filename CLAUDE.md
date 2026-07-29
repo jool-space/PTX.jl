@@ -59,6 +59,17 @@ structure is documented in `docs/src/internals.md`; this file is about how to
   a harness argument as `::Function` would rebind the name against
   `PTX.IR.Function` importers (see the comment on `compile_touch_sweep`).
 
+## Comment discipline
+
+- A comment states a present-tense constraint of the code. Provenance —
+  dates, PR/issue numbers, plan or session names — goes in commit messages
+  and PR bodies, where git keeps it attached to the change; `git blame`
+  answers "when and why", and a comment that answers it instead goes stale
+  silently. Same rule for prose fields in data files (SURFACE notes): no
+  claims a test can't falsify.
+- Deleted evidence scripts (spikes/) are cited by bare name only; the
+  archaeology pointer lives in docs/src/internals.md "Evidence archaeology".
+
 ## Git and PR conventions
 
 - Squash-merge; working branches use the `agent/` prefix; commits/PRs go

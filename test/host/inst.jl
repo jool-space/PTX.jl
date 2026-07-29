@@ -145,8 +145,8 @@ end
 
 @testset "build_call: side-effecting opcodes must never classify pure" begin
     # The chain default's failure mode for a forgotten NONPURE entry is a
-    # miscompile, not slowness. These are the gaps found 2026-07-04 — each
-    # was pure + clobber-free before.
+    # miscompile, not slowness. Each opcode here was once misclassified
+    # pure + clobber-free; the pins keep that regression class closed.
 
     # multimem.st writes memory: nonpure, void (the dtype suffix is the
     # value being written), bracketed address.
