@@ -28,10 +28,12 @@ function _tma_im2col_prefetch_callsite_attrs(llvm::AbstractString)
         m = match(r"^attributes #([0-9]+) = \{([^}]*)\}", strip(line))
         m === nothing || (groups[m.captures[1]] = m.captures[2])
     end
+    # Single-route asm since the demotion: the call sites are inline asm
+    # (convergent_asm_ir), not llvm.nvvm.* intrinsic calls.
     calls = [String(line) for line in eachline(IOBuffer(llvm))
-             if occursin(" call ", line) &&
-                occursin(
-                    "llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col", line)]
+             if occursin(" asm ", line) &&
+                occursin("cp.async.bulk.prefetch.tensor", line) &&
+                occursin(".im2col", line)]
     attrs = String[]
     for call in calls
         m = match(r" #([0-9]+)(?:,|$)", strip(call))
@@ -76,14 +78,18 @@ end
 end
 
 @testset "TMA base-im2col prefetch fails below sm_90" begin
+    # The asm route has no ISel gate (the retired intrinsic route failed
+    # with "Cannot select" in the backend); the sm_90 floor is now
+    # enforced by ptxas, which rejects the spelling for an sm_89 target.
     types = Tuple{PTX.TMADescriptorPtr, UInt64}
+    ptx = emit_ptx(_tma_im2col_prefetch_surface!, types; cap = v"8.9")
+    @test occursin("cp.async.bulk.prefetch.tensor.3d.L2.global.im2col", ptx)
     err = try
-        emit_ptx(_tma_im2col_prefetch_surface!, types; cap = v"8.9")
+        ptxas_compiles(_tma_im2col_prefetch_surface!, types; cap = v"8.9")
         nothing
     catch e
         e
     end
-    @test err isa ErrorException
-    @test occursin("Cannot select", sprint(showerror, err))
-    @test occursin("prefetch.im2col", sprint(showerror, err))
+    @test err !== nothing
+    @test occursin("sm_90 or higher", sprint(showerror, err))
 end

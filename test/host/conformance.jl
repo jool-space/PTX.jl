@@ -43,7 +43,6 @@ end
 const pS  = Core.LLVMPtr{UInt64, 3}
 const pS8 = Core.LLVMPtr{UInt8, 3}
 const pS16 = Core.LLVMPtr{UInt16, 3}
-const p7  = Core.LLVMPtr{UInt8, 7}    # shared::cluster
 const p0  = Core.LLVMPtr{UInt8, 0}    # generic (TMA descriptor)
 const I4 = (UInt32, UInt32, UInt32, UInt32)
 
@@ -191,132 +190,14 @@ const PROBES = Tuple{String, Tuple, String, String, Regex}[
     ("llvm.nvvm.mbarrier.arrive.expect.tx.scope.cta.space.cta",
         (pS, UInt32), "sm_90", "+ptx80", r"mbarrier\.arrive\.expect_tx\.shared\.b64"),
 
-    # TMA (wrappers/tma.jl) — g2s takes (dst p7, mbar p3, tmap p0, coords,
-    # mc i16, ch i64, flag_mc, flag_ch, cta_group); g2s.cta and s2g drop the
-    # cluster-only operands. Flag immarg combos are probed separately below
-    # the per-rank base forms.
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.tile.1d",
-        (p7, pS, p0, Int32, UInt16, UInt64, Val{false}, Val{false}, Val{0}),
-        "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.tensor\.1d\.shared::cluster\.global\.tile\.mbarrier::complete_tx::bytes \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.tile.2d",
-        (p7, pS, p0, Int32, Int32, UInt16, UInt64, Val{false}, Val{false}, Val{0}),
-        "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.tensor\.2d\.shared::cluster\.global\.tile\.mbarrier::complete_tx::bytes \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.tile.3d",
-        (p7, pS, p0, Int32, Int32, Int32, UInt16, UInt64, Val{false}, Val{false}, Val{0}),
-        "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.tensor\.3d\.shared::cluster\.global\.tile\.mbarrier::complete_tx::bytes \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.tile.4d",
-        (p7, pS, p0, Int32, Int32, Int32, Int32, UInt16, UInt64, Val{false}, Val{false}, Val{0}),
-        "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.tensor\.4d\.shared::cluster\.global\.tile\.mbarrier::complete_tx::bytes \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.tile.5d",
-        (p7, pS, p0, Int32, Int32, Int32, Int32, Int32, UInt16, UInt64, Val{false}, Val{false}, Val{0}),
-        "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.tensor\.5d\.shared::cluster\.global\.tile\.mbarrier::complete_tx::bytes \["),
-    # flag combos: multicast (sm_90), cta_group::2 and both (sm_100a; ISel
-    # renders cta_group trailing — notation non-WYSIWYG, see wrappers/tma.jl)
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.tile.2d",
-        (p7, pS, p0, Int32, Int32, UInt16, UInt64, Val{true}, Val{false}, Val{0}),
-        "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.tensor\.2d\.shared::cluster\.global\.tile\.mbarrier::complete_tx::bytes\.multicast::cluster \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.tile.2d",
-        (p7, pS, p0, Int32, Int32, UInt16, UInt64, Val{false}, Val{false}, Val{2}),
-        "sm_100a", "+ptx86",
-        r"cp\.async\.bulk\.tensor\.2d\.shared::cluster\.global\.tile\.mbarrier::complete_tx::bytes\.cta_group::2 \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.tile.2d",
-        (p7, pS, p0, Int32, Int32, UInt16, UInt64, Val{true}, Val{false}, Val{2}),
-        "sm_100a", "+ptx86",
-        r"cp\.async\.bulk\.tensor\.2d\.shared::cluster\.global\.tile\.mbarrier::complete_tx::bytes\.multicast::cluster\.cta_group::2 \["),
-    # shared::cta destination — PTX 8.6 floor (cannot ISel at +ptx80)
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.cta.tile.1d",
-        (pS8, pS, p0, Int32, UInt64, Val{false}), "sm_90", "+ptx86",
-        r"cp\.async\.bulk\.tensor\.1d\.shared::cta\.global\.tile\.mbarrier::complete_tx::bytes \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.cta.tile.2d",
-        (pS8, pS, p0, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx86",
-        r"cp\.async\.bulk\.tensor\.2d\.shared::cta\.global\.tile\.mbarrier::complete_tx::bytes \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.cta.tile.3d",
-        (pS8, pS, p0, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx86",
-        r"cp\.async\.bulk\.tensor\.3d\.shared::cta\.global\.tile\.mbarrier::complete_tx::bytes \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.cta.tile.4d",
-        (pS8, pS, p0, Int32, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx86",
-        r"cp\.async\.bulk\.tensor\.4d\.shared::cta\.global\.tile\.mbarrier::complete_tx::bytes \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.g2s.cta.tile.5d",
-        (pS8, pS, p0, Int32, Int32, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx86",
-        r"cp\.async\.bulk\.tensor\.5d\.shared::cta\.global\.tile\.mbarrier::complete_tx::bytes \["),
-    # stores (s2g)
-    ("llvm.nvvm.cp.async.bulk.tensor.s2g.tile.1d",
-        (pS8, p0, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.tensor\.1d\.global\.shared::cta\.tile\.bulk_group \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.s2g.tile.2d",
-        (pS8, p0, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.tensor\.2d\.global\.shared::cta\.tile\.bulk_group \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.s2g.tile.3d",
-        (pS8, p0, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.tensor\.3d\.global\.shared::cta\.tile\.bulk_group \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.s2g.tile.4d",
-        (pS8, p0, Int32, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.tensor\.4d\.global\.shared::cta\.tile\.bulk_group \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.s2g.tile.5d",
-        (pS8, p0, Int32, Int32, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.tensor\.5d\.global\.shared::cta\.tile\.bulk_group \["),
-    # L2 tensor prefetch (no destination — fire-and-forget L2 warming).
-    # Every rank is probed both without and with the cache-policy flag; this
-    # pins the optional operand/qualifier pair rather than just intrinsic
-    # name selection.
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.1d",
-        (p0, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.1d\.L2\.global\.tile \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.1d",
-        (p0, Int32, UInt64, Val{true}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.1d\.L2\.global\.tile\.L2::cache_hint \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.2d",
-        (p0, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.2d\.L2\.global\.tile \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.2d",
-        (p0, Int32, Int32, UInt64, Val{true}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.2d\.L2\.global\.tile\.L2::cache_hint \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.3d",
-        (p0, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.3d\.L2\.global\.tile \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.3d",
-        (p0, Int32, Int32, Int32, UInt64, Val{true}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.3d\.L2\.global\.tile\.L2::cache_hint \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.4d",
-        (p0, Int32, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.4d\.L2\.global\.tile \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.4d",
-        (p0, Int32, Int32, Int32, Int32, UInt64, Val{true}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.4d\.L2\.global\.tile\.L2::cache_hint \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.5d",
-        (p0, Int32, Int32, Int32, Int32, Int32, UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.5d\.L2\.global\.tile \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile.5d",
-        (p0, Int32, Int32, Int32, Int32, Int32, UInt64, Val{true}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.5d\.L2\.global\.tile\.L2::cache_hint \["),
-    # Base im2col prefetch: rank-many s32 tensor coordinates, then rank-2
-    # i16 offsets. The cache policy remains paired with its immediate flag.
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.3d",
-        (p0, Int32, Int32, Int32, Int16, UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.3d\.L2\.global\.im2col \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.3d",
-        (p0, Int32, Int32, Int32, Int16, UInt64, Val{true}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.3d\.L2\.global\.im2col\.L2::cache_hint \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.4d",
-        (p0, Int32, Int32, Int32, Int32, Int16, Int16, UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.4d\.L2\.global\.im2col \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.4d",
-        (p0, Int32, Int32, Int32, Int32, Int16, Int16, UInt64, Val{true}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.4d\.L2\.global\.im2col\.L2::cache_hint \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.5d",
-        (p0, Int32, Int32, Int32, Int32, Int32, Int16, Int16, Int16,
-         UInt64, Val{false}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.5d\.L2\.global\.im2col \["),
-    ("llvm.nvvm.cp.async.bulk.tensor.prefetch.im2col.5d",
-        (p0, Int32, Int32, Int32, Int32, Int32, Int16, Int16, Int16,
-         UInt64, Val{true}), "sm_90", "+ptx80",
-        r"cp\.async\.bulk\.prefetch\.tensor\.5d\.L2\.global\.im2col\.L2::cache_hint \["),
+    # The TMA family (cp.async.bulk.tensor g2s/s2g and the tensor
+    # prefetch grammars) is single-route asm since the demotion (see
+    # wrappers/tma.jl) — no src literal remains, so no probes are
+    # required. Intrinsic records stay in the pinned registry:
+    # g2s.tile.1d remains a ceiling negative control in
+    # test/host/effect_ceiling.jl and prefetch.im2col.3d remains an
+    # arch-gate negative case below, both exercised directly against
+    # the registry.
 ]
 
 # tcgen05 (wrappers/tcgen05.jl) — datacenter Blackwell only (consumer

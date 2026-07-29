@@ -260,7 +260,7 @@ section = "9.7.10.28"
 title = "Data Movement and Conversion Instructions: Asynchronous copy (cp.async, cp.async.bulk, TMA)"
 status = "strict"
 opcodes = ["cp"]
-notes = "cp.async and the bulk/tensor forms are chain-renderable under sink overrides (the terminal type token is an operand descriptor), cp.async.bulk.prefetch.tensor is typed-wrapper-only (rank-dependent coordinate vectors plus a paired cache-hint operand), and the TMA wrappers own the tensor-copy API."
+notes = "cp.async and the bulk/tensor forms are chain-renderable under sink overrides (the terminal type token is an operand descriptor), cp.async.bulk.prefetch.tensor is typed-wrapper-only (rank-dependent coordinate vectors plus a paired cache-hint operand), and the TMA wrappers own the tensor-copy API. The whole cp.async.bulk.tensor/prefetch wrapper family is single-route asm — the former tier-2 intrinsic route was demoted (observable async effects; the argmem-widen A/B on B200 showed the conservative clobber is codegen-free) — making the notation WYSIWYG: cluster cta_group::2 renders after the rank like the pre-existing shared::cta residue (ptxas accepts both orders)."
 owner = ["src/ledgers/forms.jl", "src/wrappers/cp_async.jl", "src/wrappers/tma.jl"]
 
 [[family]]
