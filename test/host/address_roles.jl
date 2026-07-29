@@ -369,7 +369,7 @@ end
     # Address role instead of silently unwrapping it.
     dealloc = ptx"tcgen05.dealloc.cta_group::1.sync.aligned.b32"
     bare_dealloc = PTX.lowering(dealloc, (UInt32, UInt32))
-    @test bare_dealloc.tier === :intrinsic
+    @test bare_dealloc.tier === :asm
     @test which(dealloc, Tuple{UInt32, UInt32}) !== PTX._CHAIN_METHOD
     @test PTX.lowering(dealloc, (Address{UInt32},)).tier === :forbidden
     @test PTX.lowering(dealloc,

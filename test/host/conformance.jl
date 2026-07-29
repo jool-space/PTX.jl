@@ -320,9 +320,7 @@ const PROBES = Tuple{String, Tuple, String, String, Regex}[
 ]
 
 # tcgen05 (wrappers/tcgen05.jl) — datacenter Blackwell only (consumer
-# sm_12x has no tensor memory; ISel enforces what ptxas did). Expected
-# spellings per the golden diff: commit emits `.shared::cluster` for both
-# state-space notations and orders multicast after the space; dense mma is
+# sm_12x has no tensor memory; ISel enforces what ptxas did). Dense mma is
 # the maskless form with collector::a::discard explicit (PTX 8.8).
 const p6 = Core.LLVMPtr{UInt8, 6}
 append!(PROBES, [
@@ -335,36 +333,13 @@ for cg in (1, 2)
     append!(PROBES, [
         ("llvm.nvvm.tcgen05.shift.down.cg$cg", (p6,), "sm_100a", "+ptx86",
             Regex("tcgen05\\.shift\\.cta_group::$cg\\.down")),
-        ("llvm.nvvm.tcgen05.dealloc.cg$cg", (p6, UInt32), "sm_100a", "+ptx86",
-            Regex("tcgen05\\.dealloc\\.cta_group::$cg\\.sync\\.aligned\\.b32")),
-        ("llvm.nvvm.tcgen05.alloc.shared.cg$cg", (pS8, UInt32), "sm_100a", "+ptx86",
-            Regex("tcgen05\\.alloc\\.cta_group::$cg\\.sync\\.aligned\\.shared::cta\\.b32")),
-        ("llvm.nvvm.tcgen05.relinq.alloc.permit.cg$cg", (), "sm_100a", "+ptx86",
-            Regex("tcgen05\\.relinquish_alloc_permit\\.cta_group::$cg\\.sync\\.aligned")),
-        ("llvm.nvvm.tcgen05.commit.shared.cg$cg", (pS8,), "sm_100a", "+ptx86",
-            Regex("tcgen05\\.commit\\.cta_group::$cg\\.mbarrier::arrive::one\\.shared::cluster\\.b64")),
-        ("llvm.nvvm.tcgen05.commit.mc.shared.cg$cg", (pS8, UInt16), "sm_100a", "+ptx86",
-            Regex("tcgen05\\.commit\\.cta_group::$cg\\.mbarrier::arrive::one\\.shared::cluster\\.multicast::cluster\\.b64")),
     ])
-    # Every shape (incl. the multicast-mandatory 64x128b/32x128b) is
-    # probed plain and with both decompression formats; the regex pins the
-    # ISA modifier order cta_group.shape{.multicast}{.dst_fmt.src_fmt}.
-    for (spell, stem) in (("128x256b", "128x256b"),
-                          ("4x256b", "4x256b"),
-                          ("128x128b", "128x128b"),
-                          ("64x128b.warpx2::02_13", "64x128b_warpx2_02_13"),
-                          ("64x128b.warpx2::01_23", "64x128b_warpx2_01_23"),
-                          ("32x128b.warpx4", "32x128b_warpx4")),
-        fmt in ("", "b6x16_p32", "b4x16_p64")
-
-        iname = fmt == "" ? "$stem.cg$cg" : "$stem.$fmt.cg$cg"
-        re = "tcgen05\\.cp\\.cta_group::$cg\\." *
-             replace(spell, "." => "\\.") *
-             (fmt == "" ? "" : "\\.b8x16\\.$fmt")
-        push!(PROBES, ("llvm.nvvm.tcgen05.cp.$iname", (p6, UInt64),
-                       "sm_100a", "+ptx86", Regex(re)))
-    end
 end
+# The tcgen05 management verbs (alloc/dealloc/relinquish_alloc_permit/
+# commit/cp) are single-route asm since the demotion (see
+# wrappers/tcgen05.jl) — no src literal remains, so no probes are
+# required. The alloc.shared.cg1 intrinsic still appears below in the
+# arch-gate negative cases, exercised directly against the registry.
 # tcgen05.wait::ld/st are single-route asm since the free demotion (their
 # post-overlay attributes render the same conservative barrier as the asm
 # clobber) — no src literal remains, so no probes are required.

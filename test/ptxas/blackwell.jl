@@ -334,8 +334,9 @@ end
 # that need a 32-bit address operand without an LLVMPtr carrier. All tcgen05
 # calls now require exact typed wrappers; in particular the pointer lifecycle
 # forms and no-arg fences can no longer fall through to scalar rendering.
-# The alloc intrinsic canonicalizes the equivalent generic-address spelling
-# below to an explicit `.shared::cta` qualifier.
+# The lifecycle verbs are single-route asm (see wrappers/tcgen05.jl): the
+# generic-address alloc spelling below renders literally (the retired
+# intrinsic route canonicalized it to an explicit `.shared::cta`).
 #
 # LLVM corpus reference: test/corpus/external/llvm/tcgen05-{alloc,commit,
 # fence}__test_*.ptx — verified call-site forms.
@@ -360,7 +361,7 @@ end
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tcgen05_lifecycle!, types;
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32", ptx)
+    @test occursin("tcgen05.alloc.cta_group::1.sync.aligned.b32", ptx)
     @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64", ptx)
     @test occursin("tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned", ptx)
 end
@@ -628,17 +629,21 @@ function _bw_tcgen05_commit_mc2!(mbar::UInt32)
 end
 
 @testset "tcgen05.commit.multicast::cluster at sm_100a" begin
+    # Single-route asm renders the notation's multicast-first modifier
+    # order (the retired intrinsic route reordered to
+    # `.shared::cluster.multicast::cluster`); ptxas accepts both, pinned
+    # by the ptxas_compiles legs here.
     @test ptxas_compiles(_bw_tcgen05_commit_mc1!, Tuple{UInt32};
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tcgen05_commit_mc1!, Tuple{UInt32};
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.multicast::cluster.b64", ptx)
+    @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64", ptx)
 
     @test ptxas_compiles(_bw_tcgen05_commit_mc2!, Tuple{UInt32};
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tcgen05_commit_mc2!, Tuple{UInt32};
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.multicast::cluster.b64", ptx)
+    @test occursin("tcgen05.commit.cta_group::2.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64", ptx)
 end
 
 function _bw_tma_cta_group2!(dst::Core.LLVMPtr{UInt16, PTX.AS.Shared},

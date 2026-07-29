@@ -3,20 +3,46 @@
 # Copyright 2026 Patrick Toulmé. Licensed under the Apache License, Version 2.0
 # (http://www.apache.org/licenses/LICENSE-2.0). Translated to Julia and adapted.
 
-# `tcgen05.*` — fourth family migrated to tier-2 intrinsic lowering.
-# The notation surface is unchanged: taddr operands stay raw
-# `UInt32` TMEM addresses (returned by `tcgen05.alloc`) and SMEM operands
-# stay 32-bit offsets from `smem_addr_u32`; the wrappers retype them into
-# the address spaces the intrinsics want (`reinterpret_addrspace` — TMEM
-# is addrspace(6), 32-bit in the backend datalayout, so taddr operands
-# stay 32-bit registers in the emitted PTX).
+# `tcgen05.*` — mixed-route family. The notation surface is unchanged:
+# taddr operands stay raw `UInt32` TMEM addresses (returned by
+# `tcgen05.alloc`) and SMEM operands stay 32-bit offsets from
+# `smem_addr_u32`; where a wrapper still routes to an intrinsic it retypes
+# them into the address spaces the intrinsics want (`reinterpret_addrspace`
+# — TMEM is addrspace(6), 32-bit in the backend datalayout, so taddr
+# operands stay 32-bit registers in the emitted PTX).
 #
-# Intrinsic mapping (probed against llc 22.1.7, sm_100a):
-#   - alloc → alloc.shared.cgN (p3 dst): ISel emits `.shared::cta` explicitly,
-#     including for the ISA's equivalent generic-address spelling.
-#   - dealloc/shift/wait/relinquish → 1:1, identical spellings; cp too,
-#     except intrinsic names flatten the multicast qualifier into the
-#     shape stem (64x128b.warpx2::02_13 → 64x128b_warpx2_02_13).
+# The management verbs — alloc, dealloc, relinquish_alloc_permit, commit,
+# and the complete cp grid — are single-route convergent inline asm, like
+# mbarrier and the waits/fences below. That split was retired deliberately:
+#   - every one is an observable async/lifecycle effect — there is no
+#     CSE/LICM for intrinsic attributes to unlock, so the tier-2 route
+#     bought bookkeeping (per-intrinsic selection probes, ceiling checks,
+#     name-flattening tables) and no optimization. The argmem-widen A/B on
+#     B200 (branch agent/argmem-widen-b200) proved the point from the other
+#     direction: widening these families' memory precision to the asm
+#     route's conservative clobber left the FA/GEMM/b128 instruction
+#     streams byte-identical at sm_100a;
+#   - the PTX ISA 9.4 additions (.exclusive alloc/dealloc, the ::16b/::32b
+#     multicast commits) have no upstream intrinsics and were already asm —
+#     one route instead of two.
+# Emitted-PTX deltas vs the intrinsic route, reviewed at demotion:
+#   - the generic-address alloc form spells the literal (no `.shared::cta`;
+#     ISel printed the qualifier explicitly — same operation, the ISA
+#     requires dst to lie in the CTA shared window either way);
+#   - commit keeps pyptx's `.multicast::cluster.shared::cluster` modifier
+#     order (ISel reversed it; ptxas accepts both). Its `.shared::cta`
+#     NOTATION still renders `.shared::cluster`: the §9.7.18.12.1 syntax
+#     block admits only {.shared::cluster} on commit — no ::cta spelling
+#     exists, and ptxas rejects one ("State space incorrect") — so the
+#     ::cta-modified wrapper is an address-species surface (a shared::cta
+#     mbar address lies inside the cluster window) and the render follows
+#     the ISA, exactly as the intrinsic route printed it;
+#   - pointer/static-SMEM operands materialize through mov/cvt instead of
+#     folding into the operand (ptxas folds these in SASS).
+#
+# Intrinsic mapping for the surviving tier-2 forms (probed against llc
+# 22.1.7, sm_100a):
+#   - shift → shift.down.cgN: 1:1, identical spelling.
 #   - ld/st → ld.<shape>.<count> / st.<shape>.<count>: identical
 #     spellings. The data moves as an LLVM vector (v<N>i32), so the
 #     wrappers repack to/from the notation surface's plain NTuple{N,
@@ -24,12 +50,6 @@
 #     surfaced as an explicit modifier (plain spellings pass Val(false)).
 #     The 16x32bx2 shape carries its extra `immHalfSplitoff` i64 immarg
 #     as a positional `Val(off)` operand after taddr.
-#   - commit → commit.shared.cgN / commit.mc.shared.cgN. ISel emits the
-#     `.shared::cluster` spelling for BOTH state-space notations (a
-#     shared::cta address is valid in the cluster window — same
-#     explicit-widening as mbarrier's expect_tx default), and renders
-#     `.shared::cluster.multicast::cluster` where pyptx put multicast
-#     first. ptxas accepts both spellings.
 #   - dense mma (kinds f16/tf32/f8f6f4/i8) → mma.{shared,tensor} (A from
 #     an SMEM descriptor vs a TMEM address) with immargs kind (0=f16,
 #     1=tf32, 2=f8f6f4, 3=i8), cta_group, collector_usage (0 = discard =
@@ -60,9 +80,8 @@
 # conformance replays with the same probe-per-name requirement plus a
 # registry-equality pin.
 
-# taddr/SMEM-offset retypes (see address_space.jl).
+# taddr retype for the intrinsic-routed forms (see address_space.jl).
 @inline _tmem(taddr::UInt32) = reinterpret_addrspace(Val(AS.Tmem), taddr)
-@inline _tc_smem(addr::UInt32) = reinterpret_addrspace(Val(AS.Shared), addr)
 
 # tcgen05.ld returns / tcgen05.st takes LLVM vectors; the notation surface
 # uses plain tuples (scalar for the single-register forms).
@@ -121,195 +140,45 @@ end
     ceiled(nvvm"tcgen05.shift.down.cg2", ptx"tcgen05.shift.cta_group::2.down")(
         _tmem(taddr))
 
-@inline optype"tcgen05.dealloc.cta_group::1.sync.aligned.b32"(
-        taddr::UInt32, ncols::UInt32) =
-    ceiled(nvvm"tcgen05.dealloc.cg1",
-           ptx"tcgen05.dealloc.cta_group::1.sync.aligned.b32")(
-        _tmem(taddr), ncols)
-@inline optype"tcgen05.dealloc.cta_group::2.sync.aligned.b32"(
-        taddr::UInt32, ncols::UInt32) =
-    ceiled(nvvm"tcgen05.dealloc.cg2",
-           ptx"tcgen05.dealloc.cta_group::2.sync.aligned.b32")(
-        _tmem(taddr), ncols)
+# dealloc and the complete cp grid are single-route asm (see header).
+# PTX 9.3 §9.7.17.7.1 spells dealloc's taddr as a bare register; cp
+# brackets its TMEM destination and takes the SMEM source as a matrix
+# descriptor. Shapes carry their ISA-mandated multicast pairing
+# (§9.7.17.9: `.64x128b` requires one of the `.warpx2::*` pairings,
+# `.32x128b` requires `.warpx4`), each optionally with the
+# `.b8x16.{b6x16_p32,b4x16_p64}` decompression pair — the same grid as the
+# integer-address adapter loop below.
+for cg in 1:2
+    cta = Symbol("cta_group::", cg)
 
-@inline optype"tcgen05.cp.cta_group::1.128x256b"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.128x256b.cg1",
-           ptx"tcgen05.cp.cta_group::1.128x256b")(_tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.128x256b"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.128x256b.cg2",
-           ptx"tcgen05.cp.cta_group::2.128x256b")(_tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.4x256b"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.4x256b.cg1", ptx"tcgen05.cp.cta_group::1.4x256b")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.4x256b"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.4x256b.cg2", ptx"tcgen05.cp.cta_group::2.4x256b")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.128x128b"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.128x128b.cg1",
-           ptx"tcgen05.cp.cta_group::1.128x128b")(_tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.128x128b"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.128x128b.cg2",
-           ptx"tcgen05.cp.cta_group::2.128x128b")(_tmem(taddr), s_desc)
+    mods = (:dealloc, cta, :sync, :aligned, :b32)
+    ir = convergent_asm_ir(
+        "tcgen05.dealloc.cta_group::$cg.sync.aligned.b32 \$0, \$1;",
+        "r,r,~{memory}", Nothing, (UInt32, UInt32))
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            taddr::UInt32, ncols::UInt32)
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt32},
+                      taddr, ncols)
+    end
 
-# Multicast shapes (PTX 9.3 §9.7.17.9: `.64x128b` requires one of the
-# `.warpx2::*` pairings, `.32x128b` requires `.warpx4`) and optional
-# `.b8x16.{b6x16_p32,b4x16_p64}` decompression during the copy. The
-# intrinsic names flatten the multicast qualifier into the shape stem
-# (`64x128b_warpx2_02_13`); the notation keeps the ISA's modifier order.
-@inline optype"tcgen05.cp.cta_group::1.128x256b.b8x16.b6x16_p32"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.128x256b.b6x16_p32.cg1",
-           ptx"tcgen05.cp.cta_group::1.128x256b.b8x16.b6x16_p32")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.128x256b.b8x16.b6x16_p32"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.128x256b.b6x16_p32.cg2",
-           ptx"tcgen05.cp.cta_group::2.128x256b.b8x16.b6x16_p32")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.128x256b.b8x16.b4x16_p64"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.128x256b.b4x16_p64.cg1",
-           ptx"tcgen05.cp.cta_group::1.128x256b.b8x16.b4x16_p64")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.128x256b.b8x16.b4x16_p64"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.128x256b.b4x16_p64.cg2",
-           ptx"tcgen05.cp.cta_group::2.128x256b.b8x16.b4x16_p64")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.4x256b.b8x16.b6x16_p32"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.4x256b.b6x16_p32.cg1",
-           ptx"tcgen05.cp.cta_group::1.4x256b.b8x16.b6x16_p32")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.4x256b.b8x16.b6x16_p32"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.4x256b.b6x16_p32.cg2",
-           ptx"tcgen05.cp.cta_group::2.4x256b.b8x16.b6x16_p32")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.4x256b.b8x16.b4x16_p64"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.4x256b.b4x16_p64.cg1",
-           ptx"tcgen05.cp.cta_group::1.4x256b.b8x16.b4x16_p64")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.4x256b.b8x16.b4x16_p64"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.4x256b.b4x16_p64.cg2",
-           ptx"tcgen05.cp.cta_group::2.4x256b.b8x16.b4x16_p64")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.128x128b.b8x16.b6x16_p32"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.128x128b.b6x16_p32.cg1",
-           ptx"tcgen05.cp.cta_group::1.128x128b.b8x16.b6x16_p32")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.128x128b.b8x16.b6x16_p32"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.128x128b.b6x16_p32.cg2",
-           ptx"tcgen05.cp.cta_group::2.128x128b.b8x16.b6x16_p32")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.128x128b.b8x16.b4x16_p64"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.128x128b.b4x16_p64.cg1",
-           ptx"tcgen05.cp.cta_group::1.128x128b.b8x16.b4x16_p64")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.128x128b.b8x16.b4x16_p64"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.128x128b.b4x16_p64.cg2",
-           ptx"tcgen05.cp.cta_group::2.128x128b.b8x16.b4x16_p64")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_02_13.cg1",
-           ptx"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_02_13.cg2",
-           ptx"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13.b8x16.b6x16_p32"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_02_13.b6x16_p32.cg1",
-           ptx"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13.b8x16.b6x16_p32")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13.b8x16.b6x16_p32"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_02_13.b6x16_p32.cg2",
-           ptx"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13.b8x16.b6x16_p32")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13.b8x16.b4x16_p64"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_02_13.b4x16_p64.cg1",
-           ptx"tcgen05.cp.cta_group::1.64x128b.warpx2::02_13.b8x16.b4x16_p64")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13.b8x16.b4x16_p64"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_02_13.b4x16_p64.cg2",
-           ptx"tcgen05.cp.cta_group::2.64x128b.warpx2::02_13.b8x16.b4x16_p64")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_01_23.cg1",
-           ptx"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_01_23.cg2",
-           ptx"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23.b8x16.b6x16_p32"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_01_23.b6x16_p32.cg1",
-           ptx"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23.b8x16.b6x16_p32")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23.b8x16.b6x16_p32"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_01_23.b6x16_p32.cg2",
-           ptx"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23.b8x16.b6x16_p32")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23.b8x16.b4x16_p64"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_01_23.b4x16_p64.cg1",
-           ptx"tcgen05.cp.cta_group::1.64x128b.warpx2::01_23.b8x16.b4x16_p64")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23.b8x16.b4x16_p64"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.64x128b_warpx2_01_23.b4x16_p64.cg2",
-           ptx"tcgen05.cp.cta_group::2.64x128b.warpx2::01_23.b8x16.b4x16_p64")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.32x128b.warpx4"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.32x128b_warpx4.cg1",
-           ptx"tcgen05.cp.cta_group::1.32x128b.warpx4")(_tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.32x128b.warpx4"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.32x128b_warpx4.cg2",
-           ptx"tcgen05.cp.cta_group::2.32x128b.warpx4")(_tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.32x128b.warpx4.b8x16.b6x16_p32"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.32x128b_warpx4.b6x16_p32.cg1",
-           ptx"tcgen05.cp.cta_group::1.32x128b.warpx4.b8x16.b6x16_p32")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.32x128b.warpx4.b8x16.b6x16_p32"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.32x128b_warpx4.b6x16_p32.cg2",
-           ptx"tcgen05.cp.cta_group::2.32x128b.warpx4.b8x16.b6x16_p32")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::1.32x128b.warpx4.b8x16.b4x16_p64"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.32x128b_warpx4.b4x16_p64.cg1",
-           ptx"tcgen05.cp.cta_group::1.32x128b.warpx4.b8x16.b4x16_p64")(
-        _tmem(taddr), s_desc)
-@inline optype"tcgen05.cp.cta_group::2.32x128b.warpx4.b8x16.b4x16_p64"(
-        taddr::UInt32, s_desc::UInt64) =
-    ceiled(nvvm"tcgen05.cp.32x128b_warpx4.b4x16_p64.cg2",
-           ptx"tcgen05.cp.cta_group::2.32x128b.warpx4.b8x16.b4x16_p64")(
-        _tmem(taddr), s_desc)
+    for shapemods in ((Symbol("128x256b"),), (Symbol("4x256b"),),
+                      (Symbol("128x128b"),),
+                      (Symbol("64x128b"), Symbol("warpx2::02_13")),
+                      (Symbol("64x128b"), Symbol("warpx2::01_23")),
+                      (Symbol("32x128b"), :warpx4)),
+            fmt in ((), (:b8x16, :b6x16_p32), (:b8x16, :b4x16_p64))
+        mods = (:cp, cta, shapemods..., fmt...)
+        spell = join(("tcgen05", "cp", String(cta),
+                      String.(shapemods)..., String.(fmt)...), ".")
+        ir = convergent_asm_ir("$spell [\$0], \$1;", "r,l,~{memory}",
+                               Nothing, (UInt32, UInt64))
+        @eval @inline function (::Operation{:tcgen05, $mods})(
+                taddr::UInt32, s_desc::UInt64)
+            Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt64},
+                          taddr, s_desc)
+        end
+    end
+end
 
 # Integer-address adapters for the literal shift/cp methods above (dealloc
 # takes a bare register per PTX 9.3 §9.7.17.7.1 — no adapter).
@@ -387,36 +256,41 @@ end
 
 # --- alloc / relinquish / wait / commit ----------------------------------------
 
-# Generic-address alloc form. The ISA permits omitting `.shared::cta` while
-# still requiring `dst` to lie in the CTA shared-memory window. Keep the
-# pointer schema exact so a wrong address space, pointee, arity, or nCols
-# carrier cannot fall through to generic tcgen05 rendering.
-@inline optype"tcgen05.alloc.cta_group::1.sync.aligned.b32"(
-        dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32) =
-    ceiled(nvvm"tcgen05.alloc.shared.cg1",
-           ptx"tcgen05.alloc.cta_group::1.sync.aligned.b32")(dst, ncols)
-@inline optype"tcgen05.alloc.cta_group::2.sync.aligned.b32"(
-        dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32) =
-    ceiled(nvvm"tcgen05.alloc.shared.cg2",
-           ptx"tcgen05.alloc.cta_group::2.sync.aligned.b32")(dst, ncols)
+# Single-route asm (see header). The generic-address alloc form keeps its
+# exact pointer schema — the ISA permits omitting `.shared::cta` while
+# still requiring `dst` to lie in the CTA shared-memory window — so a
+# wrong address space, pointee, arity, or nCols carrier cannot fall
+# through to generic tcgen05 rendering.
+for cg in 1:2
+    cta = Symbol("cta_group::", cg)
+    head = "tcgen05.alloc.cta_group::$cg.sync.aligned"
 
-@inline optype"tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32"(
-        dst::UInt32, ncols::UInt32) =
-    ceiled(nvvm"tcgen05.alloc.shared.cg1",
-           ptx"tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32")(
-        _tc_smem(dst), ncols)
-@inline optype"tcgen05.alloc.cta_group::2.sync.aligned.shared::cta.b32"(
-        dst::UInt32, ncols::UInt32) =
-    ceiled(nvvm"tcgen05.alloc.shared.cg2",
-           ptx"tcgen05.alloc.cta_group::2.sync.aligned.shared::cta.b32")(
-        _tc_smem(dst), ncols)
+    mods = (:alloc, cta, :sync, :aligned, :b32)
+    ir = convergent_asm_ir("$head.b32 [\$0], \$1;", "r,r,~{memory}",
+                           Nothing, (Core.LLVMPtr{UInt32, AS.Shared}, UInt32))
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32)
+        Base.llvmcall(($ir, "entry"), Nothing,
+                      Tuple{Core.LLVMPtr{UInt32, AS.Shared}, UInt32},
+                      dst, ncols)
+    end
 
-@inline optype"tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned"() =
-    ceiled(nvvm"tcgen05.relinq.alloc.permit.cg1",
-           ptx"tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned")()
-@inline optype"tcgen05.relinquish_alloc_permit.cta_group::2.sync.aligned"() =
-    ceiled(nvvm"tcgen05.relinq.alloc.permit.cg2",
-           ptx"tcgen05.relinquish_alloc_permit.cta_group::2.sync.aligned")()
+    mods = (:alloc, cta, :sync, :aligned, Symbol("shared::cta"), :b32)
+    ir = convergent_asm_ir("$head.shared::cta.b32 [\$0], \$1;",
+                           "r,r,~{memory}", Nothing, (UInt32, UInt32))
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            dst::UInt32, ncols::UInt32)
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt32},
+                      dst, ncols)
+    end
+
+    mods = (:relinquish_alloc_permit, cta, :sync, :aligned)
+    ir = convergent_asm_ir(
+        "tcgen05.relinquish_alloc_permit.cta_group::$cg.sync.aligned;",
+        "~{memory}", Nothing, ())
+    @eval @inline (::Operation{:tcgen05, $mods})() =
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{})
+end
 
 # Demoted to asm (free): after the MEMORY_WIDEN_OVERLAY (#109) the wait
 # intrinsics render no memory attribute — semantically the same conservative
@@ -449,50 +323,51 @@ end
     @asmcall("tcgen05.fence::after_thread_sync;", "~{memory}", true,
              Nothing, Tuple{})
 
-# Both state-space notations lower to the same intrinsic and emit the
-# `.shared::cluster` spelling (see header).
-@inline optype"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64"(
-        mbar::Core.LLVMPtr{UInt64, AS.Shared}) =
-    ceiled(nvvm"tcgen05.commit.shared.cg1",
-           ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64")(
-        mbar)
-@inline optype"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64"(
-        mbar::Core.LLVMPtr{UInt64, AS.Shared}) =
-    ceiled(nvvm"tcgen05.commit.shared.cg2",
-           ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64")(
-        mbar)
+# Single-route asm. The notation keeps both state-space spellings, but
+# every form RENDERS `.shared::cluster`: the §9.7.18.12.1 syntax block
+# admits only {.shared::cluster} on commit (no ::cta spelling exists;
+# ptxas rejects one with "State space incorrect"), so the ::cta-modified
+# wrapper is an address-species surface and the render follows the ISA —
+# the same spelling the intrinsic route printed. The pre-9.4 multicast
+# form keeps pyptx's multicast-first modifier order with its b16 CTA mask
+# under "h".
+for cg in 1:2
+    cta = Symbol("cta_group::", cg)
+    arrive = Symbol("mbarrier::arrive::one")
+    chead = "tcgen05.commit.cta_group::$cg.mbarrier::arrive::one"
 
-@inline optype"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cta.b64"(
-        mbar::UInt32) =
-    ceiled(nvvm"tcgen05.commit.shared.cg1",
-           ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cta.b64")(
-        _tc_smem(mbar))
-@inline optype"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cta.b64"(
-        mbar::UInt32) =
-    ceiled(nvvm"tcgen05.commit.shared.cg2",
-           ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cta.b64")(
-        _tc_smem(mbar))
-@inline optype"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64"(
-        mbar::UInt32) =
-    ceiled(nvvm"tcgen05.commit.shared.cg1",
-           ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64")(
-        _tc_smem(mbar))
-@inline optype"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64"(
-        mbar::UInt32) =
-    ceiled(nvvm"tcgen05.commit.shared.cg2",
-           ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64")(
-        _tc_smem(mbar))
+    # Pointer form (shared::cluster notation, AS 3 mbar).
+    mods = (:commit, cta, arrive, Symbol("shared::cluster"), :b64)
+    ir = convergent_asm_ir("$chead.shared::cluster.b64 [\$0];",
+                           "r,~{memory}", Nothing,
+                           (Core.LLVMPtr{UInt64, AS.Shared},))
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            mbar::Core.LLVMPtr{UInt64, AS.Shared})
+        Base.llvmcall(($ir, "entry"), Nothing,
+                      Tuple{Core.LLVMPtr{UInt64, AS.Shared}}, mbar)
+    end
 
-@inline optype"tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64"(
-        mbar::UInt32, mask::Integer) =
-    ceiled(nvvm"tcgen05.commit.mc.shared.cg1",
-           ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64")(
-        _tc_smem(mbar), UInt16(mask))
-@inline optype"tcgen05.commit.cta_group::2.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64"(
-        mbar::UInt32, mask::Integer) =
-    ceiled(nvvm"tcgen05.commit.mc.shared.cg2",
-           ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64")(
-        _tc_smem(mbar), UInt16(mask))
+    # SMEM-offset forms for both state-space notations; one shared
+    # `.shared::cluster` render per the section comment above.
+    for space in (Symbol("shared::cta"), Symbol("shared::cluster"))
+        mods = (:commit, cta, arrive, space, :b64)
+        ir = convergent_asm_ir("$chead.shared::cluster.b64 [\$0];",
+                               "r,~{memory}", Nothing, (UInt32,))
+        @eval @inline (::Operation{:tcgen05, $mods})(mbar::UInt32) =
+            Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32}, mbar)
+    end
+
+    mods = (:commit, cta, arrive, Symbol("multicast::cluster"),
+            Symbol("shared::cluster"), :b64)
+    ir = convergent_asm_ir(
+        "$chead.multicast::cluster.shared::cluster.b64 [\$0], \$1;",
+        "r,h,~{memory}", Nothing, (UInt32, UInt16))
+    @eval @inline function (::Operation{:tcgen05, $mods})(
+            mbar::UInt32, mask::Integer)
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt16},
+                      mbar, UInt16(mask))
+    end
+end
 
 # --- PTX ISA 9.4 alloc/dealloc/commit forms, asm tier -------------------------
 # No NVVM intrinsics exist for any of these at 22.1.7; spelled-only until a
