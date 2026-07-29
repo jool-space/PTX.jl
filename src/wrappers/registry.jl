@@ -81,7 +81,30 @@ function wrapper_intrinsic_call(family::Symbol, op::Symbol,
         return nothing
     end
     register_wrapper!(family, op, mods, :intrinsic, name)
-    NVVM.IntrinsicCall{Symbol(name)}()
+    contract = form_contract(op, mods)
+    contract === nothing &&
+        error("$family generator built $name for $op.$(join(mods, '.')) " *
+              "but the form registry has no contract to ceil it with")
+    NVVM.IntrinsicCall{Symbol(name), _ceiling(contract)}()
+end
+
+"""
+    ceiled(call::NVVM.IntrinsicCall, op_singleton::Operation) -> NVVM.IntrinsicCall
+
+Thread the reviewed form contract for the PTX spelling onto a bare
+`nvvm"..."` singleton, so the effect ceiling is checked at every use. The
+spelling is passed as a `ptx"..."` singleton — the (op, mods) the wrapper
+is lexically implementing — and resolved to its contract at generation
+time. Every `nvvm""` literal in `src/` must flow through this or
+`wrapper_intrinsic_call` (enforced by test/host/effect_ceiling.jl).
+"""
+@generated function ceiled(::NVVM.IntrinsicCall{name, nothing},
+                           ::Operation{op, mods}) where {name, op, mods}
+    contract = form_contract(op, mods)
+    contract === nothing &&
+        error("ceiled(nvvm\"$name\", ptx\"$op.$(join(mods, '.'))\"): the " *
+              "form registry has no contract for this spelling")
+    NVVM.IntrinsicCall{name, _ceiling(contract)}()
 end
 
 """

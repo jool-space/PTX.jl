@@ -31,65 +31,83 @@
 
 @inline optype"ldmatrix.sync.aligned.m8n8.x1.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m8n8.x1.b16"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m8n8.x1.b16",
+           ptx"ldmatrix.sync.aligned.m8n8.x1.shared.b16")(addr)
 @inline optype"ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m8n8.x1.trans.b16"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m8n8.x1.trans.b16",
+           ptx"ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16")(addr)
 @inline optype"ldmatrix.sync.aligned.m8n8.x2.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m8n8.x2.b16"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m8n8.x2.b16",
+           ptx"ldmatrix.sync.aligned.m8n8.x2.shared.b16")(addr)
 @inline optype"ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m8n8.x2.trans.b16"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m8n8.x2.trans.b16",
+           ptx"ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16")(addr)
 @inline optype"ldmatrix.sync.aligned.m8n8.x4.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m8n8.x4.b16"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m8n8.x4.b16",
+           ptx"ldmatrix.sync.aligned.m8n8.x4.shared.b16")(addr)
 @inline optype"ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m8n8.x4.trans.b16"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m8n8.x4.trans.b16",
+           ptx"ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16")(addr)
 
 # b8 shapes (sm_100a family): 2 regs per count step.
 @inline optype"ldmatrix.sync.aligned.m16n16.x1.trans.shared.b8"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m16n16.x1.trans.b8"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m16n16.x1.trans.b8",
+           ptx"ldmatrix.sync.aligned.m16n16.x1.trans.shared.b8")(addr)
 @inline optype"ldmatrix.sync.aligned.m16n16.x2.trans.shared.b8"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m16n16.x2.trans.b8"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m16n16.x2.trans.b8",
+           ptx"ldmatrix.sync.aligned.m16n16.x2.trans.shared.b8")(addr)
 
 # Optional decompression from packed unsigned 4-/6-bit source rows. The
 # pointer element type is deliberately unconstrained: PTX consumes an address,
 # while the formats (not Julia's pointee type) define the 128-bit row payload.
 @inline optype"ldmatrix.sync.aligned.m8n16.x1.shared.b8x16.b4x16_p64"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m8n16.x1.b8x16.b4x16_p64"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m8n16.x1.b8x16.b4x16_p64",
+           ptx"ldmatrix.sync.aligned.m8n16.x1.shared.b8x16.b4x16_p64")(addr)
 @inline optype"ldmatrix.sync.aligned.m8n16.x1.shared.b8x16.b6x16_p32"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m8n16.x1.b8x16.b6x16_p32"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m8n16.x1.b8x16.b6x16_p32",
+           ptx"ldmatrix.sync.aligned.m8n16.x1.shared.b8x16.b6x16_p32")(addr)
 @inline optype"ldmatrix.sync.aligned.m8n16.x2.shared.b8x16.b4x16_p64"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m8n16.x2.b8x16.b4x16_p64"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m8n16.x2.b8x16.b4x16_p64",
+           ptx"ldmatrix.sync.aligned.m8n16.x2.shared.b8x16.b4x16_p64")(addr)
 @inline optype"ldmatrix.sync.aligned.m8n16.x2.shared.b8x16.b6x16_p32"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m8n16.x2.b8x16.b6x16_p32"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m8n16.x2.b8x16.b6x16_p32",
+           ptx"ldmatrix.sync.aligned.m8n16.x2.shared.b8x16.b6x16_p32")(addr)
 @inline optype"ldmatrix.sync.aligned.m8n16.x4.shared.b8x16.b4x16_p64"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m8n16.x4.b8x16.b4x16_p64"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m8n16.x4.b8x16.b4x16_p64",
+           ptx"ldmatrix.sync.aligned.m8n16.x4.shared.b8x16.b4x16_p64")(addr)
 @inline optype"ldmatrix.sync.aligned.m8n16.x4.shared.b8x16.b6x16_p32"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m8n16.x4.b8x16.b6x16_p32"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m8n16.x4.b8x16.b6x16_p32",
+           ptx"ldmatrix.sync.aligned.m8n16.x4.shared.b8x16.b6x16_p32")(addr)
 
 @inline optype"ldmatrix.sync.aligned.m16n16.x1.trans.shared.b8x16.b4x16_p64"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m16n16.x1.trans.b8x16.b4x16_p64"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m16n16.x1.trans.b8x16.b4x16_p64",
+           ptx"ldmatrix.sync.aligned.m16n16.x1.trans.shared.b8x16.b4x16_p64")(addr)
 @inline optype"ldmatrix.sync.aligned.m16n16.x1.trans.shared.b8x16.b6x16_p32"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m16n16.x1.trans.b8x16.b6x16_p32"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m16n16.x1.trans.b8x16.b6x16_p32",
+           ptx"ldmatrix.sync.aligned.m16n16.x1.trans.shared.b8x16.b6x16_p32")(addr)
 @inline optype"ldmatrix.sync.aligned.m16n16.x2.trans.shared.b8x16.b4x16_p64"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m16n16.x2.trans.b8x16.b4x16_p64"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m16n16.x2.trans.b8x16.b4x16_p64",
+           ptx"ldmatrix.sync.aligned.m16n16.x2.trans.shared.b8x16.b4x16_p64")(addr)
 @inline optype"ldmatrix.sync.aligned.m16n16.x2.trans.shared.b8x16.b6x16_p32"(
         addr::Core.LLVMPtr{T, AS.Shared}) where T =
-    nvvm"ldmatrix.sync.aligned.m16n16.x2.trans.b8x16.b6x16_p32"(addr)
+    ceiled(nvvm"ldmatrix.sync.aligned.m16n16.x2.trans.b8x16.b6x16_p32",
+           ptx"ldmatrix.sync.aligned.m16n16.x2.trans.shared.b8x16.b6x16_p32")(addr)
 
 # --- `shared::cta` spellings, asm tier ---------------------------------------
 # Same instruction as `.shared` (the ::cta sub-qualifier is the explicit
@@ -131,6 +149,29 @@ for (shape, count, nout, trans) in (
     outs = "{" * join(("\$$i" for i in 0:nout-1), ", ") * "}"
     asm = "ldmatrix.sync.aligned.$shape.$count$ttext.shared::cta.b8x16.$src_fmt " *
           "$outs, [\$$nout];"
+    constraints = join(vcat(fill("=r", nout), ["r", "~{memory}"]), ",")
+    rettype = nout == 1 ? UInt32 : NTuple{nout, UInt32}
+    ir = convergent_asm_ir(asm, constraints, rettype,
+                           (Core.LLVMPtr{UInt8, AS.Shared},))
+    @eval function (::Operation{:ldmatrix, $mods})(
+            addr::Core.LLVMPtr{T, AS.Shared}) where T
+        Base.@inline
+        Base.llvmcall(($ir, "entry"), $rettype,
+                      Tuple{Core.LLVMPtr{T, AS.Shared}}, addr)
+    end
+end
+
+# PTX ISA 9.4 sign-extending element-size expansion: `.s8.s4` for `.m8n16`
+# loads signed 4-bit elements expanded to signed 8-bit during the load
+# (contrast `.b8x16.b4x16_p64`, which is unsigned-with-padding). sm_90a plus
+# the sm_100f/sm_110f/sm_120f families; no NVVM intrinsic at 22.1.7, so both
+# state-space spellings are asm — spelled-only until a CUDA 13.4+ ptxas
+# ships. Same one-b32-per-matrix result shape as the other m8n16 forms.
+for (count, nout) in ((:x1, 1), (:x2, 2), (:x4, 4)),
+        space in (:shared, Symbol("shared::cta"))
+    mods = (:sync, :aligned, :m8n16, count, space, :s8, :s4)
+    outs = "{" * join(("\$$i" for i in 0:nout-1), ", ") * "}"
+    asm = "ldmatrix.sync.aligned.m8n16.$count.$space.s8.s4 $outs, [\$$nout];"
     constraints = join(vcat(fill("=r", nout), ["r", "~{memory}"]), ",")
     rettype = nout == 1 ? UInt32 : NTuple{nout, UInt32}
     ir = convergent_asm_ir(asm, constraints, rettype,

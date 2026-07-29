@@ -17,10 +17,10 @@
 tests = "gpu/hopper"
 runtime = "cc==9.0"
 evidence = "manual"
-last_validated = "2026-07-27"
-device = "H200 (CC 9.0)"
-tree = "post-redesign main (9d6f1f8; #88–#96 ledger protocol, wrapper registry, preflight unification)"
-result = "full default-routing suite green — first hopper runtime execution of the redesigned lowering internals (prior record: H100 PCIe 2026-07-06, 27,817/27,817 on the pre-redesign tree)"
+last_validated = "2026-07-29"
+device = "H100 (80GB HBM3 + PCIe spot instances, CC 9.0)"
+tree = "main (740d28d; #106–#116 ISA 9.4 + #109–#112 effect ceiling)"
+result = "full default-routing suite 97,518/97,518 — first hopper runtime execution of the mbarrier all-asm demotion (#110), memory-widen overlay (#109), effect ceiling (#112), and the 9.4 feature set. Same session: the :observable A/B (agent/observable-h100-experiment, 525bf6c) also ran 97,518 green but emitted byte-identical PTX — LLVM ignores a dropped ~{memory} on sideeffect asm without callsite memory(...) attrs, so the run is vacuous as reorder evidence (see the branch commit message); queue items #52 (mapa u64 carrier: resolved, semantically sound) and #49 (matrix ambiguity: resolved/confirmed via two-toolkit ptxas+SASS matrix) closed with evidence. (Prior record: H200 2026-07-27, post-redesign main 9d6f1f8)"
 
 [[tier]]
 tests = "gpu/blackwell"
@@ -87,6 +87,5 @@ items = [
 [[queue]]
 device = "H100/H200 (CC 9.0)"
 items = [
-    "issue #52: shared-cluster u64 mapa carrier semantic probe",
-    "issue #49: matrix-ambiguity assembly experiments (f8f6f4 K shape, integer WGMMA upper-N, modifier ordering) across toolkits",
+    "asm-tier :observable follow-up: teach the renderer to attach callsite memory(inaccessiblemem: readwrite) attrs (LLVM.jl-verified as the real reorder lever, 2026-07-29), then re-run the A/B — dropping ~{memory} alone is inert",
 ]
