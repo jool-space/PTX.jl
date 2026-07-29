@@ -133,13 +133,13 @@ println("=" ^ 72)
 println("[ptxas] sm_90a assembly")
 for (label, f, tt) in (("kernel A (u32 carrier + raw bits)", _mapa_carrier_bits_kernel!, _A_TYPES),
                        ("kernel B (u64 carrier load)", _mapa_u64_read_kernel!, _B_TYPES))
-    ok, err = try
+    accepted, err = try
         ptxas_compiles(f, tt; cap = v"9.0", feature_set = :arch), ""
     catch e
         false, sprint(showerror, e)
     end
-    println("  ", label, ": ", ok ? "ACCEPTED" : "REJECTED")
-    ok || println(err)
+    println("  ", label, ": ", accepted ? "ACCEPTED" : "REJECTED")
+    accepted || println(err)
 end
 
 println("=" ^ 72)
