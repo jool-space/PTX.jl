@@ -28,7 +28,7 @@ runtime = "cc==10|cc==11"
 evidence = "manual"
 last_validated = "2026-07-29"
 device = "B300 SXM6 (CC 10.3) + B200 (CC 10.0), separate spot instances"
-tree = "agent/b200-queue (tcgen05-flash @ 6e56298 + main @ 740d28d merged)"
+tree = "agent/b200-queue (tcgen05-flash + main #106–#117; the measured pre-rebase merge is byte-identical to the post-rebase rebuild)"
 result = "full default-routing suite 97,413/97,413 via runtests.jl (goldens included) on BOTH chips — first Blackwell runtime execution of the effect-ceiling arc #109–#112 (mbarrier all-asm demotion, memory-widen overlay, ceiling) and the 9.4 feature PRs #113–#116, covering both the sm_103a recompile path (B300) and sm_100a (B200). Also covers the post-BarrierSet FA revalidation (maxdiff 5.9e-4–7.7e-4, rescale 1.55e-2 — matches pre-BarrierSet records) and both hand-encoded idesc probes: kind::f8f6f4 e4m3 PASS on B300+B200 (all 32.0), kind::i8 PASS on B200 (all 32; sm_100a-exclusive — B300 correctly self-gated). Prior record: B200 CC 10.0 2026-07-28 on main c6c3ba5 (91,870 via Pkg.test, goldens filter-skipped)"
 
 [[tier]]
@@ -89,10 +89,16 @@ result = "every push, both lanes; PTX_REQUIRE_GPU_RUNTIME fails the lane if the 
 # Perf-attribution check (same B200 box, 2026-07-29): pre-merge
 # tcgen05-flash reads 1059–1075 TF — identical to the merged tree, so the
 # #110 mbarrier demotion's codegen deltas (legacy expect_tx spelling,
-# static-SMEM mov/cvt prologues) are perf-NEUTRAL on the FA hot path. The
-# 1150 TF record vs today's ~1065 is spot-box variance (different
-# provider/clocks), not a tree regression; treat cross-box TF deltas
-# under ~8% as noise unless same-box A/B'd.
+# static-SMEM mov/cvt prologues) are perf-NEUTRAL on the FA hot path.
+# Tree-side fully ruled out by PTX: the FA kernel's instruction multiset
+# is IDENTICAL from c94bbda (the 1150-record tree) through tcgen05-flash
+# HEAD — across both main merges (#100–#105 incl. the island partition),
+# the BarrierSet adoption, and the emu port; only the approved
+# mbarrier.init prologue reordering + consequent label renumbering (and
+# the mangled name, via the cfg tuple's emu field) differ. The 1150 TF
+# record vs today's ~1065 is therefore spot-box variance (different
+# provider/clocks); treat cross-box TF deltas under ~8% as noise unless
+# same-box A/B'd.
 
 [[queue]]
 device = "B200/B300 (CC 10.x)"
