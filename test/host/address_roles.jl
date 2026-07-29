@@ -443,7 +443,7 @@ end
         (ptx"cp.async.ca.shared.global",
          (S16, G32, Val{16}), :asm, Nothing),
         (ptx"cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes",
-         (S16, C8, Int32, S64), :intrinsic, Nothing),
+         (S16, C8, Int32, S64), :asm, Nothing),
     )
     for (op, argtypes, tier, rettype) in cases
         info = PTX.lowering(op, argtypes)

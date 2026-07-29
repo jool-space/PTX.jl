@@ -174,9 +174,12 @@ end
 
 # --- TMA (cp.async.bulk.tensor): tile loads/stores ---------------------------
 # Rank spread (1d/2d/5d) plus the qualifier axes: multicast::cluster, the
-# shared::cta destination, and (at sm_100a) cta_group::2. The shared::cta ×
-# cta_group::2 combination stays asm-tier (no NVVM intrinsic carries both)
-# and is pinned in the sm_100a golden to prove the migration left it alone.
+# shared::cta destination, and (at sm_100a) cta_group::2. Single-route asm
+# since the demotion (see wrappers/tma.jl): the goldens pin the WYSIWYG
+# renders — cluster cta_group::2 spells the qualifier after `.<N>d` like
+# the pre-existing shared::cta × cta_group::2 residue (the retired
+# intrinsic route rendered it after the completion mechanism) — and the
+# register materialization of static-SMEM operands the asm route implies.
 
 function _golden_tma_sm90!(tmap::Core.LLVMPtr{UInt8, PTX.AS.Const}, c::Int32)
     buf = CuStaticSharedArray(UInt16, 64)

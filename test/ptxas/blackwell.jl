@@ -606,11 +606,11 @@ end
 #     registers `shared::cluster` only (pyptx's builder is syntactically
 #     permissive about space; the assembler is not).
 #   * cp.async.bulk.tensor.<N>d ... .cta_group::2 — Blackwell 2-SM
-#     cooperative load. The cluster-destination forms lower via the
-#     g2s.tile intrinsics, whose ISel renders `.cta_group::2` after the
-#     completion mechanism (notation keeps the pyptx post-rank order; see
-#     wrappers/tma.jl). The shared::cta × cta_group::2 form is asm-tier
-#     and keeps the post-rank spelling — ptxas accepts both.
+#     cooperative load. Single-route asm since the demotion (see
+#     wrappers/tma.jl): every form renders the notation's pyptx post-rank
+#     `.cta_group::2` spelling (the retired intrinsic route rendered the
+#     §9.7.10.28.5.3 syntax-block order after the completion mechanism);
+#     ptxas accepts both, pinned by the ptxas_compiles leg here.
 #
 # Ported from pyptx _Tcgen05.commit(multicast=True) /
 # _CpAsyncBulkTensor._tile_load(cta_group=2).
@@ -663,7 +663,7 @@ end
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tma_cta_group2!, types;
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.cta_group::2", ptx)
-    @test occursin("cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster.cta_group::2", ptx)
+    @test occursin("cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes [", ptx)
+    @test occursin("cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster [", ptx)
     @test occursin("cp.async.bulk.tensor.2d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes", ptx)
 end
