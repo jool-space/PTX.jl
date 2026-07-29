@@ -86,6 +86,21 @@ result = "every push, both lanes; PTX_REQUIRE_GPU_RUNTIME fails the lane if the 
 # decision rule the 2-CTA port stays skipped; the remaining FA perf lever
 # is the half-granular split-P port.
 #
+# Split-P verdict (B200 CC 10.0, 2026-07-29, agent/fa-splitp 3a755a5):
+# the half-granular split-P port WINS and is adopted as the default
+# (splitp = true). fab_check green for splitp and splitp+emu (incl. the
+# rescale-heavy scale=2.0 gate). Saturated shape B=8 H=8 S=8192:
+# default(quarter) 1104–1116 TF, splitp 1158–1164 (+4.5%,
+# non-overlapping bands); B=1 H=8 S=8192: 1017–1023 vs 1037–1064.
+# emu = (1, 3, 5, 7) ON TOP of splitp: 1128–1146 — worse than splitp
+# alone, so emu is FALSIFIED TERMINALLY (negative alone on B300+B200
+# 2026-07-29, negative paired with split-P — pyptx's own pairing); the
+# knob stays for reproduction only. New saturated-shape reference on
+# this box class: ~1161 TF (B=8 H=8 S=8192; the saturated-shape rule —
+# B=1 bands are occupancy-limited and noisier). Remaining gap to
+# pyptx's 1240 headline is 2-CTA-structural or box conditions, not an
+# unported 1-CTA mechanism — every 1-CTA piece is now ported and swept.
+#
 # Perf-attribution check (same B200 box, 2026-07-29): pre-merge
 # tcgen05-flash reads 1059–1075 TF — identical to the merged tree, so the
 # #110 mbarrier demotion's codegen deltas (legacy expect_tx spelling,
@@ -103,7 +118,10 @@ result = "every push, both lanes; PTX_REQUIRE_GPU_RUNTIME fails the lane if the 
 [[queue]]
 device = "B200/B300 (CC 10.x)"
 items = [
-    "FA perf: sweep the now-ported half-granular split-P knob (splitp = true; fab_check gates first — the rescale-heavy scale=2.0 input — then fab_time B=1 and B=8 bands; afterwards RETEST emu on top of splitp: pyptx pairs them, and both the emu and scoreboard falsifications were measured without it)",
+    # (empty 2026-07-29: split-P swept and adopted as default — see the
+    # verdict note above; emu falsified terminally; FA 1-CTA perf work
+    # is closed pending a new hypothesis. Next runtime session should
+    # revalidate the flipped default via the standard FA testsets.)
 ]
 
 [[queue]]

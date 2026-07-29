@@ -39,10 +39,13 @@
 #       half instead of per quarter: kk 0-3 issue under half 0 while
 #       the softmax still streams half 1 (which gates kk 4-7). The P
 #       barrier group reshapes [stage, quarter] → [stage, half].
-#       Default false — quarter-granular, byte-identical PTX to the
-#       pre-port tree; numerics are UNCHANGED either way (same stores,
-#       same values — only publish granularity moves), but fab_check
-#       still gates the sweep like every knob.
+#       Default true — 2026-07-29 B200 A/B winner (+4.5% at the
+#       saturated shape, non-overlapping bands; fab_check green incl.
+#       the rescale-heavy gate). splitp=false is the pre-port
+#       quarter-granular protocol (byte-identical PTX to the
+#       pre-adoption tree), kept as the fallback; numerics are
+#       UNCHANGED either way (same stores, same values — only publish
+#       granularity moves).
 #
 # Structure (faithful to pyptx):
 #   * 256 query rows per CTA as two 128-row subtiles ("stages"); BN=128 KV
@@ -56,9 +59,10 @@
 #     dispatch (w12 lane 0), TMA load (w14 lane 0); w13/w15 idle.
 #   * Stale-basis softmax: each tile exps against the PREVIOUS tile's
 #     basis immediately; the row max / basis decision defers one tile and
-#     runs in the next tile's TMEM-load shadow. Each 32-column quarter of
-#     P publishes immediately (BAR_P_Q), so PV starts after 32 columns
-#     (per 64-column half under `splitp` — see the knob above).
+#     runs in the next tile's TMEM-load shadow. P publishes per
+#     64-column half (default `splitp = true`), so PV's kk 0-3 start
+#     while the softmax still streams the second half; `splitp = false`
+#     restores the per-32-column-quarter publish (see the knob above).
 #   * FA4 "skip correction": O is rescaled in TMEM only when the running
 #     row max moved by more than RESCALE_THRESHOLD in scaled-log2 units.
 #     In the common no-rescale case the softmax warps release the O
@@ -94,10 +98,10 @@
 #     rebalances SFU/FMA pipe pressure.
 #   * Half-granular split-P (pyptx ships it only in the 2-CTA variant,
 #     commit 4d2aa00) is ported onto this 1-CTA kernel behind the
-#     `splitp` knob, default OFF (quarter-granular, the B200-validated
-#     scheme) until a B200 session sweeps it — pyptx's headline pairs
-#     it with `emu`, and the 2026-07-29 emu falsification was measured
-#     WITHOUT it.
+#     `splitp` knob and adopted as the default after the 2026-07-29
+#     B200 A/B (see EVIDENCE.toml). The same session retested `emu` ON
+#     TOP of split-P (pyptx's pairing) and it stayed negative — emu is
+#     falsified terminally; the knob remains for reproduction only.
 #   * Debug scaffolding (waitmap / beacons / lockstep / s_f16) not ported.
 #   * Shape parameters (seqlen, n_tiles, total_work, ...) are runtime
 #     kernel arguments — one compiled kernel serves every shape (pyptx
@@ -183,8 +187,14 @@ const FAB_LOAD_TID = UInt32(448)   # warp 14 lane 0
 # (128,112,144) 1116) and found the producer's register floor: every
 # n2=64 candidate fails ptxas. Correctness re-gated by fab_check at each
 # candidate (rescale-heavy input, scale=2.0).
+# splitp = true adopted 2026-07-29 (same B200 box class, same-session
+# A/B): saturated B=8 H=8 S=8192 band 1158–1164 TF vs 1104–1116 default
+# (+4.5%, non-overlapping); B=1 H=8 S=8192 1037–1064 vs 1017–1023.
+# fab_check green (incl. the rescale-heavy scale=2.0 gate) for splitp
+# and splitp+emu; emu on top of splitp read 1128–1146 — negative, so
+# emu stays falsified even in pyptx's pairing.
 const FAB_CFG_DEFAULT = (scoreboard = false, beacon = false,
-                         nreg = (144, 80, 144), emu = (), splitp = false)
+                         nreg = (144, 80, 144), emu = (), splitp = true)
 
 function fab_check_cfg(cfg)
     a, b, c = cfg.nreg

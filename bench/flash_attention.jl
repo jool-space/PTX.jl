@@ -10,7 +10,8 @@
 #     fab_check(cfg)                     # correctness gate, rescale-heavy input
 #     fab_time(cfg; H = 16, S = 4096)    # → (; ms, tflops)
 #     fab_check((; FAB_CFG_DEFAULT..., emu = (1, 3, 5, 7)))  # emu sweep entry
-#     fab_check((; FAB_CFG_DEFAULT..., splitp = true))     # split-P sweep entry
+#     fab_check((; FAB_CFG_DEFAULT..., splitp = false))  # quarter-granular P
+#                                        # (the pre-2026-07-29 default)
 #     fab_sweep()                        # default vs scoreboard, all shapes
 #     fab_hang_debug(cfg; H = 2, S = 512)  # beacon run + site decode
 #
@@ -130,7 +131,7 @@ end
 function fab_sweep(; cfgs = [
         "default"    => FAB_CFG_DEFAULT,
         "scoreboard" => (scoreboard = true, beacon = false,
-                         nreg = (144, 80, 144), emu = (), splitp = false),
+                         nreg = (144, 80, 144), emu = (), splitp = true),
     ], shapes = [(1, 16, 1024), (1, 16, 2048), (1, 16, 4096), (1, 8, 8192)])
     for (name, cfg) in cfgs
         fab_check(cfg) || (println("  skipping $name (failed check)"); continue)
