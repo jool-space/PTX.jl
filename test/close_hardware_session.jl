@@ -26,7 +26,11 @@ function main(args)
 
     root = normpath(joinpath(@__DIR__, ".."))
     tree = readchomp(`git -C $root rev-parse --short HEAD`)
-    isempty(readchomp(`git -C $root status --porcelain`)) ||
+    # The evidence file is this script's own output; a previous invocation
+    # (e.g. correcting a mistyped count) must not look like unrecorded drift.
+    dirty = filter(l -> !isempty(l) && !endswith(l, "test/EVIDENCE.toml"),
+                   readlines(`git -C $root status --porcelain`))
+    isempty(dirty) ||
         @warn "working tree is dirty — `tree = $tree` will not describe what ran"
 
     evidence = TOML.parsefile(EVIDENCE_PATH)
