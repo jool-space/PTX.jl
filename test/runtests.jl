@@ -1,4 +1,4 @@
-import PTX, CUDACore, CUDATools, TOML
+import PTX, CUDACore, CUDATools, TOML, Test
 using ParallelTestRunner
 
 include(joinpath(@__DIR__, "target_requirements.jl"))
@@ -55,13 +55,6 @@ if args.list === nothing
             req = requirements[test]
             push!(manifest, PlanEntry(test, :skip, req,
                                       "test support file loaded by each worker"))
-            return false
-        end
-        # Not a test: the manual session-close utility (it errors without its
-        # command-line argument). Skipped even when named explicitly.
-        if test == "close_hardware_session"
-            push!(manifest, PlanEntry(test, :skip, requirements[test],
-                                      "hardware-session utility, run directly"))
             return false
         end
         if test == "ptxas/golden" && Base.JLOptions().check_bounds == 1 &&
@@ -149,4 +142,35 @@ if args.list === nothing
     end
 end
 
-runtests(PTX, ARGS; init_code, testsuite)
+ts = runtests(PTX, ARGS; init_code, testsuite)
+
+# A green default-routing run on a manual-evidence device IS the session
+# evidence: print the ledger entry ready to paste into test/EVIDENCE.toml,
+# so nobody transcribes device strings or pass counts by hand. Nothing is
+# written implicitly — the session-close PR copies the block in. (runtests
+# throws on failures, so this only prints for green runs.)
+if args.list === nothing && apply_default_routing && gpu_functional
+    evidence_tier = cap == v"9.0"         ? "gpu/hopper" :
+                    cap.major in (10, 11) ? "gpu/blackwell" : nothing
+    if evidence_tier !== nothing && ts isa Test.DefaultTestSet
+        function count_passes(t)
+            t isa Test.DefaultTestSet || return 0
+            t.n_passed + sum(count_passes, t.results; init = 0)
+        end
+        tree = try
+            readchomp(pipeline(Cmd(["git", "-C",
+                                    normpath(joinpath(@__DIR__, "..")),
+                                    "rev-parse", "--short", "HEAD"]);
+                               stderr = devnull))
+        catch
+            "<short sha of the tree that ran>"
+        end
+        println("hardware evidence produced — paste into test/EVIDENCE.toml ",
+                "([[tier]] ", evidence_tier, "):")
+        println("last_validated = \"", Libc.strftime("%Y-%m-%d", time()), "\"")
+        println("device = \"", device_name,
+                " (CC ", cap.major, ".", cap.minor, ")\"")
+        println("tree = \"", tree, "\"")
+        println("suite = ", count_passes(ts))
+    end
+end
