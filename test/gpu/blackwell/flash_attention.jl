@@ -1,9 +1,9 @@
 # TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10
 # Blackwell tcgen05 FlashAttention forward — correctness tests for the
 # kernel defined in flash_attention_defs.jl (see its header for the
-# architecture and the compile-time config). Tests run the DEFAULT config
-# (B200-validated 2026-07-12); the perf/debug workbench that sweeps
-# configs lives in bench/flash_attention.jl.
+# architecture and the compile-time config). Tests run the DEFAULT config;
+# the perf/debug workbench that sweeps configs lives in
+# bench/flash_attention.jl.
 
 include("flash_attention_defs.jl")
 
@@ -104,8 +104,8 @@ include("flash_attention_defs.jl")
     @test !occursin("f32x2", ptx)
 
     # splitp: half-granular split-P (pyptx's 2-CTA stage-E mechanism on
-    # the 1-CTA kernel) is the DEFAULT since the 2026-07-29 B200 A/B
-    # (+4.5% saturated band — see EVIDENCE.toml). Stores stay per
+    # the 1-CTA kernel) is the DEFAULT — same-box A/Bs win at the
+    # saturated shape on both B200 and B300. Stores stay per
     # 32-column chunk (same x16 count), but the publish coarsens to the
     # 64-column half: 2 softmax wait::st→fence→arrive round trips per
     # tile instead of 4 (×2 inlined bodies), and the P barrier group is

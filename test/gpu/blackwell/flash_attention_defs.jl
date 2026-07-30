@@ -22,15 +22,17 @@
 #       instead of hanging. Decode with FAB_SITES. Default false.
 #   nreg       :: NTuple{3,Int} — setmaxnreg split (softmax, correction,
 #       mma/load warpgroup). Constraint: 256a + 128b + 128c ≤ 65536.
-#       Default (144, 80, 144) — B200 sweep winner 2026-07-28 (+6% over
+#       Default (144, 80, 144) — the hardware-swept optimum (+6% over
 #       pyptx's (136, 96, 144); producer floor is 72 — n2=64 fails ptxas).
 #   emu        :: NTuple{N,Int} — softmax exp2 pairs (0-based, of 16 per
 #       32-column chunk) computed by the FMA-pipe f32x2 polynomial
 #       emulation instead of ex2.approx (pyptx `emu_pairs`; rebalances
-#       SFU vs FMA pipe pressure — pyptx's headline 1240 TF config uses
-#       (1, 3, 5, 7)). Default () — ex2 everywhere, pending a B200
-#       sweep; the emulation changes numerics (poly + round-to-int
-#       exponent inject), so fab_check gates each swept config.
+#       SFU vs FMA pipe pressure — pyptx's headline config uses
+#       (1, 3, 5, 7)). Default () — ex2 everywhere: the emulation
+#       measured negative at every density on B200 and B300, alone and
+#       stacked on splitp; the knob remains for reproduction. It changes
+#       numerics (poly + round-to-int exponent inject), so fab_check
+#       gates each swept config.
 #   splitp     :: Bool — half-granular split-P (pyptx's 2-CTA "stage E"
 #       mechanism, commit 4d2aa00, mapped onto the 1-CTA kernel): the
 #       softmax still stores P per 32-column chunk, but the publish
@@ -39,9 +41,9 @@
 #       half instead of per quarter: kk 0-3 issue under half 0 while
 #       the softmax still streams half 1 (which gates kk 4-7). The P
 #       barrier group reshapes [stage, quarter] → [stage, half].
-#       Default true — 2026-07-29 B200 A/B winner (+4.5% at the
-#       saturated shape, non-overlapping bands; fab_check green incl.
-#       the rescale-heavy gate). splitp=false is the pre-port
+#       Default true — same-box A/B winner at the saturated shape on
+#       B200 (+4.5%) and B300 (+14.7%), non-overlapping bands; fab_check
+#       green incl. the rescale-heavy gate. splitp=false is the pre-port
 #       quarter-granular protocol (byte-identical PTX to the
 #       pre-adoption tree), kept as the fallback; numerics are
 #       UNCHANGED either way (same stores, same values — only publish
@@ -98,10 +100,10 @@
 #     rebalances SFU/FMA pipe pressure.
 #   * Half-granular split-P (pyptx ships it only in the 2-CTA variant,
 #     commit 4d2aa00) is ported onto this 1-CTA kernel behind the
-#     `splitp` knob and adopted as the default after the 2026-07-29
-#     B200 A/B (see EVIDENCE.toml). The same session retested `emu` ON
-#     TOP of split-P (pyptx's pairing) and it stayed negative — emu is
-#     falsified terminally; the knob remains for reproduction only.
+#     `splitp` knob and adopted as the default after same-box B200 and
+#     B300 A/Bs. `emu` was retested ON TOP of split-P (pyptx's pairing)
+#     and stayed negative — emu is falsified terminally; the knob
+#     remains for reproduction only.
 #   * Debug scaffolding (waitmap / beacons / lockstep / s_f16) not ported.
 #   * Shape parameters (seqlen, n_tiles, total_work, ...) are runtime
 #     kernel arguments — one compiled kernel serves every shape (pyptx
@@ -180,16 +182,14 @@ const FAB_LOAD_TID = UInt32(448)   # warp 14 lane 0
 
 # ── compile-time config ─────────────────────────────────────────────────
 
-# Default nreg = the 2026-07-28 B200 sweep winner (setmaxnreg is
-# warpgroup-collective): 144*256 + 80*128 + 144*128 = 65536, 1150 TF at
-# B=1 H=8 S=8192 vs 1086 for pyptx's original (136, 96, 144) split. The
-# sweep bracketed the optimum ((144,96,128) 1137, (152,72,136) 1124,
-# (128,112,144) 1116) and found the producer's register floor: every
-# n2=64 candidate fails ptxas. Correctness re-gated by fab_check at each
-# candidate (rescale-heavy input, scale=2.0).
-# splitp = true adopted 2026-07-29 (same B200 box class, same-session
-# A/B): saturated B=8 H=8 S=8192 band 1158–1164 TF vs 1104–1116 default
-# (+4.5%, non-overlapping); B=1 H=8 S=8192 1037–1064 vs 1017–1023.
+# Default nreg = the hardware-swept optimum (setmaxnreg is
+# warpgroup-collective): 144*256 + 80*128 + 144*128 = 65536, +6% over
+# pyptx's original (136, 96, 144) split. The sweep bracketed the optimum
+# and found the producer's register floor: every n2=64 candidate fails
+# ptxas (the CORRECTION warpgroup floors at 72). Correctness re-gated by
+# fab_check at each candidate (rescale-heavy input, scale=2.0).
+# splitp = true: same-box A/Bs win at the saturated shape with
+# non-overlapping bands on B200 (+4.5%) and B300 (+14.7%).
 # fab_check green (incl. the rescale-heavy scale=2.0 gate) for splitp
 # and splitp+emu; emu on top of splitp read 1128–1146 — negative, so
 # emu stays falsified even in pyptx's pairing.
@@ -646,8 +646,8 @@ function _fab_kernel!(
 
     # @inbounds: CuDynamicSharedArray's @boundscheck plants
     # gpu_report_exception cold paths (and their register save/restore) in
-    # the entry region. Not launch-critical — the 2026-07-12 B200 run
-    # passed under Pkg.test's --check-bounds=yes, i.e. with these calls
+    # the entry region. Not launch-critical — the kernel passes on
+    # hardware under Pkg.test's --check-bounds=yes, i.e. with these calls
     # present, so `.reqntid` alone is what makes ptxas honor setmaxnreg —
     # but the checks are dead weight in a hand-verified SMEM layout.
     smem_q    = @inbounds CuDynamicSharedArray(UInt16, FAB_Q_BYTES ÷ 2, FAB_SMEM_Q)
