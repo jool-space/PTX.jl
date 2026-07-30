@@ -129,9 +129,13 @@ function _expected_tcgen05_integer_address_forms()
         (:mxf4nvf4, Symbol("scale_vec::4X"), :block16),
     )
     for (kind, scale_vec, block) in variants,
-            scale in (scale_vec, block), cg in 1:2, sp in ((), (:sp,))
+            scale in (scale_vec, block), cg in 1:2, sp in ((), (:sp,)),
+            coll in (nothing, Symbol("collector::a::lastuse"),
+                     Symbol("collector::a::fill"),
+                     Symbol("collector::a::use"))
         push!(forms, (:mma, sp..., Symbol("cta_group::", cg),
-                      Symbol("kind::", kind), :block_scale, scale))
+                      Symbol("kind::", kind), :block_scale, scale,
+                      (coll === nothing ? () : (coll,))...))
     end
     for kind in (:f16, :tf32, :f8f6f4, :i8), sp in ((), (:sp,))
         colls = Any[nothing]
@@ -348,12 +352,12 @@ end
 @testset "closed tcgen05 integer-address adapters" begin
     expected_forms = _expected_tcgen05_integer_address_forms()
     @test Set(PTX.TCGEN05_INTEGER_ADDRESS_FORMS) == expected_forms
-    @test length(expected_forms) == 618
+    @test length(expected_forms) == 714
     expected = _expected_tcgen05_integer_address_adapters()
     actual = Set((s.mods, s.argtypes)
                  for s in PTX.TCGEN05_INTEGER_ADDRESS_ADAPTERS)
     @test actual == expected
-    @test length(actual) == 1418
+    @test length(actual) == 1610
     for (mods, signature) in actual
         # Immediate specs are the abstract `Val` (dispatch admits any
         # immediate); lowering probes need a concrete instance, as every

@@ -136,9 +136,14 @@ const EXPECTED_TCGEN05_MX_KIND_SCALES = Set((
     (:mxf4nvf4, :block32),
 ))
 
-_tcgen_mx_mods(kind, scale, cg; sp = false) =
+_tcgen_mx_mods(kind, scale, cg; sp = false, coll = nothing) =
     (:mma, (sp ? (:sp,) : ())..., Symbol("cta_group::", cg),
-     Symbol("kind::", kind), :block_scale, scale)
+     Symbol("kind::", kind), :block_scale, scale,
+     (coll === nothing ? () : (coll,))...)
+
+const _TCGEN_MX_COLLECTORS = (nothing, Symbol("collector::a::lastuse"),
+                              Symbol("collector::a::fill"),
+                              Symbol("collector::a::use"))
 
 @testset "tcgen05 MX: complete block-scale schema inventory" begin
     @test PTX._TCGEN05_MX_SCALE_VARIANTS == EXPECTED_TCGEN05_MX_ALIAS_ROWS
@@ -151,8 +156,8 @@ _tcgen_mx_mods(kind, scale, cg; sp = false) =
     @test length(actual) == 8
 
     for (kind, scale) in EXPECTED_TCGEN05_MX_KIND_SCALES, cg in (1, 2),
-            sp in (false, true)
-        op = Operation{:tcgen05, _tcgen_mx_mods(kind, scale, cg; sp)}()
+            sp in (false, true), coll in _TCGEN_MX_COLLECTORS
+        op = Operation{:tcgen05, _tcgen_mx_mods(kind, scale, cg; sp, coll)}()
         meta = sp ? (UInt32,) : ()
         ss = (UInt32, UInt64, UInt64, meta..., UInt32, UInt32, UInt32, Bool)
         ts = (UInt32, UInt32, UInt64, meta..., UInt32, UInt32, UInt32, Bool)
@@ -165,7 +170,8 @@ _tcgen_mx_mods(kind, scale, cg; sp = false) =
             typed = string(ci)
             @test occursin("tcgen05.mma" * (sp ? ".sp" : "") *
                            ".cta_group::$cg.kind::$kind" *
-                           ".block_scale.$scale", typed)
+                           ".block_scale.$scale" *
+                           (coll === nothing ? " " : ".$coll "), typed)
             # Julia's CodeInfo printer escapes the `$` operand sigils inside
             # the inline-assembly string.  Strip only that presentation-layer
             # escaping before checking the exact PTX operand schema.

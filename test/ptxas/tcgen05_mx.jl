@@ -17,6 +17,11 @@ function _t5_mx_dense!(out::Core.LLVMPtr{UInt32, 1}, d::UInt32,
     # TMEM-A species of the third kind.
     ptx"tcgen05.mma.cta_group::1.kind::mxf4nvf4.block_scale.scale_vec::4X"(
         d, d, bdesc, idesc, sa, sb, false)
+    # collector::a usage (absent collector = the ISA-default discard).
+    ptx"tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale.scale_vec::1X.collector::a::fill"(
+        d, adesc, bdesc, idesc, sa, sb, false)
+    ptx"tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale.scale_vec::1X.collector::a::use"(
+        d, adesc, bdesc, idesc, sa, sb, false)
     ptx"st.global.b32"(out, d)
     return nothing
 end
@@ -31,6 +36,9 @@ function _t5_mx_sp!(out::Core.LLVMPtr{UInt32, 1}, d::UInt32,
     # TMEM-A species of the third kind.
     ptx"tcgen05.mma.sp.cta_group::1.kind::mxf4nvf4.block_scale.scale_vec::4X"(
         d, d, bdesc, meta, idesc, sa, sb, false)
+    # collector::a on a sparse form.
+    ptx"tcgen05.mma.sp.cta_group::1.kind::mxf4.block_scale.scale_vec::2X.collector::a::lastuse"(
+        d, adesc, bdesc, meta, idesc, sa, sb, false)
     ptx"st.global.b32"(out, d)
     return nothing
 end
@@ -39,6 +47,8 @@ function _t5_mx_sp_family!(out::Core.LLVMPtr{UInt32, 1}, d::UInt32,
                            adesc::UInt64, bdesc::UInt64, meta::UInt32,
                            idesc::UInt32, sa::UInt32, sb::UInt32)
     ptx"tcgen05.mma.sp.cta_group::1.kind::mxf8f6f4.block_scale.block32"(
+        d, adesc, bdesc, meta, idesc, sa, sb, false)
+    ptx"tcgen05.mma.sp.cta_group::1.kind::mxf8f6f4.block_scale.block32.collector::a::fill"(
         d, adesc, bdesc, meta, idesc, sa, sb, false)
     ptx"st.global.b32"(out, d)
     return nothing
@@ -72,6 +82,9 @@ const _T5_MX_SP_TT = Tuple{Core.LLVMPtr{UInt32, 1}, UInt32, UInt64, UInt64,
     @test occursin(r"tcgen05\.mma\.sp\.cta_group::1\.kind::mxf8f6f4\.block_scale\.scale_vec::1X \[%r\d+\], %rd\d+, %rd\d+, \[%r\d+\], %r\d+, \[%r\d+\], \[%r\d+\], %p\d+;",
                    ptx)
     @test occursin(r"tcgen05\.mma\.sp\.cta_group::1\.kind::mxf4nvf4\.block_scale\.scale_vec::4X \[%r\d+\], \[%r\d+\], %rd\d+, \[%r\d+\], %r\d+, \[%r\d+\], \[%r\d+\], %p\d+;",
+                   ptx)
+    # collector::a renders after the scale qualifier, before the operands.
+    @test occursin(r"tcgen05\.mma\.sp\.cta_group::1\.kind::mxf4\.block_scale\.scale_vec::2X\.collector::a::lastuse \[%r\d+\],",
                    ptx)
 end
 

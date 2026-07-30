@@ -898,14 +898,17 @@ const _TCGEN05_MX_SCALE_VARIANTS = (
 )
 
 function _tcgen05_mx_register(kind::Symbol, scale::Symbol, cta_group::Int,
-                              sp::Bool)
+                              sp::Bool, coll::Union{Nothing, Symbol})
     cta_group in (1, 2) || throw(ArgumentError("invalid tcgen05 cta_group: $cta_group"))
     cg = Symbol("cta_group::", cta_group)
     kmod = Symbol("kind::", kind)
     spmods = sp ? (:sp,) : ()
-    mods = (:mma, spmods..., cg, kmod, :block_scale, scale)
+    collmods = coll === nothing ? () : (coll,)
+    mods = (:mma, spmods..., cg, kmod, :block_scale, scale, collmods...)
     register_wrapper!(:tcgen05_mx, :tcgen05, mods, :asm)
-    head = "tcgen05.mma" * (sp ? ".sp" : "") * ".$cg.$kmod.block_scale.$scale"
+    head = "tcgen05.mma" * (sp ? ".sp" : "") *
+           ".$cg.$kmod.block_scale.$scale" *
+           (coll === nothing ? "" : ".$coll")
 
     # Integer-address adapters: the scale descriptors — and for `.sp` the
     # sparsity-metadata operand — are bracketed TMEM addresses, and the A
@@ -956,9 +959,16 @@ end
 # modifier' not supported on .target 'sm_100f'") — while .kind::mxf8f6f4
 # assembles on both a- and f-targets. Registered uniformly; the assembler
 # owns target policy, as with dense .kind::i8.
+#
+# collector::a mirrors the dense/sp intrinsic-tier convention: an absent
+# collector is the ISA-default discard (never spelled explicitly), and
+# collector::b / decompress::lut::b stay deferred.
 for (kind, scale_vec, block) in _TCGEN05_MX_SCALE_VARIANTS,
-        scale in (scale_vec, block), cta_group in (1, 2), sp in (false, true)
-    _tcgen05_mx_register(kind, scale, cta_group, sp)
+        scale in (scale_vec, block), cta_group in (1, 2),
+        sp in (false, true),
+        coll in (nothing, Symbol("collector::a::lastuse"),
+                 Symbol("collector::a::fill"), Symbol("collector::a::use"))
+    _tcgen05_mx_register(kind, scale, cta_group, sp, coll)
 end
 
 # Seal the derived adapter inventory. Every signature above was emitted by
