@@ -878,7 +878,8 @@ end
 # tcgen05.mma: there is no disable-output-lane vector.  Instead, both scale
 # matrices are mandatory TMEM address operands:
 #
-#   [d], a-desc/[a], b-desc, idesc, [scale-A], [scale-B], enable-input-d
+#   [d], a-desc/[a], b-desc{, [sp-meta]}, idesc, [scale-A], [scale-B],
+#   enable-input-d
 #
 # Require an explicit scale-vector/block qualifier even where the ISA defines
 # a default.  Besides making the semantic choice visible at the call site,
@@ -896,46 +897,52 @@ const _TCGEN05_MX_SCALE_VARIANTS = (
     (:mxf4nvf4, Symbol("scale_vec::4X"), :block16),
 )
 
-function _tcgen05_mx_register(kind::Symbol, scale::Symbol, cta_group::Int)
+function _tcgen05_mx_register(kind::Symbol, scale::Symbol, cta_group::Int,
+                              sp::Bool)
     cta_group in (1, 2) || throw(ArgumentError("invalid tcgen05 cta_group: $cta_group"))
     cg = Symbol("cta_group::", cta_group)
     kmod = Symbol("kind::", kind)
-    mods = (:mma, cg, kmod, :block_scale, scale)
+    spmods = sp ? (:sp,) : ()
+    mods = (:mma, spmods..., cg, kmod, :block_scale, scale)
     register_wrapper!(:tcgen05_mx, :tcgen05, mods, :asm)
-    head = "tcgen05.mma.$cg.$kmod.block_scale.$scale"
+    head = "tcgen05.mma" * (sp ? ".sp" : "") * ".$cg.$kmod.block_scale.$scale"
 
-    # Integer-address adapters: both scale descriptors are bracketed TMEM
-    # addresses, and the A operand may itself be a TMEM address.
+    # Integer-address adapters: the scale descriptors — and for `.sp` the
+    # sparsity-metadata operand — are bracketed TMEM addresses, and the A
+    # operand may itself be a TMEM address.
     A32 = Address{UInt32}
-    _tcgen05_adapter!(mods, A32, UInt64, UInt64, UInt32, A32, A32, Bool)
-    _tcgen05_adapter!(mods, A32, A32, UInt64, UInt32, A32, A32, Bool)
+    meta = sp ? (A32,) : ()
+    _tcgen05_adapter!(mods, A32, UInt64, UInt64, meta..., UInt32, A32, A32,
+                      Bool)
+    _tcgen05_adapter!(mods, A32, A32, UInt64, meta..., UInt32, A32, A32,
+                      Bool)
 
-    # Shared-memory A descriptor form.
-    let asm = "$head [\$0], \$1, \$2, \$3, [\$4], [\$5], \$6;",
-            constraints = "r,l,l,r,r,r,b,~{memory}"
-        @eval @inline function (::Operation{:tcgen05, $mods})(
-                d::UInt32, a_desc::UInt64, b_desc::UInt64, idesc::UInt32,
-                scale_a::UInt32, scale_b::UInt32, enable_input_d::Bool)
-            @asmcall($asm, $constraints, true, Nothing,
-                     Tuple{UInt32, UInt64, UInt64, UInt32,
-                           UInt32, UInt32, Bool},
-                     d, a_desc, b_desc, idesc,
-                     scale_a, scale_b, enable_input_d)
-            nothing
+    # A-operand species: SMEM descriptor (UInt64) versus TMEM address
+    # (UInt32) — unambiguous at Julia dispatch. Operand order per
+    # §9.7.18.10: [d], a, b-desc{, [sp-meta]}, idesc, [scale-A],
+    # [scale-B], enable-input-d.
+    for a_tmem in (false, true)
+        aT = a_tmem ? UInt32 : UInt64
+        slots = String["[\$0]", a_tmem ? "[\$1]" : "\$1", "\$2"]
+        k = 3
+        if sp
+            push!(slots, "[\$3]")
+            k = 4
         end
-    end
-
-    # Tensor-memory A address form.  UInt32 versus UInt64 on operand two makes
-    # the two ISA alternatives unambiguous at Julia dispatch.
-    let asm = "$head [\$0], [\$1], \$2, \$3, [\$4], [\$5], \$6;",
-            constraints = "r,r,l,r,r,r,b,~{memory}"
+        push!(slots, "\$$k", "[\$$(k + 1)]", "[\$$(k + 2)]", "\$$(k + 3)")
+        asm = head * " " * join(slots, ", ") * ";"
+        constraints = "r," * (a_tmem ? "r" : "l") * ",l," *
+                      (sp ? "r," : "") * "r,r,r,b,~{memory}"
+        metadecl = sp ? (:(spmeta::UInt32),) : ()
+        metaargs = sp ? (:spmeta,) : ()
+        tt = Tuple{UInt32, aT, UInt64, (sp ? (UInt32,) : ())...,
+                   UInt32, UInt32, UInt32, Bool}
         @eval @inline function (::Operation{:tcgen05, $mods})(
-                d::UInt32, a_tmem::UInt32, b_desc::UInt64, idesc::UInt32,
-                scale_a::UInt32, scale_b::UInt32, enable_input_d::Bool)
-            @asmcall($asm, $constraints, true, Nothing,
-                     Tuple{UInt32, UInt32, UInt64, UInt32,
-                           UInt32, UInt32, Bool},
-                     d, a_tmem, b_desc, idesc,
+                d::UInt32, a::$aT, b_desc::UInt64, $(metadecl...),
+                idesc::UInt32, scale_a::UInt32, scale_b::UInt32,
+                enable_input_d::Bool)
+            @asmcall($asm, $constraints, true, Nothing, $tt,
+                     d, a, b_desc, $(metaargs...), idesc,
                      scale_a, scale_b, enable_input_d)
             nothing
         end
@@ -943,9 +950,15 @@ function _tcgen05_mx_register(kind::Symbol, scale::Symbol, cta_group::Int)
     nothing
 end
 
+# `.sp` target gating (§9.7.18.10 support list, ptxas-verified): sparse
+# block-scale with .kind::mxf4/.kind::mxf4nvf4 is a-variant-exclusive —
+# family targets refuse the modifier pair ("Feature '.kind::mxf4 with .sp
+# modifier' not supported on .target 'sm_100f'") — while .kind::mxf8f6f4
+# assembles on both a- and f-targets. Registered uniformly; the assembler
+# owns target policy, as with dense .kind::i8.
 for (kind, scale_vec, block) in _TCGEN05_MX_SCALE_VARIANTS,
-        scale in (scale_vec, block), cta_group in (1, 2)
-    _tcgen05_mx_register(kind, scale, cta_group)
+        scale in (scale_vec, block), cta_group in (1, 2), sp in (false, true)
+    _tcgen05_mx_register(kind, scale, cta_group, sp)
 end
 
 # Seal the derived adapter inventory. Every signature above was emitted by

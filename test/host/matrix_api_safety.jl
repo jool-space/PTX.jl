@@ -136,9 +136,9 @@ const EXPECTED_TCGEN05_MX_KIND_SCALES = Set((
     (:mxf4nvf4, :block32),
 ))
 
-_tcgen_mx_mods(kind, scale, cg) =
-    (:mma, Symbol("cta_group::", cg), Symbol("kind::", kind),
-     :block_scale, scale)
+_tcgen_mx_mods(kind, scale, cg; sp = false) =
+    (:mma, (sp ? (:sp,) : ())..., Symbol("cta_group::", cg),
+     Symbol("kind::", kind), :block_scale, scale)
 
 @testset "tcgen05 MX: complete block-scale schema inventory" begin
     @test PTX._TCGEN05_MX_SCALE_VARIANTS == EXPECTED_TCGEN05_MX_ALIAS_ROWS
@@ -150,10 +150,12 @@ _tcgen_mx_mods(kind, scale, cg) =
     @test actual == EXPECTED_TCGEN05_MX_KIND_SCALES
     @test length(actual) == 8
 
-    for (kind, scale) in EXPECTED_TCGEN05_MX_KIND_SCALES, cg in (1, 2)
-        op = Operation{:tcgen05, _tcgen_mx_mods(kind, scale, cg)}()
-        ss = (UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, Bool)
-        ts = (UInt32, UInt32, UInt64, UInt32, UInt32, UInt32, Bool)
+    for (kind, scale) in EXPECTED_TCGEN05_MX_KIND_SCALES, cg in (1, 2),
+            sp in (false, true)
+        op = Operation{:tcgen05, _tcgen_mx_mods(kind, scale, cg; sp)}()
+        meta = sp ? (UInt32,) : ()
+        ss = (UInt32, UInt64, UInt64, meta..., UInt32, UInt32, UInt32, Bool)
+        ts = (UInt32, UInt32, UInt64, meta..., UInt32, UInt32, UInt32, Bool)
         for (argts, a_operand) in ((ss, "\$1"), (ts, "[\$1]"))
             @test which(op, argts).module === PTX
             info = PTX.lowering(op, argts)
@@ -161,17 +163,27 @@ _tcgen_mx_mods(kind, scale, cg) =
             @test info.rettype === Nothing
             ci, _ = first(Base.code_typed(op, argts))
             typed = string(ci)
-            @test occursin("tcgen05.mma.cta_group::$cg.kind::$kind" *
+            @test occursin("tcgen05.mma" * (sp ? ".sp" : "") *
+                           ".cta_group::$cg.kind::$kind" *
                            ".block_scale.$scale", typed)
             # Julia's CodeInfo printer escapes the `$` operand sigils inside
             # the inline-assembly string.  Strip only that presentation-layer
             # escaping before checking the exact PTX operand schema.
             unescaped = replace(typed, "\\\$" => "\$")
-            @test occursin("[\$0], $a_operand, \$2, \$3, [\$4], [\$5], \$6;",
-                           unescaped)
+            schema = sp ?
+                "[\$0], $a_operand, \$2, [\$3], \$4, [\$5], [\$6], \$7;" :
+                "[\$0], $a_operand, \$2, \$3, [\$4], [\$5], \$6;"
+            @test occursin(schema, unescaped)
             @test occursin("asm sideeffect", typed)
             @test occursin("~{memory}", typed)
         end
+        # The other arity is not a method: a dense call cannot silently
+        # drop into an sp form (or vice versa) — the metadata operand is
+        # load-bearing, not optional.
+        other = sp ? (UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, Bool) :
+                     (UInt32, UInt64, UInt64, UInt32, UInt32, UInt32,
+                      UInt32, Bool)
+        @test PTX.lowering(op, other).tier === :forbidden
     end
 end
 

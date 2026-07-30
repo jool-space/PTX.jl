@@ -129,8 +129,8 @@ function _expected_tcgen05_integer_address_forms()
         (:mxf4nvf4, Symbol("scale_vec::4X"), :block16),
     )
     for (kind, scale_vec, block) in variants,
-            scale in (scale_vec, block), cg in 1:2
-        push!(forms, (:mma, Symbol("cta_group::", cg),
+            scale in (scale_vec, block), cg in 1:2, sp in ((), (:sp,))
+        push!(forms, (:mma, sp..., Symbol("cta_group::", cg),
                       Symbol("kind::", kind), :block_scale, scale))
     end
     for kind in (:f16, :tf32, :f8f6f4, :i8), sp in ((), (:sp,))
@@ -213,14 +213,17 @@ function _expected_tcgen05_integer_address_adapters()
         elseif first(mods) === :commit
             Symbol("multicast::cluster") in mods ? (A32, Integer) : (A32,)
         elseif first(mods) === :mma && :block_scale in mods
-            (A32, UInt64, UInt64, UInt32, A32, A32, Bool)
+            # sp inserts the sparsity-metadata TMEM address after B.
+            meta = mods[2] === :sp ? (A32,) : ()
+            (A32, UInt64, UInt64, meta..., UInt32, A32, A32, Bool)
         else
             error("unclassified tcgen05 adapter form: $mods")
         end
         push!(specs, (mods, argtypes))
         if first(mods) === :mma && :block_scale in mods
+            meta = mods[2] === :sp ? (A32,) : ()
             push!(specs, (mods,
-                (A32, A32, UInt64, UInt32, A32, A32, Bool)))
+                (A32, A32, UInt64, meta..., UInt32, A32, A32, Bool)))
         end
     end
     specs
@@ -345,12 +348,12 @@ end
 @testset "closed tcgen05 integer-address adapters" begin
     expected_forms = _expected_tcgen05_integer_address_forms()
     @test Set(PTX.TCGEN05_INTEGER_ADDRESS_FORMS) == expected_forms
-    @test length(expected_forms) == 602
+    @test length(expected_forms) == 618
     expected = _expected_tcgen05_integer_address_adapters()
     actual = Set((s.mods, s.argtypes)
                  for s in PTX.TCGEN05_INTEGER_ADDRESS_ADAPTERS)
     @test actual == expected
-    @test length(actual) == 1386
+    @test length(actual) == 1418
     for (mods, signature) in actual
         # Immediate specs are the abstract `Val` (dispatch admits any
         # immediate); lowering probes need a concrete instance, as every
