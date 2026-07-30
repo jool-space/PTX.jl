@@ -292,10 +292,10 @@ for cg in 1:2
         Base.llvmcall(($ir, "entry"), Nothing, Tuple{})
 end
 
-# Demoted to asm (free): after the MEMORY_WIDEN_OVERLAY (#109) the wait
-# intrinsics render no memory attribute — semantically the same conservative
-# barrier as `sideeffect + ~{memory}` — so the intrinsic route bought only
-# its two selection probes. The waits order ALL prior tcgen05.ld/st results
+# Single-route asm: under the MEMORY_WIDEN_OVERLAY the wait intrinsics
+# render no memory attribute — semantically the same conservative barrier
+# as `sideeffect + ~{memory}` — so an intrinsic route would buy only its
+# two selection probes. The waits order ALL prior tcgen05.ld/st results
 # against subsequent ordinary loads/stores, hence the full clobber.
 let ir = convergent_asm_ir("tcgen05.wait::ld.sync.aligned;", "~{memory}",
                            Nothing, ())
