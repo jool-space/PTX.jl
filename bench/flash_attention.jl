@@ -11,7 +11,7 @@
 #     fab_time(cfg; H = 16, S = 4096)    # → (; ms, tflops)
 #     fab_check((; FAB_CFG_DEFAULT..., emu = (1, 3, 5, 7)))  # emu sweep entry
 #     fab_check((; FAB_CFG_DEFAULT..., splitp = false))  # quarter-granular P
-#                                        # (the pre-2026-07-29 default)
+#                                        # (the pre-split-P protocol)
 #     fab_sweep()                        # default vs scoreboard, all shapes
 #     fab_hang_debug(cfg; H = 2, S = 512)  # beacon run + site decode
 #
@@ -19,6 +19,15 @@
 # splitp = ...)` NamedTuples
 # (see the defs header); each distinct config compiles a fresh kernel
 # specialization (~15 s first call).
+#
+# Measurement discipline (hardware-derived, both chips):
+#   - The headline is the SATURATED shape: B*H*(S/256) well above the
+#     148-CTA fill, e.g. B=8 H=8 S=8192. B=1 H=8 S=8192 is the
+#     latency-sensitive case, and its distance from saturated is
+#     chip-dependent — the two are not interchangeable.
+#   - Cross-box TF deltas under ~8% are noise unless the configs were
+#     A/B'd on the same box; cross-CHIP comparisons (B200-class
+#     references vs B300 numbers) are not comparisons at all.
 
 using PTX, CUDACore, Test, Random
 
