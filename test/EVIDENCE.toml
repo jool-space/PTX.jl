@@ -22,10 +22,10 @@ suite = 97465
 tests = "gpu/blackwell"
 runtime = "cc==10|cc==11"
 evidence = "manual"
-last_validated = "2026-07-29"
-device = "B200 (CC 10.0) + B300 SXM6 (CC 10.3)"
-tree = "55fe96c"
-suite = 97360
+last_validated = "2026-07-30"
+device = "B300 SXM6 AC (CC 10.3)"
+tree = "275dce0"
+suite = 98144
 
 [[tier]]
 tests = "gpu"

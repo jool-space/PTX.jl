@@ -480,7 +480,7 @@ section = "9.7.18"
 title = "TensorCore 5th Generation Family Instructions"
 status = "strict"
 opcodes = ["tcgen05"]
-notes = "Typed-wrapper-only: one head spans address destinations, register vectors, sinks, fences, and matrix descriptors (alloc/dealloc, ld/st grids, cp, mma dense/sp/ws/mx, commit, fences). The management verbs (alloc/dealloc/relinquish_alloc_permit/commit/cp), the waits, and the PTX ISA 9.4 additions (.exclusive alloc/dealloc, commit multicast::cluster::{16b,32b} and sync_restrict::shared::read::mma::a — spelled-only until a ptxas that accepts ISA 9.4 ships) are single-route asm; ld/st, shift, and dense/sp/ws mma lower via tier-2 intrinsics. Not wrapped: ld.red, mma.sp block-scale, collector::a fill/use/lastuse, ti16/collector::b/decompress::lut::b."
+notes = "Typed-wrapper-only: one head spans address destinations, register vectors, sinks, fences, and matrix descriptors (alloc/dealloc, ld/st grids, cp, mma dense/sp/ws/mx, commit, fences). The management verbs (alloc/dealloc/relinquish_alloc_permit/commit/cp), the waits, and the PTX ISA 9.4 additions (.exclusive alloc/dealloc, commit multicast::cluster::{16b,32b} and sync_restrict::shared::read::mma::a — spelled-only until a ptxas that accepts ISA 9.4 ships) are single-route asm, as is ld.red (no upstream intrinsics; ISA target floor sm_103f/sm_110a — no sm_100 support); ld/st, shift, and dense/sp/ws mma lower via tier-2 intrinsics. Not wrapped: mma.sp block-scale, collector::a fill/use/lastuse, ti16/collector::b/decompress::lut::b."
 owner = ["src/wrappers/tcgen05.jl", "src/lib/tcgen05_descriptor.jl",
          "src/lib/tcgen05_layout.jl"]
 

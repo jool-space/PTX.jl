@@ -86,6 +86,17 @@ function _expected_tcgen05_integer_address_forms()
                           Symbol("x", count), flag..., :b32))
         end
     end
+    # ld.red: reduction shapes only, num ≥ x2, f32 with the {abs}{NaN}
+    # variants plus the plain integer types (§9.7.18.8).
+    for shape in (Symbol("32x32b"), Symbol("16x32bx2")),
+            count in (2, 4, 8, 16, 32, 64, 128), redop in (:min, :max),
+            (variant, dtype) in (((), :f32), ((:abs,), :f32),
+                                 ((Symbol("NaN"),), :f32),
+                                 ((:abs, Symbol("NaN")), :f32),
+                                 ((), :u32), ((), :s32))
+        push!(forms, (:ld, :red, :sync, :aligned, shape, Symbol("x", count),
+                      redop, variant..., dtype))
+    end
     for cg in 1:2
         cta = Symbol("cta_group::", cg)
         push!(forms, (:alloc, cta, :sync, :aligned,
@@ -181,6 +192,10 @@ function _expected_tcgen05_integer_address_adapters()
         end
         argtypes = if first(mods) === :shift
             (A32,)
+        elseif first(mods) === :ld && mods[2] === :red
+            # redval is a second DESTINATION, not an operand: the adapter
+            # signature carries only the bracketed taddr (+ split Val).
+            mods[5] === Symbol("16x32bx2") ? (A32, Val) : (A32,)
         elseif first(mods) === :ld
             mods[4] === Symbol("16x32bx2") ? (A32, Val) : (A32,)
         elseif first(mods) === :alloc
@@ -330,12 +345,12 @@ end
 @testset "closed tcgen05 integer-address adapters" begin
     expected_forms = _expected_tcgen05_integer_address_forms()
     @test Set(PTX.TCGEN05_INTEGER_ADDRESS_FORMS) == expected_forms
-    @test length(expected_forms) == 434
+    @test length(expected_forms) == 602
     expected = _expected_tcgen05_integer_address_adapters()
     actual = Set((s.mods, s.argtypes)
                  for s in PTX.TCGEN05_INTEGER_ADDRESS_ADAPTERS)
     @test actual == expected
-    @test length(actual) == 1218
+    @test length(actual) == 1386
     for (mods, signature) in actual
         # Immediate specs are the abstract `Val` (dispatch admits any
         # immediate); lowering probes need a concrete instance, as every
@@ -355,13 +370,17 @@ end
     end
 
     # A reviewed spelling with a missing operand (16x32bx2 without its
-    # immHalfSplitoff) and an unreviewed spelling (ld.red) can use neither
-    # the adapter nor the raw fallback.
+    # immHalfSplitoff) can use neither the adapter nor the raw fallback.
     miss = ptx"tcgen05.ld.sync.aligned.16x32bx2.x1.b32"
     @test PTX.lowering(miss, (Address{UInt32},)).tier === :forbidden
     @test PTX.lowering(ptx"tcgen05.ld.sync.aligned.16x32bx2.x1.b32"raw,
                        (Address{UInt32},)).tier === :forbidden
+    # ld.red lowers as single-route asm on the bracketed-taddr signature;
+    # a caller passing redval as an OPERAND (it is a second destination)
+    # stays forbidden.
     red = ptx"tcgen05.ld.red.sync.aligned.32x32b.x2.min.f32"
+    @test PTX.lowering(red, (Address{UInt32},)).tier === :asm
+    @test which(red, Tuple{Address{UInt32}}) !== PTX._CHAIN_METHOD
     @test PTX.lowering(red, (Float32, Address{UInt32})).tier === :forbidden
 
     # PTX 9.3 §9.7.17.7.1 spells dealloc's taddr as a bare register. It must
