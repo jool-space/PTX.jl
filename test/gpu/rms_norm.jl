@@ -16,7 +16,13 @@ using Random
 #   7. every thread reads the row sum, computes rstd = rsqrt(mean + eps);
 #   8. every thread reuses its loaded x_vals and emits y = x * rstd * w[i].
 #
-# v0: v4-only path. N (= F) must be divisible by block*4.
+# v4-only path. N (= F) must be divisible by block*4, and N ÷ (block*4) ≤ 16
+# (the register-tile unroll bound; 16 v4-chunks = 64 f32 per thread).
+#
+# The row is register-resident: pass 1's loaded chunks stay live as SSA
+# values and pass 2 consumes them — one DRAM read of X total, matching the
+# pyptx original. The unroll uses the same `@nexprs 16` + compile-time-folded
+# guard idiom as the warp-partial combine below.
 
 const RMS_WARP_SIZE = UInt32(32)
 
@@ -43,6 +49,7 @@ function _rms_norm_v4_kernel!(
     num_warps = block ÷ Int(RMS_WARP_SIZE)
     v4_iters  = N ÷ (block * 4)
     @assert v4_iters * block * 4 == N
+    @assert v4_iters <= 16
 
     partials = CuStaticSharedArray(Float32, num_warps)
     stats    = CuStaticSharedArray(Float32, 1)
@@ -57,31 +64,17 @@ function _rms_norm_v4_kernel!(
     warp_id = tid >> UInt32(5)
     elem_base = Int(tid) * 4
 
-    # --- pass 1: load + sum-of-squares -----------------------------------
-    # Stash the loaded values in a Vector so pass 2 doesn't reread DRAM.
-    # Using a `MVector` would be cleanest but stack allocation needs to be
-    # explicit; bare `NTuple` walked by `j` works since v4_iters is a Val.
+    # --- pass 1: load + sum-of-squares; x4_j chunks stay register-resident
     sum_sq = 0f0
-    # Pre-allocate as a Ref{NTuple{4*v4_iters, Float32}}? Easier: just
-    # iterate with @nexprs since v4_iters is a compile-time constant.
-    # We unroll j so each x[1..4] becomes its own SSA value.
-    x_buf = ntuple(_ -> 0f0, Val(4 * v4_iters))   # placeholder for layout
-
-    # Manual unroll over j (v4_iters is small, typically 1..8).
-    j = 0
-    while j < v4_iters
-        idx = elem_base + j * (block * 4)
-        off = idx * 4
-        x4 = ptx"ld.global.v4.f32"(px + off)
-        # Stash in row-major flat storage. Need mutable; switch to MVector.
-        # …but we can't mutate a tuple. Workaround: reload in pass 2.
-        # OK for v0 (DRAM bandwidth-bound; rstd path is tiny), but a
-        # follow-up should keep x in registers.
-        sum_sq = ptx"fma.rn.f32"(x4[1], x4[1], sum_sq)
-        sum_sq = ptx"fma.rn.f32"(x4[2], x4[2], sum_sq)
-        sum_sq = ptx"fma.rn.f32"(x4[3], x4[3], sum_sq)
-        sum_sq = ptx"fma.rn.f32"(x4[4], x4[4], sum_sq)
-        j += 1
+    Base.@nexprs 16 j -> begin
+        if j <= v4_iters
+            off_j = (elem_base + (j - 1) * (block * 4)) * 4
+            x4_j = ptx"ld.global.v4.f32"(px + off_j)
+            sum_sq = ptx"fma.rn.f32"(x4_j[1], x4_j[1], sum_sq)
+            sum_sq = ptx"fma.rn.f32"(x4_j[2], x4_j[2], sum_sq)
+            sum_sq = ptx"fma.rn.f32"(x4_j[3], x4_j[3], sum_sq)
+            sum_sq = ptx"fma.rn.f32"(x4_j[4], x4_j[4], sum_sq)
+        end
     end
 
     # --- warp reduce ------------------------------------------------------
@@ -109,19 +102,16 @@ function _rms_norm_v4_kernel!(
     mean_sq = ptx"add.f32"(ptx"mul.f32"(row_sum, inv_n), Float32(eps))
     rstd    = ptx"rsqrt.approx.f32"(mean_sq)
 
-    # --- pass 2: re-load X (DRAM cache makes this cheap), apply, store ---
-    j = 0
-    while j < v4_iters
-        idx = elem_base + j * (block * 4)
-        off = idx * 4
-        x4 = ptx"ld.global.v4.f32"(px + off)
-        w4 = ptx"ld.global.v4.f32"(pw + off)
-        y1 = ptx"mul.f32"(ptx"mul.f32"(x4[1], rstd), w4[1])
-        y2 = ptx"mul.f32"(ptx"mul.f32"(x4[2], rstd), w4[2])
-        y3 = ptx"mul.f32"(ptx"mul.f32"(x4[3], rstd), w4[3])
-        y4 = ptx"mul.f32"(ptx"mul.f32"(x4[4], rstd), w4[4])
-        ptx"st.global.v4.f32"(py + off, (y1, y2, y3, y4))
-        j += 1
+    # --- pass 2: apply to the register-resident x4_j, store --------------
+    Base.@nexprs 16 j -> begin
+        if j <= v4_iters
+            w4 = ptx"ld.global.v4.f32"(pw + off_j)
+            y1 = ptx"mul.f32"(ptx"mul.f32"(x4_j[1], rstd), w4[1])
+            y2 = ptx"mul.f32"(ptx"mul.f32"(x4_j[2], rstd), w4[2])
+            y3 = ptx"mul.f32"(ptx"mul.f32"(x4_j[3], rstd), w4[3])
+            y4 = ptx"mul.f32"(ptx"mul.f32"(x4_j[4], rstd), w4[4])
+            ptx"st.global.v4.f32"(py + off_j, (y1, y2, y3, y4))
+        end
     end
     return nothing
 end
