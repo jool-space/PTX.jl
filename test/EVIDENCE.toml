@@ -13,10 +13,10 @@
 tests = "gpu/hopper"
 runtime = "cc==9.0"
 evidence = "manual"
-last_validated = "2026-07-29"
-device = "H100 PCIe (CC 9.0)"
-tree = "740d28d"
-suite = 97518
+last_validated = "2026-07-30"
+device = "NVIDIA H100 PCIe (CC 9.0)"
+tree = "30e1d4d"
+suite = 97465
 
 [[tier]]
 tests = "gpu/blackwell"
