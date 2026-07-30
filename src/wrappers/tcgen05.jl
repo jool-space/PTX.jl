@@ -68,8 +68,8 @@
 #   4 for 16x256b
 # (PTX 9.3 §9.7.17.8 Table 52). count ∈ {x1..x128} with per_lane ≤ 128.
 # The `.pack::16b`/`.unpack::16b` repack variants cover the same grid.
-# `tcgen05.ld.red` (load-with-reduction, PTX 9.1+) has no NVVM intrinsic
-# records at the pinned backend and stays outside the wrapper surface.
+# `tcgen05.ld.red` (load-with-reduction, PTX 8.8) has no NVVM intrinsic
+# records at the pinned backend and is a single-route asm family below.
 #
 # Irregular families are written out literally so every intrinsic they
 # stand on is greppable — test/host/conformance.jl scans for `nvvm"..."`
@@ -252,6 +252,82 @@ end
 for (shape, base, counts, split) in _TCGEN05_LDST_SHAPES,
         count in counts, op in (:ld, :st), repack in (false, true)
     _tcgen05_ldst_register(op, shape, base, count, split, repack)
+end
+
+# --- ld.red (load-with-reduction, generated asm family) -------------------------
+#
+# `tcgen05.ld.red` (PTX 8.8 §9.7.18.8) has no NVVM intrinsic records at the
+# pinned backend, so the family is single-route convergent asm under the
+# family-wide sideeffect + ~{memory} + convergent nomerge contract
+# (`.sync.aligned` = warp-collective, same hazard class as the mbarrier
+# family). Target reality: the ISA supports ld.red on sm_110a and the
+# sm_103f/sm_110f families only — NEVER sm_100 (ptxas: "Instruction
+# 'tcgen05.ld.red' not supported on .target 'sm_100a'"). The ptxas legs
+# assemble at sm_103f; runtime evidence needs a CC 10.3+ device.
+#
+# Grid: shape {32x32b, 16x32bx2} × num {x2..x128} (`.red` requires ≥ .x2) ×
+# redOp {min, max} × (f32 × {∅, .abs, .NaN, .abs.NaN} ∪ {u32, s32}) =
+# 168 forms. Calls return the flat tuple (data..., redval): count b32 data
+# carriers (UInt32) plus the reduction result typed by the trailing dtype
+# (Float32 / UInt32 / Int32). 16x32bx2 takes its immHalfSplitoff as a
+# positional Val operand baked into the asm text as the ISA's immediate.
+
+const _TCGEN05_LDRED_REDT = (f32 = Float32, u32 = UInt32, s32 = Int32)
+
+function _tcgen05_ldred_ir(mods::Tuple{Vararg{Symbol}}, n::Int,
+                           redT::Type, off)
+    head = "tcgen05." * join(String.(mods), ".")
+    regs = join(("\$$(k - 1)" for k in 1:n), ", ")
+    tail = off === nothing ? "" : ", $off"
+    asm = "$head {$regs}, \$$n, [\$$(n + 1)]$tail;"
+    constraints = join(fill("=r", n), ",") * "," *
+                  (redT === Float32 ? "=f" : "=r") * ",r,~{memory}"
+    rt = Tuple{fill(UInt32, n)..., redT}
+    convergent_asm_ir(asm, constraints, rt, (UInt32,)), rt
+end
+
+# The split-shape offset must be a PTX immediate, so its IR is generated
+# per Val here (helper above — the generator-world rule).
+@generated function _tcgen05_ldred_split(::Operation{:tcgen05, mods},
+                                         taddr::UInt32,
+                                         ::Val{off}) where {mods, off}
+    off isa Integer && off >= 0 ||
+        return :(throw(ArgumentError(
+            "halfsplitoff must be a non-negative integer Val")))
+    n = parse(Int, String(mods[6])[2:end])
+    ir, rt = _tcgen05_ldred_ir(mods, n, _TCGEN05_LDRED_REDT[mods[end]],
+                               Int(off))
+    :(Base.llvmcall(($ir, "entry"), $rt, Tuple{UInt32}, taddr))
+end
+
+function _tcgen05_ldred_register(shape::Symbol, count::Int, redop::Symbol,
+                                 variant::Tuple{Vararg{Symbol}},
+                                 dtype::Symbol)
+    mods = (:ld, :red, :sync, :aligned, shape, Symbol("x", count), redop,
+            variant..., dtype)
+    register_wrapper!(:tcgen05_ldred, :tcgen05, mods, :asm)
+    if shape === Symbol("16x32bx2")
+        @eval @inline (op::Operation{:tcgen05, $mods})(
+                taddr::UInt32, halfsplitoff::Val) =
+            _tcgen05_ldred_split(op, taddr, halfsplitoff)
+        _tcgen05_adapter!(mods, Address{UInt32}, Val)
+    else
+        ir, rt = _tcgen05_ldred_ir(mods, count,
+                                   _TCGEN05_LDRED_REDT[dtype], nothing)
+        @eval @inline (::Operation{:tcgen05, $mods})(taddr::UInt32) =
+            Base.llvmcall(($ir, "entry"), $rt, Tuple{UInt32}, taddr)
+        _tcgen05_adapter!(mods, Address{UInt32})
+    end
+    nothing
+end
+
+for shape in (Symbol("32x32b"), Symbol("16x32bx2")),
+        count in (2, 4, 8, 16, 32, 64, 128), redop in (:min, :max),
+        (variant, dtype) in (((), :f32), ((:abs,), :f32),
+                             ((Symbol("NaN"),), :f32),
+                             ((:abs, Symbol("NaN")), :f32),
+                             ((), :u32), ((), :s32))
+    _tcgen05_ldred_register(shape, count, redop, variant, dtype)
 end
 
 # --- alloc / relinquish / wait / commit ----------------------------------------
