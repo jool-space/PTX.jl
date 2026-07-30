@@ -4,11 +4,11 @@ using TOML
 
 DocMeta.setdocmeta!(PTX, :DocTestSetup, :(using PTX); recursive=true)
 
-# --- docs/src/coverage.md is GENERATED from SURFACE.toml (repo root) ---------
+# --- docs/src/coverage.md is GENERATED from docs/SURFACE.toml ----------------
 # The inventory is the reviewed artifact and test/host/surface.jl enforces it
 # against the code; this step only renders it. The output is gitignored.
 function write_coverage_page()
-    surface = TOML.parsefile(joinpath(pkgdir(PTX), "SURFACE.toml"))
+    surface = TOML.parsefile(joinpath(@__DIR__, "SURFACE.toml"))
     entries = surface["family"]
     badge(status) = Dict(
         "strict"       => "🟢 strict",
@@ -20,7 +20,7 @@ function write_coverage_page()
     print(io, """
         # Instruction-surface coverage
 
-        *This page is generated from `SURFACE.toml` at docs-build time; edit
+        *This page is generated from `docs/SURFACE.toml` at docs-build time; edit
         that file, not this page. `test/host/surface.jl` machine-checks the
         inventory against the form registry, the typed-wrapper-only rules,
         and the wrapper registry.*
@@ -73,24 +73,28 @@ function write_coverage_page()
         end
         println(io)
     end
-    # The hardware-evidence ledger (EVIDENCE.toml): which runtime tiers CI
-    # exercises continuously, and when the manual tiers last ran on hardware.
-    evidence = TOML.parsefile(joinpath(pkgdir(PTX), "EVIDENCE.toml"))
+    # The hardware-evidence ledger (test/EVIDENCE.toml): which runtime tiers
+    # CI exercises continuously, and when the manual tiers last ran on
+    # hardware.
+    evidence = TOML.parsefile(joinpath(pkgdir(PTX), "test", "EVIDENCE.toml"))
     println(io, "## Hardware evidence\n")
     println(io, """
         The `gpu/hopper` and `gpu/blackwell` runtime tiers run in no CI
         lane; their evidence comes from manual cloud sessions recorded in
-        `EVIDENCE.toml` (the test manifest prints these records whenever it
-        skips a tier). Dates matter: a record older than the tree under
-        test is *spelled/assembles* evidence only.
+        `test/EVIDENCE.toml` (the test manifest prints these records — and
+        what has changed since the recorded tree — whenever it skips a
+        tier). Dates matter: a record older than the tree under test is
+        *spelled/assembles* evidence only.
         """)
-    println(io, "| Tier | Evidence | Last validated | Device | Tree | Result |")
+    println(io, "| Tier | Evidence | Last validated | Device | Tree | Suite |")
     println(io, "|---|---|---|---|---|---|")
     for t in evidence["tier"]
-        println(io, "| `", t["tests"], "` (", t["runtime"], ") | ",
+        println(io, "| `", t["tests"], "` (",
+                replace(t["runtime"], "|" => "\\|"), ") | ",
                 t["evidence"], " | ", get(t, "last_validated", "—"), " | ",
-                t["device"], " | ", get(t, "tree", "—"), " | ",
-                replace(t["result"], "|" => "\\|"), " |")
+                t["device"], " | ",
+                haskey(t, "tree") ? "`$(t["tree"])`" : "—", " | ",
+                get(t, "suite", "—"), " |")
     end
     write(joinpath(@__DIR__, "src", "coverage.md"), take!(io))
 end

@@ -30,9 +30,11 @@ structure is documented in `docs/src/internals.md`; this file is about how to
 - The `gpu/hopper` (cc==9.0) and `gpu/blackwell` (cc==10|cc==11) runtime
   sections run in **no CI lane** — they are exercised in manual cloud
   sessions (H100, B200/B300). Their ptxas legs do run everywhere. Don't
-  interpret green CI as runtime evidence for those tiers: `EVIDENCE.toml`
+  interpret green CI as runtime evidence for those tiers: `test/EVIDENCE.toml`
   records when each tier last executed on hardware and on which tree (the
-  test manifest prints it), and a hardware session ends by updating it.
+  test manifest prints it, plus what drifted since). A hardware session ends
+  by running `julia --project=test test/close_hardware_session.jl <count>` —
+  the entry is machine-written; session narrative goes in the PR body only.
 
 ## The form registry is a review boundary
 
