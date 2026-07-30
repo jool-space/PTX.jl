@@ -32,9 +32,10 @@ structure is documented in `docs/src/internals.md`; this file is about how to
   sessions (H100, B200/B300). Their ptxas legs do run everywhere. Don't
   interpret green CI as runtime evidence for those tiers: `test/EVIDENCE.toml`
   records when each tier last executed on hardware and on which tree (the
-  test manifest prints it, plus what drifted since). A hardware session ends
-  by running `julia --project=test test/close_hardware_session.jl <count>` —
-  the entry is machine-written; session narrative goes in the PR body only.
+  test manifest prints it, plus what drifted since). A green suite run on
+  such a device prints the ledger entry ready to paste; a session ends by
+  copying it into the file in the session-close PR — narrative goes in the
+  PR body only.
 
 ## The form registry is a review boundary
 

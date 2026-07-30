@@ -67,6 +67,16 @@ site carries its ceiling (`ceiled(nvvm"...", ptx"...")`,
 unceiled plumbing, and `test/host/effect_ceiling.jl` keeps it out of
 `src/`.
 
+One asm-tier honesty note: the `:observable` effects class (never
+deletable, touches no tracked memory) currently *renders* with the same
+conservative barrier as `:clobbers` — LLVM treats `sideeffect` inline asm
+without call-site `memory(...)` attributes as unknown memory, so the
+class documents reviewed semantics without yet granting the optimizer
+freedom. Attaching call-site memory attributes through the
+handwritten-IR path is the known lever; measurement showed motion
+windows in real pipelined kernels are bounded by their barrier waits
+regardless, so the lever stays unpulled until a profile demands it.
+
 ```@autodocs
 Modules = [PTX.NVVM]
 ```

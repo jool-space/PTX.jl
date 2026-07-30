@@ -4,10 +4,10 @@
 # and test/gpu/ since `tree` — whenever it routes such a tier to skip, so
 # green output is never mistaken for runtime evidence the run didn't produce.
 #
-# Machine fields only. Regenerate with
-#   julia --project=test test/close_hardware_session.jl <passed-count>
-# at the end of a hardware session; session narrative belongs in the
-# session-close PR, not here.
+# Machine fields only. A green default-routing suite run on a hopper- or
+# blackwell-class device prints this entry ready to paste at the end of
+# its output; the session-close PR copies it in. Narrative belongs in
+# that PR's body, not here.
 
 [[tier]]
 tests = "gpu/hopper"
@@ -24,7 +24,7 @@ runtime = "cc==10|cc==11"
 evidence = "manual"
 last_validated = "2026-07-30"
 device = "B300 SXM6 AC (CC 10.3)"
-tree = "275dce0"
+tree = "ecbc00e"
 suite = 98144
 
 [[tier]]

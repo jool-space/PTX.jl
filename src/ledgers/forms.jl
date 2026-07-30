@@ -11,10 +11,15 @@
 #                  :pure       safe to delete if unused, CSE duplicates,
 #                              reorder freely (asm: no sideeffect flag)
 #                  :observable never deletable/duplicable, but touches no
-#                              memory LLVM tracks — reorderable past loads
-#                              and stores (asm: `sideeffect`, no `~{memory}`;
-#                              precedent: extended_precision's CC.CF blocks,
-#                              mapa's address computation)
+#                              memory LLVM tracks (asm: `sideeffect`, no
+#                              `~{memory}`; precedent: extended_precision's
+#                              CC.CF blocks, mapa's address computation).
+#                              NOTE: LLVM treats sideeffect asm without
+#                              call-site memory(...) attrs as unknown
+#                              memory, so this class currently RENDERS as
+#                              conservatively as :clobbers — it documents
+#                              reviewed semantics, not optimizer freedom
+#                              (see internals.md, effect authority)
 #                  :clobbers   full memory barrier (asm: `sideeffect` +
 #                              `~{memory}`); the only safe default
 #   convergent — NOT safe to duplicate or merge across divergent branches:
