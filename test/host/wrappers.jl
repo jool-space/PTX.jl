@@ -1130,15 +1130,14 @@ end
     @test BlackwellLayout.B32          == 6
 end
 
-@testset "tma (cp.async.bulk.tensor) wrapper (tier-2 intrinsic lowering)" begin
-    # Third migrated family. Cluster-destination loads lower through
-    # llvm.nvvm.cp.async.bulk.tensor.g2s.tile.<N>d — multicast and
-    # cta_group are immarg-selected qualifiers on the same intrinsic;
-    # shared::cta loads through g2s.cta.tile.<N>d (PTX 8.6 ISel floor);
-    # stores through s2g.tile.<N>d. The wrapper retypes dst → addrspace(7)
-    # and tmap → generic raw (reinterpret_addrspace — never addrspacecast,
-    # see address_space.jl). Goldens: test/golden/tma@sm{90,100a}.ptx.
-    # shared::cta × cta_group::2 stays asm-tier (no intrinsic carries both).
+@testset "tma (cp.async.bulk.tensor) wrapper (single-route asm lowering)" begin
+    # Single-route asm since the demotion (see wrappers/tma.jl): every
+    # form is convergent inline asm with the full clobber, and the render
+    # is WYSIWYG — cluster cta_group::2 spells the qualifier after `.<N>d`
+    # (the retired intrinsic route rendered the §9.7.10.28.5.3
+    # syntax-block order `...bytes{.multicast::cluster}.cta_group::2`;
+    # ptxas accepts both, pinned by test/ptxas/blackwell.jl). Goldens:
+    # test/golden/tma@sm{90,100a}.ptx.
 
     pSh = Core.LLVMPtr{Float32, PTX.AS.Shared}
     pTm = Core.LLVMPtr{UInt8, PTX.AS.Const}
@@ -1153,7 +1152,9 @@ end
         nd = Symbol("$(n)d")
         coords = ntuple(_ -> Int32, n)
 
-        # the intrinsics the wrappers stand on: registered and convergent
+        # The unwrapped intrinsic records stay in the pinned registry; the
+        # attribute review below is what the demotion walked away from
+        # (convergent + argmem — no stronger promise than the asm route).
         for name in ("llvm.nvvm.cp.async.bulk.tensor.g2s.tile.$(n)d",
                      "llvm.nvvm.cp.async.bulk.tensor.g2s.cta.tile.$(n)d",
                      "llvm.nvvm.cp.async.bulk.tensor.s2g.tile.$(n)d")
@@ -1161,8 +1162,9 @@ end
             @test :convergent in PTX.NVVM.intrinsic(name).props
         end
 
-        # cluster loads (plain / multicast / cta_group::2 / both) all route
-        # to g2s.tile.<N>d, differing only in immargs and the mask operand
+        # Every load/store form pins its reviewed render: the notation's
+        # spelling verbatim (match truncated before the operand brackets —
+        # CodeInfo escapes `$`), no intrinsic call, full clobber.
         for (mods, argtypes) in (
                 ((:async, :bulk, :tensor, nd, cluster, :global, :tile, cmpl),
                  (pSh, pTm, coords..., pMb)),
@@ -1171,38 +1173,21 @@ end
                 ((:async, :bulk, :tensor, nd, cg2, cluster, :global, :tile, cmpl),
                  (pSh, pTm, coords..., pMb)),
                 ((:async, :bulk, :tensor, nd, cg2, cluster, :global, :tile, cmpl, mc),
-                 (pSh, pTm, coords..., pMb, UInt16)))
+                 (pSh, pTm, coords..., pMb, UInt16)),
+                ((:async, :bulk, :tensor, nd, cta, :global, :tile, cmpl),
+                 (pSh, pTm, coords..., pMb)),
+                ((:async, :bulk, :tensor, nd, :global, cta, :tile, :bulk_group),
+                 (pTm, coords..., pSh)),
+                ((:async, :bulk, :tensor, nd, cg2, cta, :global, :tile, cmpl),
+                 (pSh, pTm, coords..., pMb)))
             @test which(Operation{:cp, mods}(), argtypes).module == PTX
             ci, rt = first(Base.code_typed(Operation{:cp, mods}(), argtypes))
+            code = string(ci)
             @test rt === Nothing
-            @test occursin("g2s.tile.$(n)d", string(ci))
+            @test occursin("cp." * join(String.(mods), ".") * " [", code)
+            @test occursin("~{memory}", code)
+            @test !occursin("llvm.nvvm", code)
         end
-
-        # shared::cta load → g2s.cta.tile.<N>d
-        mods = (:async, :bulk, :tensor, nd, cta, :global, :tile, cmpl)
-        @test which(Operation{:cp, mods}(),
-                    (pSh, pTm, coords..., pMb)).module == PTX
-        ci, rt = first(Base.code_typed(Operation{:cp, mods}(),
-                                       (pSh, pTm, coords..., pMb)))
-        @test rt === Nothing
-        @test occursin("g2s.cta.tile.$(n)d", string(ci))
-
-        # store → s2g.tile.<N>d
-        mods = (:async, :bulk, :tensor, nd, :global, cta, :tile, :bulk_group)
-        @test which(Operation{:cp, mods}(),
-                    (pTm, coords..., pSh)).module == PTX
-        ci, rt = first(Base.code_typed(Operation{:cp, mods}(),
-                                       (pTm, coords..., pSh)))
-        @test rt === Nothing
-        @test occursin("s2g.tile.$(n)d", string(ci))
-
-        # residue: shared::cta × cta_group::2 stays asm-tier (match
-        # truncated before the operand brackets — CodeInfo escapes `$`)
-        mods = (:async, :bulk, :tensor, nd, cg2, cta, :global, :tile, cmpl)
-        ci, _ = first(Base.code_typed(Operation{:cp, mods}(),
-                                      (pSh, pTm, coords..., pMb)))
-        @test occursin("cp.async.bulk.tensor.$(n)d.cta_group::2.shared::cta" *
-                       ".global.tile.mbarrier::complete_tx::bytes [", string(ci))
     end
 end
 
@@ -1267,34 +1252,63 @@ end
     end
 end
 
-@testset "tcgen05 wrapper (tier-2 intrinsic lowering)" begin
-    # Fourth migrated family — see wrappers/tcgen05.jl for the mapping.
-    # The notation surface keeps raw UInt32 taddr/SMEM-offset operands;
-    # bodies must route to the intrinsic literals. mx mma kinds stay
-    # asm-tier (block-scale operands are not in the notation surface).
+@testset "tcgen05 wrapper (mixed-route lowering)" begin
+    # See wrappers/tcgen05.jl for the mapping. The notation surface keeps
+    # raw UInt32 taddr/SMEM-offset operands. shift, ld/st, and dense mma
+    # stay tier-2 intrinsic; the management verbs (alloc/dealloc/
+    # relinquish_alloc_permit/commit/cp) are single-route asm since the
+    # demotion. mx mma kinds stay asm-tier (block-scale operands are not
+    # in the notation surface).
     cg1 = Symbol("cta_group::1")
     cg2 = Symbol("cta_group::2")
 
     for (mods, argts, intr) in (
-            ((:shift, cg1, :down), (UInt32,), "tcgen05.shift.down.cg1"),
-            ((:dealloc, cg2, :sync, :aligned, :b32), (UInt32, UInt32),
-             "tcgen05.dealloc.cg2"),
-            ((:cp, cg1, Symbol("128x128b")), (UInt32, UInt64),
-             "tcgen05.cp.128x128b.cg1"),
-            ((:alloc, cg1, :sync, :aligned, Symbol("shared::cta"), :b32),
-             (UInt32, UInt32), "tcgen05.alloc.shared.cg1"),
-            ((:relinquish_alloc_permit, cg1, :sync, :aligned), (),
-             "tcgen05.relinq.alloc.permit.cg1"),
-            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
-              Symbol("shared::cta"), :b64), (UInt32,),
-             "tcgen05.commit.shared.cg1"),
-            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
-              Symbol("multicast::cluster"), Symbol("shared::cluster"), :b64),
-             (UInt32, UInt16), "tcgen05.commit.mc.shared.cg1"))
+            ((:shift, cg1, :down), (UInt32,), "tcgen05.shift.down.cg1"),)
         @test which(Operation{:tcgen05, mods}(), argts).module == PTX
         ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), argts))
         @test rt === Nothing
         @test occursin(intr, string(ci))
+    end
+
+    # Management verbs: single-route asm — the pins spell the reviewed
+    # render (commit keeps the multicast-first modifier order but ALWAYS
+    # renders `.shared::cluster` — §9.7.18.12.1 admits no ::cta spelling,
+    # the ::cta-modified wrapper is an address-species surface; alloc's
+    # generic-address form omits `.shared::cta`), no intrinsic call, full
+    # clobber.
+    for (mods, argts, asm) in (
+            ((:dealloc, cg2, :sync, :aligned, :b32), (UInt32, UInt32),
+             "tcgen05.dealloc.cta_group::2.sync.aligned.b32 "),
+            ((:cp, cg1, Symbol("128x128b")), (UInt32, UInt64),
+             "tcgen05.cp.cta_group::1.128x128b ["),
+            ((:cp, cg2, Symbol("64x128b"), Symbol("warpx2::02_13"),
+              :b8x16, :b6x16_p32), (UInt32, UInt64),
+             "tcgen05.cp.cta_group::2.64x128b.warpx2::02_13.b8x16.b6x16_p32 ["),
+            ((:alloc, cg1, :sync, :aligned, :b32),
+             (Core.LLVMPtr{UInt32, PTX.AS.Shared}, UInt32),
+             "tcgen05.alloc.cta_group::1.sync.aligned.b32 ["),
+            ((:alloc, cg1, :sync, :aligned, Symbol("shared::cta"), :b32),
+             (UInt32, UInt32),
+             "tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32 ["),
+            ((:relinquish_alloc_permit, cg1, :sync, :aligned), (),
+             "tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned;"),
+            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
+              Symbol("shared::cta"), :b64), (UInt32,),
+             "tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64 ["),
+            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
+              Symbol("shared::cluster"), :b64), (UInt32,),
+             "tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64 ["),
+            ((:commit, cg1, Symbol("mbarrier::arrive::one"),
+              Symbol("multicast::cluster"), Symbol("shared::cluster"), :b64),
+             (UInt32, UInt16),
+             "tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64 ["))
+        @test which(Operation{:tcgen05, mods}(), argts).module == PTX
+        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), argts))
+        code = string(ci)
+        @test rt === Nothing
+        @test occursin(asm, code)
+        @test occursin("~{memory}", code)
+        @test !occursin("llvm.nvvm", code)
     end
 
     # The waits were demoted to asm (free: post-#109 their intrinsic

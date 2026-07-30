@@ -31,11 +31,17 @@ _tma_im2col_prefetch_mods(rank; hint = false) =
             op = Operation{:cp, mods}()
             @test which(op, args).module === PTX
 
+            # Single-route asm since the demotion (see wrappers/tma.jl):
+            # every form is convergent inline asm with the full clobber.
             info = lowering(op, args)
-            @test info.tier === :intrinsic
+            @test info.tier === :asm
             @test info.rettype === Nothing
-            @test info.intrinsics == [intrinsic]
+            @test isempty(info.intrinsics)
 
+            # The unwrapped intrinsic records stay in the pinned registry;
+            # the attribute review below is what the demotion walked away
+            # from (convergent + a readonly descriptor operand — no
+            # stronger promise than the asm route).
             record = PTX.NVVM.intrinsic(intrinsic)
             @test record.ret == ()
             @test :convergent in record.props

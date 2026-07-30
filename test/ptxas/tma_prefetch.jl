@@ -34,9 +34,11 @@ function _tma_prefetch_callsite_attrs(llvm::AbstractString)
         m = match(r"^attributes #([0-9]+) = \{([^}]*)\}", strip(line))
         m === nothing || (groups[m.captures[1]] = m.captures[2])
     end
+    # Single-route asm since the demotion: the call sites are inline asm
+    # (convergent_asm_ir), not llvm.nvvm.* intrinsic calls.
     calls = [String(line) for line in eachline(IOBuffer(llvm))
-             if occursin(" call ", line) &&
-                occursin("llvm.nvvm.cp.async.bulk.tensor.prefetch.tile", line)]
+             if occursin(" asm ", line) &&
+                occursin("cp.async.bulk.prefetch.tensor", line)]
     attrs = String[]
     for call in calls
         m = match(r" #([0-9]+)(?:,|$)", strip(call))
@@ -68,9 +70,10 @@ end
             line), ranked)
     end
 
-    # The optimized middle end must retain every weak-memory hint call. NVVM
-    # marks these intrinsic records convergent even though PTX imposes no
-    # warp-collective participation rule; keep that conservative boundary.
+    # The optimized middle end must retain every weak-memory hint call.
+    # The asm route keeps the convergent nomerge boundary the retired
+    # intrinsic records imposed, even though PTX imposes no
+    # warp-collective participation rule.
     llvm = emit_llvm(_tma_tile_prefetch_surface!, types; cap = v"9.0")
     calls, attrs = _tma_prefetch_callsite_attrs(llvm)
     @test length(calls) == 10

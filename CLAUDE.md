@@ -30,9 +30,12 @@ structure is documented in `docs/src/internals.md`; this file is about how to
 - The `gpu/hopper` (cc==9.0) and `gpu/blackwell` (cc==10|cc==11) runtime
   sections run in **no CI lane** — they are exercised in manual cloud
   sessions (H100, B200/B300). Their ptxas legs do run everywhere. Don't
-  interpret green CI as runtime evidence for those tiers: `EVIDENCE.toml`
+  interpret green CI as runtime evidence for those tiers: `test/EVIDENCE.toml`
   records when each tier last executed on hardware and on which tree (the
-  test manifest prints it), and a hardware session ends by updating it.
+  test manifest prints it, plus what drifted since). A green suite run on
+  such a device prints the ledger entry ready to paste; a session ends by
+  copying it into the file in the session-close PR — narrative goes in the
+  PR body only.
 
 ## The form registry is a review boundary
 
@@ -58,6 +61,17 @@ structure is documented in `docs/src/internals.md`; this file is about how to
 - Test-support namespace is shared across all files in a worker: annotating
   a harness argument as `::Function` would rebind the name against
   `PTX.IR.Function` importers (see the comment on `compile_touch_sweep`).
+
+## Comment discipline
+
+- A comment states a present-tense constraint of the code. Provenance —
+  dates, PR/issue numbers, plan or session names — goes in commit messages
+  and PR bodies, where git keeps it attached to the change; `git blame`
+  answers "when and why", and a comment that answers it instead goes stale
+  silently. Same rule for prose fields in data files (SURFACE notes): no
+  claims a test can't falsify.
+- Deleted evidence scripts (spikes/) are cited by bare name only; the
+  archaeology pointer lives in docs/src/internals.md "Evidence archaeology".
 
 ## Git and PR conventions
 

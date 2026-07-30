@@ -204,8 +204,7 @@ end
     @test :convergent in mb.props
     @test !overloaded(mb)
 
-    # ldmatrix: verified on hardware by spikes/aggregate_return.jl (removed
-    # in ccdfb8a; `git show ccdfb8a~1:spikes/aggregate_return.jl`);
+    # ldmatrix: verified on hardware by spikes/aggregate_return.jl;
     # overloaded on the pointer address space → mangled callsite name
     ld = intrinsic("llvm.nvvm.ldmatrix.sync.aligned.m8n8.x4.b16")
     @test ld.ret == (:i32, :i32, :i32, :i32)

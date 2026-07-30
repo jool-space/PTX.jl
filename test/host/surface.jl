@@ -1,5 +1,5 @@
-# SURFACE.toml enforcement — keeps the instruction-surface inventory honest
-# (issue #55). The inventory is the reviewed artifact; this file asserts it
+# SURFACE.toml enforcement — keeps the instruction-surface inventory honest.
+# The inventory is the reviewed artifact; this file asserts it
 # against the live code in both directions so a FORMS entry, a typed-wrapper
 # rule, or a wrapper family can never appear or disappear without the
 # inventory (and therefore the generated coverage page) noticing.
@@ -11,7 +11,7 @@
 
 using TOML
 
-const SURFACE_PATH = joinpath(pkgdir(PTX), "SURFACE.toml")
+const SURFACE_PATH = joinpath(pkgdir(PTX), "docs", "SURFACE.toml")
 const SURFACE_STATUSES = ("strict", "generic", "raw-only", "out-of-scope")
 
 @testset "SURFACE.toml: the instruction-surface inventory" begin

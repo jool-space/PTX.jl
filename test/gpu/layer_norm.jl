@@ -40,6 +40,7 @@ function _layer_norm_v4_kernel!(
     num_warps = block ÷ Int(LN_WARP_SIZE)
     v4_iters  = N ÷ (block * 4)
     @assert v4_iters * block * 4 == N
+    @assert v4_iters <= 16    # register-tile unroll bound (64 f32 per thread)
 
     # 2 partials per warp: [warp_id, 0] = Σx, [warp_id, 1] = Σx².
     partials = CuStaticSharedArray(Float32, (16, 2))   # max 16 warps (block ≤ 512)
@@ -56,23 +57,22 @@ function _layer_norm_v4_kernel!(
     warp_id = tid >> UInt32(5)
     elem_base = Int(tid) * 4
 
-    # --- pass 1: load + accumulate Σx, Σx² ---------------------------
+    # --- pass 1: load + accumulate Σx, Σx²; x4_j stays register-resident
     sum_x  = 0f0
     sum_x2 = 0f0
-    j = 0
-    while j < v4_iters
-        idx = elem_base + j * (block * 4)
-        off = idx * 4
-        x4 = ptx"ld.global.v4.f32"(px + off)
-        sum_x  = ptx"add.f32"(sum_x, x4[1])
-        sum_x  = ptx"add.f32"(sum_x, x4[2])
-        sum_x  = ptx"add.f32"(sum_x, x4[3])
-        sum_x  = ptx"add.f32"(sum_x, x4[4])
-        sum_x2 = ptx"fma.rn.f32"(x4[1], x4[1], sum_x2)
-        sum_x2 = ptx"fma.rn.f32"(x4[2], x4[2], sum_x2)
-        sum_x2 = ptx"fma.rn.f32"(x4[3], x4[3], sum_x2)
-        sum_x2 = ptx"fma.rn.f32"(x4[4], x4[4], sum_x2)
-        j += 1
+    Base.@nexprs 16 j -> begin
+        if j <= v4_iters
+            off_j = (elem_base + (j - 1) * (block * 4)) * 4
+            x4_j = ptx"ld.global.v4.f32"(px + off_j)
+            sum_x  = ptx"add.f32"(sum_x, x4_j[1])
+            sum_x  = ptx"add.f32"(sum_x, x4_j[2])
+            sum_x  = ptx"add.f32"(sum_x, x4_j[3])
+            sum_x  = ptx"add.f32"(sum_x, x4_j[4])
+            sum_x2 = ptx"fma.rn.f32"(x4_j[1], x4_j[1], sum_x2)
+            sum_x2 = ptx"fma.rn.f32"(x4_j[2], x4_j[2], sum_x2)
+            sum_x2 = ptx"fma.rn.f32"(x4_j[3], x4_j[3], sum_x2)
+            sum_x2 = ptx"fma.rn.f32"(x4_j[4], x4_j[4], sum_x2)
+        end
     end
 
     sum_x  = _ln_warp_reduce_sum(sum_x)
@@ -107,28 +107,25 @@ function _layer_norm_v4_kernel!(
     var     = ptx"add.f32"(ptx"sub.f32"(ex2, mean_sq), Float32(eps))
     rstd    = ptx"rsqrt.approx.f32"(var)
 
-    # --- pass 2: y = (x - mean) * rstd * w + b -----------------------
-    j = 0
-    while j < v4_iters
-        idx = elem_base + j * (block * 4)
-        off = idx * 4
-        x4 = ptx"ld.global.v4.f32"(px + off)
-        w4 = ptx"ld.global.v4.f32"(pw + off)
-        b4 = ptx"ld.global.v4.f32"(pb + off)
-        d1 = ptx"sub.f32"(x4[1], mean)
-        d2 = ptx"sub.f32"(x4[2], mean)
-        d3 = ptx"sub.f32"(x4[3], mean)
-        d4 = ptx"sub.f32"(x4[4], mean)
-        n1 = ptx"mul.f32"(d1, rstd)
-        n2 = ptx"mul.f32"(d2, rstd)
-        n3 = ptx"mul.f32"(d3, rstd)
-        n4 = ptx"mul.f32"(d4, rstd)
-        y1 = ptx"fma.rn.f32"(n1, w4[1], b4[1])
-        y2 = ptx"fma.rn.f32"(n2, w4[2], b4[2])
-        y3 = ptx"fma.rn.f32"(n3, w4[3], b4[3])
-        y4 = ptx"fma.rn.f32"(n4, w4[4], b4[4])
-        ptx"st.global.v4.f32"(py + off, (y1, y2, y3, y4))
-        j += 1
+    # --- pass 2: y = (x - mean) * rstd * w + b on register-resident x4_j
+    Base.@nexprs 16 j -> begin
+        if j <= v4_iters
+            w4 = ptx"ld.global.v4.f32"(pw + off_j)
+            b4 = ptx"ld.global.v4.f32"(pb + off_j)
+            d1 = ptx"sub.f32"(x4_j[1], mean)
+            d2 = ptx"sub.f32"(x4_j[2], mean)
+            d3 = ptx"sub.f32"(x4_j[3], mean)
+            d4 = ptx"sub.f32"(x4_j[4], mean)
+            n1 = ptx"mul.f32"(d1, rstd)
+            n2 = ptx"mul.f32"(d2, rstd)
+            n3 = ptx"mul.f32"(d3, rstd)
+            n4 = ptx"mul.f32"(d4, rstd)
+            y1 = ptx"fma.rn.f32"(n1, w4[1], b4[1])
+            y2 = ptx"fma.rn.f32"(n2, w4[2], b4[2])
+            y3 = ptx"fma.rn.f32"(n3, w4[3], b4[3])
+            y4 = ptx"fma.rn.f32"(n4, w4[4], b4[4])
+            ptx"st.global.v4.f32"(py + off_j, (y1, y2, y3, y4))
+        end
     end
     return nothing
 end

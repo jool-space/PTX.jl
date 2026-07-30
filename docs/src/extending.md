@@ -48,8 +48,8 @@ Every recipe ends the same way: run the affected suites with
 `julia --project=test test/runtests.jl <names...>` and update the
 test-side oracles (see [Count pins and oracles](#count-pins-and-oracles)).
 
-Whatever the recipe, adding coverage also means updating `SURFACE.toml`
-(repo root) — the machine-checked inventory that assigns every ISA
+Whatever the recipe, adding coverage also means updating
+`docs/SURFACE.toml` — the machine-checked inventory that assigns every ISA
 §9.7.x family an explicit disposition (`strict`/`generic`/`raw-only`/
 `out-of-scope`). A new `FORMS` opcode, typed-wrapper-only rule, or
 wrapper family that the inventory doesn't own fails

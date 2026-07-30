@@ -88,9 +88,11 @@ end
         # Mask width is pinned by cta_group.
         (_t5_sp_mods(1, :f16),
          (UInt32, UInt64, UInt64, UInt32, UInt32, NTuple{8, UInt32}, Bool)),
-        # sp block-scale (MX) spellings are deliberately unimplemented.
+        # sp block-scale (MX) is a wrapped asm family (matrix_api_safety
+        # pins its schema); a kind × scale pair outside Table 60 stays a
+        # grammar miss even with the correct sp arity.
         ((:mma, :sp, Symbol("cta_group::1"), Symbol("kind::mxf8f6f4"),
-          :block_scale, Symbol("scale_vec::1X")),
+          :block_scale, Symbol("scale_vec::2X")),
          (UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, UInt32, Bool)),
     )
 

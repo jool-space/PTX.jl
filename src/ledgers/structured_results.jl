@@ -154,7 +154,7 @@ const STRUCTURED_RESULT_SCHEMAS = let schemas = StructuredResultSchema[]
 
     # PTX 9.3 §9.7.3.1. `testp.op.type p, a;` — the modifier tail names the
     # SOURCE type; the destination is always one .pred (the raw tier's
-    # terminal-type inference would misread it, issue #94). CUDA 13 ptxas
+    # terminal-type inference would misread it). CUDA 13 ptxas
     # rejects the `_` sink ("Result discard mode is not allowed"), so no
     # position is sinkable. Introduced PTX ISA 2.0, sm_20.
     for dtype in (:f32, :f64),

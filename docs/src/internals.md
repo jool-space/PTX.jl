@@ -67,6 +67,16 @@ site carries its ceiling (`ceiled(nvvm"...", ptx"...")`,
 unceiled plumbing, and `test/host/effect_ceiling.jl` keeps it out of
 `src/`.
 
+One asm-tier honesty note: the `:observable` effects class (never
+deletable, touches no tracked memory) currently *renders* with the same
+conservative barrier as `:clobbers` — LLVM treats `sideeffect` inline asm
+without call-site `memory(...)` attributes as unknown memory, so the
+class documents reviewed semantics without yet granting the optimizer
+freedom. Attaching call-site memory attributes through the
+handwritten-IR path is the known lever; measurement showed motion
+windows in real pipelined kernels are bounded by their barrier waits
+regardless, so the lever stays unpulled until a profile demands it.
+
 ```@autodocs
 Modules = [PTX.NVVM]
 ```
@@ -95,3 +105,18 @@ narrow semantic boundary before emitting any Julia source.
 ```@docs
 PTX.Codegen.validate_transpilable
 ```
+
+## Evidence archaeology
+
+One-off validation scripts lived in `spikes/` until their findings were
+baked into code, tests, and goldens; the directory was then deleted.
+Comments citing a `spikes/*.jl` script refer to these — view any of them
+with `git show ccdfb8a~1:spikes/`. The load-bearing ones:
+
+- `spikes/convergence.jl` — reproduces the divergent-duplication
+  miscompile class that motivates `convergent` on collective ops.
+- `spikes/raw_asm_attrs.jl` — proves a `convergent` attribute group on an
+  inline-asm call site parses through `Base.llvmcall` and survives the
+  optimized module (the `convergent_asm_ir` mechanism).
+- `spikes/aggregate_return.jl` — hardware validation of the ldmatrix
+  aggregate-return repack and mangled overloaded-callsite names.

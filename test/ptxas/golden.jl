@@ -174,9 +174,12 @@ end
 
 # --- TMA (cp.async.bulk.tensor): tile loads/stores ---------------------------
 # Rank spread (1d/2d/5d) plus the qualifier axes: multicast::cluster, the
-# shared::cta destination, and (at sm_100a) cta_group::2. The shared::cta ×
-# cta_group::2 combination stays asm-tier (no NVVM intrinsic carries both)
-# and is pinned in the sm_100a golden to prove the migration left it alone.
+# shared::cta destination, and (at sm_100a) cta_group::2. Single-route asm
+# since the demotion (see wrappers/tma.jl): the goldens pin the WYSIWYG
+# renders — cluster cta_group::2 spells the qualifier after `.<N>d` like
+# the pre-existing shared::cta × cta_group::2 residue (the retired
+# intrinsic route rendered it after the completion mechanism) — and the
+# register materialization of static-SMEM operands the asm route implies.
 
 function _golden_tma_sm90!(tmap::Core.LLVMPtr{UInt8, PTX.AS.Const}, c::Int32)
     buf = CuStaticSharedArray(UInt16, 64)
@@ -232,6 +235,11 @@ end
 # relinquish, cp, shift, ld/st (scalar and multi-register shapes), waits,
 # commit (cta + cluster spellings, multicast), dense mma (f16 + tf32,
 # both cg1), and one MX kind with its complete block-scale operand schema.
+# The management verbs are single-route asm (see wrappers/tcgen05.jl): the
+# golden pins their reviewed renders (commit always spells
+# `.shared::cluster` — §9.7.18.12.1 admits no ::cta form — and keeps the
+# multicast-first order) and the SMEM-offset operand materialization the
+# asm route implies.
 
 function _golden_tcgen05_sm100a!(out::CuDeviceVector{UInt32, 1},
                                  s_desc::UInt64, idesc::UInt32)

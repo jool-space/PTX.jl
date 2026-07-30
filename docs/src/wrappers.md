@@ -193,6 +193,10 @@ bit-packing helpers for both:
 | `wgmma_descriptor` | Hopper `wgmma.mma_async` SMEM operand encoding (14-bit field windows + swizzle + base offset) |
 | `tcgen05_descriptor` | Blackwell `tcgen05.mma` SMEM operand encoding (3-bit layout vs wgmma's 2-bit; legal swizzle values only). The ISA-fixed `0b001` field is inserted internally; `lbo_mode=1` selects the restricted `sm_103a` absolute leading-address mode. |
 | `tcgen05_instr_desc_f16bf16_f32` | Blackwell `tcgen05.mma` 32-bit instruction descriptor for F16/BF16/TF32 → F32 paths. The integer-only saturation bit and reserved bits are fixed at zero. Mirrors CUTLASS/CuTe's `UMMA::make_instr_desc`. |
+| `tcgen05_instr_desc_i8` | `.kind::i8` instruction descriptor (u8/s8 → s32). Negation is ISA-unsupported for the integer kind, so those bits are not caller-controlled. |
+| `tcgen05_instr_desc_f8f6f4` | `.kind::f8f6f4` instruction descriptor (independent e4m3/e5m2/e2m3/e3m2/e2m1 A/B types, f16 or f32 destination). |
+| `tcgen05_instr_desc_mxf8f6f4` | `.kind::mxf8f6f4` block-scale instruction descriptor (scale-factor data IDs; scale matrix type is the ISA-fixed UE8M0). |
+| `tcgen05_instr_desc_mxf4`, `tcgen05_instr_desc_mxf4nvf4` | `.kind::mxf4` / `.kind::mxf4nvf4` block-scale instruction descriptors (E2M1 elements; transpose ISA-unsupported; nvf4 additionally chooses the scale matrix type). |
 | `smem_addr_u32` | Convert a `Core.LLVMPtr{T, AS.Shared}` to its 32-bit in-CTA SMEM offset (used as the `smem_addr_u32` argument to the descriptor builders). |
 | `step_desc` | Advance a wgmma SMEM-operand descriptor's start address by a byte offset — walking a SMEM ring buffer or stepping K within a tile without re-packing. |
 
@@ -202,9 +206,13 @@ as `PTX.wgmma_descriptor`, `PTX.tcgen05_descriptor`, etc.
 The `tcgen05` builders deliberately expose semantic fields rather than every
 bit in the packed values. In particular, `tcgen05_descriptor` has no `version`
 keyword: PTX 9.3 §9.7.17.4.1 defines bits 46–48 as the fixed constant
-`0b001`, not a version selector. Likewise,
-`tcgen05_instr_desc_f16bf16_f32` has no `saturate` keyword because Table 45
-defines that bit only for integer MMA kinds. Matrix addresses and byte offsets
+`0b001`, not a version selector. Likewise, only `tcgen05_instr_desc_i8`
+has a `saturate` keyword (the bit is integer-only), the i8 builder has no
+negate keywords and the mxf4 builders no transpose keywords (both
+ISA-unsupported for those kinds), and every architecture-gated encoding
+(the `sm_107f`-family K-dimension and scale-layout bits) is fixed at zero
+rather than exposed. An illegal descriptor is unrepresentable through the
+builders, not merely rejected. Matrix addresses and byte offsets
 must be 16-byte aligned and fit the 18-bit descriptor input window; invalid
 swizzle encodings and values that would spill into reserved fields fail with
 `ArgumentError` instead of being truncated.
@@ -223,6 +231,11 @@ PTX.smem_addr_u32
 PTX.step_desc
 PTX.tcgen05_descriptor
 PTX.tcgen05_instr_desc_f16bf16_f32
+PTX.tcgen05_instr_desc_i8
+PTX.tcgen05_instr_desc_f8f6f4
+PTX.tcgen05_instr_desc_mxf8f6f4
+PTX.tcgen05_instr_desc_mxf4
+PTX.tcgen05_instr_desc_mxf4nvf4
 ```
 
 ## GMMA layout helpers

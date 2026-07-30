@@ -1,365 +1,161 @@
-# `cp.async.bulk.tensor.<N>d.*` — TMA tile copies (Hopper sm_90+), third
-# family migrated to tier-2 intrinsic lowering.
-# The notation surface is unchanged; the `[base, {coords}]` operand encoding,
-# qualifier rendering, and per-arity constraint strings the asm tier built by
-# hand are now ISel's job.
+# `cp.async.bulk.tensor.<N>d.*` — TMA tile copies (Hopper sm_90+) and the
+# tensor prefetch grammars, single-route convergent inline asm.
+# The notation surface is unchanged: exact typed wrappers own the
+# `[base, {coords}]` operand encoding, qualifier rendering, and per-arity
+# constraint strings.
 #
-# Intrinsic mapping:
-#   - `shared::cluster` loads (plain / multicast / cta_group::2) →
-#     `g2s.tile.<N>d`. The intrinsic's destination is `ptr addrspace(7)`;
-#     the wrapper keeps the package's AS.Shared surface and retypes the raw
-#     value (`reinterpret_addrspace`) — the ISA defines `shared::cta`
-#     addresses as valid `shared::cluster` addresses, which is exactly what
-#     the asm tier's `r` constraint relied on.
-#   - `shared::cta` loads → `g2s.cta.tile.<N>d`. ISel requires PTX 8.6 —
-#     the same floor ptxas already imposed on the asm spelling.
-#   - stores → `s2g.tile.<N>d` (selects the identical
-#     `...global.shared::cta.tile.bulk_group` instruction at sm_90/ptx80).
-#   - The tensormap operand is `ptr` (generic) in all of them; the package's
-#     TMADescriptorPtr is a *global* address typed AS.Const by convention,
-#     so it is retyped raw, never addrspacecast (see reinterpret_addrspace).
+# The family previously routed through the llvm.nvvm.cp.async.bulk.tensor.*
+# intrinsics (tier 2). That split was retired deliberately:
+#   - every form is an observable async memory effect — there is no
+#     CSE/LICM for intrinsic attributes to unlock, so the tier-2 route
+#     bought bookkeeping (per-intrinsic selection probes, immarg
+#     flag-pair plumbing for optional qualifiers, addrspace(7)/generic
+#     retypes) and no optimization. The argmem-widen A/B on B200 (branch
+#     agent/argmem-widen-b200) proved the point from the other direction:
+#     widening the `llvm.nvvm.cp.async.bulk` prefix's memory precision —
+#     fn-level props AND per-arg readonly/writeonly — to the asm route's
+#     conservative clobber left the FA/GEMM/b128 instruction streams
+#     byte-identical at sm_100a;
+#   - the `shared::cta` × `cta_group::2` residue was already asm (no NVVM
+#     intrinsic carries both qualifiers at 22.1.7) — one route instead of
+#     two.
+# Emitted-PTX deltas vs the intrinsic route, reviewed at demotion:
+#   - the notation is WYSIWYG again in the one spot it wasn't: the
+#     cluster-destination `cta_group::2` forms render the qualifier after
+#     `.<N>d` (pyptx order, matching the pre-existing asm residue), where
+#     ISel rendered the §9.7.10.28.5.3 syntax-block order
+#     `.mbarrier::complete_tx::bytes{.multicast::cluster}.cta_group::2`.
+#     ptxas accepts both spellings (probed standalone at sm_100a, ptxas
+#     13.3; pinned by the ptxas legs in test/ptxas/blackwell.jl);
+#   - static-SMEM operands materialize through mov/cvt into a register
+#     instead of folding into the operand as a symbol (ptxas folds these
+#     in SASS), exactly as the residue always rendered.
 #
-# Optional-operand scheme: the intrinsics carry every optional qualifier as
-# an (operand, i1 immarg flag) pair — multicast mask + flag, cache hint +
-# flag — plus an i32 `cta_group` immarg (0 = none, 1/2 = `.cta_group::<n>`,
-# sm_100a). A false flag drops the qualifier and ignores the operand. Tile
-# prefetch exposes cache hints explicitly; load/store forms still pass
-# (UInt64(0), Val(false)).
+# Operand/constraint schema (PTX 9.4 §9.7.10.28.5.3 and §9.7.10.28.5.5):
+#   - shared-window addresses (dst, mbar, src) are `r` (32-bit window
+#     offsets; same encoding the residue and pyptx always used);
+#   - the tensor-map operand is a 64-bit generic address, `l`. The
+#     package's TMADescriptorPtr is a *global* address typed AS.Const by
+#     convention, so its raw value is already generic — the asm boundary
+#     passes it as-is, never through cvta (see reinterpret_addrspace for
+#     why a translation would corrupt it);
+#   - tensor coordinates are `.s32` (`r`), the multicast CTA mask is the
+#     default-width 16-bit `h` carrier (the ::16b/::32b sub-qualifiers are
+#     not in this surface), im2col offsets are 16-bit `h`, and the
+#     `.L2::cache_hint` policy is a paired 64-bit `l` operand.
 #
-# Notation is non-WYSIWYG in one spot: ISel renders `.cta_group::2` after
-# `.mbarrier::complete_tx::bytes`, where the asm tier (pyptx order) placed
-# it after `.<N>d`. ptxas accepts both; the goldens pin the new spelling.
-#
-# Residue: `shared::cta` × `cta_group::2` stays on the asm tier — no NVVM
-# intrinsic carries both (`g2s.cta` has no cta_group operand, `g2s` renders
-# `shared::cluster`).
-#
-# Methods are written out literally (no name-building loop) so every
-# intrinsic this file stands on is greppable — test/host/conformance.jl
-# scans for `nvvm"..."` literals and requires a probe for each.
+# Every form carries the `convergent nomerge` + `~{memory}` call-site
+# contract via convergent_asm_ir — the same conservative boundary the
+# NVVM intrinsic records imposed (they are all marked convergent even
+# though PTX imposes no collective participation rule; see the prefetch
+# note below).
 
-# The two raw retypes at the wrapper boundary (see address_space.jl).
-@inline _tma_tmap(p::Core.LLVMPtr) = reinterpret_addrspace(Val(AS.Generic), p)
-@inline _tma_cluster(p::Core.LLVMPtr) =
-    reinterpret_addrspace(Val(AS.SharedCluster), p)
+# Pointee-erasing retype at the asm boundary: the wrappers stay generic
+# over the element type, but `Base.llvmcall` requires the exact declared
+# argument types, and `_asm_lltype` spells every LLVMPtr as an i8 pointer
+# anyway. Same raw ptrtoint/inttoptr bit-preservation contract as
+# reinterpret_addrspace — the address space is untouched.
+@generated function _tma_addr(p::Core.LLVMPtr{T, A}) where {T, A}
+    spell = A == 0 ? "i8*" : "i8 addrspace($A)*"
+    ir = """
+        %i = ptrtoint $spell %0 to i64
+        %q = inttoptr i64 %i to $spell
+        ret $spell %q"""
+    quote
+        Base.@inline
+        Base.llvmcall($ir, Core.LLVMPtr{UInt8, $A},
+                      Tuple{Core.LLVMPtr{$T, $A}}, p)
+    end
+end
 
 # --- Loads: shared::cluster destination --------------------------------------
-
-@inline function optype"cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.1d",
-           ptx"cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1),
-        UInt16(0), UInt64(0), Val(false), Val(false), Val(0))
-end
-
-@inline function optype"cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.2d",
-           ptx"cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1), Int32(c2),
-        UInt16(0), UInt64(0), Val(false), Val(false), Val(0))
-end
-
-@inline function optype"cp.async.bulk.tensor.3d.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.3d",
-           ptx"cp.async.bulk.tensor.3d.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3),
-        UInt16(0), UInt64(0), Val(false), Val(false), Val(0))
-end
-
-@inline function optype"cp.async.bulk.tensor.4d.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer, c4::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.4d",
-           ptx"cp.async.bulk.tensor.4d.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3), Int32(c4),
-        UInt16(0), UInt64(0), Val(false), Val(false), Val(0))
-end
-
-@inline function optype"cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer, c4::Integer, c5::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.5d",
-           ptx"cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3), Int32(c4), Int32(c5),
-        UInt16(0), UInt64(0), Val(false), Val(false), Val(0))
-end
-
-# --- Loads: shared::cluster + multicast::cluster ------------------------------
-# One global read lands in every CTA whose bit is set in the u16 mask.
-
-@inline function optype"cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, mbar::Core.LLVMPtr{U, AS.Shared},
-        mask::Integer) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.1d",
-           ptx"cp.async.bulk.tensor.1d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1),
-        UInt16(mask), UInt64(0), Val(true), Val(false), Val(0))
-end
-
-@inline function optype"cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, mbar::Core.LLVMPtr{U, AS.Shared},
-        mask::Integer) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.2d",
-           ptx"cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1), Int32(c2),
-        UInt16(mask), UInt64(0), Val(true), Val(false), Val(0))
-end
-
-@inline function optype"cp.async.bulk.tensor.3d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}, mask::Integer) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.3d",
-           ptx"cp.async.bulk.tensor.3d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3),
-        UInt16(mask), UInt64(0), Val(true), Val(false), Val(0))
-end
-
-@inline function optype"cp.async.bulk.tensor.4d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer, c4::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}, mask::Integer) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.4d",
-           ptx"cp.async.bulk.tensor.4d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3), Int32(c4),
-        UInt16(mask), UInt64(0), Val(true), Val(false), Val(0))
-end
-
-@inline function optype"cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer, c4::Integer, c5::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}, mask::Integer) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.5d",
-           ptx"cp.async.bulk.tensor.5d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3), Int32(c4), Int32(c5),
-        UInt16(mask), UInt64(0), Val(true), Val(false), Val(0))
-end
-
-# --- Loads: shared::cluster + cta_group::2 (Blackwell 2-SM, sm_100a) ----------
-# Both cluster CTAs issue the same instruction; hardware splits the read.
-
-@inline function optype"cp.async.bulk.tensor.1d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.1d",
-           ptx"cp.async.bulk.tensor.1d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1),
-        UInt16(0), UInt64(0), Val(false), Val(false), Val(2))
-end
-
-@inline function optype"cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.2d",
-           ptx"cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1), Int32(c2),
-        UInt16(0), UInt64(0), Val(false), Val(false), Val(2))
-end
-
-@inline function optype"cp.async.bulk.tensor.3d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.3d",
-           ptx"cp.async.bulk.tensor.3d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3),
-        UInt16(0), UInt64(0), Val(false), Val(false), Val(2))
-end
-
-@inline function optype"cp.async.bulk.tensor.4d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer, c4::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.4d",
-           ptx"cp.async.bulk.tensor.4d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3), Int32(c4),
-        UInt16(0), UInt64(0), Val(false), Val(false), Val(2))
-end
-
-@inline function optype"cp.async.bulk.tensor.5d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer, c4::Integer, c5::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.5d",
-           ptx"cp.async.bulk.tensor.5d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3), Int32(c4), Int32(c5),
-        UInt16(0), UInt64(0), Val(false), Val(false), Val(2))
-end
-
-# --- Loads: shared::cluster + cta_group::2 + multicast::cluster ---------------
-
-@inline function optype"cp.async.bulk.tensor.1d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, mbar::Core.LLVMPtr{U, AS.Shared},
-        mask::Integer) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.1d",
-           ptx"cp.async.bulk.tensor.1d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1),
-        UInt16(mask), UInt64(0), Val(true), Val(false), Val(2))
-end
-
-@inline function optype"cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, mbar::Core.LLVMPtr{U, AS.Shared},
-        mask::Integer) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.2d",
-           ptx"cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap), Int32(c1), Int32(c2),
-        UInt16(mask), UInt64(0), Val(true), Val(false), Val(2))
-end
-
-@inline function optype"cp.async.bulk.tensor.3d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}, mask::Integer) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.3d",
-           ptx"cp.async.bulk.tensor.3d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3),
-        UInt16(mask), UInt64(0), Val(true), Val(false), Val(2))
-end
-
-@inline function optype"cp.async.bulk.tensor.4d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer, c4::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}, mask::Integer) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.4d",
-           ptx"cp.async.bulk.tensor.4d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3), Int32(c4),
-        UInt16(mask), UInt64(0), Val(true), Val(false), Val(2))
-end
-
-@inline function optype"cp.async.bulk.tensor.5d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer, c4::Integer, c5::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}, mask::Integer) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.tile.5d",
-           ptx"cp.async.bulk.tensor.5d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster")(
-        _tma_cluster(dst), mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3), Int32(c4), Int32(c5),
-        UInt16(mask), UInt64(0), Val(true), Val(false), Val(2))
+# Plain, multicast::cluster (one global read lands in every CTA whose bit
+# is set in the b16 mask), cta_group::2 (Blackwell 2-SM, sm_100a; both
+# cluster CTAs issue the same instruction and hardware splits the read),
+# and their combination. The ISA defines `shared::cta` addresses as valid
+# `shared::cluster` addresses, which is exactly what the `r` constraint
+# relies on — the same convention as the asm residue below.
+for n in 1:5, cg2 in (false, true), mc in (false, true)
+    nd = Symbol("$(n)d")
+    cs = [Symbol("c", i) for i in 1:n]
+    mods = (:async, :bulk, :tensor, nd,
+            (cg2 ? (Symbol("cta_group::2"),) : ())...,
+            Symbol("shared::cluster"), :global, :tile,
+            Symbol("mbarrier::complete_tx::bytes"),
+            (mc ? (Symbol("multicast::cluster"),) : ())...)
+    spell = "cp." * join(String.(mods), ".")
+    coordops = join(("\$$(i + 1)" for i in 1:n), ", ")
+    asm = "$spell [\$0], [\$1, {$coordops}], [\$$(n + 2)]" *
+          (mc ? ", \$$(n + 3);" : ";")
+    constraints = join(["r"; "l"; fill("r", n); "r";
+                        (mc ? ["h"] : []); "~{memory}"], ",")
+    argts = (Core.LLVMPtr{UInt8, AS.Shared}, Core.LLVMPtr{UInt8, AS.Const},
+             ntuple(_ -> Int32, n)..., Core.LLVMPtr{UInt8, AS.Shared},
+             (mc ? (UInt16,) : ())...)
+    ir = convergent_asm_ir(asm, constraints, Nothing, argts)
+    coordsig = [:($c::Integer) for c in cs]
+    coordvals = [:(Int32($c)) for c in cs]
+    masksig = mc ? Any[:(mask::Integer)] : Any[]
+    maskvals = mc ? Any[:(UInt16(mask))] : Any[]
+    @eval @inline function (::Operation{:cp, $mods})(
+            dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
+            $(coordsig...), mbar::Core.LLVMPtr{U, AS.Shared},
+            $(masksig...)) where {T, S, U}
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                      _tma_addr(dst), _tma_addr(tmap), $(coordvals...),
+                      _tma_addr(mbar), $(maskvals...))
+    end
 end
 
 # --- Loads: shared::cta destination (PTX 8.6) ---------------------------------
 
-@inline function optype"cp.async.bulk.tensor.1d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.cta.tile.1d",
-           ptx"cp.async.bulk.tensor.1d.shared::cta.global.tile.mbarrier::complete_tx::bytes")(
-        dst, mbar, _tma_tmap(tmap), Int32(c1), UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.cta.tile.2d",
-           ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes")(
-        dst, mbar, _tma_tmap(tmap), Int32(c1), Int32(c2),
-        UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.tensor.3d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.cta.tile.3d",
-           ptx"cp.async.bulk.tensor.3d.shared::cta.global.tile.mbarrier::complete_tx::bytes")(
-        dst, mbar, _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3),
-        UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.tensor.4d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer, c4::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.cta.tile.4d",
-           ptx"cp.async.bulk.tensor.4d.shared::cta.global.tile.mbarrier::complete_tx::bytes")(
-        dst, mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3), Int32(c4),
-        UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.tensor.5d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
-        dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-        c1::Integer, c2::Integer, c3::Integer, c4::Integer, c5::Integer,
-        mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-    ceiled(nvvm"cp.async.bulk.tensor.g2s.cta.tile.5d",
-           ptx"cp.async.bulk.tensor.5d.shared::cta.global.tile.mbarrier::complete_tx::bytes")(
-        dst, mbar, _tma_tmap(tmap),
-        Int32(c1), Int32(c2), Int32(c3), Int32(c4), Int32(c5),
-        UInt64(0), Val(false))
+for n in 1:5
+    nd = Symbol("$(n)d")
+    cs = [Symbol("c", i) for i in 1:n]
+    mods = (:async, :bulk, :tensor, nd, Symbol("shared::cta"), :global,
+            :tile, Symbol("mbarrier::complete_tx::bytes"))
+    spell = "cp." * join(String.(mods), ".")
+    coordops = join(("\$$(i + 1)" for i in 1:n), ", ")
+    asm = "$spell [\$0], [\$1, {$coordops}], [\$$(n + 2)];"
+    constraints = join(["r"; "l"; fill("r", n); "r"; "~{memory}"], ",")
+    argts = (Core.LLVMPtr{UInt8, AS.Shared}, Core.LLVMPtr{UInt8, AS.Const},
+             ntuple(_ -> Int32, n)..., Core.LLVMPtr{UInt8, AS.Shared})
+    ir = convergent_asm_ir(asm, constraints, Nothing, argts)
+    coordsig = [:($c::Integer) for c in cs]
+    coordvals = [:(Int32($c)) for c in cs]
+    @eval @inline function (::Operation{:cp, $mods})(
+            dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
+            $(coordsig...), mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                      _tma_addr(dst), _tma_addr(tmap), $(coordvals...),
+                      _tma_addr(mbar))
+    end
 end
 
 # --- Stores: shared::cta → global, bulk_group completion ----------------------
+# `[tensorMap, {coords}], [srcMem]` — the tensor map leads, per the ISA's
+# shared::cta → global syntax block.
 
-@inline function optype"cp.async.bulk.tensor.1d.global.shared::cta.tile.bulk_group"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer,
-        src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
-    ceiled(nvvm"cp.async.bulk.tensor.s2g.tile.1d",
-           ptx"cp.async.bulk.tensor.1d.global.shared::cta.tile.bulk_group")(
-        src, _tma_tmap(tmap), Int32(c1), UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
-        src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
-    ceiled(nvvm"cp.async.bulk.tensor.s2g.tile.2d",
-           ptx"cp.async.bulk.tensor.2d.global.shared::cta.tile.bulk_group")(
-        src, _tma_tmap(tmap), Int32(c1), Int32(c2), UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.tensor.3d.global.shared::cta.tile.bulk_group"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
-        c3::Integer, src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
-    ceiled(nvvm"cp.async.bulk.tensor.s2g.tile.3d",
-           ptx"cp.async.bulk.tensor.3d.global.shared::cta.tile.bulk_group")(
-        src, _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3),
-        UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.tensor.4d.global.shared::cta.tile.bulk_group"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
-        c3::Integer, c4::Integer,
-        src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
-    ceiled(nvvm"cp.async.bulk.tensor.s2g.tile.4d",
-           ptx"cp.async.bulk.tensor.4d.global.shared::cta.tile.bulk_group")(
-        src, _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
-        UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.tensor.5d.global.shared::cta.tile.bulk_group"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
-        c3::Integer, c4::Integer, c5::Integer,
-        src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
-    ceiled(nvvm"cp.async.bulk.tensor.s2g.tile.5d",
-           ptx"cp.async.bulk.tensor.5d.global.shared::cta.tile.bulk_group")(
-        src, _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
-        Int32(c5), UInt64(0), Val(false))
+for n in 1:5
+    nd = Symbol("$(n)d")
+    cs = [Symbol("c", i) for i in 1:n]
+    mods = (:async, :bulk, :tensor, nd, :global, Symbol("shared::cta"),
+            :tile, :bulk_group)
+    spell = "cp." * join(String.(mods), ".")
+    coordops = join(("\$$i" for i in 1:n), ", ")
+    asm = "$spell [\$0, {$coordops}], [\$$(n + 1)];"
+    constraints = join(["l"; fill("r", n); "r"; "~{memory}"], ",")
+    argts = (Core.LLVMPtr{UInt8, AS.Const}, ntuple(_ -> Int32, n)...,
+             Core.LLVMPtr{UInt8, AS.Shared})
+    ir = convergent_asm_ir(asm, constraints, Nothing, argts)
+    coordsig = [:($c::Integer) for c in cs]
+    coordvals = [:(Int32($c)) for c in cs]
+    @eval @inline function (::Operation{:cp, $mods})(
+            tmap::Core.LLVMPtr{S, AS.Const}, $(coordsig...),
+            src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                      _tma_addr(tmap), $(coordvals...), _tma_addr(src))
+    end
 end
 
 # --- Prefetch: global → L2 through a tensor map -------------------------------
@@ -367,166 +163,79 @@ end
 # warming. This is the instruction CUTLASS's weight-prefetch mainloop
 # (examples/63) stands on: a dedicated warp walks the weight tensor's
 # K-tiles ahead of the TMA loads that will actually consume them.
-# PTX imposes no collective participation rule. The NVVM intrinsic records
-# are nevertheless `convergent`, so tier-2 emission preserves that conservative
-# optimizer boundary without claiming warp-cooperative semantics.
+# PTX imposes no collective participation rule; the NVVM intrinsic records
+# are nevertheless `convergent`, and the asm route preserves that
+# conservative optimizer boundary without claiming warp-cooperative
+# semantics. PTX couples the u64 cache-policy operand to the
+# `.L2::cache_hint` qualifier as an inseparable pair; the policy is only a
+# performance hint and does not change weak-memory semantics.
 
-@inline function optype"cp.async.bulk.prefetch.tensor.1d.L2.global.tile"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer) where {S}
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.1d",
-           ptx"cp.async.bulk.prefetch.tensor.1d.L2.global.tile")(
-        _tma_tmap(tmap), Int32(c1), UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.prefetch.tensor.2d.L2.global.tile"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer) where {S}
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.2d",
-           ptx"cp.async.bulk.prefetch.tensor.2d.L2.global.tile")(
-        _tma_tmap(tmap), Int32(c1), Int32(c2), UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.prefetch.tensor.3d.L2.global.tile"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
-        c3::Integer) where {S}
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.3d",
-           ptx"cp.async.bulk.prefetch.tensor.3d.L2.global.tile")(
-        _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3),
-        UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.prefetch.tensor.4d.L2.global.tile"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
-        c3::Integer, c4::Integer) where {S}
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.4d",
-           ptx"cp.async.bulk.prefetch.tensor.4d.L2.global.tile")(
-        _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
-        UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.prefetch.tensor.5d.L2.global.tile"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
-        c3::Integer, c4::Integer, c5::Integer) where {S}
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.5d",
-           ptx"cp.async.bulk.prefetch.tensor.5d.L2.global.tile")(
-        _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
-        Int32(c5), UInt64(0), Val(false))
-end
-
-# PTX requires the qualifier and u64 cache-policy operand as a pair. The policy
-# is only a performance hint; it does not change weak-memory semantics.
-@inline function optype"cp.async.bulk.prefetch.tensor.1d.L2.global.tile.L2::cache_hint"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer,
-        cache_policy::UInt64) where {S}
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.1d",
-           ptx"cp.async.bulk.prefetch.tensor.1d.L2.global.tile.L2::cache_hint")(
-        _tma_tmap(tmap), Int32(c1), UInt64(cache_policy), Val(true))
-end
-
-@inline function optype"cp.async.bulk.prefetch.tensor.2d.L2.global.tile.L2::cache_hint"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
-        cache_policy::UInt64) where {S}
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.2d",
-           ptx"cp.async.bulk.prefetch.tensor.2d.L2.global.tile.L2::cache_hint")(
-        _tma_tmap(tmap), Int32(c1), Int32(c2),
-        UInt64(cache_policy), Val(true))
-end
-
-@inline function optype"cp.async.bulk.prefetch.tensor.3d.L2.global.tile.L2::cache_hint"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
-        c3::Integer, cache_policy::UInt64) where {S}
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.3d",
-           ptx"cp.async.bulk.prefetch.tensor.3d.L2.global.tile.L2::cache_hint")(
-        _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3),
-        UInt64(cache_policy), Val(true))
-end
-
-@inline function optype"cp.async.bulk.prefetch.tensor.4d.L2.global.tile.L2::cache_hint"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
-        c3::Integer, c4::Integer, cache_policy::UInt64) where {S}
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.4d",
-           ptx"cp.async.bulk.prefetch.tensor.4d.L2.global.tile.L2::cache_hint")(
-        _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
-        UInt64(cache_policy), Val(true))
-end
-
-@inline function optype"cp.async.bulk.prefetch.tensor.5d.L2.global.tile.L2::cache_hint"(
-        tmap::Core.LLVMPtr{S, AS.Const}, c1::Integer, c2::Integer,
-        c3::Integer, c4::Integer, c5::Integer,
-        cache_policy::UInt64) where {S}
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.tile.5d",
-           ptx"cp.async.bulk.prefetch.tensor.5d.L2.global.tile.L2::cache_hint")(
-        _tma_tmap(tmap), Int32(c1), Int32(c2), Int32(c3), Int32(c4),
-        Int32(c5), UInt64(cache_policy), Val(true))
+for n in 1:5, hint in (false, true)
+    nd = Symbol("$(n)d")
+    cs = [Symbol("c", i) for i in 1:n]
+    mods = (:async, :bulk, :prefetch, :tensor, nd, :L2, :global, :tile,
+            (hint ? (Symbol("L2::cache_hint"),) : ())...)
+    spell = "cp." * join(String.(mods), ".")
+    coordops = join(("\$$i" for i in 1:n), ", ")
+    asm = "$spell [\$0, {$coordops}]" * (hint ? ", \$$(n + 1);" : ";")
+    constraints = join(["l"; fill("r", n); (hint ? ["l"] : []);
+                        "~{memory}"], ",")
+    argts = (Core.LLVMPtr{UInt8, AS.Const}, ntuple(_ -> Int32, n)...,
+             (hint ? (UInt64,) : ())...)
+    ir = convergent_asm_ir(asm, constraints, Nothing, argts)
+    coordsig = [:($c::Integer) for c in cs]
+    coordvals = [:(Int32($c)) for c in cs]
+    hintsig = hint ? Any[:(cache_policy::UInt64)] : Any[]
+    hintvals = hint ? Any[:cache_policy] : Any[]
+    @eval @inline function (::Operation{:cp, $mods})(
+            tmap::Core.LLVMPtr{S, AS.Const}, $(coordsig...),
+            $(hintsig...)) where {S}
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                      _tma_addr(tmap), $(coordvals...), $(hintvals...))
+    end
 end
 
 # Base im2col prefetch is a separate grammar island from tile prefetch. PTX
 # 9.3 §9.7.9.26.5.4 admits ranks 3d..5d and requires exactly N signed tensor
-# coordinates followed by N-2 signed 16-bit im2col offsets (Figures 11–15).
+# coordinates followed by N-2 signed 16-bit im2col offsets (Figures 11–15),
+# the offsets rendered as a braced vector after the bracket operand.
 # Keep this surface exact: the later `.im2col::w[::128]` modes and
 # `.tile::gather4` have different operands and target restrictions.
 
-@inline function optype"cp.async.bulk.prefetch.tensor.3d.L2.global.im2col"(
-        tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32, c3::Int32,
-        o1::Int16)
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.im2col.3d",
-           ptx"cp.async.bulk.prefetch.tensor.3d.L2.global.im2col")(
-        _tma_tmap(tmap), c1, c2, c3, o1, UInt64(0), Val(false))
+for n in 3:5, hint in (false, true)
+    k = n - 2
+    nd = Symbol("$(n)d")
+    cs = [Symbol("c", i) for i in 1:n]
+    os = [Symbol("o", i) for i in 1:k]
+    mods = (:async, :bulk, :prefetch, :tensor, nd, :L2, :global, :im2col,
+            (hint ? (Symbol("L2::cache_hint"),) : ())...)
+    spell = "cp." * join(String.(mods), ".")
+    coordops = join(("\$$i" for i in 1:n), ", ")
+    offsetops = join(("\$$(n + i)" for i in 1:k), ", ")
+    asm = "$spell [\$0, {$coordops}], {$offsetops}" *
+          (hint ? ", \$$(n + k + 1);" : ";")
+    constraints = join(["l"; fill("r", n); fill("h", k);
+                        (hint ? ["l"] : []); "~{memory}"], ",")
+    argts = (Core.LLVMPtr{UInt8, AS.Const}, ntuple(_ -> Int32, n)...,
+             ntuple(_ -> Int16, k)..., (hint ? (UInt64,) : ())...)
+    ir = convergent_asm_ir(asm, constraints, Nothing, argts)
+    coordsig = [:($c::Int32) for c in cs]
+    offsetsig = [:($o::Int16) for o in os]
+    hintsig = hint ? Any[:(cache_policy::UInt64)] : Any[]
+    hintvals = hint ? Any[:cache_policy] : Any[]
+    @eval @inline function (::Operation{:cp, $mods})(
+            tmap::Core.LLVMPtr{UInt8, AS.Const}, $(coordsig...),
+            $(offsetsig...), $(hintsig...))
+        Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                      tmap, $(cs...), $(os...), $(hintvals...))
+    end
 end
 
-@inline function optype"cp.async.bulk.prefetch.tensor.4d.L2.global.im2col"(
-        tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32,
-        c3::Int32, c4::Int32,
-        o1::Int16, o2::Int16)
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.im2col.4d",
-           ptx"cp.async.bulk.prefetch.tensor.4d.L2.global.im2col")(
-        _tma_tmap(tmap), c1, c2, c3, c4, o1, o2,
-        UInt64(0), Val(false))
-end
-
-@inline function optype"cp.async.bulk.prefetch.tensor.5d.L2.global.im2col"(
-        tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32,
-        c3::Int32, c4::Int32,
-        c5::Int32, o1::Int16, o2::Int16, o3::Int16)
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.im2col.5d",
-           ptx"cp.async.bulk.prefetch.tensor.5d.L2.global.im2col")(
-        _tma_tmap(tmap), c1, c2, c3, c4, c5, o1, o2, o3,
-        UInt64(0), Val(false))
-end
-
-# As for tile prefetch, PTX couples the optional cache-policy operand to the
-# `.L2::cache_hint` qualifier. It remains a weak, non-observable hint.
-@inline function optype"cp.async.bulk.prefetch.tensor.3d.L2.global.im2col.L2::cache_hint"(
-        tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32, c3::Int32,
-        o1::Int16, cache_policy::UInt64)
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.im2col.3d",
-           ptx"cp.async.bulk.prefetch.tensor.3d.L2.global.im2col.L2::cache_hint")(
-        _tma_tmap(tmap), c1, c2, c3, o1, cache_policy, Val(true))
-end
-
-@inline function optype"cp.async.bulk.prefetch.tensor.4d.L2.global.im2col.L2::cache_hint"(
-        tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32,
-        c3::Int32, c4::Int32,
-        o1::Int16, o2::Int16, cache_policy::UInt64)
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.im2col.4d",
-           ptx"cp.async.bulk.prefetch.tensor.4d.L2.global.im2col.L2::cache_hint")(
-        _tma_tmap(tmap), c1, c2, c3, c4, o1, o2, cache_policy, Val(true))
-end
-
-@inline function optype"cp.async.bulk.prefetch.tensor.5d.L2.global.im2col.L2::cache_hint"(
-        tmap::Core.LLVMPtr{UInt8, AS.Const}, c1::Int32, c2::Int32,
-        c3::Int32, c4::Int32,
-        c5::Int32, o1::Int16, o2::Int16, o3::Int16,
-        cache_policy::UInt64)
-    ceiled(nvvm"cp.async.bulk.tensor.prefetch.im2col.5d",
-           ptx"cp.async.bulk.prefetch.tensor.5d.L2.global.im2col.L2::cache_hint")(
-        _tma_tmap(tmap), c1, c2, c3, c4, c5, o1, o2, o3,
-        cache_policy, Val(true))
-end
-
-# --- Residue: shared::cta × cta_group::2 (asm tier) ---------------------------
-# No NVVM intrinsic carries both qualifiers at 22.1.7: `g2s.cta` has no
-# cta_group operand and `g2s` renders `shared::cluster`. Asm strings keep
-# the pyptx modifier order (cta_group after `.<N>d`).
+# --- shared::cta × cta_group::2 ------------------------------------------------
+# Predates the demotion as the family's asm residue (no NVVM intrinsic
+# carried both qualifiers at 22.1.7: `g2s.cta` has no cta_group operand and
+# `g2s` renders `shared::cluster`). Asm strings keep the pyptx modifier
+# order (cta_group after `.<N>d`) — now the family-wide spelling.
 
 @generated function optype"cp.async.bulk.tensor.1d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},

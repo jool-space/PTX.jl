@@ -1,0 +1,34 @@
+# test/EVIDENCE.toml — when each runtime tier last executed on hardware, and
+# on which tree. The gpu/hopper and gpu/blackwell runtime sections run in no
+# CI lane; runtests.jl prints these records — plus what changed under src/
+# and test/gpu/ since `tree` — whenever it routes such a tier to skip, so
+# green output is never mistaken for runtime evidence the run didn't produce.
+#
+# Machine fields only. A green default-routing suite run on a hopper- or
+# blackwell-class device prints this entry ready to paste at the end of
+# its output; the session-close PR copies it in. Narrative belongs in
+# that PR's body, not here.
+
+[[tier]]
+tests = "gpu/hopper"
+runtime = "cc==9.0"
+evidence = "manual"
+last_validated = "2026-07-30"
+device = "NVIDIA H100 PCIe (CC 9.0)"
+tree = "30e1d4d"
+suite = 97465
+
+[[tier]]
+tests = "gpu/blackwell"
+runtime = "cc==10|cc==11"
+evidence = "manual"
+last_validated = "2026-07-30"
+device = "B300 SXM6 AC (CC 10.3)"
+tree = "ecbc00e"
+suite = 98144
+
+[[tier]]
+tests = "gpu"
+runtime = "cc>=7.0 floors up to cc==12.1"
+evidence = "ci-continuous"
+device = "GB10 (CC 12.1 / sm_121a), self-hosted CI runner"

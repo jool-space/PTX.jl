@@ -334,8 +334,9 @@ end
 # that need a 32-bit address operand without an LLVMPtr carrier. All tcgen05
 # calls now require exact typed wrappers; in particular the pointer lifecycle
 # forms and no-arg fences can no longer fall through to scalar rendering.
-# The alloc intrinsic canonicalizes the equivalent generic-address spelling
-# below to an explicit `.shared::cta` qualifier.
+# The lifecycle verbs are single-route asm (see wrappers/tcgen05.jl): the
+# generic-address alloc spelling below renders literally (the retired
+# intrinsic route canonicalized it to an explicit `.shared::cta`).
 #
 # LLVM corpus reference: test/corpus/external/llvm/tcgen05-{alloc,commit,
 # fence}__test_*.ptx — verified call-site forms.
@@ -360,7 +361,7 @@ end
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tcgen05_lifecycle!, types;
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32", ptx)
+    @test occursin("tcgen05.alloc.cta_group::1.sync.aligned.b32", ptx)
     @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64", ptx)
     @test occursin("tcgen05.relinquish_alloc_permit.cta_group::1.sync.aligned", ptx)
 end
@@ -605,11 +606,11 @@ end
 #     registers `shared::cluster` only (pyptx's builder is syntactically
 #     permissive about space; the assembler is not).
 #   * cp.async.bulk.tensor.<N>d ... .cta_group::2 — Blackwell 2-SM
-#     cooperative load. The cluster-destination forms lower via the
-#     g2s.tile intrinsics, whose ISel renders `.cta_group::2` after the
-#     completion mechanism (notation keeps the pyptx post-rank order; see
-#     wrappers/tma.jl). The shared::cta × cta_group::2 form is asm-tier
-#     and keeps the post-rank spelling — ptxas accepts both.
+#     cooperative load. Single-route asm since the demotion (see
+#     wrappers/tma.jl): every form renders the notation's pyptx post-rank
+#     `.cta_group::2` spelling (the retired intrinsic route rendered the
+#     §9.7.10.28.5.3 syntax-block order after the completion mechanism);
+#     ptxas accepts both, pinned by the ptxas_compiles leg here.
 #
 # Ported from pyptx _Tcgen05.commit(multicast=True) /
 # _CpAsyncBulkTensor._tile_load(cta_group=2).
@@ -628,17 +629,21 @@ function _bw_tcgen05_commit_mc2!(mbar::UInt32)
 end
 
 @testset "tcgen05.commit.multicast::cluster at sm_100a" begin
+    # Single-route asm renders the notation's multicast-first modifier
+    # order (the retired intrinsic route reordered to
+    # `.shared::cluster.multicast::cluster`); ptxas accepts both, pinned
+    # by the ptxas_compiles legs here.
     @test ptxas_compiles(_bw_tcgen05_commit_mc1!, Tuple{UInt32};
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tcgen05_commit_mc1!, Tuple{UInt32};
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.multicast::cluster.b64", ptx)
+    @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64", ptx)
 
     @test ptxas_compiles(_bw_tcgen05_commit_mc2!, Tuple{UInt32};
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tcgen05_commit_mc2!, Tuple{UInt32};
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.multicast::cluster.b64", ptx)
+    @test occursin("tcgen05.commit.cta_group::2.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64", ptx)
 end
 
 function _bw_tma_cta_group2!(dst::Core.LLVMPtr{UInt16, PTX.AS.Shared},
@@ -658,7 +663,7 @@ end
                          cap = v"10.0", feature_set = :arch)
     ptx = emit_ptx(_bw_tma_cta_group2!, types;
                    cap = v"10.0", feature_set = :arch)
-    @test occursin("cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.cta_group::2", ptx)
-    @test occursin("cp.async.bulk.tensor.2d.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster.cta_group::2", ptx)
+    @test occursin("cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes [", ptx)
+    @test occursin("cp.async.bulk.tensor.2d.cta_group::2.shared::cluster.global.tile.mbarrier::complete_tx::bytes.multicast::cluster [", ptx)
     @test occursin("cp.async.bulk.tensor.2d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes", ptx)
 end

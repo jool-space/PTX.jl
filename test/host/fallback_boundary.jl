@@ -214,21 +214,23 @@ end
     pG64 = Core.LLVMPtr{UInt64, PTX.AS.Global}
 
     surfaces = (
+        # alloc/commit are single-route asm since the demotion (see
+        # wrappers/tcgen05.jl); the evidence column is the asm spelling.
         ((:alloc, cg1, :sync, :aligned, :b32), (pS32, UInt32),
-         :intrinsic, "llvm.nvvm.tcgen05.alloc.shared.cg1",
+         :asm, "tcgen05.alloc.cta_group::1.sync.aligned.b32 [",
          ((UInt32, UInt32), (pG32, UInt32), (pS64, UInt32),
           (pS32, Int32), (pS32,), (pS32, UInt32, UInt32))),
         ((:alloc, cg2, :sync, :aligned, :b32), (pS32, UInt32),
-         :intrinsic, "llvm.nvvm.tcgen05.alloc.shared.cg2",
+         :asm, "tcgen05.alloc.cta_group::2.sync.aligned.b32 [",
          ((UInt32, UInt32), (pG32, UInt32), (pS64, UInt32),
           (pS32, Int32), (pS32,), (pS32, UInt32, UInt32))),
         ((:commit, cg1, Symbol("mbarrier::arrive::one"),
           Symbol("shared::cluster"), :b64), (pS64,),
-         :intrinsic, "llvm.nvvm.tcgen05.commit.shared.cg1",
+         :asm, "tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64 [",
          ((UInt64,), (pG64,), (pS32,), (), (pS64, UInt32))),
         ((:commit, cg2, Symbol("mbarrier::arrive::one"),
           Symbol("shared::cluster"), :b64), (pS64,),
-         :intrinsic, "llvm.nvvm.tcgen05.commit.shared.cg2",
+         :asm, "tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.b64 [",
          ((UInt64,), (pG64,), (pS32,), (), (pS64, UInt32))),
         ((Symbol("fence::before_thread_sync"),), (),
          :asm, "tcgen05.fence::before_thread_sync;",
