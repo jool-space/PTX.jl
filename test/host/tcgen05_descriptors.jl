@@ -259,3 +259,285 @@ end
             ; valid..., saturate)
     end
 end
+
+# ── PTX 9.4 §9.7.18.4.2 Tables 51–53: the non-f16 idesc kinds ────────────────
+# Independent oracles, same double-entry rule as above. Hardware anchors: the
+# two encodings below were runtime-validated on a B200 by the idesc probes
+# (s8×s8→s32 all-ones K=32 → 32; e4m3×e4m3→f32 1.0×1.0 → 32.0).
+
+using PTX: tcgen05_instr_desc_i8, tcgen05_instr_desc_f8f6f4,
+           tcgen05_instr_desc_mxf8f6f4, tcgen05_instr_desc_mxf4,
+           tcgen05_instr_desc_mxf4nvf4
+
+const _TD_I8_FMT = Dict(:u8 => UInt32(0), :s8 => UInt32(1))
+const _TD_F864_FMT = Dict(:e4m3 => UInt32(0), :e5m2 => UInt32(1),
+                          :e2m3 => UInt32(3), :e3m2 => UInt32(4),
+                          :e2m1 => UInt32(5))
+const _TD_F864_DFMT = Dict(:f16 => UInt32(0), :f32 => UInt32(1))
+const _TD_NVF4_SFMT = Dict(:ue4m3 => UInt32(0), :ue8m0 => UInt32(1),
+                           :ue5m3 => UInt32(2))
+
+# Zero masks per table: sparsity selector (Table 51 kinds), every reserved
+# bit, and every architecture-gated encoding the builders pin to zero.
+const _TD_I8_ZERO_MASK = UInt32(0x3) |                  # sparsity selector
+    (UInt32(0x3) << 13) |                               # negate: unsupported
+    (UInt32(0x1) << 6) | (UInt32(0x1) << 23) |          # reserved
+    (UInt32(0x1) << 29)                                 # gated K encoding
+const _TD_F864_ZERO_MASK = UInt32(0x3) |
+    (UInt32(0x1) << 3) |                                # saturate: NA
+    (UInt32(0x1) << 6) | (UInt32(0x1) << 23) |
+    (UInt32(0x1) << 29)
+const _TD_MXF864_ZERO_MASK = UInt32(0x3) |
+    (UInt32(0x1) << 3) | (UInt32(0x1) << 6) |           # reserved
+    (UInt32(0x3) << 24) |                               # reserved
+    (UInt32(0x1) << 26) |                               # gated scale layout
+    (UInt32(0x1) << 31)                                 # gated K encoding
+const _TD_MXF4_ZERO_MASK = UInt32(0x3) |
+    (UInt32(0x1) << 3) |                                # gated K upper bit
+    (UInt32(0x1) << 6) | (UInt32(0x1) << 25) |          # reserved
+    (UInt32(0x3) << 15) |                               # transpose: unsupported
+    (UInt32(0x1) << 26) |                               # gated scale layout
+    (UInt32(0x1) << 31)                                 # gated K lower bit
+
+function _td_expected_i8(m, n, a, b, amaj, bmaj, sat, sparse, shift)
+    UInt32(sparse) << 2 | UInt32(sat) << 3 | UInt32(2) << 4 |
+    _TD_I8_FMT[a] << 7 | _TD_I8_FMT[b] << 10 |
+    UInt32(amaj == :MN) << 15 | UInt32(bmaj == :MN) << 16 |
+    UInt32(n >> 3) << 17 | UInt32(m >> 4) << 24 | UInt32(shift) << 30
+end
+
+function _td_expected_f864(m, n, a, b, d, amaj, bmaj, sa, sb, sparse, shift)
+    UInt32(sparse) << 2 | _TD_F864_DFMT[d] << 4 |
+    _TD_F864_FMT[a] << 7 | _TD_F864_FMT[b] << 10 |
+    UInt32(sa == -1) << 13 | UInt32(sb == -1) << 14 |
+    UInt32(amaj == :MN) << 15 | UInt32(bmaj == :MN) << 16 |
+    UInt32(n >> 3) << 17 | UInt32(m >> 4) << 24 | UInt32(shift) << 30
+end
+
+function _td_expected_mxf864(m, n, a, b, said, sbid, amaj, bmaj, sa, sb, sparse)
+    UInt32(sparse) << 2 | UInt32(sbid) << 4 |
+    _TD_F864_FMT[a] << 7 | _TD_F864_FMT[b] << 10 |
+    UInt32(sa == -1) << 13 | UInt32(sb == -1) << 14 |
+    UInt32(amaj == :MN) << 15 | UInt32(bmaj == :MN) << 16 |
+    UInt32(n >> 3) << 17 | UInt32(1) << 23 | UInt32(m >> 7) << 27 |
+    UInt32(said) << 29
+end
+
+function _td_expected_mxf4(m, n, sfmt, said, sbid, sa, sb, sparse, spv)
+    UInt32(sparse) << 2 | UInt32(sbid) << 4 |
+    UInt32(1) << 7 | UInt32(1) << 10 | UInt32(spv) << 12 |
+    UInt32(sa == -1) << 13 | UInt32(sb == -1) << 14 |
+    UInt32(n >> 3) << 17 | sfmt << 23 | UInt32(m >> 7) << 27 |
+    UInt32(said) << 29
+end
+
+@testset "tcgen05 idesc: hardware-anchored encodings" begin
+    # Exact values proven on silicon by the idesc probes (B200, sm_100a).
+    @test tcgen05_instr_desc_i8(; m = 128, n = 256,
+                                a_dtype = :s8, b_dtype = :s8) == 0x084004A0
+    @test tcgen05_instr_desc_f8f6f4(; m = 128, n = 256,
+                                    a_dtype = :e4m3, b_dtype = :e4m3,
+                                    d_dtype = :f32) == 0x08400010
+end
+
+@testset "tcgen05 i8 idesc: exhaustive public fields" begin
+    mismatches = String[]
+    checked = 0
+    for m in (32, 64, 128, 256), n in 8:8:256,
+        a in (:u8, :s8), b in (:u8, :s8), amaj in (:K, :MN), bmaj in (:K, :MN),
+        sat in (false, true), sparse in (false, true), shift in 0:3
+
+        desc = tcgen05_instr_desc_i8(; m, n, a_dtype = a, b_dtype = b,
+                                     a_major = amaj, b_major = bmaj,
+                                     saturate = sat, sparse, max_shift = shift)
+        expected = _td_expected_i8(m, n, a, b, amaj, bmaj, sat, sparse, shift)
+        checked += 1
+        ok = desc == expected && iszero(desc & _TD_I8_ZERO_MASK) &&
+             _td_field(desc, 4, 2) == 2        # dtype = s32, always
+        ok && continue
+        length(mismatches) < 16 && push!(mismatches,
+            "(m=$m n=$n $a×$b amaj=$amaj bmaj=$bmaj sat=$sat " *
+            "sparse=$sparse shift=$shift): got 0x$(string(desc, base = 16))")
+    end
+    isempty(mismatches) ||
+        foreach(x -> println("I8 IDESC MISMATCH: ", x), mismatches)
+    @test isempty(mismatches)
+    @test checked == 4 * 32 * 2 * 2 * 2 * 2 * 2 * 2 * 4
+end
+
+@testset "tcgen05 f8f6f4 idesc: exhaustive public fields" begin
+    mismatches = String[]
+    checked = 0
+    for m in (32, 64, 128, 256), n in 8:8:256,
+        a in (:e4m3, :e5m2, :e2m3, :e3m2, :e2m1), b in (:e4m3, :e2m1),
+        d in (:f16, :f32), amaj in (:K, :MN), bmaj in (:K, :MN),
+        sa in (1, -1), sb in (1, -1), sparse in (false, true), shift in 0:3
+
+        desc = tcgen05_instr_desc_f8f6f4(; m, n, a_dtype = a, b_dtype = b,
+                                         d_dtype = d, a_major = amaj,
+                                         b_major = bmaj, scale_a = sa,
+                                         scale_b = sb, sparse,
+                                         max_shift = shift)
+        expected = _td_expected_f864(m, n, a, b, d, amaj, bmaj, sa, sb,
+                                     sparse, shift)
+        checked += 1
+        ok = desc == expected && iszero(desc & _TD_F864_ZERO_MASK)
+        ok && continue
+        length(mismatches) < 16 && push!(mismatches,
+            "(m=$m n=$n $a×$b→$d amaj=$amaj bmaj=$bmaj sa=$sa sb=$sb " *
+            "sparse=$sparse shift=$shift): got 0x$(string(desc, base = 16))")
+    end
+    isempty(mismatches) ||
+        foreach(x -> println("F8F6F4 IDESC MISMATCH: ", x), mismatches)
+    @test isempty(mismatches)
+    @test checked == 4 * 32 * 5 * 2 * 2 * 2 * 2 * 2 * 2 * 2 * 4
+end
+
+@testset "tcgen05 mxf8f6f4 idesc: exhaustive public fields" begin
+    mismatches = String[]
+    checked = 0
+    for m in (128, 256), n in 8:8:256,
+        a in (:e4m3, :e5m2, :e2m3, :e3m2, :e2m1), b in (:e4m3, :e2m1),
+        said in 0:3, sbid in 0:3, amaj in (:K, :MN), bmaj in (:K, :MN),
+        sa in (1, -1), sb in (1, -1), sparse in (false, true)
+
+        desc = tcgen05_instr_desc_mxf8f6f4(; m, n, a_dtype = a, b_dtype = b,
+                                           scale_a_id = said,
+                                           scale_b_id = sbid,
+                                           a_major = amaj, b_major = bmaj,
+                                           scale_a = sa, scale_b = sb, sparse)
+        expected = _td_expected_mxf864(m, n, a, b, said, sbid, amaj, bmaj,
+                                       sa, sb, sparse)
+        checked += 1
+        ok = desc == expected && iszero(desc & _TD_MXF864_ZERO_MASK) &&
+             _td_field(desc, 23, 1) == 1       # scale type = UE8M0, always
+        ok && continue
+        length(mismatches) < 16 && push!(mismatches,
+            "(m=$m n=$n $a×$b ids=$said/$sbid amaj=$amaj bmaj=$bmaj " *
+            "sa=$sa sb=$sb sparse=$sparse): got 0x$(string(desc, base = 16))")
+    end
+    isempty(mismatches) ||
+        foreach(x -> println("MXF8F6F4 IDESC MISMATCH: ", x), mismatches)
+    @test isempty(mismatches)
+    @test checked == 2 * 32 * 5 * 2 * 4 * 4 * 2 * 2 * 2 * 2 * 2
+end
+
+@testset "tcgen05 mxf4/mxf4nvf4 idesc: exhaustive public fields" begin
+    mismatches = String[]
+    checked = 0
+    for m in (128, 256), n in 8:8:256, said in (0, 2), sbid in (0, 2),
+        sa in (1, -1), sb in (1, -1), sparse in (false, true), spv in (0, 1)
+
+        mx = tcgen05_instr_desc_mxf4(; m, n, scale_a_id = said,
+                                     scale_b_id = sbid, scale_a = sa,
+                                     scale_b = sb, sparse,
+                                     sparsity_version = spv)
+        ok = mx == _td_expected_mxf4(m, n, UInt32(1), said, sbid, sa, sb,
+                                     sparse, spv) &&
+             iszero(mx & _TD_MXF4_ZERO_MASK)
+        checked += 1
+        ok || length(mismatches) >= 16 || push!(mismatches,
+            "mxf4(m=$m n=$n ids=$said/$sbid sa=$sa sb=$sb sparse=$sparse " *
+            "spv=$spv): got 0x$(string(mx, base = 16))")
+
+        for sfmt in (:ue4m3, :ue8m0, :ue5m3)
+            nv = tcgen05_instr_desc_mxf4nvf4(; m, n, scale_dtype = sfmt,
+                                             scale_a_id = said,
+                                             scale_b_id = sbid, scale_a = sa,
+                                             scale_b = sb, sparse,
+                                             sparsity_version = spv)
+            nvok = nv == _td_expected_mxf4(m, n, _TD_NVF4_SFMT[sfmt], said,
+                                           sbid, sa, sb, sparse, spv) &&
+                   iszero(nv & (_TD_MXF4_ZERO_MASK & ~(UInt32(0x3) << 23)))
+            checked += 1
+            nvok || length(mismatches) >= 16 || push!(mismatches,
+                "mxf4nvf4(m=$m n=$n $sfmt ids=$said/$sbid sa=$sa sb=$sb " *
+                "sparse=$sparse spv=$spv): got 0x$(string(nv, base = 16))")
+        end
+    end
+    isempty(mismatches) ||
+        foreach(x -> println("MXF4 IDESC MISMATCH: ", x), mismatches)
+    @test isempty(mismatches)
+    @test checked == 2 * 32 * 2 * 2 * 2 * 2 * 2 * 2 * 4
+end
+
+@testset "tcgen05 non-f16 idesc: unsafe encodings rejected" begin
+    i8 = (; m = 128, n = 256, a_dtype = :s8, b_dtype = :s8)
+    f864 = (; m = 128, n = 256, a_dtype = :e4m3, b_dtype = :e4m3)
+    mx864 = (; m = 128, n = 256, a_dtype = :e4m3, b_dtype = :e4m3,
+             scale_a_id = 0, scale_b_id = 0)
+    mxf4 = (; m = 128, n = 256, scale_a_id = 0, scale_b_id = 0)
+    nvf4 = (; mxf4..., scale_dtype = :ue4m3)
+
+    for m in (-1, 0, 31, 96, 257, typemax(Int))
+        @test_throws ArgumentError tcgen05_instr_desc_i8(; i8..., m)
+        @test_throws ArgumentError tcgen05_instr_desc_f8f6f4(; f864..., m)
+    end
+    # Block-scale M is the narrower M>>7 window: 32/64 must NOT be accepted.
+    for m in (-1, 0, 32, 64, 96, 384, 512, typemax(Int))
+        @test_throws ArgumentError tcgen05_instr_desc_mxf8f6f4(; mx864..., m)
+        @test_throws ArgumentError tcgen05_instr_desc_mxf4(; mxf4..., m)
+        @test_throws ArgumentError tcgen05_instr_desc_mxf4nvf4(; nvf4..., m)
+    end
+    for n in (-8, 0, 7, 12, 257, typemax(Int))
+        @test_throws ArgumentError tcgen05_instr_desc_i8(; i8..., n)
+        @test_throws ArgumentError tcgen05_instr_desc_f8f6f4(; f864..., n)
+        @test_throws ArgumentError tcgen05_instr_desc_mxf8f6f4(; mx864..., n)
+        @test_throws ArgumentError tcgen05_instr_desc_mxf4(; mxf4..., n)
+    end
+    for dt in (:s4, :f16, :e4m3, :i8)
+        @test_throws ArgumentError tcgen05_instr_desc_i8(; i8..., a_dtype = dt)
+        @test_throws ArgumentError tcgen05_instr_desc_i8(; i8..., b_dtype = dt)
+    end
+    for dt in (:u8, :f16, :ue8m0, :e8m0)
+        @test_throws ArgumentError tcgen05_instr_desc_f8f6f4(
+            ; f864..., a_dtype = dt)
+        @test_throws ArgumentError tcgen05_instr_desc_mxf8f6f4(
+            ; mx864..., b_dtype = dt)
+    end
+    for d in (:s32, :bf16, :f64)
+        @test_throws ArgumentError tcgen05_instr_desc_f8f6f4(
+            ; f864..., d_dtype = d)
+    end
+    for sfmt in (:e4m3, :ue2m1, :f32)
+        @test_throws ArgumentError tcgen05_instr_desc_mxf4nvf4(
+            ; mxf4..., scale_dtype = sfmt)
+    end
+    for id in (-1, 4, typemax(Int))
+        @test_throws ArgumentError tcgen05_instr_desc_mxf8f6f4(
+            ; mx864..., scale_a_id = id)
+        @test_throws ArgumentError tcgen05_instr_desc_mxf8f6f4(
+            ; mx864..., scale_b_id = id)
+    end
+    # Table 53 restricts the mxf4-kind scale-factor IDs to {0, 2}.
+    for id in (-1, 1, 3, 4, typemax(Int))
+        @test_throws ArgumentError tcgen05_instr_desc_mxf4(
+            ; mxf4..., scale_a_id = id)
+        @test_throws ArgumentError tcgen05_instr_desc_mxf4nvf4(
+            ; nvf4..., scale_b_id = id)
+    end
+    for spv in (-1, 2, typemax(Int))
+        @test_throws ArgumentError tcgen05_instr_desc_mxf4(
+            ; mxf4..., sparsity_version = spv)
+    end
+
+    # §9.7.18.10 Table 62: negate is unsupported for .kind::i8 — the keyword
+    # must not exist, so an invalid descriptor is unrepresentable.
+    for kw in ((; scale_a = -1), (; scale_b = -1))
+        @test_throws MethodError tcgen05_instr_desc_i8(; i8..., kw...)
+    end
+    # Saturation is integer-only: absent from every float-kind builder.
+    @test_throws MethodError tcgen05_instr_desc_f8f6f4(
+        ; f864..., saturate = true)
+    @test_throws MethodError tcgen05_instr_desc_mxf8f6f4(
+        ; mx864..., saturate = true)
+    # Table 62: transpose is unsupported for the mxf4 kinds.
+    for kw in ((; a_major = :MN), (; b_major = :MN))
+        @test_throws MethodError tcgen05_instr_desc_mxf4(; mxf4..., kw...)
+        @test_throws MethodError tcgen05_instr_desc_mxf4nvf4(; nvf4..., kw...)
+    end
+    # max_shift is a Table 51 field only (.ws); absent from block-scale kinds.
+    @test_throws MethodError tcgen05_instr_desc_mxf8f6f4(
+        ; mx864..., max_shift = 1)
+    @test_throws MethodError tcgen05_instr_desc_mxf4(; mxf4..., max_shift = 1)
+end
