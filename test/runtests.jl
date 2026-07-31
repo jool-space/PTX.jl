@@ -57,6 +57,14 @@ if args.list === nothing
                                       "test support file loaded by each worker"))
             return false
         end
+        # *_defs.jl files hold shared kernel definitions, included by their
+        # test file AND by the bench/ workbench; no tests of their own.
+        if endswith(test, "_defs") && apply_default_routing
+            req = requirements[test]
+            push!(manifest, PlanEntry(test, :skip, req,
+                                      "shared kernel definitions included by their test file"))
+            return false
+        end
         if test == "ptxas/golden" && Base.JLOptions().check_bounds == 1 &&
            apply_default_routing
             # Golden comparison is byte-exact, and forced bounds checks
