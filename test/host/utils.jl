@@ -80,6 +80,79 @@ end
     @test got == [1, 2]
 end
 
+@testset "@unrolled: capped form" begin
+    n = 3                                # not a parse-time literal
+    acc = Int[]
+    @unrolled 8 for j in 1:n
+        push!(acc, j)
+    end
+    @test acc == [1, 2, 3]
+
+    # the guard splices the stop EXPRESSION: 0:(n-1) means what it says
+    zero_based = Int[]
+    @unrolled 8 for j in 0:(n - 1)
+        push!(zero_based, j)
+    end
+    @test zero_based == [0, 1, 2]
+
+    # per-iteration names mint exactly for the live copies
+    @unrolled 4 for s in 0:(n - 2)
+        cap_s = 10 + s
+    end
+    @test (cap_0, cap_1) == (10, 11)
+    @test !@isdefined(cap_2)
+
+    # step ranges: literal start/step, dynamic stop
+    m = 5
+    stepped = Int[]
+    @unrolled 4 for j in 0:2:m
+        push!(stepped, j)
+    end
+    @test stepped == [0, 2, 4]
+    descending = Int[]
+    @unrolled 4 for j in 8:-2:m
+        push!(descending, j)
+    end
+    @test descending == [8, 6]
+
+    # the stop expression is evaluated once
+    calls = Ref(0)
+    stop_once() = (calls[] += 1; 2)
+    hits = Int[]
+    @unrolled 8 for j in 1:stop_once()
+        push!(hits, j)
+    end
+    @test hits == [1, 2] && calls[] == 1
+
+    # the cap is a caller-asserted ceiling: iterations beyond it are
+    # silently absent (assert the bound where the values are chosen)
+    over = Int[]
+    @unrolled 2 for j in 1:100
+        push!(over, j)
+    end
+    @test over == [1, 2]
+end
+
+@testset "@unrolled: capped-form refusals" begin
+    unrolled2(cap, loop) = Expr(:macrocall, Symbol("@unrolled"),
+                                LineNumberNode(@__LINE__, @__FILE__), cap, loop)
+
+    err = _expansion_error(unrolled2(:n, :(for i in 1:m; i; end)))
+    @test err isa ErrorException && occursin("literal positive integer", err.msg)
+
+    err = _expansion_error(unrolled2(4, :(for i in a:m; i; end)))
+    @test err isa ErrorException && occursin("start must be a literal", err.msg)
+
+    err = _expansion_error(unrolled2(4, :(for i in 0:0:m; i; end)))
+    @test err isa ErrorException && occursin("nonzero literal", err.msg)
+
+    err = _expansion_error(unrolled2(4, :(for (a, b) in 1:m; a; end)))
+    @test err isa ErrorException && occursin("plain symbol binding", err.msg)
+
+    err = _expansion_error(unrolled2(4, :(for i in (1, 2); i; end)))
+    @test err isa ErrorException && occursin("range iterator", err.msg)
+end
+
 @testset "@unrolled: refusals" begin
     unrolled(loop) = Expr(:macrocall, Symbol("@unrolled"),
                           LineNumberNode(@__LINE__, @__FILE__), loop)
