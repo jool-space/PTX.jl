@@ -48,11 +48,11 @@ const FAM_THREADS = 32 * FAM_WARPS
 const FAM_LOG2E   = 1.4426950408889634
 
 # SMEM (bytes): Q tile, 2 K stages, Vᵀ tile.
-_fam_q_bytes(HD)    = FAM_BM * HD * 2
-_fam_k_bytes(HD)    = FAM_BN * HD * 2
-_fam_smem_bytes(HD) = _fam_q_bytes(HD) + 2 * _fam_k_bytes(HD) + HD * FAM_BN * 2
+fam_q_bytes(HD)    = FAM_BM * HD * 2
+fam_k_bytes(HD)    = FAM_BN * HD * 2
+fam_smem_bytes(HD) = fam_q_bytes(HD) + 2 * fam_k_bytes(HD) + HD * FAM_BN * 2
 
-function _fam_kernel!(
+function fam_kernel!(
         O::CuDeviceVector{UInt16},
         Q::CuDeviceVector{UInt16},
         K::CuDeviceVector{UInt16},
@@ -64,15 +64,15 @@ function _fam_kernel!(
     D8  = HD ÷ 8                        # 16-byte chunks per tile row
     D16 = HD ÷ 16                       # k-chunks over head_dim
 
-    smem = @inbounds CuDynamicSharedArray(UInt8, _fam_smem_bytes(HD))
+    smem = @inbounds CuDynamicSharedArray(UInt8, fam_smem_bytes(HD))
     smem_base = pointer(smem)
     q_base  = smem_base
-    k_base0 = smem_base + _fam_q_bytes(HD)
-    k_base1 = k_base0 + _fam_k_bytes(HD)
+    k_base0 = smem_base + fam_q_bytes(HD)
+    k_base1 = k_base0 + fam_k_bytes(HD)
     # Vᵀ as a b32 array: element (d, kp) at d*(BN÷2) + kp packs
     # V[2kp, d] (low half) and V[2kp+1, d] (high half).
     vt = @inbounds CuDynamicSharedArray(UInt32, HD * (FAM_BN ÷ 2),
-                                        _fam_q_bytes(HD) + 2 * _fam_k_bytes(HD))
+                                        fam_q_bytes(HD) + 2 * fam_k_bytes(HD))
     vt_ptr = pointer(vt)
 
     qb = ptx"mov.u32"(sreg"ctaid.x")    # query block within the sequence
@@ -299,7 +299,7 @@ end
 # ── host side ───────────────────────────────────────────────────────────
 
 # f32 reference with bf16-quantized inputs, per (batch*head) slice.
-function _fam_cpu_ref(Q::Matrix{Float32}, K::Matrix{Float32},
+function fam_cpu_ref(Q::Matrix{Float32}, K::Matrix{Float32},
                       V::Matrix{Float32}, sm_scale::Float32, causal::Bool)
     Qb = bf16_to_f32.(bf16_bits.(Q))
     Kb = bf16_to_f32.(bf16_bits.(K))
@@ -317,7 +317,7 @@ function _fam_cpu_ref(Q::Matrix{Float32}, K::Matrix{Float32},
 end
 
 # (rows, HD) f32 → bf16 bits, HD-fast row-major.
-function _fam_pack(X::Matrix{Float32})
+function fam_pack(X::Matrix{Float32})
     rows, hd = size(X)
     out = Array{UInt16}(undef, hd, rows)
     for r in 1:rows, h in 1:hd
@@ -326,7 +326,7 @@ function _fam_pack(X::Matrix{Float32})
     out
 end
 
-function _run_fam(B, H, S, HD; causal = false, atol = 5e-2)
+function run_fam(B, H, S, HD; causal = false, atol = 5e-2)
     @assert S % FAM_BM == 0
     bh = B * H
     total_rows = bh * S
@@ -337,15 +337,15 @@ function _run_fam(B, H, S, HD; causal = false, atol = 5e-2)
     K = Float32.(randn(rng, total_rows, HD)) .* 0.5f0
     V = Float32.(randn(rng, total_rows, HD))
 
-    Q_d = CuArray(vec(_fam_pack(Q)))
-    K_d = CuArray(vec(_fam_pack(K)))
-    V_d = CuArray(vec(_fam_pack(V)))
+    Q_d = CuArray(vec(fam_pack(Q)))
+    K_d = CuArray(vec(fam_pack(K)))
+    V_d = CuArray(vec(fam_pack(V)))
     O_d = CUDACore.zeros(UInt16, total_rows * HD)
 
     args = (O_d, Q_d, K_d, V_d, UInt32(S), sm_scale * Float32(FAM_LOG2E),
             Val(HD), Val(causal))
-    shmem = _fam_smem_bytes(HD)
-    kern = @cuda launch=false _fam_kernel!(args...)
+    shmem = fam_smem_bytes(HD)
+    kern = @cuda launch=false fam_kernel!(args...)
     attrs = CUDACore.attributes(kern.fun)
     attrs[CUDACore.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES] = shmem
     kern(args...; blocks = (S ÷ FAM_BM, bh), threads = FAM_THREADS,
@@ -357,7 +357,7 @@ function _run_fam(B, H, S, HD; causal = false, atol = 5e-2)
     for i in 1:bh
         r = ((i - 1) * S + 1):(i * S)
         O_got = permutedims(bf16_to_f32.(O_packed[:, r]))
-        O_ref = _fam_cpu_ref(Q[r, :], K[r, :], V[r, :], sm_scale, causal)
+        O_ref = fam_cpu_ref(Q[r, :], K[r, :], V[r, :], sm_scale, causal)
         maxdiff = max(maxdiff, maximum(abs.(O_got - O_ref)))
     end
     @info "flash_attention_mma" B H S HD causal maxdiff
@@ -373,5 +373,5 @@ end
         (1, 2, 512,  64,  false),   # head_dim 64
         (1, 1, 256,  64,  true),
     ]
-    @test _run_fam(B, H, S, HD; causal = c)
+    @test run_fam(B, H, S, HD; causal = c)
 end
