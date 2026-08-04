@@ -141,6 +141,11 @@ function _reduce_tree(leaves::Vector{Any}, fanout::Int)
     leaves[1]
 end
 
+# `NTuple{N, Any}` (not `NTuple{N, T}`) in both methods below: a
+# length-0 tuple would leave T unbound, and the generator never needs
+# the element type. (This comment sits ABOVE the docstring because a
+# comment line between a docstring and its definition silently detaches
+# the doc.)
 """
     strided_reduce(op, w::NTuple{N}, ::Val{S}[, ::Val{F}]) -> NTuple{S}
 
@@ -163,8 +168,6 @@ exactly associative (`max`, `min`, integer `+`): for floating-point
 addition a fanout change is an association change, i.e. different
 numerics.
 """
-# `NTuple{N, Any}` (not `NTuple{N, T}`): a length-0 tuple would leave T
-# unbound. The generator never needs the element type.
 @inline strided_reduce(op::F, w::NTuple{N, Any}, s::Val) where {F, N} =
     strided_reduce(op, w, s, Val(2))
 @generated function strided_reduce(op::F, w::NTuple{N, Any}, ::Val{S},
