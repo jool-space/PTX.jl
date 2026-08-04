@@ -123,6 +123,67 @@ macro unrolled(loop)
              (_substitute(body, _unrolled_bindings(lhs, val)) for val in vals)...))
 end
 
+"""
+    @unrolled CAP for x in start:stop        body end
+    @unrolled CAP for x in start:step:stop   body end
+
+The capped form: for trip counts that are compile-time constants but
+not parse-time literals (`Val`-derived tile parameters — the norm
+kernels' `@nexprs 16` + folded-guard idiom, generated).
+
+`CAP` (a literal positive integer) is the maximum number of
+iterations; `start` and `step` must be literal integers, `stop` may be
+any expression. The macro expands `CAP` guarded copies — copy `i`
+substitutes the literal value `start + i·step` and executes only when
+that value is `≤ stop` (`≥ stop` for a negative step). The guard
+compares against the *spliced stop expression*, so `0:(D8 - 1)` and
+`1:D8` both do exactly what they say; there is no privileged start
+value. `stop` is evaluated once, before the first copy.
+
+Semantics: identical to `for x in start:step:stop` (with the enclosing-
+scope splice of the uncapped form) **provided the range has at most
+`CAP` iterations** — iterations beyond the cap are silently absent,
+so the cap is a caller-asserted ceiling; check it where the values are
+chosen (host side), the way the norm kernels assert `v4_iters ≤ 16`.
+When `stop` folds to a specialization-time constant the guards vanish;
+a genuinely runtime `stop` leaves a predicated unroll, which is still
+correct.
+"""
+macro unrolled(cap, loop)
+    cap isa Integer && cap >= 1 ||
+        error("@unrolled: the cap must be a literal positive integer, got `$cap`")
+    Meta.isexpr(loop, :for) ||
+        error("@unrolled needs a `for` loop, got `$(loop isa Expr ? loop.head : loop)`")
+    head, body = loop.args
+    Meta.isexpr(head, :(=), 2) ||
+        error("@unrolled supports exactly one induction binding " *
+              "(`for x in iter`), not comma-separated loops")
+    lhs, iter = head.args
+    lhs isa Symbol ||
+        error("@unrolled with a cap needs a plain symbol binding; " *
+              "destructuring only makes sense for literal tuple iterators")
+    Meta.isexpr(iter, :call) && iter.args[1] === :(:) &&
+        length(iter.args) in (3, 4) ||
+        error("@unrolled with a cap needs a range iterator " *
+              "(`start:stop` or `start:step:stop`); got `$iter`")
+    start = iter.args[2]
+    step  = length(iter.args) == 4 ? iter.args[3] : 1
+    stop  = iter.args[end]
+    start isa Integer ||
+        error("@unrolled: the range start must be a literal integer, got `$start`")
+    step isa Integer && step != 0 ||
+        error("@unrolled: the range step must be a nonzero literal integer, " *
+              "got `$step`")
+    cmp = step > 0 ? :(<=) : :(>=)
+    stopvar = gensym(:unrolled_stop)
+    copies = map(0:(cap - 1)) do i
+        v = start + i * step
+        Expr(:if, Expr(:call, cmp, v, stopvar),
+             _substitute(body, _unrolled_bindings(lhs, v)))
+    end
+    esc(Expr(:block, :(local $stopvar = $stop), copies...))
+end
+
 # ── strided_reduce ──────────────────────────────────────────────────────
 
 # Balanced tree over `leaves` with up-to-F-ary nodes; a short leftover
