@@ -73,6 +73,7 @@ include("lib/tensor_map.jl")
 include("lib/mbarriers.jl")
 include("lib/pipelines.jl")
 include("lib/warps.jl")
+include("lib/utils.jl")
 
 function __init__()
     # The TMA tensor-map encoders are implemented by the CUDACore package

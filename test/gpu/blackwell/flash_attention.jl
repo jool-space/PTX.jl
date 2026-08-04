@@ -19,18 +19,18 @@ include("flash_attention_defs.jl")
     # entry register count, IGNORES every setmaxnreg (C7508), and records
     # a flat 168 registers — which can't launch at 512 threads. With it
     # the kernel records 65536/512 = 128 and repartitions at runtime.
-    @test ptxas_compiles(_fab_kernel!, default; cap = v"10.0", feature_set = :arch,
+    @test ptxas_compiles(fab_kernel!, default; cap = v"10.0", feature_set = :arch,
                          minthreads = 512)
     # Blackwell Ultra (CC 10.3) and the family target: sm_100a cubins load
     # ONLY on CC 10.0, so 10.3 devices recompile at sm_103a (the runtime
     # @cuda path auto-selects this); sm_100f is the one-cubin-per-family
     # alternative. Both must stay compilable.
-    @test ptxas_compiles(_fab_kernel!, default; cap = v"10.3", feature_set = :arch,
+    @test ptxas_compiles(fab_kernel!, default; cap = v"10.3", feature_set = :arch,
                          minthreads = 512)
-    @test ptxas_compiles(_fab_kernel!, default; cap = v"10.0", feature_set = :family,
+    @test ptxas_compiles(fab_kernel!, default; cap = v"10.0", feature_set = :family,
                          minthreads = 512)
 
-    ptx = emit_ptx(_fab_kernel!, default; cap = v"10.0", feature_set = :arch,
+    ptx = emit_ptx(fab_kernel!, default; cap = v"10.0", feature_set = :arch,
                    minthreads = 512)
     @test occursin(".reqntid 512, 1, 1", ptx)
     # QK: SMEM-descriptor A (i64 operand, no brackets)
@@ -64,9 +64,9 @@ include("flash_attention_defs.jl")
     # each must actually change the emitted PTX the way it claims.
     sb_cfg = fab_check_cfg((scoreboard = true, beacon = false,
                             nreg = (144, 80, 144), emu = (), splitp = true))
-    @test ptxas_compiles(_fab_kernel!, types(sb_cfg);
+    @test ptxas_compiles(fab_kernel!, types(sb_cfg);
                          cap = v"10.0", feature_set = :arch, minthreads = 512)
-    sb_ptx = emit_ptx(_fab_kernel!, types(sb_cfg);
+    sb_ptx = emit_ptx(fab_kernel!, types(sb_cfg);
                       cap = v"10.0", feature_set = :arch, minthreads = 512)
     # scoreboard mode drops the softmax stream's wait::ld (4 sites);
     # correction/epilogue keep theirs, so count strictly between 0 and
@@ -76,12 +76,12 @@ include("flash_attention_defs.jl")
 
     bc_cfg = fab_check_cfg((scoreboard = false, beacon = true,
                             nreg = (144, 80, 144), emu = (), splitp = true))
-    @test ptxas_compiles(_fab_kernel!, types(bc_cfg);
+    @test ptxas_compiles(fab_kernel!, types(bc_cfg);
                          cap = v"10.0", feature_set = :arch, minthreads = 512)
 
     nr_cfg = fab_check_cfg((scoreboard = false, beacon = false,
                             nreg = (144, 88, 128), emu = (), splitp = true))
-    nr_ptx = emit_ptx(_fab_kernel!, types(nr_cfg);
+    nr_ptx = emit_ptx(fab_kernel!, types(nr_cfg);
                       cap = v"10.0", feature_set = :arch, minthreads = 512)
     @test occursin("setmaxnreg.inc.sync.aligned.u32 144", nr_ptx)
     @test occursin("setmaxnreg.dec.sync.aligned.u32 88", nr_ptx)
@@ -92,9 +92,9 @@ include("flash_attention_defs.jl")
     emu_cfg = fab_check_cfg((scoreboard = false, beacon = false,
                              nreg = (144, 80, 144), emu = (1, 3, 5, 7),
                              splitp = true))
-    @test ptxas_compiles(_fab_kernel!, types(emu_cfg);
+    @test ptxas_compiles(fab_kernel!, types(emu_cfg);
                          cap = v"10.0", feature_set = :arch, minthreads = 512)
-    emu_ptx = emit_ptx(_fab_kernel!, types(emu_cfg);
+    emu_ptx = emit_ptx(fab_kernel!, types(emu_cfg);
                        cap = v"10.0", feature_set = :arch, minthreads = 512)
     @test occursin("fma.rn.ftz.f32x2", emu_ptx)
     @test occursin("add.rm.ftz.f32x2", emu_ptx)
@@ -116,9 +116,9 @@ include("flash_attention_defs.jl")
     # both protocols against drift.
     qp_cfg = fab_check_cfg((scoreboard = false, beacon = false,
                             nreg = (144, 80, 144), emu = (), splitp = false))
-    @test ptxas_compiles(_fab_kernel!, types(qp_cfg);
+    @test ptxas_compiles(fab_kernel!, types(qp_cfg);
                          cap = v"10.0", feature_set = :arch, minthreads = 512)
-    qp_ptx = emit_ptx(_fab_kernel!, types(qp_cfg);
+    qp_ptx = emit_ptx(fab_kernel!, types(qp_cfg);
                       cap = v"10.0", feature_set = :arch, minthreads = 512)
     n_st_waits(p) = length(collect(eachmatch(r"tcgen05\.wait::st", p)))
     n_bar_inits(p) = length(collect(eachmatch(r"mbarrier\.init", p)))
@@ -136,7 +136,10 @@ end
 # (see tcgen05_smoke.jl rationale; the GB10 CI runner is CC 12.1)
 
 if test_runtime_supported(@__FILE__)
-    function _run_fab(B, H, S; input_scale = 0.5f0, atol = 5e-2)
+    # Returns the max |kernel − reference| — the caller's @test carries
+    # the gate, so a failure prints the measured value without
+    # green-run noise.
+    function _runfab(B, H, S; input_scale = 0.5f0)
         @assert S % (FAB_QSTAGE * FAB_BM) == 0
         n_tiles = S ÷ FAB_BN
         @assert n_tiles % 2 == 0 && n_tiles >= 2
@@ -160,9 +163,9 @@ if test_runtime_supported(@__FILE__)
         K = Float32.(randn(rng, total_rows, FAB_HD)) .* input_scale
         V = Float32.(randn(rng, total_rows, FAB_HD))
 
-        Q_d = CuArray(_fab_pack(Q))
-        K_d = CuArray(_fab_pack(K))
-        V_d = CuArray(_fab_pack(V))
+        Q_d = CuArray(fab_pack(Q))
+        K_d = CuArray(fab_pack(K))
+        V_d = CuArray(fab_pack(V))
         tmaps = map((Q_d, K_d, V_d)) do X_d
             tensor_map_tile_2d(:bf16, pointer(X_d), total_rows, FAB_HD,
                                FAB_BM, 64; swizzle = :B128)
@@ -178,7 +181,7 @@ if test_runtime_supported(@__FILE__)
                 UInt32(n_tiles), UInt32(total_work),
                 sm_scale * Float32(FAB_LOG2E),
                 dbg_d, Val(FAB_CFG_DEFAULT))
-        kern = @cuda launch=false minthreads=512 _fab_kernel!(args...)
+        kern = @cuda launch=false minthreads=512 fab_kernel!(args...)
         attrs = CUDACore.attributes(kern.fun)
         attrs[CUDACore.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES] = FAB_SMEM_BYTES
         kern(args...; blocks = (num_ctas, 1, 1), threads = FAB_THREADS,
@@ -190,11 +193,10 @@ if test_runtime_supported(@__FILE__)
         for i in 1:bh
             r = ((i - 1) * S + 1):(i * S)
             O_got = permutedims(bf16_to_f32.(O_packed[:, r]))  # (S, HD)
-            O_ref = _fab_cpu_ref(Q[r, :], K[r, :], V[r, :], sm_scale)
+            O_ref = fab_cpu_ref(Q[r, :], K[r, :], V[r, :], sm_scale)
             maxdiff = max(maxdiff, maximum(abs.(O_got - O_ref)))
         end
-        @info "flash_attention_blackwell" B H S maxdiff
-        maxdiff < atol
+        maxdiff
     end
 
     @testset "FA forward B=$B H=$H S=$S" for (B, H, S) in [
@@ -202,7 +204,7 @@ if test_runtime_supported(@__FILE__)
             (1, 2, 512),     # 4 work items
             (2, 4, 1024),    # 32 work items — persistent multi-item per CTA
         ]
-        @test _run_fab(B, H, S)
+        @test _runfab(B, H, S) < 5e-2
     end
 
     # At input_scale 0.5 the running row max NEVER drifts past
@@ -215,6 +217,6 @@ if test_runtime_supported(@__FILE__)
     # exact-arrival-count invariant. Max per-tile row sum ~3e7: ample f32
     # headroom (scale 3 would push 4e16 — gratuitous).
     @testset "FA forward rescale path B=1 H=2 S=512 scale=2" begin
-        @test _run_fab(1, 2, 512; input_scale = 2.0f0)
+        @test _runfab(1, 2, 512; input_scale = 2.0f0) < 5e-2
     end
 end

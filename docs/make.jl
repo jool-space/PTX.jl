@@ -102,7 +102,7 @@ write_coverage_page()
 
 makedocs(;
     modules=[PTX, PTX.IR, PTX.Codegen, PTX.Parser, PTX.MBarriers,
-             PTX.Pipelines, PTX.Warps],
+             PTX.Pipelines, PTX.Warps, PTX.Utils],
     authors="Anton Oresten <antonoresten@proton.me>",
     sitename="PTX.jl",
     format=Documenter.HTML(;
@@ -117,6 +117,7 @@ makedocs(;
         "Wrappers" => "wrappers.md",
         "Coverage" => "coverage.md",
         "Barriers & pipelines" => "barriers.md",
+        "Kernel utilities" => "utils.md",
         "Transpiler" => "transpiler.md",
         "Reference" => "reference.md",
         "Internals" => "internals.md",
