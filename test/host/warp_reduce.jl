@@ -6,16 +6,26 @@
 
 using PTX.Warps: warp_reduce
 
+# ptx"..." ops are callable singletons — passed directly as `op`.
 function _wr_full_kernel!(out::CuDeviceVector{Float32, 1})
     tid = ptx"mov.u32"(sreg"tid.x")
-    v = warp_reduce((a, b) -> ptx"max.f32"(a, b), Float32(tid))
+    v = warp_reduce(ptx"max.f32", Float32(tid))
     @inbounds out[1] = v
     return nothing
 end
 
 function _wr_seg4_kernel!(out::CuDeviceVector{Float32, 1})
     tid = ptx"mov.u32"(sreg"tid.x")
-    v = warp_reduce((a, b) -> ptx"add.f32"(a, b), Float32(tid), Val(4))
+    v = warp_reduce(ptx"add.f32", Float32(tid), Val(4))
+    @inbounds out[1] = v
+    return nothing
+end
+
+# A closure wrapping the same op must lower identically to the direct
+# singleton — pinned below alongside the hand-ladder equivalence.
+function _wr_closure_kernel!(out::CuDeviceVector{Float32, 1})
+    tid = ptx"mov.u32"(sreg"tid.x")
+    v = warp_reduce((a, b) -> ptx"max.f32"(a, b), Float32(tid))
     @inbounds out[1] = v
     return nothing
 end
@@ -61,12 +71,16 @@ end
 end
 
 @testset "warp_reduce: byte-identical to the hand-rolled ladder" begin
+    # normalize register numbers and the mangled kernel symbol (whose
+    # _Z<len> prefix differs with the Julia function-name length)
     norm(p) = replace(split(p, ".visible .entry")[2],
                       r"%(r|rd|f|p)\d+" => s"%\1",
-                      r"_wr_\w+_kernel" => "_wr_kernel")
+                      r"_Z\d+_wr_\w+?_kernel" => "_wr_kernel")
     a = norm(emit_ptx(_wr_full_kernel!, _WR_TT; cap = v"8.9"))
     b = norm(emit_ptx(_wr_hand_kernel!, _WR_TT; cap = v"8.9"))
+    c = norm(emit_ptx(_wr_closure_kernel!, _WR_TT; cap = v"8.9"))
     @test a == b
+    @test a == c
 end
 
 @testset "warp_reduce: refusals" begin

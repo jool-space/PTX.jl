@@ -25,9 +25,11 @@ of each `W`-lane segment holds `op` folded over the segment's values.
 raw b32 lanes and `op` sees `T`).
 
 `op` is any two-argument function, applied between shuffle rounds
-exactly as written — pass the combining op the kernel *means*:
-`(a, b) -> ptx"max.f32"(a, b)` and Julia's `max` (which lowers to the
-NaN-propagating `max.NaN.f32`) are different instructions.
+exactly as written — pass the combining op the kernel *means*. `ptx"..."`
+ops are callable singletons, so they pass directly:
+`warp_reduce(ptx"max.f32", v)` and `warp_reduce(max, v)` (Julia `max`
+lowers to the NaN-propagating `max.NaN.f32`) are different instructions,
+and the choice stays at the call site.
 
 Convergent: all 32 lanes of the warp must reach the call with the full
 membermask's lanes active, including lanes whose segment result goes

@@ -29,14 +29,6 @@ using PTX.Warps: warp_reduce
 const SM_WARP_SIZE = UInt32(32)
 const SM_LOG2E     = Float32(1.4426950408889634)
 
-# ptx"max.f32"/ptx"add.f32" (not Julia max/+): the kernel's reduction
-# semantics are the non-NaN-propagating PTX ops, and warp_reduce applies
-# op verbatim between shuffle rounds.
-@inline _sm_warp_reduce_max(v::Float32) =
-    warp_reduce((a, b) -> ptx"max.f32"(a, b), v)
-@inline _sm_warp_reduce_sum(v::Float32) =
-    warp_reduce((a, b) -> ptx"add.f32"(a, b), v)
-
 function _softmax_v4_kernel!(
         Y::CuDeviceVector{Float32},
         X::CuDeviceVector{Float32},
@@ -72,7 +64,9 @@ function _softmax_v4_kernel!(
     end
 
     # --- cross-warp combine: row_max -------------------------------------
-    row_max = _sm_warp_reduce_max(row_max)
+    # ptx"max.f32" (not Julia max → max.NaN.f32): warp_reduce applies the
+    # op verbatim between shuffle rounds.
+    row_max = warp_reduce(ptx"max.f32", row_max)
     if lane == UInt32(0)
         @inbounds partials[Int(warp_id) + 1] = row_max
     end
@@ -111,7 +105,7 @@ function _softmax_v4_kernel!(
     end
 
     # --- cross-warp combine: row_sum -------------------------------------
-    row_sum = _sm_warp_reduce_sum(row_sum)
+    row_sum = warp_reduce(ptx"add.f32", row_sum)
     if lane == UInt32(0)
         @inbounds partials[Int(warp_id) + 1] = row_sum
     end

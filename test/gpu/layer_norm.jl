@@ -20,10 +20,6 @@ using PTX.Warps: warp_reduce
 
 const LN_WARP_SIZE = UInt32(32)
 
-# ptx"add.f32" (not Julia +): the kernel's reduction op is the plain PTX
-# add, and warp_reduce applies op verbatim between shuffle rounds.
-@inline _ln_warp_reduce_sum(v::Float32) =
-    warp_reduce((a, b) -> ptx"add.f32"(a, b), v)
 
 function _layer_norm_v4_kernel!(
         Y::CuDeviceVector{Float32},
@@ -69,8 +65,10 @@ function _layer_norm_v4_kernel!(
         end
     end
 
-    sum_x  = _ln_warp_reduce_sum(sum_x)
-    sum_x2 = _ln_warp_reduce_sum(sum_x2)
+    # ptx"add.f32" (not Julia +): warp_reduce applies the op verbatim
+    # between shuffle rounds.
+    sum_x  = warp_reduce(ptx"add.f32", sum_x)
+    sum_x2 = warp_reduce(ptx"add.f32", sum_x2)
 
     if lane == UInt32(0)
         @inbounds partials[Int(warp_id) + 1, 1] = sum_x

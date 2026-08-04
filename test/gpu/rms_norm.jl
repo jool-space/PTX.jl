@@ -27,10 +27,6 @@ using PTX.Warps: warp_reduce
 
 const RMS_WARP_SIZE = UInt32(32)
 
-# ptx"add.f32" (not Julia +): the kernel's reduction op is the plain PTX
-# add, and warp_reduce applies op verbatim between shuffle rounds.
-@inline _warp_reduce_sum(v::Float32) =
-    warp_reduce((a, b) -> ptx"add.f32"(a, b), v)
 
 function _rms_norm_v4_kernel!(
         Y::CuDeviceVector{Float32},
@@ -69,7 +65,9 @@ function _rms_norm_v4_kernel!(
     end
 
     # --- warp reduce ------------------------------------------------------
-    sum_sq = _warp_reduce_sum(sum_sq)
+    # ptx"add.f32" (not Julia +): warp_reduce applies the op verbatim
+    # between shuffle rounds.
+    sum_sq = warp_reduce(ptx"add.f32", sum_sq)
 
     if lane == UInt32(0)
         @inbounds partials[Int(warp_id) + 1] = sum_sq
