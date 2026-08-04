@@ -58,8 +58,8 @@ function fab_setup(B, H, S; input_scale = 0.5f0, cfg = FAB_CFG_DEFAULT)
     K = Float32.(randn(rng, total_rows, FAB_HD)) .* input_scale
     V = Float32.(randn(rng, total_rows, FAB_HD))
 
-    Q_d = CuArray(_fab_pack(Q)); K_d = CuArray(_fab_pack(K))
-    V_d = CuArray(_fab_pack(V))
+    Q_d = CuArray(fab_pack(Q)); K_d = CuArray(fab_pack(K))
+    V_d = CuArray(fab_pack(V))
     tmaps = map((Q_d, K_d, V_d)) do X_d
         tensor_map_tile_2d(:bf16, pointer(X_d), total_rows, FAB_HD,
                            FAB_BM, 64; swizzle = :B128)
@@ -75,7 +75,7 @@ function fab_setup(B, H, S; input_scale = 0.5f0, cfg = FAB_CFG_DEFAULT)
             UInt32(n_tiles), UInt32(total_work),
             sm_scale * Float32(FAB_LOG2E),
             dbg_d, Val(cfg))
-    kern = @cuda launch=false minthreads=512 _fab_kernel!(args...)
+    kern = @cuda launch=false minthreads=512 fab_kernel!(args...)
     attrs = CUDACore.attributes(kern.fun)
     attrs[CUDACore.FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES] = FAB_SMEM_BYTES
     launch! = () -> kern(args...; blocks = (num_ctas, 1, 1),
@@ -95,7 +95,7 @@ function fab_check(cfg = FAB_CFG_DEFAULT; B = 1, H = 2, S = 512,
     for i in 1:(B * H)
         r = ((i - 1) * S + 1):(i * S)
         O_got = permutedims(bf16_to_f32.(O_packed[:, r]))
-        O_ref = _fab_cpu_ref(p.Q[r, :], p.K[r, :], p.V[r, :], p.sm_scale)
+        O_ref = fab_cpu_ref(p.Q[r, :], p.K[r, :], p.V[r, :], p.sm_scale)
         maxdiff = max(maxdiff, maximum(abs.(O_got - O_ref)))
     end
     ok = maxdiff < atol

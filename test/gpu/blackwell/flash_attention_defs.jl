@@ -170,8 +170,8 @@ const FAB_BARS_SP = (; FAB_BARS..., p_q = ((2, 2), 128))
 
 # Dispatch-based table selection (kernel-path validation must be
 # dispatch, not runtime membership — see CLAUDE.md's 1.10 note).
-@inline _fab_barset(::Val{false}, base) = BarrierSet{FAB_BARS}(base)
-@inline _fab_barset(::Val{true},  base) = BarrierSet{FAB_BARS_SP}(base)
+@inline fab_barset(::Val{false}, base) = BarrierSet{FAB_BARS}(base)
+@inline fab_barset(::Val{true},  base) = BarrierSet{FAB_BARS_SP}(base)
 
 const FAB_SMEM_TMEM  = FAB_SMEM_BARS + FAB_BAR_BYTES
 const FAB_SMEM_BYTES = FAB_SMEM_TMEM + 8
@@ -214,9 +214,9 @@ end
 # be a compile-time constant, and the type parameter guarantees it
 # survives any constprop weather between the config NamedTuple and the
 # immarg.
-@inline _fab_maxnreg_inc(::Val{N}) where {N} =
+@inline fab_maxnreg_inc(::Val{N}) where {N} =
     ptx"setmaxnreg.inc.sync.aligned.u32"(Val(N))
-@inline _fab_maxnreg_dec(::Val{N}) where {N} =
+@inline fab_maxnreg_dec(::Val{N}) where {N} =
     ptx"setmaxnreg.dec.sync.aligned.u32"(Val(N))
 
 # ── beacon plumbing (hang forensics) ────────────────────────────────────
@@ -240,14 +240,14 @@ const FAB_SITES = Dict(
 )
 
 # Waits return the barrier's NEXT phase parity, so a per-barrier phase
-# variable updates as `ph = _fab_wait(d, bar, ph, site)`. Callers whose
+# variable updates as `ph = fab_wait(d, bar, ph, site)`. Callers whose
 # phase is shared across a barrier group (p_q) discard the return and
 # flip once per group.
-@inline function _fab_wait(::FabDbg{false}, mbar, ph::UInt32, ::Val)
+@inline function fab_wait(::FabDbg{false}, mbar, ph::UInt32, ::Val)
     barrier_try_wait(mbar, ph)
     ph ⊻ UInt32(1)
 end
-@inline function _fab_wait(d::FabDbg{true}, mbar, ph::UInt32,
+@inline function fab_wait(d::FabDbg{true}, mbar, ph::UInt32,
                            ::Val{SITE}) where {SITE}
     tries = UInt32(0)
     while !ptx"mbarrier.try_wait.parity.shared.b64"(mbar, ph)
@@ -266,11 +266,11 @@ end
 
 # Per-work-item Q row base: m_block = w & mb_mask varies fastest,
 # bh = w >> mb_shift.
-@inline _fab_q_row0(w::UInt32, seqlen::UInt32, mb_shift::UInt32, mb_mask::UInt32) =
+@inline fab_q_row0(w::UInt32, seqlen::UInt32, mb_shift::UInt32, mb_mask::UInt32) =
     (w >> mb_shift) * seqlen + (w & mb_mask) * UInt32(FAB_QSTAGE * FAB_BM)
 
 # One 128×128 bf16 tile = two TMA 128-row × 64-col swizzle stripes.
-@inline function _fab_load_tile(dst_ptr, byteoff::Int, tma, row::UInt32, mbar)
+@inline function fab_load_tile(dst_ptr, byteoff::Int, tma, row::UInt32, mbar)
     for stripe in 0:1
         ptx"cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
             dst_ptr + byteoff + stripe * FAB_STRIPE_BYTES, tma,
@@ -280,34 +280,34 @@ end
 
 # Ring-slot load: wait FREE (uniform accounting — the ring is self-credited
 # once at role start), expect_tx, two stripe loads. Returns advanced row.
-@inline function _fab_load_kv(d::FabDbg, ::Val{SLOT}, kv_ptr, tma, row::UInt32,
+@inline function fab_load_kv(d::FabDbg, ::Val{SLOT}, kv_ptr, tma, row::UInt32,
                               bars::BarrierSet,
                               ph::UInt32) where {SLOT}
-    ph = _fab_wait(d, bars.kv_free[SLOT], ph, Val(1))
+    ph = fab_wait(d, bars.kv_free[SLOT], ph, Val(1))
     barrier_arrive_expect_tx(bars.kv_full[SLOT], FAB_TILE_BYTES)
-    _fab_load_tile(kv_ptr, SLOT * FAB_TILE_BYTES, tma, row, bars.kv_full[SLOT])
+    fabload_tile(kv_ptr, SLOT * FAB_TILE_BYTES, tma, row, bars.kv_full[SLOT])
     return row + UInt32(FAB_BN), ph
 end
 
-@inline _fab_commit(mbar_ptr) =
+@inline fabcommit(mbar_ptr) =
     ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cta.b64"(
         smem_addr_u32(mbar_ptr))
 
 # Descriptor offset (16B units) for k-atom kk of a K-major 128-col bf16
 # tile: k-atoms 0-3 live in stripe 0 (+32 B each), 4-7 in stripe 1 (+16 KiB).
-@inline _fab_kmaj_off(kk::Int) = UInt64((kk ÷ 4) * 1024 + (kk % 4) * 2)
+@inline fab_kmaj_off(kk::Int) = UInt64((kk ÷ 4) * 1024 + (kk % 4) * 2)
 
 # S(stage) = Q(stage) @ K(k_idx)^T — 8 k16 UMMAs, accumulate within the tile.
-@inline function _fab_qk_mma(::Val{STAGE}, ::Val{KIDX}, tmem::UInt32,
+@inline function fab_qk_mma(::Val{STAGE}, ::Val{KIDX}, tmem::UInt32,
                              dq0::UInt64, dk0::UInt64, idesc::UInt32,
                              bars::BarrierSet) where {STAGE, KIDX}
     d = tmem + UInt32(STAGE * 128)
     for kk in 0:7
-        da = dq0 + UInt64(STAGE * FAB_SLOT_UNITS) + _fab_kmaj_off(kk)
-        db = dk0 + UInt64(KIDX * 2 * FAB_SLOT_UNITS) + _fab_kmaj_off(kk)
+        da = dq0 + UInt64(STAGE * FAB_SLOT_UNITS) + fab_kmaj_off(kk)
+        db = dk0 + UInt64(KIDX * 2 * FAB_SLOT_UNITS) + fab_kmaj_off(kk)
         ptx"tcgen05.mma.cta_group::1.kind::f16"(d, da, db, idesc, kk != 0)
     end
-    _fab_commit(bars.s_full[STAGE])
+    fab_commit(bars.s_full[STAGE])
 end
 
 # O(stage) += P(stage) @ V(v_idx) — A sourced from TMEM, consumed per
@@ -316,7 +316,7 @@ end
 # half 1, which gates kk 4-7 — pyptx 4d2aa00's pv_mma), 32-column
 # quarters otherwise. PV(tile) is gated on O_RESC[stage][tile&1] at the
 # first group.
-@inline function _fab_pv_mma(dbg::FabDbg, ::Val{SPLITP}, ::Val{STAGE}, ::Val{VIDX},
+@inline function fab_pv_mma(dbg::FabDbg, ::Val{SPLITP}, ::Val{STAGE}, ::Val{VIDX},
                              first_accum::Bool,
                              ::Val{PAR}, tmem::UInt32, dv0::UInt64,
                              idesc::UInt32, bars::BarrierSet,
@@ -327,9 +327,9 @@ end
     W  = 8 ÷ NG                # k-atoms per group
     for g in 0:(NG - 1)
         # the group's barriers share ph_pq: flip once per tile, at return
-        _fab_wait(dbg, bars.p_q[STAGE, g], ph_pq, Val(5))
+        fab_wait(dbg, bars.p_q[STAGE, g], ph_pq, Val(5))
         if g == 0
-            ph_or = _fab_wait(dbg, bars.o_resc[STAGE, PAR], ph_or, Val(6))
+            ph_or = fab_wait(dbg, bars.o_resc[STAGE, PAR], ph_or, Val(6))
         end
         ptx"tcgen05.fence::after_thread_sync"()
         for kk in (W * g):(W * g + W - 1)
@@ -344,7 +344,7 @@ end
     end
     # deferred-rescale handshake: correction may only touch O after this
     # tile's PV has fully accumulated
-    _fab_commit(bars.pv_done[STAGE])
+    fab_commit(bars.pv_done[STAGE])
     return ph_pq ⊻ UInt32(1), ph_or
 end
 
@@ -357,23 +357,23 @@ end
 # exponent field with a bit-shift/add. Constants are pyptx's exact bit
 # patterns (examples/blackwell/flash_attention_blackwell.py:106-111).
 const FAB_EX2_CLAMP = reinterpret(Float32, 0xC2FE0000)   # -127.0
-@inline _fab_pack2(lo::Float32, hi::Float32) =
+@inline fab_pack2(lo::Float32, hi::Float32) =
     (UInt64(reinterpret(UInt32, hi)) << 32) | UInt64(reinterpret(UInt32, lo))
-const FAB_EX2_BIG2 = _fab_pack2(reinterpret(Float32, 0x4B400000),
+const FAB_EX2_BIG2 = fab_pack2(reinterpret(Float32, 0x4B400000),
                                 reinterpret(Float32, 0x4B400000))
-const FAB_EX2_C32  = _fab_pack2(reinterpret(Float32, 0x3D9DF09D),
+const FAB_EX2_C32  = fab_pack2(reinterpret(Float32, 0x3D9DF09D),
                                 reinterpret(Float32, 0x3D9DF09D))
-const FAB_EX2_C22  = _fab_pack2(reinterpret(Float32, 0x3E6906A4),
+const FAB_EX2_C22  = fab_pack2(reinterpret(Float32, 0x3E6906A4),
                                 reinterpret(Float32, 0x3E6906A4))
-const FAB_EX2_C12  = _fab_pack2(reinterpret(Float32, 0x3F31F519),
+const FAB_EX2_C12  = fab_pack2(reinterpret(Float32, 0x3F31F519),
                                 reinterpret(Float32, 0x3F31F519))
-const FAB_EX2_C02  = _fab_pack2(1.0f0, 1.0f0)
+const FAB_EX2_C02  = fab_pack2(1.0f0, 1.0f0)
 
-@inline function _fab_exp_pair_emu(v0::UInt32, v1::UInt32,
+@inline function fab_exp_pair_emu(v0::UInt32, v1::UInt32,
                                    qk2::UInt64, m2::UInt64)
     a0 = ptx"max.ftz.f32"(reinterpret(Float32, v0), FAB_EX2_CLAMP)
     a1 = ptx"max.ftz.f32"(reinterpret(Float32, v1), FAB_EX2_CLAMP)
-    x  = ptx"fma.rn.ftz.f32x2"(_fab_pack2(a0, a1), qk2, m2)
+    x  = ptx"fma.rn.ftz.f32x2"(fab_pack2(a0, a1), qk2, m2)
     bi = ptx"add.rm.ftz.f32x2"(x, FAB_EX2_BIG2)
     f  = ptx"sub.rn.ftz.f32x2"(x, ptx"sub.rn.ftz.f32x2"(bi, FAB_EX2_BIG2))
     pl = ptx"fma.rn.ftz.f32x2"(f, FAB_EX2_C32, FAB_EX2_C22)
@@ -387,18 +387,18 @@ end
 # @generated: the emu/ex2 split is per-pair compile-time state; explicit
 # unrolled assignments keep every lane in registers (a 32-wide closure
 # would escape the inliner and become a real device CALL).
-@generated function _fab_exp_chunk(::Val{EMU}, v::NTuple{32, UInt32},
+@generated function fab_exp_chunk(::Val{EMU}, v::NTuple{32, UInt32},
                                    qk_scale::Float32, mneg::Float32,
                                    qk2::UInt64) where {EMU}
     stmts = Expr[]
-    isempty(EMU) || push!(stmts, :(m2 = _fab_pack2(mneg, mneg)))
+    isempty(EMU) || push!(stmts, :(m2 = fab_pack2(mneg, mneg)))
     lanes = Symbol[]
     for pair in 0:15
         i = 2pair + 1
         w0 = Symbol(:w, i); w1 = Symbol(:w, i + 1)
         if pair in EMU
             push!(stmts, :(($w0, $w1) =
-                _fab_exp_pair_emu(v[$i], v[$(i + 1)], qk2, m2)))
+                fab_exp_pair_emu(v[$i], v[$(i + 1)], qk2, m2)))
         else
             push!(stmts, :($w0 = ptx"ex2.approx.ftz.f32"(
                 fma(reinterpret(Float32, v[$i]), qk_scale, mneg))))
@@ -424,13 +424,13 @@ end
 # the half-mate's exp/pack), chunks 1/3 wait::st (covering BOTH stores),
 # fence, and arrive the half barrier — pyptx 4d2aa00's `c == 1 or c == 3`
 # publish, with [stage, half] granularity on the consumer side.
-@inline function _fab_softmax_chunk(::Val{C}, ::Val{SPLITP}, emu::Val,
+@inline function fab_softmax_chunk(::Val{C}, ::Val{SPLITP}, emu::Val,
                                     v::NTuple{32, UInt32},
                                     macc::NTuple{4, Float32}, sacc::NTuple{4, Float32},
                                     sp_base::UInt32, pq_ptr,
                                     qk_scale::Float32, qk2::UInt64,
                                     mneg::Float32) where {C, SPLITP}
-    w = _fab_exp_chunk(emu, v, qk_scale, mneg, qk2)
+    w = fab_exp_chunk(emu, v, qk_scale, mneg, qk2)
     pk = ntuple(k -> bf16x2_pack(w[2k - 1], w[2k]), Val(16))
     ptx"tcgen05.st.sync.aligned.32x32b.x16.b32"(sp_base + UInt32(C * 16), pk)
     if SPLITP
@@ -459,7 +459,7 @@ end
 
 # One KV tile of the softmax stream. Returns the updated per-thread state
 # (ph_s, ph_stats, mneg, pmax_pend, sums_pend, l_run).
-@inline function _fab_softmax_body(d::FabDbg, sb::Bool, sp::Val, emu::Val,
+@inline function fab_softmax_body(d::FabDbg, sb::Bool, sp::Val, emu::Val,
                                    first::Bool,
                                    oresc_par_ptr,
                                    sp_base::UInt32, sfull, sfree, pq_ptr,
@@ -467,7 +467,7 @@ end
                                    qk_scale::Float32, qk2::UInt64,
                                    ph_s::UInt32, ph_stats::UInt32, mneg::Float32,
                                    pmax::Float32, sums::Float32, l_run::Float32)
-    ph_s = _fab_wait(d, sfull, ph_s, Val(7))
+    ph_s = fab_wait(d, sfull, ph_s, Val(7))
     ptx"tcgen05.fence::after_thread_sync"()
 
     # first chunk's load flies under the deferred tail
@@ -492,7 +492,7 @@ end
         if blt == UInt32(0)
             barrier_arrive(oresc_par_ptr)
         end
-        ph_stats = _fab_wait(d, sfree, ph_stats, Val(8))
+        ph_stats = fab_wait(d, sfree, ph_stats, Val(8))
         @inbounds stats[alpha_idx] = alpha
         ptx"bar.arrive"(stats_bar, UInt32(64))
     end
@@ -503,19 +503,19 @@ end
     # under exp/pack/store(c) ──
     sb || ptx"tcgen05.wait::ld.sync.aligned"()
     v1 = ptx"tcgen05.ld.sync.aligned.32x32b.x32.b32"(sp_base + UInt32(32))
-    macc, sacc = _fab_softmax_chunk(Val(0), sp, emu, v0, ntuple(_ -> 0.0f0, Val(4)),
+    macc, sacc = fab_softmax_chunk(Val(0), sp, emu, v0, ntuple(_ -> 0.0f0, Val(4)),
                                     ntuple(_ -> 0.0f0, Val(4)),
                                     sp_base, pq_ptr, qk_scale, qk2, mneg)
     sb || ptx"tcgen05.wait::ld.sync.aligned"()
     v2 = ptx"tcgen05.ld.sync.aligned.32x32b.x32.b32"(sp_base + UInt32(64))
-    macc, sacc = _fab_softmax_chunk(Val(1), sp, emu, v1, macc, sacc,
+    macc, sacc = fab_softmax_chunk(Val(1), sp, emu, v1, macc, sacc,
                                     sp_base, pq_ptr, qk_scale, qk2, mneg)
     sb || ptx"tcgen05.wait::ld.sync.aligned"()
     v3 = ptx"tcgen05.ld.sync.aligned.32x32b.x32.b32"(sp_base + UInt32(96))
-    macc, sacc = _fab_softmax_chunk(Val(2), sp, emu, v2, macc, sacc,
+    macc, sacc = fab_softmax_chunk(Val(2), sp, emu, v2, macc, sacc,
                                     sp_base, pq_ptr, qk_scale, qk2, mneg)
     sb || ptx"tcgen05.wait::ld.sync.aligned"()
-    macc, sacc = _fab_softmax_chunk(Val(3), sp, emu, v3, macc, sacc,
+    macc, sacc = fab_softmax_chunk(Val(3), sp, emu, v3, macc, sacc,
                                     sp_base, pq_ptr, qk_scale, qk2, mneg)
 
     # horizontal reduce into the pending carries
@@ -529,12 +529,12 @@ end
 # Element-wise O ops as top-level helpers: a closure over a variable that
 # is reassigned in its enclosing loop gets boxed (dynamic dispatch in
 # device code) — arguments don't.
-@inline _fab_scale64(v::NTuple{64, UInt32}, s::Float32) =
+@inline fab_scale64(v::NTuple{64, UInt32}, s::Float32) =
     ntuple(i -> reinterpret(UInt32, reinterpret(Float32, v[i]) * s), Val(64))
 # Q as a type parameter: `v[32q + ...]` with a runtime q is a dynamic
 # NTuple{64} getindex, which lowers through an alloca that SROA cannot
 # remove — the whole 64-register tuple demotes to local memory.
-@inline _fab_pack16(v::NTuple{64, UInt32}, ::Val{Q}, s::Float32) where {Q} =
+@inline fab_pack16(v::NTuple{64, UInt32}, ::Val{Q}, s::Float32) where {Q} =
     ntuple(Val(16)) do k
         bf16x2_pack(reinterpret(Float32, v[32Q + 2k - 1]) * s,
                     reinterpret(Float32, v[32Q + 2k]) * s)
@@ -546,14 +546,14 @@ end
 # tracks the true completion count — a parity-only wait inside the rare
 # branch could alias an older same-parity completion and race the
 # in-flight PV.
-@inline function _fab_corr_tile(d::FabDbg, ::Val{STAGE}, bars::BarrierSet,
+@inline function fab_corr_tile(d::FabDbg, ::Val{STAGE}, bars::BarrierSet,
                                 stats, alpha_idx::Int,
                                 stats_bar::UInt32, o_addr::UInt32,
                                 ponc::UInt32, ph_pv::UInt32) where {STAGE}
     ptx"bar.sync"(stats_bar, UInt32(64))
     alpha = @inbounds stats[alpha_idx]
     barrier_arrive(bars.stats_free[STAGE])
-    ph_pv = _fab_wait(d, bars.pv_done[STAGE], ph_pv, Val(10))
+    ph_pv = fab_wait(d, bars.pv_done[STAGE], ph_pv, Val(10))
     need = alpha < 1.0f0
     blt = nvvm"vote.ballot.sync"(0xffffffff, need)
     # softmax already released O_RESC when nothing rescales
@@ -563,7 +563,7 @@ end
             addr = o_addr + UInt32(half * 64)
             ov = ptx"tcgen05.ld.sync.aligned.32x32b.x64.b32"(addr)
             ptx"tcgen05.wait::ld.sync.aligned"()
-            ptx"tcgen05.st.sync.aligned.32x32b.x64.b32"(addr, _fab_scale64(ov, alpha))
+            ptx"tcgen05.st.sync.aligned.32x32b.x64.b32"(addr, fab_scale64(ov, alpha))
         end
         ptx"tcgen05.wait::st.sync.aligned"()
         ptx"tcgen05.fence::before_thread_sync"()
@@ -573,7 +573,7 @@ end
 end
 
 # Epilogue for one stage: normalize O by the row sum, pack bf16, store.
-@inline function _fab_epi_stage(::Val{STAGE}, bars::BarrierSet,
+@inline function fab_epi_stage(::Val{STAGE}, bars::BarrierSet,
                                 stats, alpha_idx::Int,
                                 stats_bar::UInt32, o_addr::UInt32,
                                 out_row::UInt32, po) where {STAGE}
@@ -600,7 +600,7 @@ end
         # @unrolled (not plain for): pk_q[4vec + 1] must be a constant
         # tuple index by construction, not by trusting LLVM's unroller
         @unrolled for q in 0:1
-            pk_q = _fab_pack16(ov, Val(q), inv_l)
+            pk_q = fab_pack16(ov, Val(q), inv_l)
             @unrolled for vec in 0:3
                 ptx"st.global.v4.b32"(gptr + half * 128 + 64q + vec * 16,
                     (pk_q[4vec + 1], pk_q[4vec + 2],
@@ -616,7 +616,7 @@ end
 
 # ── the kernel ──────────────────────────────────────────────────────────
 
-function _fab_kernel!(
+function fab_kernel!(
         O::CuDeviceVector{UInt16, 1},
         tma_Q::PTX.TMADescriptorPtr,
         tma_K::PTX.TMADescriptorPtr,
@@ -642,7 +642,7 @@ function _fab_kernel!(
 
     q_ptr  = pointer(smem_q)
     kv_ptr = pointer(smem_kv)
-    bars   = _fab_barset(Val(CFG.splitp), pointer(bar_mem))
+    bars   = fab_barset(Val(CFG.splitp), pointer(bar_mem))
 
     tid      = ptx"mov.u32"(sreg"tid.x")
     cta_id   = ptx"mov.u32"(sreg"ctaid.x")
@@ -670,7 +670,7 @@ function _fab_kernel!(
     # TMA load warp (single lane; warpgroup 12-15 takes NREG_OTHER)
     # =====================================================================
     if tid >= UInt32(384)
-        _fab_maxnreg_inc(Val(CFG.nreg[3]))
+        fab_maxnreg_inc(Val(CFG.nreg[3]))
     end
 
     if tid == FAB_LOAD_TID
@@ -688,23 +688,23 @@ function _fab_kernel!(
 
         lw = cta_id
         while lw < total_work
-            q_row0 = _fab_q_row0(lw, seqlen, mb_shift, mb_mask)
+            q_row0 = fab_q_row0(lw, seqlen, mb_shift, mb_mask)
             kv_row = (lw >> mb_shift) * seqlen
             krow = kv_row
             vrow = kv_row
 
             # prologue, ordered by first use: QK(stage 0) needs only
             # Q0+K0, so K0 goes ahead of the second Q tile
-            q_free_ph = _fab_wait(d, bars.q_free, q_free_ph, Val(2))
+            q_free_ph = fab_wait(d, bars.q_free, q_free_ph, Val(2))
             barrier_arrive_expect_tx(bars.q[0], FAB_TILE_BYTES)
-            _fab_load_tile(q_ptr, 0, tma_Q, q_row0, bars.q[0])
-            krow, ph_0 = _fab_load_kv(d, Val(0), kv_ptr, tma_K, krow, bars, ph_0)
+            fab_load_tile(q_ptr, 0, tma_Q, q_row0, bars.q[0])
+            krow, ph_0 = fab_load_kv(d, Val(0), kv_ptr, tma_K, krow, bars, ph_0)
             barrier_arrive_expect_tx(bars.q[1], FAB_TILE_BYTES)
-            _fab_load_tile(q_ptr, FAB_TILE_BYTES, tma_Q, q_row0 + UInt32(FAB_BM),
+            fab_load_tile(q_ptr, FAB_TILE_BYTES, tma_Q, q_row0 + UInt32(FAB_BM),
                            bars.q[1])
             @unrolled for (s, tma, row) in ((1, tma_V, vrow), (2, tma_K, krow),
                                             (3, tma_V, vrow))
-                row, ph_s = _fab_load_kv(d, Val(s), kv_ptr, tma, row, bars, ph_s)
+                row, ph_s = fab_load_kv(d, Val(s), kv_ptr, tma, row, bars, ph_s)
             end
 
             # steady state: 4 loads per trip into slots 0..3, K/V alternating
@@ -713,7 +713,7 @@ function _fab_kernel!(
             while trip < trips
                 @unrolled for (s, tma, row) in ((0, tma_K, krow), (1, tma_V, vrow),
                                                 (2, tma_K, krow), (3, tma_V, vrow))
-                    row, ph_s = _fab_load_kv(d, Val(s), kv_ptr, tma, row, bars, ph_s)
+                    row, ph_s = fab_load_kv(d, Val(s), kv_ptr, tma, row, bars, ph_s)
                 end
                 trip += UInt32(1)
             end
@@ -752,24 +752,24 @@ function _fab_kernel!(
         while mw < total_work
             # ── prologue: S(0) for stage 0 as soon as Q0+K0 land; the
             # second Q tile's TMA overlaps the first QK ──
-            ph_qa = _fab_wait(d, bars.q[0], ph_qa, Val(3))
-            kph0 = _fab_wait(d, bars.kv_full[0], kph0, Val(4))
-            _fab_qk_mma(Val(0), Val(0), tmem, dq0, dk0, idesc_qk, bars)
-            ph_qb = _fab_wait(d, bars.q[1], ph_qb, Val(3))
-            _fab_qk_mma(Val(1), Val(0), tmem, dq0, dk0, idesc_qk, bars)
-            _fab_commit(bars.kv_free[0])
+            ph_qa = fab_wait(d, bars.q[0], ph_qa, Val(3))
+            kph0 = fab_wait(d, bars.kv_full[0], kph0, Val(4))
+            fab_qk_mma(Val(0), Val(0), tmem, dq0, dk0, idesc_qk, bars)
+            ph_qb = fab_wait(d, bars.q[1], ph_qb, Val(3))
+            fab_qk_mma(Val(1), Val(0), tmem, dq0, dk0, idesc_qk, bars)
+            fab_commit(bars.kv_free[0])
 
             # ── peeled j=0: PV(0) with V slot 1, S(1) with K slot 2 ──
-            kph1 = _fab_wait(d, bars.kv_full[1], kph1, Val(4))
-            kph2 = _fab_wait(d, bars.kv_full[2], kph2, Val(4))
-            ph_pq0, ph_or00 = _fab_pv_mma(d, sp, Val(0), Val(0), true, Val(0),
+            kph1 = fab_wait(d, bars.kv_full[1], kph1, Val(4))
+            kph2 = fab_wait(d, bars.kv_full[2], kph2, Val(4))
+            ph_pq0, ph_or00 = fab_pv_mma(d, sp, Val(0), Val(0), true, Val(0),
                                           tmem, dv0, idesc_pv, bars, ph_pq0, ph_or00)
-            _fab_qk_mma(Val(0), Val(1), tmem, dq0, dk0, idesc_qk, bars)
-            ph_pq1, ph_or10 = _fab_pv_mma(d, sp, Val(1), Val(0), true, Val(0),
+            fab_qk_mma(Val(0), Val(1), tmem, dq0, dk0, idesc_qk, bars)
+            ph_pq1, ph_or10 = fab_pv_mma(d, sp, Val(1), Val(0), true, Val(0),
                                           tmem, dv0, idesc_pv, bars, ph_pq1, ph_or10)
-            _fab_qk_mma(Val(1), Val(1), tmem, dq0, dk0, idesc_qk, bars)
-            _fab_commit(bars.kv_free[2])
-            _fab_commit(bars.kv_free[1])
+            fab_qk_mma(Val(1), Val(1), tmem, dq0, dk0, idesc_qk, bars)
+            fab_commit(bars.kv_free[2])
+            fab_commit(bars.kv_free[1])
 
             # ── steady: j = 1 .. n_tiles-2, two iterations per trip. KV
             # waits are hoisted ahead of the PV/QK pair: KV normally
@@ -780,43 +780,43 @@ function _fab_kernel!(
             trip = UInt32(0)
             while trip < trips
                 # j odd: V in slot 3, next K in slot 0
-                kph3 = _fab_wait(d, bars.kv_full[3], kph3, Val(4))
-                kph0 = _fab_wait(d, bars.kv_full[0], kph0, Val(4))
-                ph_pq0, ph_or01 = _fab_pv_mma(d, sp, Val(0), Val(1), false, Val(1),
+                kph3 = fab_wait(d, bars.kv_full[3], kph3, Val(4))
+                kph0 = fab_wait(d, bars.kv_full[0], kph0, Val(4))
+                ph_pq0, ph_or01 = fab_pv_mma(d, sp, Val(0), Val(1), false, Val(1),
                                               tmem, dv0, idesc_pv, bars, ph_pq0, ph_or01)
-                _fab_qk_mma(Val(0), Val(0), tmem, dq0, dk0, idesc_qk, bars)
-                ph_pq1, ph_or11 = _fab_pv_mma(d, sp, Val(1), Val(1), false, Val(1),
+                fab_qk_mma(Val(0), Val(0), tmem, dq0, dk0, idesc_qk, bars)
+                ph_pq1, ph_or11 = fab_pv_mma(d, sp, Val(1), Val(1), false, Val(1),
                                               tmem, dv0, idesc_pv, bars, ph_pq1, ph_or11)
-                _fab_qk_mma(Val(1), Val(0), tmem, dq0, dk0, idesc_qk, bars)
-                _fab_commit(bars.kv_free[0])
-                _fab_commit(bars.kv_free[3])
+                fab_qk_mma(Val(1), Val(0), tmem, dq0, dk0, idesc_qk, bars)
+                fab_commit(bars.kv_free[0])
+                fab_commit(bars.kv_free[3])
                 # j even: V in slot 1, next K in slot 2
-                kph1 = _fab_wait(d, bars.kv_full[1], kph1, Val(4))
-                kph2 = _fab_wait(d, bars.kv_full[2], kph2, Val(4))
-                ph_pq0, ph_or00 = _fab_pv_mma(d, sp, Val(0), Val(0), false, Val(0),
+                kph1 = fab_wait(d, bars.kv_full[1], kph1, Val(4))
+                kph2 = fab_wait(d, bars.kv_full[2], kph2, Val(4))
+                ph_pq0, ph_or00 = fab_pv_mma(d, sp, Val(0), Val(0), false, Val(0),
                                               tmem, dv0, idesc_pv, bars, ph_pq0, ph_or00)
-                _fab_qk_mma(Val(0), Val(1), tmem, dq0, dk0, idesc_qk, bars)
-                ph_pq1, ph_or10 = _fab_pv_mma(d, sp, Val(1), Val(0), false, Val(0),
+                fab_qk_mma(Val(0), Val(1), tmem, dq0, dk0, idesc_qk, bars)
+                ph_pq1, ph_or10 = fab_pv_mma(d, sp, Val(1), Val(0), false, Val(0),
                                               tmem, dv0, idesc_pv, bars, ph_pq1, ph_or10)
-                _fab_qk_mma(Val(1), Val(1), tmem, dq0, dk0, idesc_qk, bars)
-                _fab_commit(bars.kv_free[2])
-                _fab_commit(bars.kv_free[1])
+                fab_qk_mma(Val(1), Val(1), tmem, dq0, dk0, idesc_qk, bars)
+                fab_commit(bars.kv_free[2])
+                fab_commit(bars.kv_free[1])
                 trip += UInt32(1)
             end
 
             # all QKs for this work item are issued: release the Q buffer
             # so the next item's Q TMA overlaps the final PV and the
             # epilogue
-            _fab_commit(bars.q_free)
+            fab_commit(bars.q_free)
 
             # ── peeled j = n_tiles-1 (odd): PV only, V in slot 3 ──
-            kph3 = _fab_wait(d, bars.kv_full[3], kph3, Val(4))
-            ph_pq0, ph_or01 = _fab_pv_mma(d, sp, Val(0), Val(1), false, Val(1),
+            kph3 = fab_wait(d, bars.kv_full[3], kph3, Val(4))
+            ph_pq0, ph_or01 = fab_pv_mma(d, sp, Val(0), Val(1), false, Val(1),
                                           tmem, dv0, idesc_pv, bars, ph_pq0, ph_or01)
-            ph_pq1, ph_or11 = _fab_pv_mma(d, sp, Val(1), Val(1), false, Val(1),
+            ph_pq1, ph_or11 = fab_pv_mma(d, sp, Val(1), Val(1), false, Val(1),
                                           tmem, dv0, idesc_pv, bars, ph_pq1, ph_or11)
-            _fab_commit(bars.kv_free[3])
-            _fab_commit(bars.o_done)
+            fab_commit(bars.kv_free[3])
+            fab_commit(bars.o_done)
 
             mw += num_ctas
         end
@@ -826,8 +826,8 @@ function _fab_kernel!(
         # completions per stage guarantee every pending parity test still
         # sees a phase flip after the last real PV
         for _ in 1:8
-            _fab_commit(bars.pv_done[0])
-            _fab_commit(bars.pv_done[1])
+            fab_commit(bars.pv_done[0])
+            fab_commit(bars.pv_done[1])
         end
     end
 
@@ -838,7 +838,7 @@ function _fab_kernel!(
     # chunk's TMEM load flies under the previous chunk's exp.
     # =====================================================================
     if tid < UInt32(256)
-        _fab_maxnreg_inc(Val(CFG.nreg[1]))
+        fab_maxnreg_inc(Val(CFG.nreg[1]))
         stage = (tid & UInt32(128)) >> UInt32(7)
 
         sp_base = tmem + lane_bits + (stage << UInt32(7))
@@ -852,25 +852,25 @@ function _fab_kernel!(
 
         sp  = Val(CFG.splitp)
         emu = Val(CFG.emu)
-        qk2 = _fab_pack2(qk_scale, qk_scale)
+        qk2 = fab_pack2(qk_scale, qk_scale)
         ph_s = UInt32(0); ph_stats = UInt32(0); epi_ph = UInt32(0)
         pmax = 0.0f0; sums = 0.0f0
 
         sw = cta_id
         while sw < total_work
             # gate the item start on the previous epilogue's O readout
-            epi_ph = _fab_wait(d, bars.epi, epi_ph, Val(9))
+            epi_ph = fab_wait(d, bars.epi, epi_ph, Val(9))
 
             mneg = 0.0f0
             l_run = 0.0f0
-            ph_s, ph_stats, mneg, pmax, sums, l_run = _fab_softmax_body(
+            ph_s, ph_stats, mneg, pmax, sums, l_run = fab_softmax_body(
                 d, sb, sp, emu, true, oresc, sp_base, sfull, sfree, pq_ptr,
                 stats, alpha_idx,
                 stats_bar, qk_scale, qk2, ph_s, ph_stats, mneg, pmax, sums, l_run)
             it = UInt32(1)
             while it < n_tiles
                 po = (it & UInt32(1)) << UInt32(3)
-                ph_s, ph_stats, mneg, pmax, sums, l_run = _fab_softmax_body(
+                ph_s, ph_stats, mneg, pmax, sums, l_run = fab_softmax_body(
                     d, sb, sp, emu, false, oresc + Int(po), sp_base, sfull, sfree,
                     pq_ptr,
                     stats, alpha_idx, stats_bar, qk_scale, qk2,
@@ -884,7 +884,7 @@ function _fab_kernel!(
             # STATS_FREE-gated like every body publish.
             l_run += sums
             @inbounds stats[sum_idx] = l_run
-            ph_stats = _fab_wait(d, sfree, ph_stats, Val(8))
+            ph_stats = fab_wait(d, sfree, ph_stats, Val(8))
             ptx"bar.arrive"(stats_bar, UInt32(64))
 
             sw += num_ctas
@@ -895,7 +895,7 @@ function _fab_kernel!(
     # Correction warps (tids 256-383): O rescale + epilogue
     # =====================================================================
     if UInt32(256) <= tid < UInt32(384)
-        _fab_maxnreg_dec(Val(CFG.nreg[2]))
+        fab_maxnreg_dec(Val(CFG.nreg[2]))
         # per-stage state (suffix-minted): named bars 1+w / 5+w, alpha
         # slots at stage*128, O at TMEM cols 256 + stage*128
         @unrolled for st in 0:1
@@ -924,7 +924,7 @@ function _fab_kernel!(
             while it < n_tiles - UInt32(1)
                 ponc = ((it + UInt32(1)) & UInt32(1)) << UInt32(3)
                 @unrolled for st in 0:1
-                    ph_pv_st = _fab_corr_tile(d, Val(st), bars, stats, alpha_idx_st,
+                    ph_pv_st = fab_corr_tile(d, Val(st), bars, stats, alpha_idx_st,
                                               stats_bar_st, o_addr_st, ponc, ph_pv_st)
                 end
                 it += UInt32(1)
@@ -933,16 +933,16 @@ function _fab_kernel!(
             # drain: consume the last tile's PV_DONE completion so the
             # per-work-item wait/completion counts stay exactly balanced
             @unrolled for st in 0:1
-                ph_pv_st = _fab_wait(d, bars.pv_done[st], ph_pv_st, Val(10))
+                ph_pv_st = fab_wait(d, bars.pv_done[st], ph_pv_st, Val(10))
             end
 
             # ── epilogue: wait all PV done, normalize, store bf16 ──
-            done_ph = _fab_wait(d, bars.o_done, done_ph, Val(11))
+            done_ph = fab_wait(d, bars.o_done, done_ph, Val(11))
             ptx"tcgen05.fence::after_thread_sync"()
 
-            out_row = _fab_q_row0(cw, seqlen, mb_shift, mb_mask) + row128
+            out_row = fab_q_row0(cw, seqlen, mb_shift, mb_mask) + row128
             @unrolled for st in 0:1
-                _fab_epi_stage(Val(st), bars, stats, alpha_idx_st, stats_bar_st,
+                fab_epi_stage(Val(st), bars, stats, alpha_idx_st, stats_bar_st,
                                o_addr_st, out_row, po)
             end
 
@@ -962,7 +962,7 @@ end
 # ── host-side helpers (shared by the tests and the bench workbench) ─────
 
 # f32 reference with bf16-quantized inputs, per (batch*head) slice.
-function _fab_cpu_ref(Q::Matrix{Float32}, K::Matrix{Float32},
+function fab_cpu_ref(Q::Matrix{Float32}, K::Matrix{Float32},
                       V::Matrix{Float32}, sm_scale::Float32)
     Qb = bf16_to_f32.(bf16_bits.(Q))
     Kb = bf16_to_f32.(bf16_bits.(K))
@@ -974,7 +974,7 @@ function _fab_cpu_ref(Q::Matrix{Float32}, K::Matrix{Float32},
 end
 
 # (rows, 128) f32 → bf16 bits, row-major (HD-fast) for TMA/global IO.
-function _fab_pack(X::Matrix{Float32})
+function fab_pack(X::Matrix{Float32})
     rows, hd = size(X)
     out = Array{UInt16}(undef, hd, rows)
     for r in 1:rows, h in 1:hd
