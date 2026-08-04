@@ -103,7 +103,6 @@ write_coverage_page()
 makedocs(;
     modules=[PTX, PTX.IR, PTX.Codegen, PTX.Parser, PTX.MBarriers,
              PTX.Pipelines, PTX.Warps, PTX.Utils],
-             PTX.Pipelines, PTX.Warps],
     authors="Anton Oresten <antonoresten@proton.me>",
     sitename="PTX.jl",
     format=Documenter.HTML(;
