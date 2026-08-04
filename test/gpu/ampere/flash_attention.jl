@@ -93,26 +93,22 @@ function fam_kernel!(
     # ── prologue: Q + K(0) staged in one cp.async group ─────────────────
     # 16 B per thread per issue; a 64×HD bf16 tile is 8·HD chunks →
     # HD/16 issues of 128 threads. Chunk c → row c ÷ D8, column 8·(c % D8).
-    @unrolled for i in 0:7
-        if i < D16
-            c = Int(tid) + i * FAM_THREADS
-            row = c ÷ D8
-            col = (c % D8) * 8
-            ptx"cp.async.cg.shared.global"(
-                q_base + (row * HD + col) * 2,
-                pq + ((head_row0 + q_row0 + row) * HD + col) * 2, Val(16))
-            ptx"cp.async.cg.shared.global"(
-                k_base0 + (row * HD + col) * 2,
-                pk + ((head_row0 + row) * HD + col) * 2, Val(16))
-        end
+    @unrolled 8 for i in 0:(D16 - 1)
+        c = Int(tid) + i * FAM_THREADS
+        row = c ÷ D8
+        col = (c % D8) * 8
+        ptx"cp.async.cg.shared.global"(
+            q_base + (row * HD + col) * 2,
+            pq + ((head_row0 + q_row0 + row) * HD + col) * 2, Val(16))
+        ptx"cp.async.cg.shared.global"(
+            k_base0 + (row * HD + col) * 2,
+            pk + ((head_row0 + row) * HD + col) * 2, Val(16))
     end
     ptx"cp.async.commit_group"()
 
     # ── carried state ────────────────────────────────────────────────────
-    @unrolled for j in 1:16
-        if j <= D8
-            oacc_j = (0f0, 0f0, 0f0, 0f0)
-        end
+    @unrolled 16 for j in 1:D8
+        oacc_j = (0f0, 0f0, 0f0, 0f0)
     end
     m_lo = -Inf32; m_hi = -Inf32
     l_lo = 0f0;    l_hi = 0f0
@@ -125,14 +121,12 @@ function fam_kernel!(
     # (k +8), (both) — gemm_pipelined.jl's layout.
     ptx"cp.async.wait_all"()
     ptx"bar.sync"(Val(0))
-    @unrolled for kc in 0:7
-        if kc < D16
-            qoff = q_base + ((wrow + gid) * HD + kc * 16 + col_lo) * 2
-            qf_kc = (ptx"ld.shared.b32"(qoff),
-                     ptx"ld.shared.b32"(qoff + 8 * HD * 2),
-                     ptx"ld.shared.b32"(qoff + 16),
-                     ptx"ld.shared.b32"(qoff + 8 * HD * 2 + 16))
-        end
+    @unrolled 8 for kc in 0:(D16 - 1)
+        qoff = q_base + ((wrow + gid) * HD + kc * 16 + col_lo) * 2
+        qf_kc = (ptx"ld.shared.b32"(qoff),
+                 ptx"ld.shared.b32"(qoff + 8 * HD * 2),
+                 ptx"ld.shared.b32"(qoff + 16),
+                 ptx"ld.shared.b32"(qoff + 8 * HD * 2 + 16))
     end
 
     n_tiles = CAUSAL ? (qb + UInt32(1)) : (seqlen ÷ UInt32(FAM_BN))
@@ -153,15 +147,13 @@ function fam_kernel!(
         if kt + UInt32(1) < n_tiles
             nxt = ((kt + UInt32(1)) & UInt32(1)) == UInt32(0) ? k_base0 : k_base1
             krow0 = head_row0 + Int(kt + UInt32(1)) * FAM_BN
-            @unrolled for i in 0:7
-                if i < D16
-                    c = Int(tid) + i * FAM_THREADS
-                    row = c ÷ D8
-                    col = (c % D8) * 8
-                    ptx"cp.async.cg.shared.global"(
-                        nxt + (row * HD + col) * 2,
-                        pk + ((krow0 + row) * HD + col) * 2, Val(16))
-                end
+            @unrolled 8 for i in 0:(D16 - 1)
+                c = Int(tid) + i * FAM_THREADS
+                row = c ÷ D8
+                col = (c % D8) * 8
+                ptx"cp.async.cg.shared.global"(
+                    nxt + (row * HD + col) * 2,
+                    pk + ((krow0 + row) * HD + col) * 2, Val(16))
             end
             ptx"cp.async.commit_group"()
         end
@@ -170,16 +162,14 @@ function fam_kernel!(
         @unrolled for j in 1:8
             sacc_j = (0f0, 0f0, 0f0, 0f0)
         end
-        @unrolled for kc in 0:7
-            if kc < D16
-                @unrolled for j in 1:8
-                    boff = stage_k + (((j - 1) * 8 + gid) * HD +
-                                      kc * 16 + col_lo) * 2
-                    sacc_j = ptx"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(
-                        qf_kc,
-                        (ptx"ld.shared.b32"(boff), ptx"ld.shared.b32"(boff + 16)),
-                        sacc_j)
-                end
+        @unrolled 8 for kc in 0:(D16 - 1)
+            @unrolled for j in 1:8
+                boff = stage_k + (((j - 1) * 8 + gid) * HD +
+                                  kc * 16 + col_lo) * 2
+                sacc_j = ptx"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(
+                    qf_kc,
+                    (ptx"ld.shared.b32"(boff), ptx"ld.shared.b32"(boff + 16)),
+                    sacc_j)
             end
         end
 
@@ -227,32 +217,28 @@ function fam_kernel!(
         l_hi = ptx"fma.rn.f32"(l_hi, alpha_hi, tsum_hi)
 
         # rescale O by alpha (elements 1,2 = row gid; 3,4 = row gid+8)
-        @unrolled for j in 1:16
-            if j <= D8
-                oacc_j = (oacc_j[1] * alpha_lo, oacc_j[2] * alpha_lo,
-                          oacc_j[3] * alpha_hi, oacc_j[4] * alpha_hi)
-            end
+        @unrolled 16 for j in 1:D8
+            oacc_j = (oacc_j[1] * alpha_lo, oacc_j[2] * alpha_lo,
+                      oacc_j[3] * alpha_hi, oacc_j[4] * alpha_hi)
         end
 
         # ── stage Vᵀ: v4 loads of two adjacent seq rows, halfword repack.
         # The loop-head barrier already ordered PV(kt-1)'s reads before
         # these writes.
         vrow0 = head_row0 + Int(kt) * FAM_BN
-        @unrolled for i in 0:3
-            if i < D16 ÷ 2
-                idx = Int(tid) + i * FAM_THREADS
-                kp  = idx ÷ D8
-                dc  = (idx % D8) * 8
-                va = ptx"ld.global.v4.b32"(pv + ((vrow0 + 2kp) * HD + dc) * 2)
-                vb = ptx"ld.global.v4.b32"(pv + ((vrow0 + 2kp + 1) * HD + dc) * 2)
-                @unrolled for e in 1:4
-                    # va/vb b32s pack (d, d+1); split and re-pair by seq
-                    lo = (va[e] & UInt32(0xffff)) | (vb[e] << 16)
-                    hi = (va[e] >> 16) | (vb[e] & UInt32(0xffff0000))
-                    d0 = dc + 2 * (e - 1)
-                    @inbounds vt[d0 * (FAM_BN ÷ 2) + kp + 1] = lo
-                    @inbounds vt[(d0 + 1) * (FAM_BN ÷ 2) + kp + 1] = hi
-                end
+        @unrolled 4 for i in 0:(D16 ÷ 2 - 1)
+            idx = Int(tid) + i * FAM_THREADS
+            kp  = idx ÷ D8
+            dc  = (idx % D8) * 8
+            va = ptx"ld.global.v4.b32"(pv + ((vrow0 + 2kp) * HD + dc) * 2)
+            vb = ptx"ld.global.v4.b32"(pv + ((vrow0 + 2kp + 1) * HD + dc) * 2)
+            @unrolled for e in 1:4
+                # va/vb b32s pack (d, d+1); split and re-pair by seq
+                lo = (va[e] & UInt32(0xffff)) | (vb[e] << 16)
+                hi = (va[e] >> 16) | (vb[e] & UInt32(0xffff0000))
+                d0 = dc + 2 * (e - 1)
+                @inbounds vt[d0 * (FAM_BN ÷ 2) + kp + 1] = lo
+                @inbounds vt[(d0 + 1) * (FAM_BN ÷ 2) + kp + 1] = hi
             end
         end
         ptx"bar.sync"(Val(0))
@@ -264,15 +250,13 @@ function fam_kernel!(
                     bf16x2_pack(sacc_ja[3], sacc_ja[4]),
                     bf16x2_pack(sacc_jb[1], sacc_jb[2]),
                     bf16x2_pack(sacc_jb[3], sacc_jb[4]))
-            @unrolled for j in 1:16
-                if j <= D8
-                    voff = vt_ptr + (((j - 1) * 8 + gid) * (FAM_BN ÷ 2) +
-                                     (t - 1) * 8 + (col_lo >> 1)) * 4
-                    oacc_j = ptx"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(
-                        af_t,
-                        (ptx"ld.shared.b32"(voff), ptx"ld.shared.b32"(voff + 16)),
-                        oacc_j)
-                end
+            @unrolled 16 for j in 1:D8
+                voff = vt_ptr + (((j - 1) * 8 + gid) * (FAM_BN ÷ 2) +
+                                 (t - 1) * 8 + (col_lo >> 1)) * 4
+                oacc_j = ptx"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(
+                    af_t,
+                    (ptx"ld.shared.b32"(voff), ptx"ld.shared.b32"(voff + 16)),
+                    oacc_j)
             end
         end
 
@@ -284,14 +268,12 @@ function fam_kernel!(
     inv_hi = ptx"rcp.approx.f32"(l_hi)
     orow_lo = head_row0 + q_row0 + wrow + gid
     orow_hi = orow_lo + 8
-    @unrolled for j in 1:16
-        if j <= D8
-            colb = (j - 1) * 8 + col_lo
-            ob_lo = bf16x2_pack(oacc_j[1] * inv_lo, oacc_j[2] * inv_lo)
-            ob_hi = bf16x2_pack(oacc_j[3] * inv_hi, oacc_j[4] * inv_hi)
-            ptx"st.global.b32"(po32 + (orow_lo * HD + colb) * 2, ob_lo)
-            ptx"st.global.b32"(po32 + (orow_hi * HD + colb) * 2, ob_hi)
-        end
+    @unrolled 16 for j in 1:D8
+        colb = (j - 1) * 8 + col_lo
+        ob_lo = bf16x2_pack(oacc_j[1] * inv_lo, oacc_j[2] * inv_lo)
+        ob_hi = bf16x2_pack(oacc_j[3] * inv_hi, oacc_j[4] * inv_hi)
+        ptx"st.global.b32"(po32 + (orow_lo * HD + colb) * 2, ob_lo)
+        ptx"st.global.b32"(po32 + (orow_hi * HD + colb) * 2, ob_hi)
     end
     return nothing
 end
