@@ -117,6 +117,7 @@ makedocs(;
         "Wrappers" => "wrappers.md",
         "Coverage" => "coverage.md",
         "Barriers & pipelines" => "barriers.md",
+        "Kernel utilities" => "utils.md",
         "Transpiler" => "transpiler.md",
         "Reference" => "reference.md",
         "Internals" => "internals.md",
