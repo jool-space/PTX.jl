@@ -1,5 +1,6 @@
 # TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=7.0
 using Random
+using PTX.Warps: warp_reduce
 
 # Ported from pyptx/examples/hopper/layer_norm.py
 # (https://github.com/patrick-toulme/pyptx).
@@ -19,17 +20,6 @@ using Random
 
 const LN_WARP_SIZE = UInt32(32)
 
-@inline function _ln_warp_reduce_sum(v::Float32)
-    full = UInt32(0xFFFFFFFF)
-    seg  = UInt32(0x1F)
-    Base.@nexprs 5 i -> begin
-        offset = UInt32(1) << UInt32(5 - i)
-        u      = reinterpret(UInt32, v)
-        u_par  = ptx"shfl.sync.bfly.b32"(u, offset, seg, full)
-        v      = ptx"add.f32"(v, reinterpret(Float32, u_par))
-    end
-    v
-end
 
 function _layer_norm_v4_kernel!(
         Y::CuDeviceVector{Float32},
@@ -75,8 +65,10 @@ function _layer_norm_v4_kernel!(
         end
     end
 
-    sum_x  = _ln_warp_reduce_sum(sum_x)
-    sum_x2 = _ln_warp_reduce_sum(sum_x2)
+    # ptx"add.f32" (not Julia +): warp_reduce applies the op verbatim
+    # between shuffle rounds.
+    sum_x  = warp_reduce(ptx"add.f32", sum_x)
+    sum_x2 = warp_reduce(ptx"add.f32", sum_x2)
 
     if lane == UInt32(0)
         @inbounds partials[Int(warp_id) + 1, 1] = sum_x
