@@ -71,11 +71,15 @@ end
 end
 
 @testset "warp_reduce: byte-identical to the hand-rolled ladder" begin
-    # normalize register numbers and the mangled kernel symbol (whose
-    # _Z<len> prefix differs with the Julia function-name length)
+    # normalize register numbers, the mangled kernel symbol (whose _Z<len>
+    # prefix differs with the Julia function-name length), and the gensym
+    # suffix on julia_ runtime externs — under --check-bounds=yes the
+    # probes' checked store calls julia_throw_boundserror_<N> with a
+    # per-specialization N
     norm(p) = replace(split(p, ".visible .entry")[2],
                       r"%(r|rd|f|p)\d+" => s"%\1",
-                      r"_Z\d+_wr_\w+?_kernel" => "_wr_kernel")
+                      r"_Z\d+_wr_\w+?_kernel" => "_wr_kernel",
+                      r"(julia_[A-Za-z_]+)_\d+" => s"\1")
     a = norm(emit_ptx(_wr_full_kernel!, _WR_TT; cap = v"8.9"))
     b = norm(emit_ptx(_wr_hand_kernel!, _WR_TT; cap = v"8.9"))
     c = norm(emit_ptx(_wr_closure_kernel!, _WR_TT; cap = v"8.9"))
