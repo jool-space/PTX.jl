@@ -285,11 +285,11 @@ end
                               ph::UInt32) where {SLOT}
     ph = fab_wait(d, bars.kv_free[SLOT], ph, Val(1))
     barrier_arrive_expect_tx(bars.kv_full[SLOT], FAB_TILE_BYTES)
-    fabload_tile(kv_ptr, SLOT * FAB_TILE_BYTES, tma, row, bars.kv_full[SLOT])
+    fab_load_tile(kv_ptr, SLOT * FAB_TILE_BYTES, tma, row, bars.kv_full[SLOT])
     return row + UInt32(FAB_BN), ph
 end
 
-@inline fabcommit(mbar_ptr) =
+@inline fab_commit(mbar_ptr) =
     ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cta.b64"(
         smem_addr_u32(mbar_ptr))
 
