@@ -1,5 +1,6 @@
 # TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=7.0
 using Random
+using PTX.Warps: warp_reduce
 
 # Fused RMS-norm port from pyptx/examples/hopper/rms_norm.py.
 #
@@ -26,20 +27,10 @@ using Random
 
 const RMS_WARP_SIZE = UInt32(32)
 
-# Butterfly warp reduction (sum). 5 shfl steps cover all 32 lanes; after
-# the final step every lane holds the full-warp sum. UInt32 reinterpret
-# bridges the b32-typed shfl with our Float32 accumulator.
-@inline function _warp_reduce_sum(v::Float32)
-    full = UInt32(0xFFFFFFFF)
-    seg  = UInt32(0x1F)
-    Base.@nexprs 5 i -> begin
-        offset = UInt32(1) << UInt32(5 - i)        # 16, 8, 4, 2, 1
-        u      = reinterpret(UInt32, v)
-        u_par  = ptx"shfl.sync.bfly.b32"(u, offset, seg, full)
-        v      = ptx"add.f32"(v, reinterpret(Float32, u_par))
-    end
-    v
-end
+# ptx"add.f32" (not Julia +): the kernel's reduction op is the plain PTX
+# add, and warp_reduce applies op verbatim between shuffle rounds.
+@inline _warp_reduce_sum(v::Float32) =
+    warp_reduce((a, b) -> ptx"add.f32"(a, b), v)
 
 function _rms_norm_v4_kernel!(
         Y::CuDeviceVector{Float32},

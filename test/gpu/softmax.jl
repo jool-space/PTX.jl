@@ -1,5 +1,6 @@
 # TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=7.0
 using Random
+using PTX.Warps: warp_reduce
 
 # Ported from pyptx/examples/hopper/softmax.py
 # (https://github.com/patrick-toulme/pyptx).
@@ -28,29 +29,13 @@ using Random
 const SM_WARP_SIZE = UInt32(32)
 const SM_LOG2E     = Float32(1.4426950408889634)
 
-@inline function _sm_warp_reduce_max(v::Float32)
-    full = UInt32(0xFFFFFFFF)
-    seg  = UInt32(0x1F)
-    Base.@nexprs 5 i -> begin
-        offset = UInt32(1) << UInt32(5 - i)
-        u      = reinterpret(UInt32, v)
-        u_par  = ptx"shfl.sync.bfly.b32"(u, offset, seg, full)
-        v      = ptx"max.f32"(v, reinterpret(Float32, u_par))
-    end
-    v
-end
-
-@inline function _sm_warp_reduce_sum(v::Float32)
-    full = UInt32(0xFFFFFFFF)
-    seg  = UInt32(0x1F)
-    Base.@nexprs 5 i -> begin
-        offset = UInt32(1) << UInt32(5 - i)
-        u      = reinterpret(UInt32, v)
-        u_par  = ptx"shfl.sync.bfly.b32"(u, offset, seg, full)
-        v      = ptx"add.f32"(v, reinterpret(Float32, u_par))
-    end
-    v
-end
+# ptx"max.f32"/ptx"add.f32" (not Julia max/+): the kernel's reduction
+# semantics are the non-NaN-propagating PTX ops, and warp_reduce applies
+# op verbatim between shuffle rounds.
+@inline _sm_warp_reduce_max(v::Float32) =
+    warp_reduce((a, b) -> ptx"max.f32"(a, b), v)
+@inline _sm_warp_reduce_sum(v::Float32) =
+    warp_reduce((a, b) -> ptx"add.f32"(a, b), v)
 
 function _softmax_v4_kernel!(
         Y::CuDeviceVector{Float32},
