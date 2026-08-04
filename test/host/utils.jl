@@ -3,7 +3,7 @@
 # contracts (substitution rules, pairwise tree shape), not derived from
 # the implementation.
 
-using PTX.Utils: @unrolled, strided_reduce
+using PTX.Utils: @unroll, strided_reduce
 using Random: MersenneTwister
 
 # Unwrap the LoadError layers macro-expansion errors arrive in.
@@ -20,31 +20,31 @@ function _expansion_error(ex)
     err
 end
 
-@testset "@unrolled: literal ranges" begin
+@testset "@unroll: literal ranges" begin
     acc = Int[]
-    @unrolled for i in 0:3
+    @unroll for i in 0:3
         push!(acc, i * i)
     end
     @test acc == [0, 1, 4, 9]
 
     stepped = Int[]
-    @unrolled for i in 1:2:7
+    @unroll for i in 1:2:7
         push!(stepped, i)
     end
     @test stepped == [1, 3, 5, 7]
 end
 
-@testset "@unrolled: the value is a compile-time constant" begin
+@testset "@unroll: the value is a compile-time constant" begin
     valof(::Val{N}) where {N} = N
     seen = Int[]
-    @unrolled for i in 2:4
+    @unroll for i in 2:4
         push!(seen, valof(Val(i)))   # Val(i) requires a literal i
     end
     @test seen == [2, 3, 4]
 end
 
-@testset "@unrolled: `name_x` suffix mints per-iteration names" begin
-    @unrolled for s in 0:2
+@testset "@unroll: `name_x` suffix mints per-iteration names" begin
+    @unroll for s in 0:2
         ph_s = s + 10
     end
     # assignments splice into the enclosing scope and persist
@@ -53,17 +53,17 @@ end
     # only the literal `_s` suffix rewrites; other names pass through
     bars = 7
     total = 0
-    @unrolled for s in 0:1
+    @unroll for s in 0:1
         total += bars + s
     end
     @test total == 15
 end
 
-@testset "@unrolled: tuple iterators and destructuring" begin
+@testset "@unroll: tuple iterators and destructuring" begin
     inc(x) = x + 1
     dbl(x) = 2x
     out = Int[]
-    @unrolled for (k, fn) in ((0, inc), (1, dbl))
+    @unroll for (k, fn) in ((0, inc), (1, dbl))
         r_k = fn(k)
         push!(out, r_k)
     end
@@ -71,32 +71,32 @@ end
     @test (r_0, r_1) == (1, 2)
 end
 
-@testset "@unrolled: keyword-argument names are not substituted" begin
+@testset "@unroll: keyword-argument names are not substituted" begin
     kwecho(; s = 0) = s
     got = Int[]
-    @unrolled for s in 1:2
+    @unroll for s in 1:2
         push!(got, kwecho(s = s))
     end
     @test got == [1, 2]
 end
 
-@testset "@unrolled: capped form" begin
+@testset "@unroll: capped form" begin
     n = 3                                # not a parse-time literal
     acc = Int[]
-    @unrolled 8 for j in 1:n
+    @unroll 8 for j in 1:n
         push!(acc, j)
     end
     @test acc == [1, 2, 3]
 
     # the guard splices the stop EXPRESSION: 0:(n-1) means what it says
     zero_based = Int[]
-    @unrolled 8 for j in 0:(n - 1)
+    @unroll 8 for j in 0:(n - 1)
         push!(zero_based, j)
     end
     @test zero_based == [0, 1, 2]
 
     # per-iteration names mint exactly for the live copies
-    @unrolled 4 for s in 0:(n - 2)
+    @unroll 4 for s in 0:(n - 2)
         cap_s = 10 + s
     end
     @test (cap_0, cap_1) == (10, 11)
@@ -105,12 +105,12 @@ end
     # step ranges: literal start/step, dynamic stop
     m = 5
     stepped = Int[]
-    @unrolled 4 for j in 0:2:m
+    @unroll 4 for j in 0:2:m
         push!(stepped, j)
     end
     @test stepped == [0, 2, 4]
     descending = Int[]
-    @unrolled 4 for j in 8:-2:m
+    @unroll 4 for j in 8:-2:m
         push!(descending, j)
     end
     @test descending == [8, 6]
@@ -119,7 +119,7 @@ end
     calls = Ref(0)
     stop_once() = (calls[] += 1; 2)
     hits = Int[]
-    @unrolled 8 for j in 1:stop_once()
+    @unroll 8 for j in 1:stop_once()
         push!(hits, j)
     end
     @test hits == [1, 2] && calls[] == 1
@@ -127,14 +127,14 @@ end
     # the cap is a caller-asserted ceiling: iterations beyond it are
     # silently absent (assert the bound where the values are chosen)
     over = Int[]
-    @unrolled 2 for j in 1:100
+    @unroll 2 for j in 1:100
         push!(over, j)
     end
     @test over == [1, 2]
 end
 
-@testset "@unrolled: capped-form refusals" begin
-    unrolled2(cap, loop) = Expr(:macrocall, Symbol("@unrolled"),
+@testset "@unroll: capped-form refusals" begin
+    unrolled2(cap, loop) = Expr(:macrocall, Symbol("@unroll"),
                                 LineNumberNode(@__LINE__, @__FILE__), cap, loop)
 
     err = _expansion_error(unrolled2(:n, :(for i in 1:m; i; end)))
@@ -153,8 +153,8 @@ end
     @test err isa ErrorException && occursin("range iterator", err.msg)
 end
 
-@testset "@unrolled: refusals" begin
-    unrolled(loop) = Expr(:macrocall, Symbol("@unrolled"),
+@testset "@unroll: refusals" begin
+    unrolled(loop) = Expr(:macrocall, Symbol("@unroll"),
                           LineNumberNode(@__LINE__, @__FILE__), loop)
 
     err = _expansion_error(unrolled(:(for i in 1:n; i; end)))

@@ -37,7 +37,7 @@
 # CAUSAL masks col > row within each head.
 
 using Random
-using PTX.Utils: @unrolled
+using PTX.Utils: @unroll
 using PTX.Warps: warp_reduce
 using PTX: bf16x2_pack
 
@@ -93,7 +93,7 @@ function fam_kernel!(
     # ── prologue: Q + K(0) staged in one cp.async group ─────────────────
     # 16 B per thread per issue; a 64×HD bf16 tile is 8·HD chunks →
     # HD/16 issues of 128 threads. Chunk c → row c ÷ D8, column 8·(c % D8).
-    @unrolled 8 for i in 0:(D16 - 1)
+    @unroll 8 for i in 0:(D16 - 1)
         c = Int(tid) + i * FAM_THREADS
         row = c ÷ D8
         col = (c % D8) * 8
@@ -107,7 +107,7 @@ function fam_kernel!(
     ptx"cp.async.commit_group"()
 
     # ── carried state ────────────────────────────────────────────────────
-    @unrolled 16 for j in 1:D8
+    @unroll 16 for j in 1:D8
         oacc_j = (0f0, 0f0, 0f0, 0f0)
     end
     m_lo = -Inf32; m_hi = -Inf32
@@ -121,7 +121,7 @@ function fam_kernel!(
     # (k +8), (both) — gemm_pipelined.jl's layout.
     ptx"cp.async.wait_all"()
     ptx"bar.sync"(Val(0))
-    @unrolled 8 for kc in 0:(D16 - 1)
+    @unroll 8 for kc in 0:(D16 - 1)
         qoff = q_base + ((wrow + gid) * HD + kc * 16 + col_lo) * 2
         qf_kc = (ptx"ld.shared.b32"(qoff),
                  ptx"ld.shared.b32"(qoff + 8 * HD * 2),
@@ -147,7 +147,7 @@ function fam_kernel!(
         if kt + UInt32(1) < n_tiles
             nxt = ((kt + UInt32(1)) & UInt32(1)) == UInt32(0) ? k_base0 : k_base1
             krow0 = head_row0 + Int(kt + UInt32(1)) * FAM_BN
-            @unrolled 8 for i in 0:(D16 - 1)
+            @unroll 8 for i in 0:(D16 - 1)
                 c = Int(tid) + i * FAM_THREADS
                 row = c ÷ D8
                 col = (c % D8) * 8
@@ -159,11 +159,11 @@ function fam_kernel!(
         end
 
         # ── S = Q·Kᵀ: 8 accumulator tiles, contraction over HD ──────────
-        @unrolled for j in 1:8
+        @unroll for j in 1:8
             sacc_j = (0f0, 0f0, 0f0, 0f0)
         end
-        @unrolled 8 for kc in 0:(D16 - 1)
-            @unrolled for j in 1:8
+        @unroll 8 for kc in 0:(D16 - 1)
+            @unroll for j in 1:8
                 boff = stage_k + (((j - 1) * 8 + gid) * HD +
                                   kc * 16 + col_lo) * 2
                 sacc_j = ptx"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(
@@ -176,7 +176,7 @@ function fam_kernel!(
         # ── causal mask on the diagonal tile (col > row → -Inf) ─────────
         if CAUSAL && kt == qb
             kcol0 = Float32(Int(kt) * FAM_BN + col_lo)
-            @unrolled for j in 1:8
+            @unroll for j in 1:8
                 c0 = kcol0 + Float32(8 * (j - 1))
                 sacc_j = (ifelse(c0       > qrow_lo, -Inf32, sacc_j[1]),
                           ifelse(c0 + 1f0 > qrow_lo, -Inf32, sacc_j[2]),
@@ -187,7 +187,7 @@ function fam_kernel!(
 
         # ── online softmax (per lane: rows gid and gid+8) ───────────────
         tmax_lo = -Inf32; tmax_hi = -Inf32
-        @unrolled for j in 1:8
+        @unroll for j in 1:8
             tmax_lo = fmax(tmax_lo, fmax(sacc_j[1], sacc_j[2]))
             tmax_hi = fmax(tmax_hi, fmax(sacc_j[3], sacc_j[4]))
         end
@@ -203,7 +203,7 @@ function fam_kernel!(
 
         # P = exp2((s − m)·qk2) in the accumulator layout; fold row sums
         tsum_lo = 0f0; tsum_hi = 0f0
-        @unrolled for j in 1:8
+        @unroll for j in 1:8
             sacc_j = (ptx"ex2.approx.f32"(ptx"fma.rn.f32"(sacc_j[1], qk2, mneg_lo)),
                       ptx"ex2.approx.f32"(ptx"fma.rn.f32"(sacc_j[2], qk2, mneg_lo)),
                       ptx"ex2.approx.f32"(ptx"fma.rn.f32"(sacc_j[3], qk2, mneg_hi)),
@@ -217,7 +217,7 @@ function fam_kernel!(
         l_hi = ptx"fma.rn.f32"(l_hi, alpha_hi, tsum_hi)
 
         # rescale O by alpha (elements 1,2 = row gid; 3,4 = row gid+8)
-        @unrolled 16 for j in 1:D8
+        @unroll 16 for j in 1:D8
             oacc_j = (oacc_j[1] * alpha_lo, oacc_j[2] * alpha_lo,
                       oacc_j[3] * alpha_hi, oacc_j[4] * alpha_hi)
         end
@@ -226,13 +226,13 @@ function fam_kernel!(
         # The loop-head barrier already ordered PV(kt-1)'s reads before
         # these writes.
         vrow0 = head_row0 + Int(kt) * FAM_BN
-        @unrolled 4 for i in 0:(D16 ÷ 2 - 1)
+        @unroll 4 for i in 0:(D16 ÷ 2 - 1)
             idx = Int(tid) + i * FAM_THREADS
             kp  = idx ÷ D8
             dc  = (idx % D8) * 8
             va = ptx"ld.global.v4.b32"(pv + ((vrow0 + 2kp) * HD + dc) * 2)
             vb = ptx"ld.global.v4.b32"(pv + ((vrow0 + 2kp + 1) * HD + dc) * 2)
-            @unrolled for e in 1:4
+            @unroll for e in 1:4
                 # va/vb b32s pack (d, d+1); split and re-pair by seq
                 lo = (va[e] & UInt32(0xffff)) | (vb[e] << 16)
                 hi = (va[e] >> 16) | (vb[e] & UInt32(0xffff0000))
@@ -245,12 +245,12 @@ function fam_kernel!(
 
         # ── O += P·V: A from the exp'd accumulators (k-chunk t = S tiles
         # ja, jb), B fragments straight from Vᵀ ──────────────────────────
-        @unrolled for (t, ja, jb) in ((1, 1, 2), (2, 3, 4), (3, 5, 6), (4, 7, 8))
+        @unroll for (t, ja, jb) in ((1, 1, 2), (2, 3, 4), (3, 5, 6), (4, 7, 8))
             af_t = (bf16x2_pack(sacc_ja[1], sacc_ja[2]),
                     bf16x2_pack(sacc_ja[3], sacc_ja[4]),
                     bf16x2_pack(sacc_jb[1], sacc_jb[2]),
                     bf16x2_pack(sacc_jb[3], sacc_jb[4]))
-            @unrolled 16 for j in 1:D8
+            @unroll 16 for j in 1:D8
                 voff = vt_ptr + (((j - 1) * 8 + gid) * (FAM_BN ÷ 2) +
                                  (t - 1) * 8 + (col_lo >> 1)) * 4
                 oacc_j = ptx"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(
@@ -268,7 +268,7 @@ function fam_kernel!(
     inv_hi = ptx"rcp.approx.f32"(l_hi)
     orow_lo = head_row0 + q_row0 + wrow + gid
     orow_hi = orow_lo + 8
-    @unrolled 16 for j in 1:D8
+    @unroll 16 for j in 1:D8
         colb = (j - 1) * 8 + col_lo
         ob_lo = bf16x2_pack(oacc_j[1] * inv_lo, oacc_j[2] * inv_lo)
         ob_hi = bf16x2_pack(oacc_j[3] * inv_hi, oacc_j[4] * inv_hi)

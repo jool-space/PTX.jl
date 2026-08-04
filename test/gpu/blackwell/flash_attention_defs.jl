@@ -112,7 +112,7 @@
 
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
            BlackwellLayout, tensor_map_tile_2d, bf16x2_pack
-using PTX.Utils: @unrolled, strided_reduce
+using PTX.Utils: @unroll, strided_reduce
 using PTX.MBarriers: BarrierSet, barrierset_init!, barrier_bytes,
                      barrier_arrive, barrier_arrive_expect_tx,
                      barrier_try_wait
@@ -597,11 +597,11 @@ end
             barrier_arrive(bars.o_resc[0, 0])
             barrier_arrive(bars.o_resc[1, 0])
         end
-        # @unrolled (not plain for): pk_q[4vec + 1] must be a constant
+        # @unroll (not plain for): pk_q[4vec + 1] must be a constant
         # tuple index by construction, not by trusting LLVM's unroller
-        @unrolled for q in 0:1
+        @unroll for q in 0:1
             pk_q = fab_pack16(ov, Val(q), inv_l)
-            @unrolled for vec in 0:3
+            @unroll for vec in 0:3
                 ptx"st.global.v4.b32"(gptr + half * 128 + 64q + vec * 16,
                     (pk_q[4vec + 1], pk_q[4vec + 2],
                      pk_q[4vec + 3], pk_q[4vec + 4]))
@@ -681,7 +681,7 @@ function fab_kernel!(
             barrier_arrive(bars.kv_free[s])
         end
         barrier_arrive(bars.q_free)
-        @unrolled for s in 0:3
+        @unroll for s in 0:3
             ph_s = UInt32(0)
         end
         q_free_ph = UInt32(0)
@@ -702,7 +702,7 @@ function fab_kernel!(
             barrier_arrive_expect_tx(bars.q[1], FAB_TILE_BYTES)
             fab_load_tile(q_ptr, FAB_TILE_BYTES, tma_Q, q_row0 + UInt32(FAB_BM),
                            bars.q[1])
-            @unrolled for (s, tma, row) in ((1, tma_V, vrow), (2, tma_K, krow),
+            @unroll for (s, tma, row) in ((1, tma_V, vrow), (2, tma_K, krow),
                                             (3, tma_V, vrow))
                 row, ph_s = fab_load_kv(d, Val(s), kv_ptr, tma, row, bars, ph_s)
             end
@@ -711,7 +711,7 @@ function fab_kernel!(
             trips = (n_tiles - UInt32(2)) >> 1
             trip = UInt32(0)
             while trip < trips
-                @unrolled for (s, tma, row) in ((0, tma_K, krow), (1, tma_V, vrow),
+                @unroll for (s, tma, row) in ((0, tma_K, krow), (1, tma_V, vrow),
                                                 (2, tma_K, krow), (3, tma_V, vrow))
                     row, ph_s = fab_load_kv(d, Val(s), kv_ptr, tma, row, bars, ph_s)
                 end
@@ -898,7 +898,7 @@ function fab_kernel!(
         fab_maxnreg_dec(Val(CFG.nreg[2]))
         # per-stage state (suffix-minted): named bars 1+w / 5+w, alpha
         # slots at stage*128, O at TMEM cols 256 + stage*128
-        @unrolled for st in 0:1
+        @unroll for st in 0:1
             stats_bar_st = UInt32(1 + 4st) + wig
             alpha_idx_st = 128st + Int(row128) + 1
             o_addr_st    = tmem + UInt32(256 + 128st) + lane_bits
@@ -910,7 +910,7 @@ function fab_kernel!(
         # first KV tile needs no correction: release both stages once
         # (parity-0 barrier gates PV(0)); also pre-arrive STATS_FREE so
         # the softmax's pre-write wait at tile 1 is already satisfied
-        @unrolled for st in 0:1
+        @unroll for st in 0:1
             barrier_arrive(bars.o_resc[st, 0])
             barrier_arrive(bars.stats_free[st])
         end
@@ -923,7 +923,7 @@ function fab_kernel!(
             it = UInt32(0)
             while it < n_tiles - UInt32(1)
                 ponc = ((it + UInt32(1)) & UInt32(1)) << UInt32(3)
-                @unrolled for st in 0:1
+                @unroll for st in 0:1
                     ph_pv_st = fab_corr_tile(d, Val(st), bars, stats, alpha_idx_st,
                                               stats_bar_st, o_addr_st, ponc, ph_pv_st)
                 end
@@ -932,7 +932,7 @@ function fab_kernel!(
 
             # drain: consume the last tile's PV_DONE completion so the
             # per-work-item wait/completion counts stay exactly balanced
-            @unrolled for st in 0:1
+            @unroll for st in 0:1
                 ph_pv_st = fab_wait(d, bars.pv_done[st], ph_pv_st, Val(10))
             end
 
@@ -941,7 +941,7 @@ function fab_kernel!(
             ptx"tcgen05.fence::after_thread_sync"()
 
             out_row = fab_q_row0(cw, seqlen, mb_shift, mb_mask) + row128
-            @unrolled for st in 0:1
+            @unroll for st in 0:1
                 fab_epi_stage(Val(st), bars, stats, alpha_idx_st, stats_bar_st,
                                o_addr_st, out_row, po)
             end

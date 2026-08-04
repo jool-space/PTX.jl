@@ -8,7 +8,7 @@ of loop-carried state demotes to local memory), tuple `getindex` with a
 constant — and where large `ntuple(...) do` closures escape the inliner
 and become real device CALLs:
 
-- [`@unrolled`](@ref Utils.@unrolled): statement-level loop unrolling at
+- [`@unroll`](@ref Utils.@unroll): statement-level loop unrolling at
   macro-expansion time. The LLVM-hint kind of unrolling (loopinfo
   metadata) cannot provide any of the above; this is the guaranteed,
   constant-substituting kind.
@@ -22,9 +22,9 @@ module Utils
 
 using Republic: @public
 
-@public @unrolled, strided_reduce
+@public @unroll, strided_reduce
 
-# ── @unrolled ───────────────────────────────────────────────────────────
+# ── @unroll ───────────────────────────────────────────────────────────
 
 # Literal iteration values, or a loud refusal. Parse-time expansion can
 # only see literals: a bound like `N - 1` or a `Val`-derived constant is
@@ -36,7 +36,7 @@ function _unrolled_values(iter)
         length(iter.args) == 4 && return collect(iter.args[2]:iter.args[3]:iter.args[4])
     end
     Meta.isexpr(iter, :tuple) && return iter.args
-    error("@unrolled: the iterator must be a literal range (`0:3`, `0:2:6`) " *
+    error("@unroll: the iterator must be a literal range (`0:3`, `0:2:6`) " *
           "or a literal tuple; got `$iter`. Non-literal trip counts need a " *
           "@generated function, not a parse-time unroll.")
 end
@@ -46,12 +46,12 @@ function _unrolled_bindings(lhs, val)
         return Pair{Symbol, Any}[lhs => val]
     elseif Meta.isexpr(lhs, :tuple) && all(a -> a isa Symbol, lhs.args)
         Meta.isexpr(val, :tuple) && length(val.args) == length(lhs.args) ||
-            error("@unrolled: destructuring `$lhs` needs every iterator " *
+            error("@unroll: destructuring `$lhs` needs every iterator " *
                   "element to be a literal tuple of $(length(lhs.args)); " *
                   "got `$val`")
         return Pair{Symbol, Any}[k => v for (k, v) in zip(lhs.args, val.args)]
     end
-    error("@unrolled: the loop binding must be a symbol or a tuple of " *
+    error("@unroll: the loop binding must be a symbol or a tuple of " *
           "symbols; got `$lhs`")
 end
 
@@ -80,7 +80,7 @@ function _substitute(e::Expr, binds::Vector{Pair{Symbol, Any}})
 end
 
 """
-    @unrolled for x in <literal range or tuple>
+    @unroll for x in <literal range or tuple>
         body
     end
 
@@ -110,12 +110,12 @@ The expanded bodies are spliced into the *enclosing* scope (like
 body persist after the loop, which is what per-iteration phase variables
 need.
 """
-macro unrolled(loop)
+macro unroll(loop)
     Meta.isexpr(loop, :for) ||
-        error("@unrolled needs a `for` loop, got `$(loop isa Expr ? loop.head : loop)`")
+        error("@unroll needs a `for` loop, got `$(loop isa Expr ? loop.head : loop)`")
     head, body = loop.args
     Meta.isexpr(head, :(=), 2) ||
-        error("@unrolled supports exactly one induction binding " *
+        error("@unroll supports exactly one induction binding " *
               "(`for x in iter`), not comma-separated loops")
     lhs, iter = head.args
     vals = _unrolled_values(iter)
@@ -124,8 +124,8 @@ macro unrolled(loop)
 end
 
 """
-    @unrolled CAP for x in start:stop        body end
-    @unrolled CAP for x in start:step:stop   body end
+    @unroll CAP for x in start:stop        body end
+    @unroll CAP for x in start:step:stop   body end
 
 The capped form: for trip counts that are compile-time constants but
 not parse-time literals (`Val`-derived tile parameters — the norm
@@ -149,30 +149,30 @@ When `stop` folds to a specialization-time constant the guards vanish;
 a genuinely runtime `stop` leaves a predicated unroll, which is still
 correct.
 """
-macro unrolled(cap, loop)
+macro unroll(cap, loop)
     cap isa Integer && cap >= 1 ||
-        error("@unrolled: the cap must be a literal positive integer, got `$cap`")
+        error("@unroll: the cap must be a literal positive integer, got `$cap`")
     Meta.isexpr(loop, :for) ||
-        error("@unrolled needs a `for` loop, got `$(loop isa Expr ? loop.head : loop)`")
+        error("@unroll needs a `for` loop, got `$(loop isa Expr ? loop.head : loop)`")
     head, body = loop.args
     Meta.isexpr(head, :(=), 2) ||
-        error("@unrolled supports exactly one induction binding " *
+        error("@unroll supports exactly one induction binding " *
               "(`for x in iter`), not comma-separated loops")
     lhs, iter = head.args
     lhs isa Symbol ||
-        error("@unrolled with a cap needs a plain symbol binding; " *
+        error("@unroll with a cap needs a plain symbol binding; " *
               "destructuring only makes sense for literal tuple iterators")
     Meta.isexpr(iter, :call) && iter.args[1] === :(:) &&
         length(iter.args) in (3, 4) ||
-        error("@unrolled with a cap needs a range iterator " *
+        error("@unroll with a cap needs a range iterator " *
               "(`start:stop` or `start:step:stop`); got `$iter`")
     start = iter.args[2]
     step  = length(iter.args) == 4 ? iter.args[3] : 1
     stop  = iter.args[end]
     start isa Integer ||
-        error("@unrolled: the range start must be a literal integer, got `$start`")
+        error("@unroll: the range start must be a literal integer, got `$start`")
     step isa Integer && step != 0 ||
-        error("@unrolled: the range step must be a nonzero literal integer, " *
+        error("@unroll: the range step must be a nonzero literal integer, " *
               "got `$step`")
     cmp = step > 0 ? :(<=) : :(>=)
     stopvar = gensym(:unrolled_stop)
