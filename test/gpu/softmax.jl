@@ -1,5 +1,6 @@
 # TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=7.0
 using Random
+using PTX.Warps: warp_reduce
 
 # Ported from pyptx/examples/hopper/softmax.py
 # (https://github.com/patrick-toulme/pyptx).
@@ -27,30 +28,6 @@ using Random
 
 const SM_WARP_SIZE = UInt32(32)
 const SM_LOG2E     = Float32(1.4426950408889634)
-
-@inline function _sm_warp_reduce_max(v::Float32)
-    full = UInt32(0xFFFFFFFF)
-    seg  = UInt32(0x1F)
-    Base.@nexprs 5 i -> begin
-        offset = UInt32(1) << UInt32(5 - i)
-        u      = reinterpret(UInt32, v)
-        u_par  = ptx"shfl.sync.bfly.b32"(u, offset, seg, full)
-        v      = ptx"max.f32"(v, reinterpret(Float32, u_par))
-    end
-    v
-end
-
-@inline function _sm_warp_reduce_sum(v::Float32)
-    full = UInt32(0xFFFFFFFF)
-    seg  = UInt32(0x1F)
-    Base.@nexprs 5 i -> begin
-        offset = UInt32(1) << UInt32(5 - i)
-        u      = reinterpret(UInt32, v)
-        u_par  = ptx"shfl.sync.bfly.b32"(u, offset, seg, full)
-        v      = ptx"add.f32"(v, reinterpret(Float32, u_par))
-    end
-    v
-end
 
 function _softmax_v4_kernel!(
         Y::CuDeviceVector{Float32},
@@ -87,7 +64,9 @@ function _softmax_v4_kernel!(
     end
 
     # --- cross-warp combine: row_max -------------------------------------
-    row_max = _sm_warp_reduce_max(row_max)
+    # ptx"max.f32" (not Julia max → max.NaN.f32): warp_reduce applies the
+    # op verbatim between shuffle rounds.
+    row_max = warp_reduce(ptx"max.f32", row_max)
     if lane == UInt32(0)
         @inbounds partials[Int(warp_id) + 1] = row_max
     end
@@ -126,7 +105,7 @@ function _softmax_v4_kernel!(
     end
 
     # --- cross-warp combine: row_sum -------------------------------------
-    row_sum = _sm_warp_reduce_sum(row_sum)
+    row_sum = warp_reduce(ptx"add.f32", row_sum)
     if lane == UInt32(0)
         @inbounds partials[Int(warp_id) + 1] = row_sum
     end

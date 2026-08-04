@@ -4,13 +4,15 @@ CurrentModule = PTX
 
 # Barriers and pipelines
 
-Two small verb-style modules mirror the CUDA C++ convenience headers on
-top of PTX.jl's raw wrappers: `PTX.MBarriers` mirrors `<cuda/barrier>`,
-and `PTX.Pipelines` mirrors `<cuda/pipeline>`. Neither is exported;
-access them as `PTX.MBarriers.barrier_init` etc. or via
-`using PTX.MBarriers`. They add no new hardware surface — every verb
-lowers to the same `mbarrier.*` / `mapa` / `fence` wrappers you could
-call directly — but they name the idioms every Hopper/Blackwell
+Three small verb-style modules mirror the CUDA C++ convenience headers
+on top of PTX.jl's raw wrappers: `PTX.MBarriers` mirrors
+`<cuda/barrier>`, `PTX.Pipelines` mirrors `<cuda/pipeline>`, and
+`PTX.Warps` names the warp-collective idioms (`__shfl_*_sync`-style
+reductions). None are exported; access them as
+`PTX.MBarriers.barrier_init` etc. or via `using PTX.MBarriers`. They
+add no new hardware surface — every verb lowers to the same
+`mbarrier.*` / `mapa` / `fence` / `shfl.sync` wrappers you could call
+directly — but they name the idioms every Hopper/Blackwell
 producer-consumer kernel repeats.
 
 ## MBarriers
@@ -55,4 +57,11 @@ PTX.Pipelines.pipeline_stage
 PTX.Pipelines.pipeline_phase
 PTX.Pipelines.pipeline_cursor
 PTX.Pipelines.pipeline_init!
+```
+
+## Warp collectives
+
+```@docs
+PTX.Warps
+PTX.Warps.warp_reduce
 ```
