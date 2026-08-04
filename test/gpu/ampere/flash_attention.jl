@@ -308,7 +308,9 @@ function fam_pack(X::Matrix{Float32})
     out
 end
 
-function run_fam(B, H, S, HD; causal = false, atol = 5e-2)
+# Returns the max |kernel − reference| — the caller's @test carries the
+# gate, so a failure prints the measured value without green-run noise.
+function run_fam(B, H, S, HD; causal = false)
     @assert S % FAM_BM == 0
     bh = B * H
     total_rows = bh * S
@@ -342,8 +344,7 @@ function run_fam(B, H, S, HD; causal = false, atol = 5e-2)
         O_ref = fam_cpu_ref(Q[r, :], K[r, :], V[r, :], sm_scale, causal)
         maxdiff = max(maxdiff, maximum(abs.(O_got - O_ref)))
     end
-    @info "flash_attention_mma" B H S HD causal maxdiff
-    maxdiff < atol
+    maxdiff
 end
 
 @testset "FA mma.sync B=$B H=$H S=$S D=$HD causal=$c" for (B, H, S, HD, c) in [
@@ -355,5 +356,5 @@ end
         (1, 2, 512,  64,  false),   # head_dim 64
         (1, 1, 256,  64,  true),
     ]
-    @test run_fam(B, H, S, HD; causal = c)
+    @test run_fam(B, H, S, HD; causal = c) < 5e-2
 end

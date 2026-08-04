@@ -136,7 +136,10 @@ end
 # (see tcgen05_smoke.jl rationale; the GB10 CI runner is CC 12.1)
 
 if test_runtime_supported(@__FILE__)
-    function _runfab(B, H, S; input_scale = 0.5f0, atol = 5e-2)
+    # Returns the max |kernel − reference| — the caller's @test carries
+    # the gate, so a failure prints the measured value without
+    # green-run noise.
+    function _runfab(B, H, S; input_scale = 0.5f0)
         @assert S % (FAB_QSTAGE * FAB_BM) == 0
         n_tiles = S ÷ FAB_BN
         @assert n_tiles % 2 == 0 && n_tiles >= 2
@@ -193,8 +196,7 @@ if test_runtime_supported(@__FILE__)
             O_ref = fab_cpu_ref(Q[r, :], K[r, :], V[r, :], sm_scale)
             maxdiff = max(maxdiff, maximum(abs.(O_got - O_ref)))
         end
-        @info "flash_attention_blackwell" B H S maxdiff
-        maxdiff < atol
+        maxdiff
     end
 
     @testset "FA forward B=$B H=$H S=$S" for (B, H, S) in [
@@ -202,7 +204,7 @@ if test_runtime_supported(@__FILE__)
             (1, 2, 512),     # 4 work items
             (2, 4, 1024),    # 32 work items — persistent multi-item per CTA
         ]
-        @test _runfab(B, H, S)
+        @test _runfab(B, H, S) < 5e-2
     end
 
     # At input_scale 0.5 the running row max NEVER drifts past
@@ -215,6 +217,6 @@ if test_runtime_supported(@__FILE__)
     # exact-arrival-count invariant. Max per-tile row sum ~3e7: ample f32
     # headroom (scale 3 would push 4e16 — gratuitous).
     @testset "FA forward rescale path B=1 H=2 S=512 scale=2" begin
-        @test _runfab(1, 2, 512; input_scale = 2.0f0)
+        @test _runfab(1, 2, 512; input_scale = 2.0f0) < 5e-2
     end
 end
