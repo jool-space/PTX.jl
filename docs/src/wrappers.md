@@ -260,7 +260,7 @@ Hopper TMA (`cp.async.bulk.tensor.*`) consumes a 128-byte
 take Julia types / symbols instead of raw `CUtensorMapDataType` enums,
 with a thin convenience helper for the common 2D row-major case.
 
-These methods live in `ext/PTXCUDACoreExt.jl` and load automatically
+These methods live in `ext/CUDACoreExt.jl` and load automatically
 when `CUDACore` is in the environment.
 
 ```@docs

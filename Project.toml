@@ -16,7 +16,7 @@ CUDACore = "bd0ed864-bdfe-4181-a5ed-ce625a5fdea2"
 NVPTX_LLVM_Backend_jll = "ef6e0fe3-e6ef-59c0-bde6-4989574699e0"
 
 [extensions]
-PTXCUDACoreExt = "CUDACore"
+CUDACoreExt = "CUDACore"
 
 [compat]
 CUDACore = "6.2"

@@ -3,7 +3,7 @@ using PTX: CuTensorMap, tensor_map_dtype_code, tensor_map_swizzle_code,
            tensor_map_oob_fill_code
 
 # Host-only checks for the Symbol/Type → driver-enum surface. The actual
-# `cuTensorMapEncodeTiled` call lives in PTXCUDACoreExt and is exercised
+# `cuTensorMapEncodeTiled` call lives in CUDACoreExt and is exercised
 # by test/gpu/tensor_map.jl (needs a CUDA context).
 
 @testset "CuTensorMap is a 128-byte blob" begin

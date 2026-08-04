@@ -1,4 +1,4 @@
-module PTXCUDACoreExt
+module CUDACoreExt
 
 # Provides the `cuTensorMapEncodeTiled` implementation for PTX.jl. Loaded
 # automatically when CUDACore is in the user's environment alongside PTX.

@@ -12,7 +12,7 @@
 #   - Type/Symbol → tensor-map dtype code
 #   - `tensor_map_encode_tiled(...)` stub
 #
-# The actual `cuTensorMapEncodeTiled` ccall lives in `ext/PTXCUDACoreExt.jl`
+# The actual `cuTensorMapEncodeTiled` ccall lives in `ext/CUDACoreExt.jl`
 # so PTX.jl doesn't pick up CUDACore as a hard dependency. Reference for
 # the driver call: pyptx/jax_support.py:synthesize_tma_descriptor + the
 # CUDACore binding at CUDACore/lib/cudadrv/libcuda.jl:6160.
