@@ -15,7 +15,7 @@ using PTX.NVVM: @nvvm_str
     recs = [r for r in PTX.WRAPPER_REGISTRY if r.tier === :intrinsic]
     # Hand-pinned census: the generated mma/tcgen05 families. A new family
     # or a tier flip must update this deliberately.
-    @test length(recs) == 1355
+    @test length(recs) == 1363
     failures = String[]
     for r in recs
         contract = PTX.form_contract(r.op, r.mods)
