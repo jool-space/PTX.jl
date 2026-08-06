@@ -519,13 +519,21 @@ append!(PROBES, [
     ("llvm.nvvm.mma.m16n8k16.row.col.f16.f16",
         (V2H,V2H,V2H,V2H,V2H,V2H,V2H,V2H),
         "sm_90a", "+ptx80", r"mma\.sync\.aligned\.m16n8k16\.row\.col\.f16\.f16\.f16\.f16"),
-    # fp8 e4m3 → i32 A/B; f32 and v2f16(C) accumulators (consumer-Blackwell)
+    # fp8 e4m3 → i32 A/B; f32 and v2f16(C) accumulators
     ("llvm.nvvm.mma.m16n8k16.row.col.f32.e4m3.e4m3.f32",
         (UInt32,UInt32,UInt32,Float32,Float32,Float32,Float32),
         "sm_121a", "+ptx88", r"mma\.sync\.aligned\.m16n8k16\.row\.col\.f32\.e4m3\.e4m3\.f32"),
     ("llvm.nvvm.mma.m16n8k16.row.col.f16.e4m3.e4m3.f16",
         (UInt32,UInt32,UInt32,V2H,V2H),
         "sm_121a", "+ptx88", r"mma\.sync\.aligned\.m16n8k16\.row\.col\.f16\.e4m3\.e4m3\.f16"),
+    # kind-less fp8 floors at sm_89 (Ada), no arch suffix — probe ISel at the
+    # floor itself, mixed A/B and both accumulators
+    ("llvm.nvvm.mma.m16n8k32.row.col.f32.e4m3.e5m2.f32",
+        (UInt32,UInt32,UInt32,UInt32,UInt32,UInt32,Float32,Float32,Float32,Float32),
+        "sm_89", "+ptx87", r"mma\.sync\.aligned\.m16n8k32\.row\.col\.f32\.e4m3\.e5m2\.f32"),
+    ("llvm.nvvm.mma.m16n8k32.row.col.f16.e5m2.e4m3.f16",
+        (UInt32,UInt32,UInt32,UInt32,UInt32,UInt32,V2H,V2H),
+        "sm_89", "+ptx87", r"mma\.sync\.aligned\.m16n8k32\.row\.col\.f16\.e5m2\.e4m3\.f16"),
     # kind::f8f6f4 mixed → i32 A/B (the GB10 sub-byte FP path); ISel order
     ("llvm.nvvm.mma.m16n8k32.row.col.kind.f8f6f4.f32.e2m1.e3m2.f32",
         (UInt32,UInt32,UInt32,UInt32,UInt32,UInt32,Float32,Float32,Float32,Float32),
@@ -613,8 +621,9 @@ end
 for shape in (:m8n8k4, :m16n8k4, :m16n8k8, :m16n8k16)
     _mma_dense_sweep!(shape, :f64, :f64, :f64)
 end
-for shape in (:m16n8k16, :m16n8k32), ab in (:e4m3, :e5m2), c in (:f32, :f16)
-    _mma_dense_sweep!(shape, ab, ab, c)
+for shape in (:m16n8k16, :m16n8k32), a in (:e4m3, :e5m2),
+        b in (:e4m3, :e5m2), c in (:f32, :f16)
+    _mma_dense_sweep!(shape, a, b, c)
 end
 let f8f6f4 = (:e4m3, :e5m2, :e3m2, :e2m3, :e2m1)
     for shape in (:m16n8k16, :m16n8k32), a in f8f6f4, b in f8f6f4, c in (:f32, :f16)
@@ -845,7 +854,7 @@ end
 end
 
 @testset "mma generated families: full probe coverage" begin
-    @test length(PTX.wrapper_intrinsic_names(:mma)) == 102 # dense tier-2 forms
+    @test length(PTX.wrapper_intrinsic_names(:mma)) == 110 # dense tier-2 forms
     @test length(PTX.wrapper_intrinsic_names(:mma_b1)) == 5
     @test PTX.wrapper_asm_forms(:mma_b1) ==
           [(:sync, :aligned, :m8n8k128, :row, :col,
@@ -908,7 +917,7 @@ end
     )
     wrapped = Set(PTX.wrapper_intrinsic_names(
         :mma, :mma_sp, :mma_sp_ordered, :mma_scaled, :mma_b1))
-    @test length(wrapped) == 223
+    @test length(wrapped) == 231
     @test wrapped ⊆ Set(names)
     # the overlay must not leak beyond mma.*
     @test !NVVM.is_convergent(NVVM.intrinsic("llvm.nvvm.fence.proxy.async"))
