@@ -36,14 +36,17 @@ const WGMMA_CASES = [
     (:f32, :tf32, :tf32, 8,   8,  false, Float32, 4),
     (:f32, :tf32, :tf32, 16,  8,  false, Float32, 8),
 
-    # FP8 inputs (k32), f32 acc, no trans. Same-dtype only — mixed e4m3/e5m2
-    # is valid PTX 9.3 but not yet registered in PTX.jl's floating inventory.
+    # FP8 inputs (k32), f32 acc, no trans. §9.7.16.5 types A and B
+    # independently, so mixed pairs ride the same grid.
     (:f32, :e4m3, :e4m3, 16,  32, false, Float32, 8),
     (:f32, :e4m3, :e4m3, 64,  32, false, Float32, 32),
+    (:f32, :e4m3, :e5m2, 64,  32, false, Float32, 32),
+    (:f32, :e5m2, :e4m3, 64,  32, false, Float32, 32),
     (:f32, :e5m2, :e5m2, 128, 32, false, Float32, 64),
 
     # FP8 inputs, f16 acc → N/4 d-regs.
     (:f16, :e4m3, :e4m3, 64,  32, false, UInt32,  16),
+    (:f16, :e5m2, :e4m3, 64,  32, false, UInt32,  16),
 
     # Integer wgmma (s8/u8 × s8/u8, k32, s32 acc → N/2 d-regs).
     (:s32, :s8,   :s8,   8,   32, false, Int32,   4),

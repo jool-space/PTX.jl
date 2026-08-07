@@ -82,6 +82,42 @@ end
     @test occursin(", 1, 1;", ptx)
 end
 
+# Mixed fp8 A/B (§9.7.16.5 types the operands independently) — one leg per
+# direction, dense and sparse.
+function _wgmma_compile_e4m3_e5m2!(out, a_desc::UInt64, b_desc::UInt64)
+    d = ntuple(_ -> 0f0, Val(8))
+    d_new = ptx"wgmma.mma_async.sync.aligned.m64n16k32.f32.e4m3.e5m2"(
+        d, a_desc, b_desc, false)
+    @inbounds out[1] = d_new[1]
+    return nothing
+end
+
+function _wgmma_sp_compile_e5m2_e4m3!(out, a_desc::UInt64, b_desc::UInt64,
+                                      meta::UInt32)
+    d = ntuple(_ -> 0f0, Val(8))
+    d_new = ptx"wgmma.mma_async.sp.sync.aligned.m64n16k64.f32.e5m2.e4m3"(
+        d, a_desc, b_desc, meta, Val(0), false)
+    @inbounds out[1] = d_new[1]
+    return nothing
+end
+
+@testset "wgmma mixed fp8: m64n16k32 f32.e4m3.e5m2 and sp k64 e5m2.e4m3" begin
+    types = Tuple{CuDeviceVector{Float32, 1}, UInt64, UInt64}
+    @test ptxas_compiles(_wgmma_compile_e4m3_e5m2!, types;
+                         cap = v"9.0", feature_set = :arch)
+    ptx = emit_ptx(_wgmma_compile_e4m3_e5m2!, types;
+                   cap = v"9.0", feature_set = :arch)
+    @test occursin("wgmma.mma_async.sync.aligned.m64n16k32.f32.e4m3.e5m2", ptx)
+
+    sp_types = Tuple{CuDeviceVector{Float32, 1}, UInt64, UInt64, UInt32}
+    @test ptxas_compiles(_wgmma_sp_compile_e5m2_e4m3!, sp_types;
+                         cap = v"9.0", feature_set = :arch)
+    sp_ptx = emit_ptx(_wgmma_sp_compile_e5m2_e4m3!, sp_types;
+                      cap = v"9.0", feature_set = :arch)
+    @test occursin("wgmma.mma_async.sp.sync.aligned.m64n16k64.f32.e5m2.e4m3",
+                   sp_ptx)
+end
+
 
 # --- WGMMA parametric sweep on the exact floating/integer N grids -----------
 #

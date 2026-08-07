@@ -44,10 +44,16 @@ const _WGMMA_FLOAT_VARIANTS = (
     (:f32, :bf16, :bf16, 16, true),
     (:f32, :f16,  :f16,  16, true),
     (:f32, :tf32, :tf32, 8,  false),
+    # fp8: §9.7.16.5 types A and B independently, so every e4m3/e5m2 pair
+    # is legal with either accumulator.
     (:f32, :e4m3, :e4m3, 32, false),
+    (:f32, :e4m3, :e5m2, 32, false),
+    (:f32, :e5m2, :e4m3, 32, false),
     (:f32, :e5m2, :e5m2, 32, false),
     (:f16, :f16,  :f16,  16, true),
     (:f16, :e4m3, :e4m3, 32, false),
+    (:f16, :e4m3, :e5m2, 32, false),
+    (:f16, :e5m2, :e4m3, 32, false),
     (:f16, :e5m2, :e5m2, 32, false),
 )
 
