@@ -16,9 +16,13 @@ const EXPECTED_WGMMA_FLOAT_VARIANTS = (
     (:f32, :f16,  :f16,  16, true),
     (:f32, :tf32, :tf32, 8,  false),
     (:f32, :e4m3, :e4m3, 32, false),
+    (:f32, :e4m3, :e5m2, 32, false),
+    (:f32, :e5m2, :e4m3, 32, false),
     (:f32, :e5m2, :e5m2, 32, false),
     (:f16, :f16,  :f16,  16, true),
     (:f16, :e4m3, :e4m3, 32, false),
+    (:f16, :e4m3, :e5m2, 32, false),
+    (:f16, :e5m2, :e4m3, 32, false),
     (:f16, :e5m2, :e5m2, 32, false),
 )
 const EXPECTED_WGMMA_INT_VARIANTS = (
@@ -26,6 +30,25 @@ const EXPECTED_WGMMA_INT_VARIANTS = (
     (:s32, :u8, :u8, 32, false),
     (:s32, :s8, :u8, 32, false),
     (:s32, :u8, :s8, 32, false),
+)
+# Sparse mirrors dense with doubled K (§9.7.16.6); SS + runtime-scale_d only.
+const EXPECTED_WGMMA_SP_VARIANTS = (
+    (:f32, :bf16, :bf16, 32, true),
+    (:f32, :f16,  :f16,  32, true),
+    (:f16, :f16,  :f16,  32, true),
+    (:f32, :tf32, :tf32, 16, false),
+    (:f32, :e4m3, :e4m3, 64, false),
+    (:f32, :e4m3, :e5m2, 64, false),
+    (:f32, :e5m2, :e4m3, 64, false),
+    (:f32, :e5m2, :e5m2, 64, false),
+    (:f16, :e4m3, :e4m3, 64, false),
+    (:f16, :e4m3, :e5m2, 64, false),
+    (:f16, :e5m2, :e4m3, 64, false),
+    (:f16, :e5m2, :e5m2, 64, false),
+    (:s32, :s8, :s8, 64, false),
+    (:s32, :u8, :u8, 64, false),
+    (:s32, :s8, :u8, 64, false),
+    (:s32, :u8, :s8, 64, false),
 )
 
 _wgmma_accumulator_type(dt_d::Symbol, n::Int) =
@@ -43,8 +66,9 @@ _wgmma_mods(dt_d, dt_a, dt_b, n, k) =
     @test PTX._WGMMA_INT_NS == EXPECTED_WGMMA_INT_NS
     @test PTX._WGMMA_FLOAT_VARIANTS == EXPECTED_WGMMA_FLOAT_VARIANTS
     @test PTX._WGMMA_INT_VARIANTS == EXPECTED_WGMMA_INT_VARIANTS
+    @test PTX._WGMMA_SP_VARIANTS == EXPECTED_WGMMA_SP_VARIANTS
     @test length(EXPECTED_WGMMA_FLOAT_VARIANTS) *
-          length(EXPECTED_WGMMA_FLOAT_NS) == 256
+          length(EXPECTED_WGMMA_FLOAT_NS) == 384
     @test length(EXPECTED_WGMMA_INT_VARIANTS) *
           length(EXPECTED_WGMMA_INT_NS) == 64
 
@@ -86,13 +110,13 @@ end
 @testset "dense WGMMA: illegal products fail loud" begin
     # These cover a floating-grid hole (n40), the two values beyond the dense
     # integer maximum that sparse WGMMA does support (n240/n256), wrong K, and
-    # an ISA-valid mixed-FP8 tuple that PTX.jl has not elected to expose yet.
+    # a cross-class dtype pair (fp8 × bf16) no §9.7.16.5 syntax block admits.
     misses = (
         ((:s32, :s8,   :s8,   40,  32), NTuple{20, Int32}),
         ((:s32, :u8,   :s8,   240, 32), NTuple{120, Int32}),
         ((:s32, :s8,   :u8,   256, 32), NTuple{128, Int32}),
         ((:s32, :s8,   :s8,   8,   16), NTuple{4, Int32}),
-        ((:f32, :e4m3, :e5m2, 8,   32), NTuple{4, Float32}),
+        ((:f32, :e4m3, :bf16, 8,   32), NTuple{4, Float32}),
     )
     for ((dt_d, dt_a, dt_b, n, k), d_T) in misses
         op = Operation{:wgmma, _wgmma_mods(dt_d, dt_a, dt_b, n, k)}()
