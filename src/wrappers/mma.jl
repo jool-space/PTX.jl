@@ -32,9 +32,10 @@
 # migration registers `.row.col` only, so a bogus-layout call is now a
 # clean MethodError instead of a deferred ptxas failure.
 #
-# `kind::f8f6f4` (and the fp8 paths) are consumer-Blackwell (sm_120a+,
-# the GB10 sub-byte FP accelerator — note the *opposite* gating from
-# tcgen05, which is datacenter-only). ISel enforces the floor.
+# Arch floors: kind-less fp8 (e4m3/e5m2) is sm_89+ and carries no a/f
+# suffix, so it runs on every later CC; `kind::f8f6f4` is consumer-Blackwell
+# (sm_120a+, the GB10 sub-byte FP accelerator — note the *opposite* gating
+# from tcgen05, which is datacenter-only). ISel enforces both floors.
 
 # Packed-UInt32 ⇄ <2 x half> bitcasts (free; the f16 fragment convention).
 @inline _mma_u32_v2h(x::UInt32) = Base.llvmcall(
@@ -276,9 +277,12 @@ end
 for shape in (:m8n8k4, :m16n8k4, :m16n8k8, :m16n8k16)
     _mma_register(shape, :f64, :f64, :f64, :f64)
 end
-# FP8 (Ada+) — m16n8k32 (PTX 8.0+) and m16n8k16 (PTX 8.7+).
-for shape in (:m16n8k16, :m16n8k32), ab_ty in (:e4m3, :e5m2), c_ty in (:f32, :f16)
-    _mma_register(shape, c_ty, ab_ty, ab_ty, c_ty)
+# FP8 (Ada+, sm_89) — m16n8k32 (PTX 8.4); m16n8k16 and the f16 accumulator
+# (PTX 8.7). A/B mix e4m3/e5m2 freely: the kind-less grammar types A and B
+# independently (PTX 9.3 §9.7.15.5, `.f8type` per operand).
+for shape in (:m16n8k16, :m16n8k32), a_ty in (:e4m3, :e5m2),
+        b_ty in (:e4m3, :e5m2), c_ty in (:f32, :f16)
+    _mma_register(shape, c_ty, a_ty, b_ty, c_ty)
 end
 # `kind::f8f6f4` (consumer-Blackwell sm_120a+) — mixed A/B legal because all
 # five sub-byte FP types share the 8-bit container.

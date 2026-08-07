@@ -419,6 +419,70 @@ end
 end
 
 
+# --- kind-less fp8 mma at sm_89 (the Ada floor) ----------------------------
+#
+# The complete kind-less fp8 surface: both shapes, every e4m3/e5m2 A×B
+# pair, f32 and f16 accumulators. These forms carry no `a`/`f` suffix, so
+# the same PTX is valid on every cc >= 8.9; the floor itself is the target
+# that must ISel and assemble. Results chain and store so no call folds.
+
+function _baseline_mma_fp8_k32!(outf::CuDeviceVector{Float32, 1},
+                                outh::CuDeviceVector{UInt32, 1}, x::UInt32)
+    a = (x, x, x, x)
+    b = (x, x)
+    d1 = ptx"mma.sync.aligned.m16n8k32.row.col.f32.e4m3.e4m3.f32"(
+        a, b, (0f0, 0f0, 0f0, 0f0))
+    d2 = ptx"mma.sync.aligned.m16n8k32.row.col.f32.e4m3.e5m2.f32"(a, b, d1)
+    d3 = ptx"mma.sync.aligned.m16n8k32.row.col.f32.e5m2.e4m3.f32"(a, b, d2)
+    d4 = ptx"mma.sync.aligned.m16n8k32.row.col.f32.e5m2.e5m2.f32"(a, b, d3)
+    h1 = ptx"mma.sync.aligned.m16n8k32.row.col.f16.e4m3.e4m3.f16"(
+        a, b, (UInt32(0), UInt32(0)))
+    h2 = ptx"mma.sync.aligned.m16n8k32.row.col.f16.e4m3.e5m2.f16"(a, b, h1)
+    h3 = ptx"mma.sync.aligned.m16n8k32.row.col.f16.e5m2.e4m3.f16"(a, b, h2)
+    h4 = ptx"mma.sync.aligned.m16n8k32.row.col.f16.e5m2.e5m2.f16"(a, b, h3)
+    @inbounds begin
+        outf[1] = d4[1]; outf[2] = d4[2]; outf[3] = d4[3]; outf[4] = d4[4]
+        outh[1] = h4[1]; outh[2] = h4[2]
+    end
+    return nothing
+end
+
+function _baseline_mma_fp8_k16!(outf::CuDeviceVector{Float32, 1},
+                                outh::CuDeviceVector{UInt32, 1}, x::UInt32)
+    a = (x, x)
+    b = (x,)
+    d1 = ptx"mma.sync.aligned.m16n8k16.row.col.f32.e4m3.e4m3.f32"(
+        a, b, (0f0, 0f0, 0f0, 0f0))
+    d2 = ptx"mma.sync.aligned.m16n8k16.row.col.f32.e4m3.e5m2.f32"(a, b, d1)
+    d3 = ptx"mma.sync.aligned.m16n8k16.row.col.f32.e5m2.e4m3.f32"(a, b, d2)
+    d4 = ptx"mma.sync.aligned.m16n8k16.row.col.f32.e5m2.e5m2.f32"(a, b, d3)
+    h1 = ptx"mma.sync.aligned.m16n8k16.row.col.f16.e4m3.e4m3.f16"(
+        a, b, (UInt32(0), UInt32(0)))
+    h2 = ptx"mma.sync.aligned.m16n8k16.row.col.f16.e4m3.e5m2.f16"(a, b, h1)
+    h3 = ptx"mma.sync.aligned.m16n8k16.row.col.f16.e5m2.e4m3.f16"(a, b, h2)
+    h4 = ptx"mma.sync.aligned.m16n8k16.row.col.f16.e5m2.e5m2.f16"(a, b, h3)
+    @inbounds begin
+        outf[1] = d4[1]; outf[2] = d4[2]; outf[3] = d4[3]; outf[4] = d4[4]
+        outh[1] = h4[1]; outh[2] = h4[2]
+    end
+    return nothing
+end
+
+@testset "kind-less fp8 mma surface at sm_89" begin
+    types = Tuple{CuDeviceVector{Float32, 1}, CuDeviceVector{UInt32, 1},
+                  UInt32}
+    for (f, shape) in ((_baseline_mma_fp8_k32!, "m16n8k32"),
+                       (_baseline_mma_fp8_k16!, "m16n8k16"))
+        @test ptxas_compiles(f, types; cap = v"8.9")
+        ptx = emit_ptx(f, types; cap = v"8.9")
+        for a in ("e4m3", "e5m2"), b in ("e4m3", "e5m2")
+            @test occursin("mma.sync.aligned.$shape.row.col.f32.$a.$b.f32", ptx)
+            @test occursin("mma.sync.aligned.$shape.row.col.f16.$a.$b.f16", ptx)
+        end
+    end
+end
+
+
 # `feature_set = :arch` is gated to sm_90+ in CUDACore (sm_89a doesn't
 # exist as a target). The :arch path is exercised in ptxas/hopper.jl
 # (cap=9.0) and ptxas/blackwell.jl (cap=10.0).
