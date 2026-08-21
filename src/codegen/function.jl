@@ -40,6 +40,15 @@ function emit_metadata!(cg::CodeGenState, func::Function,
     end
 end
 
+# The hoist pass holds Julia variable names (render_dst output); recover the
+# `.reg` declaration by re-prefixing `%`, falling back to the bare spelling
+# for declarations that omitted it.
+function _register_decl_for_julia_var(cg::CodeGenState, var::String)
+    decl = _declared_register(cg, "%" * var)
+    decl === nothing || return decl
+    _declared_register(cg, var)
+end
+
 function emit_function!(cg::CodeGenState, func::Function,
                         arch::AbstractString = "",
                         version::Tuple{Int, Int} = (0, 0))
@@ -70,9 +79,23 @@ function emit_function!(cg::CodeGenState, func::Function,
         emit_stmt!(body_cg, s)
     end
 
-    hoist = sort(collect(setdiff(body_cg.predicated_assigns, body_cg.declared)))
+    # PTX registers read before any write yield an undefined value; Julia
+    # variables throw. Give every register whose assignment can be bypassed —
+    # under predication, or jumped over by a forward branch — a typed zero
+    # default, so out-of-bounds threads compute-and-discard garbage exactly
+    # like the hardware instead of trapping on UndefVarError. Zero is a
+    # legitimate instance of "undefined", and a program whose result depends
+    # on it was already unspecified in PTX.
+    hoist = sort(collect(union(setdiff(body_cg.predicated_assigns, body_cg.declared),
+                               body_cg.skippable_assigns)))
     for var in hoist
-        emit!(cg, "local " * var)
+        decl = _register_decl_for_julia_var(body_cg, var)
+        if decl === nothing
+            emit!(cg, "local " * var)
+        else
+            emit!(cg, "local " * var * " = zero(" *
+                      string(scalar_to_julia(decl.type)) * ")")
+        end
     end
 
     write(cg.io, take!(body_buf))

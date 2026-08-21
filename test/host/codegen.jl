@@ -417,6 +417,14 @@ const GOLDEN_VECTOR_ADD = """\
 #   raw_params  = [("u64", "param0"), ("u64", "param1"), ("u64", "param2"), ("u32", "param3")]
 #   linking     = "visible"
 function vector_add(param0, param1, param2, param3)
+    local r5 = zero(UInt32)
+    local r6 = zero(UInt32)
+    local r7 = zero(UInt32)
+    local rd3 = zero(UInt64)
+    local rd4 = zero(UInt64)
+    local rd5 = zero(UInt64)
+    local rd6 = zero(UInt64)
+    local rd7 = zero(UInt64)
     rd0 = param0
     rd1 = param1
     rd2 = param2
@@ -445,7 +453,7 @@ const GOLDEN_PREDICATES = """\
 # @ptx_kernel arch=sm_90a version=8.5
 #   linking     = "visible"
 function pred_test()
-    local r1
+    local r1 = zero(UInt32)
     p0 = ptx"setp.eq.s32"(r0, Int32(0))
     if p0; r1 = ptx"mov.b32"(UInt32(1)); end
     if !p0; r1 = ptx"mov.b32"(UInt32(0)); end
@@ -458,6 +466,7 @@ const GOLDEN_BRANCHES = """\
 # @ptx_kernel arch=sm_90a version=8.5
 #   linking     = "visible"
 function branch_test()
+    local r1 = zero(UInt32)
     p0 = ptx"setp.eq.s32"(r0, Int32(0))
     if p0; @goto THEN; end
     r1 = ptx"mov.b32"(UInt32(0))
@@ -536,4 +545,37 @@ end
     # The unreferenced metadata global and the debug section are omitted.
     @test !occursin("NV_TILE_LAUNCH_META_DATA", out)
     @test !occursin("debug_str", out)
+end
+
+# The zero-init hoist recovers a register's carrier from its `.reg`
+# declaration via the Julia variable name. Two lookup edges: PTX permits
+# declarations without the `%` sigil (the re-prefixed lookup misses, the bare
+# fallback hits), and `$`-carrying compiler names mangle irreversibly (both
+# lookups miss — the hoist degrades to a bare `local`, the pre-zero-init
+# behavior, rather than guessing a type).
+@testset "zero-init hoist: declaration lookup edges" begin
+    percentless = """.version 8.5
+.target sm_90a
+.address_size 64
+.visible .entry percentless()
+{
+\t.reg .pred %p<2>;
+\t.reg .b32 r<3>;
+\tsetp.eq.s32 %p0, r0, 0;
+\t@%p0 bra SKIP;
+\tmov.b32 r1, 1;
+SKIP:
+\tret;
+}
+"""
+    @test occursin("local r1 = zero(UInt32)", ptx_to_julia(percentless))
+
+    mangled = replace(percentless,
+        "percentless" => "mangled",
+        ".reg .b32 r<3>;" => ".reg .b32 %r\$<3>;",
+        "setp.eq.s32 %p0, r0, 0;" => "setp.eq.s32 %p0, %r\$0, 0;",
+        "mov.b32 r1, 1;" => "mov.b32 %r\$1, 1;")
+    out = ptx_to_julia(mangled)
+    @test occursin(r"^    local r1$"m, out)
+    @test !occursin("local r1 = zero", out)
 end

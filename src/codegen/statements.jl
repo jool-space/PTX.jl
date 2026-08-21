@@ -1,7 +1,11 @@
 emit_stmt!(cg::CodeGenState, s::Instruction) = emit_instruction!(cg, s)
 
-emit_stmt!(cg::CodeGenState, s::Label) =
-    emit!(cg, "@label " * julia_label(s.name))
+function emit_stmt!(cg::CodeGenState, s::Label)
+    name = julia_label(s.name)
+    delete!(cg.open_branch_targets, name)
+    push!(cg.emitted_labels, name)
+    emit!(cg, "@label " * name)
+end
 
 # RegDecl structurally carries only the first name in a comma-packed
 # declaration. Recover the complete declaration once, when it enters the
