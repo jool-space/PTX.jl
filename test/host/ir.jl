@@ -896,3 +896,21 @@ end
     @test all(sr -> occursin(sr, canonical_v4[sr]), v4_roots)
     @test length(unique(values(canonical_v4))) == length(v4_roots)
 end
+
+@testset "diff: Section content and summaries" begin
+    mkmod(directives) = PTX.IR.Module(
+        version = PTX.IR.Version(9, 3), target = PTX.IR.Target(("sm_121a",)),
+        address_size = PTX.IR.AddressSize(64), directives = directives)
+    func = PTX.IR.Function(is_entry = true, name = "k",
+                           body = (PTX.IR.Instruction("ret", (), ()),))
+    sec(raw) = PTX.IR.Section(".debug_str", raw)
+
+    # Same section — no diff; different content — one content line.
+    @test isempty(PTX.IR.diff(mkmod((func, sec("a"))), mkmod((func, sec("a")))))
+    diffs = PTX.IR.diff(mkmod((func, sec("a"))), mkmod((func, sec("b"))))
+    @test any(d -> occursin("section: .debug_str", d), diffs)
+
+    # A length mismatch lists statement summaries, including Section's.
+    diffs = PTX.IR.diff(mkmod((func, sec("a"))), mkmod((func,)))
+    @test any(d -> occursin("Section(\".debug_str\")", d), diffs)
+end

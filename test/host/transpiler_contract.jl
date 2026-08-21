@@ -44,7 +44,12 @@ _contract_module(func::IR.Function; kwargs...) =
         address32,
         _contract_module(func; leading = (IR.RawLine("#define X 1"),)),
         _contract_module((IR.VarDecl(state_space = IR.StateSpace.GLOBAL,
-                                     type = IR.ScalarType.B32, name = "g"), func)),
+                                     type = IR.ScalarType.B32, name = "g"),
+                          _contract_function((
+                              IR.Instruction("mov", (".u64",),
+                                             (IR.RegisterOperand("%rd0"),
+                                              IR.LabelOperand("g"))),
+                              _CONTRACT_RET)))),
         _contract_module((IR.PragmaDirective(value = "nounroll"), func)),
         _contract_module((IR.TargetDirective(target = IR.Target(("sm_90a",))), func)),
         _contract_module((_UnreviewedTranspilerStatement(), func)),
@@ -55,10 +60,23 @@ _contract_module(func::IR.Function; kwargs...) =
         mod === address32 && @test err.path == "module.address_size"
     end
 
-    # Comments and blank lines are the only nonsemantic module statements.
-    accepted = _contract_module((IR.Comment("kept"), IR.BlankLine(), func);
+    # Comments and blank lines are always nonsemantic; a module-level global
+    # that no kernel body references (e.g. tileiras' launch-metadata blob)
+    # and debug-metadata `.section` blocks are deliberately omittable.
+    accepted = _contract_module((IR.Comment("kept"), IR.BlankLine(),
+                                 IR.VarDecl(state_space = IR.StateSpace.GLOBAL,
+                                            type = IR.ScalarType.B8,
+                                            name = "___NV_TILE_LAUNCH_META_DATA___",
+                                            array_size = 16,
+                                            initializer = ("1", "0")),
+                                 IR.Section(".debug_str", ".section\t.debug_str\n{\n}"),
+                                 func);
                                 leading = (IR.Comment("license"), IR.BlankLine()))
     @test occursin("function contract_probe()", ir_to_julia(accepted))
+    # Non-debug sections stay outside the supported subset.
+    _contract_error(() -> ir_to_julia(_contract_module((
+        IR.Section(".nv_custom", ".section\t.nv_custom\n{\n}"), func)));
+        category = :unsupported)
 end
 
 @testset "transpiler contract: function and parameter ABI" begin
@@ -74,8 +92,7 @@ end
     cases = (
         _contract_function(; return_params = (retparam,)),
         _contract_function(; linking = IR.LinkingDirective.WEAK),
-        _contract_function(; directives = (IR.FunctionDirective(".maxnreg", (64,)),)),
-        _contract_function(; params = (ptrparam,)),
+        _contract_function(; directives = (IR.FunctionDirective(".pragma", ()),)),
         _contract_function(; params = (aligned,)),
         _contract_function(; params = (bf16,)),
         IR.Function(is_entry = false, name = "decl_only"),
@@ -84,6 +101,15 @@ end
         _contract_error(() -> ir_to_julia(_contract_module(func));
                         category = :unsupported)
     end
+
+    # Launch-shape directives and `.ptr` parameter hints are metadata the
+    # emitted header preserves; both must transpile.
+    launch = _contract_function(; directives = (IR.FunctionDirective(".maxnreg", (64,)),
+                                                IR.FunctionDirective("reqntid", (128,)),
+                                                IR.FunctionDirective("language", (7,))))
+    @test occursin("function contract_probe()", ir_to_julia(_contract_module(launch)))
+    withptr = _contract_function(; params = (ptrparam,))
+    @test occursin("function contract_probe(ptr)", ir_to_julia(_contract_module(withptr)))
 
     # Function names and parameter names must remain unique after Julia name
     # mangling, not merely in their original PTX spelling.
@@ -606,4 +632,34 @@ end
     @test occursin("module_ = ptx\"setp.eq.u32\"(a, b)", julia)
     @test occursin("c = ptx\"cvt.rn.f32.u32\"(a)", julia)
     @test !occursin("@label", julia)
+end
+
+# The reference scan behind the unreferenced-VarDecl allowance must see a
+# symbol through every operand shape — a miss here silently drops a global a
+# kernel actually reads.
+@testset "transpiler contract: module-global reference scan operand shapes" begin
+    referenced = PTX.Codegen._module_symbol_referenced
+    with_op(ops...) = _contract_module(_contract_function((
+        IR.Instruction("mov", (".u64",), Tuple(ops)), _CONTRACT_RET)))
+    dst = IR.RegisterOperand("%rd0")
+
+    @test referenced(with_op(dst, IR.VectorOperand((IR.RegisterOperand("g"),))), "g")
+    @test referenced(with_op(dst, IR.ParenthesizedOperand((IR.LabelOperand("g"),))), "g")
+    @test referenced(with_op(dst, IR.NegatedOperand(IR.RegisterOperand("g"))), "g")
+    @test referenced(with_op(IR.PipeOperand(IR.RegisterOperand("g"),
+                                            IR.RegisterOperand("%p1")), dst), "g")
+    @test referenced(with_op(dst, IR.AddressOperand("g", nothing)), "g")
+
+    # Nested containers and the conservative RawLine text match.
+    nested = _contract_module(_contract_function((
+        IR.Block(body = (IR.Instruction("mov", (".u64",),
+                                        (dst, IR.LabelOperand("g"))),)),
+        _CONTRACT_RET)))
+    @test referenced(nested, "g")
+    raw = _contract_module(_contract_function((
+        IR.RawLine("opaque use of g;"), _CONTRACT_RET)))
+    @test referenced(raw, "g")
+
+    # And the negative: a module that never names the symbol.
+    @test !referenced(with_op(dst, IR.RegisterOperand("%rd1")), "g")
 end

@@ -41,6 +41,12 @@ const EXTERNAL_B128_FILES = Set(
 # must fail before emission; adding a file cannot silently widen the subset.
 const EXTERNAL_TRANSPILABLE_RELPATHS = Set((
     "llvm/cluster-dim__kernel_func_clusterxyz.ptx",
+    "llvm/intrinsics-sm90__test_clusterid_x.ptx",
+    "llvm/intrinsics-sm90__test_clusterid_y.ptx",
+    "llvm/intrinsics-sm90__test_clusterid_z.ptx",
+    "llvm/intrinsics-sm90__test_nclusterid_x.ptx",
+    "llvm/intrinsics-sm90__test_nclusterid_y.ptx",
+    "llvm/intrinsics-sm90__test_nclusterid_z.ptx",
     "llvm/mbarrier__barrierarrive.ptx",
     "llvm/mbarrier__barrierarrivedrop.ptx",
     "llvm/mbarrier__barrierarrivedropnoComplete.ptx",
@@ -296,6 +302,7 @@ end
 
 const CURATED_TRANSPILABLE_NAMES = Set((
     "branches.ptx", "minimal.ptx", "predicates.ptx", "vector_add.ptx",
+    "tileiras_vadd_sm121a.ptx",
 ))
 
 @testset "ptx_to_julia: curated accept/reject manifest" begin
@@ -500,4 +507,33 @@ end
     end
     """
     @test ptx_to_julia(src) == expected
+end
+
+# --- tileiras (cuTile) compiler output ------------------------------------
+#
+# `tileiras_vadd_sm121a.ptx` is genuine tileiras output (cuTile.jl `code_ptx`
+# of a Float32 vector-add tile kernel): `.language 7` provenance, a
+# `___NV_TILE_LAUNCH_META_DATA___` module global read only by the CUDA driver,
+# NVVM bit-typed param loads with a widened destination, %clusterid block
+# indexing, and a trailing `.section .debug_str` block. One fixture exercises
+# every accommodation the transpiler makes for this producer.
+@testset "ptx_to_julia: tileiras vadd" begin
+    src = read(joinpath(CORPUS_DIR, "tileiras_vadd_sm121a.ptx"), String)
+    out = ptx_to_julia(src)
+    expr = Meta.parseall(out)
+    @test expr isa Expr && expr.head == :toplevel
+    @test !any(a -> a isa Expr && a.head == :error, expr.args)
+    # Launch metadata survives as header comments.
+    @test occursin("(\"reqntid\", (128,))", out)
+    @test occursin("(\"language\", (7,))", out)
+    # `ld.param.b32 %rd1, [vadd_param_1]` zero-extends into the 64-bit
+    # register (§9.4.1, Table 28) — the widening must be explicit.
+    @test occursin("rd1 = UInt64(vadd_param_1)", out)
+    # `ld.param.b64` into a matching-width register stays a plain rebind.
+    @test occursin("rd7 = vadd_param_0", out)
+    # %clusterid.x is an admitted u32 special-register carrier.
+    @test occursin("ptx\"mov.u32\"(sreg\"%clusterid.x\")", out)
+    # The unreferenced metadata global and the debug section are omitted.
+    @test !occursin("NV_TILE_LAUNCH_META_DATA", out)
+    @test !occursin("debug_str", out)
 end

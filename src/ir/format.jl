@@ -95,6 +95,7 @@ end
 format(c::Comment)   = c.text
 format(::BlankLine)  = ""
 format(r::RawLine)   = r.text
+format(s::Section)   = s.raw
 
 function format(b::Block)
     indent = _indent(b.formatting)
@@ -128,7 +129,8 @@ end
 
 function format(d::FunctionDirective)
     isempty(d.values) && return "." * d.name
-    "." * d.name * " " * join(d.values, ", ")
+    vals = (v isa String ? "\"" * v * "\"" : string(v) for v in d.values)
+    "." * d.name * " " * join(vals, ", ")
 end
 
 function format(f::Function)

@@ -719,3 +719,53 @@ end
     @test format(m) == src                              # raw_source path
     @test format(PTX.IR.unraw(m)) == src                # structural path
 end
+
+@testset "parser: .language function directive (PTX ISA 9.3)" begin
+    src = """.version 9.3
+.target sm_121a
+.address_size 64
+.visible .entry foo()
+.reqntid 128
+.language 7
+{
+\tret;
+}
+"""
+    m = parse_ptx(src)
+    f = first(filter(d -> d isa Function, collect(m.directives)))
+    @test PTX.IR.FunctionDirective("language", (7,)) in f.directives
+    # The body must parse — before `.language` support, directive consumption
+    # stopped short of `{` and the function silently kept an empty body.
+    @test any(s -> s isa Instruction && s.opcode == "ret", f.body)
+    @test format(m) == src
+
+    # String and mixed forms per the spec.
+    mixed = replace(src, ".language 7" => ".language \"tile ir\", 3")
+    fm = first(filter(d -> d isa Function, collect(parse_ptx(mixed).directives)))
+    @test PTX.IR.FunctionDirective("language", ("tile ir", 3)) in fm.directives
+    @test format(PTX.IR.unraw(parse_ptx(mixed))) ==
+          format(parse_ptx(format(PTX.IR.unraw(parse_ptx(mixed)))))
+end
+
+@testset "parser: module-level .section debug block" begin
+    src = """.version 8.5
+.target sm_90a
+.address_size 64
+.visible .entry foo()
+{
+\tret;
+}
+.section\t.debug_str
+{
+info_label:
+.b8 105, 110, 102, 111
+}
+"""
+    m = parse_ptx(src)
+    sections = [d for d in m.directives if d isa PTX.IR.Section]
+    @test length(sections) == 1
+    @test sections[1].name == ".debug_str"
+    @test occursin("info_label:", sections[1].raw)
+    @test format(m) == src                              # raw_source path
+    @test format(PTX.IR.unraw(m)) == src                # structural path
+end

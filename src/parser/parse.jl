@@ -4,7 +4,7 @@
 
 using ..IR: Module, Version, Target, AddressSize, TargetDirective, FormattingInfo,
             Instruction, Label, RegDecl, VarDecl, PragmaDirective,
-            Comment, BlankLine, RawLine, Block, Statement,
+            Comment, BlankLine, RawLine, Section, Block, Statement,
             Operand, RegisterOperand, ImmediateOperand, LabelOperand,
             VectorOperand, AddressOperand, ParenthesizedOperand,
             NegatedOperand, PipeOperand, Predicate,
@@ -357,6 +357,9 @@ function _parse_statement!(s::ParserState, indent::String)
     if t.kind == TokenKind.DIRECTIVE
         if t.text == ".reg"
             return _parse_reg_decl!(s, indent)
+        end
+        if t.text == ".section"
+            return _parse_section!(s)
         end
         if t.text in _VAR_DECL_DIRECTIVES
             return _parse_var_decl!(s, indent)
@@ -839,6 +842,10 @@ const _FUNCTION_DIRECTIVE_NAMES = Set{String}((
     ".minperctamemory",
     ".noreturn", ".pragma",
     ".explicitcluster", ".reqnctapercluster", ".cluster_dim",
+    # Source-language provenance (PTX ISA 9.3); tileiras-emitted PTX carries
+    # `.language 7` ("tile ir") between the param list and the body. Values
+    # are integers or quoted strings.
+    ".language",
 ))
 
 function _parse_function_or_global_with_linking!(s::ParserState)
@@ -988,19 +995,50 @@ function _parse_param!(s::ParserState)
     )
 end
 
+function _parse_function_directive_value!(s::ParserState)
+    if _peek_kind(s) == TokenKind.STRING
+        str_tok = _advance!(s)
+        return String(SubString(str_tok.text, 2, lastindex(str_tok.text) - 1))
+    end
+    Base.parse(Int, _expect!(s, TokenKind.INTEGER).text)
+end
+
 function _parse_function_directive!(s::ParserState)
     tok = _advance!(s)
     name = lstrip(tok.text, '.')
     _skip_newlines_and_comments!(s)
     values = Union{Int, String}[]
-    if _peek_kind(s) == TokenKind.INTEGER
-        push!(values, Base.parse(Int, _advance!(s).text))
+    if _peek_kind(s) == TokenKind.INTEGER || _peek_kind(s) == TokenKind.STRING
+        push!(values, _parse_function_directive_value!(s))
         while _match!(s, TokenKind.COMMA) !== nothing
             _skip_newlines_and_comments!(s)
-            push!(values, Base.parse(Int, _expect!(s, TokenKind.INTEGER).text))
+            push!(values, _parse_function_directive_value!(s))
         end
     end
     FunctionDirective(String(name), Tuple(values))
+end
+
+# `.section <name> { ... }` — debug metadata blocks (`.debug_str`,
+# `.debug_loc`, ...) emitted by `--lineinfo`/`-g` compiles. The body is opaque
+# data; capture it verbatim (braces included) for round-trip.
+function _parse_section!(s::ParserState)
+    section_tok = _advance!(s)
+    start_line = section_tok.line
+    name_tok = _expect!(s, TokenKind.DIRECTIVE)
+    name = name_tok.text
+    _skip_newlines_and_comments!(s)
+    _expect!(s, TokenKind.LBRACE)
+    depth = 1
+    end_line = name_tok.line
+    while depth > 0
+        t = _advance!(s)
+        t.kind == TokenKind.EOF &&
+            throw(_err(s, "unterminated .section $(name) block"))
+        t.kind == TokenKind.LBRACE && (depth += 1)
+        t.kind == TokenKind.RBRACE && (depth -= 1)
+        end_line = t.line
+    end
+    Section(name, _extract_source(s, start_line, end_line))
 end
 
 function _parse_function_body!(s::ParserState)
