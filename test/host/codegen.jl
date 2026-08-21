@@ -417,6 +417,14 @@ const GOLDEN_VECTOR_ADD = """\
 #   raw_params  = [("u64", "param0"), ("u64", "param1"), ("u64", "param2"), ("u32", "param3")]
 #   linking     = "visible"
 function vector_add(param0, param1, param2, param3)
+    local r5 = zero(UInt32)
+    local r6 = zero(UInt32)
+    local r7 = zero(UInt32)
+    local rd3 = zero(UInt64)
+    local rd4 = zero(UInt64)
+    local rd5 = zero(UInt64)
+    local rd6 = zero(UInt64)
+    local rd7 = zero(UInt64)
     rd0 = param0
     rd1 = param1
     rd2 = param2
@@ -445,7 +453,7 @@ const GOLDEN_PREDICATES = """\
 # @ptx_kernel arch=sm_90a version=8.5
 #   linking     = "visible"
 function pred_test()
-    local r1
+    local r1 = zero(UInt32)
     p0 = ptx"setp.eq.s32"(r0, Int32(0))
     if p0; r1 = ptx"mov.b32"(UInt32(1)); end
     if !p0; r1 = ptx"mov.b32"(UInt32(0)); end
@@ -458,6 +466,7 @@ const GOLDEN_BRANCHES = """\
 # @ptx_kernel arch=sm_90a version=8.5
 #   linking     = "visible"
 function branch_test()
+    local r1 = zero(UInt32)
     p0 = ptx"setp.eq.s32"(r0, Int32(0))
     if p0; @goto THEN; end
     r1 = ptx"mov.b32"(UInt32(0))

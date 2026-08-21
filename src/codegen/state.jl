@@ -15,6 +15,14 @@ mutable struct CodeGenState
     # the register flatten to the substituted expression and the defining
     # instruction is dropped entirely.
     pointer_aliases::Dict{String, String}
+    # Forward-branch bookkeeping for PTX register semantics. A PTX register
+    # read before any write yields an undefined value; a Julia variable read
+    # before assignment throws. Any assignment emitted while a forward
+    # `@goto` target is still open may be jumped over, so it needs a
+    # zero-initialized `local` hoist (see emit_function!).
+    open_branch_targets::Set{String}      # @goto targets with no @label yet
+    emitted_labels::Set{String}           # @label names already emitted
+    skippable_assigns::Set{String}        # vars whose assignment a branch can skip
     # Some compiler-emitted CLC PTX names a `.b128` destination only through
     # exact `mov.b128 dst, {lo, hi}` without a separate `.reg` declaration.
     # The instruction itself fixes the type; retain that proof for subsequent
@@ -30,6 +38,9 @@ CodeGenState() = CodeGenState(
     String[],
     Set{String}(),
     Dict{String, String}(),
+    Set{String}(),
+    Set{String}(),
+    Set{String}(),
     Set{String}(),
 )
 

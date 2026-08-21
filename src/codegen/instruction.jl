@@ -128,6 +128,10 @@ function emit_instruction!(cg::CodeGenState, inst::Instruction)
     if inst.opcode == "bra" && length(inst.operands) == 1 &&
             inst.operands[1] isa LabelOperand
         target = julia_label((inst.operands[1]::LabelOperand).name)
+        # A forward branch (target label not yet emitted) can jump over any
+        # assignment between here and the label; a backward branch cannot
+        # make an already-linear assignment skippable.
+        target in cg.emitted_labels || push!(cg.open_branch_targets, target)
         if inst.predicate === nothing
             emit!(cg, "@goto " * target)
         else
@@ -247,4 +251,5 @@ function emit_with_predicate!(cg::CodeGenState, line::String,
         emit!(cg, "if " * render_pred_cond(pred) * "; " * line * "; end")
         union!(cg.predicated_assigns, dst_names)
     end
+    isempty(cg.open_branch_targets) || union!(cg.skippable_assigns, dst_names)
 end
