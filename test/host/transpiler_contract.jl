@@ -633,3 +633,33 @@ end
     @test occursin("c = ptx\"cvt.rn.f32.u32\"(a)", julia)
     @test !occursin("@label", julia)
 end
+
+# The reference scan behind the unreferenced-VarDecl allowance must see a
+# symbol through every operand shape — a miss here silently drops a global a
+# kernel actually reads.
+@testset "transpiler contract: module-global reference scan operand shapes" begin
+    referenced = PTX.Codegen._module_symbol_referenced
+    with_op(ops...) = _contract_module(_contract_function((
+        IR.Instruction("mov", (".u64",), Tuple(ops)), _CONTRACT_RET)))
+    dst = IR.RegisterOperand("%rd0")
+
+    @test referenced(with_op(dst, IR.VectorOperand((IR.RegisterOperand("g"),))), "g")
+    @test referenced(with_op(dst, IR.ParenthesizedOperand((IR.LabelOperand("g"),))), "g")
+    @test referenced(with_op(dst, IR.NegatedOperand(IR.RegisterOperand("g"))), "g")
+    @test referenced(with_op(IR.PipeOperand(IR.RegisterOperand("g"),
+                                            IR.RegisterOperand("%p1")), dst), "g")
+    @test referenced(with_op(dst, IR.AddressOperand("g", nothing)), "g")
+
+    # Nested containers and the conservative RawLine text match.
+    nested = _contract_module(_contract_function((
+        IR.Block(body = (IR.Instruction("mov", (".u64",),
+                                        (dst, IR.LabelOperand("g"))),)),
+        _CONTRACT_RET)))
+    @test referenced(nested, "g")
+    raw = _contract_module(_contract_function((
+        IR.RawLine("opaque use of g;"), _CONTRACT_RET)))
+    @test referenced(raw, "g")
+
+    # And the negative: a module that never names the symbol.
+    @test !referenced(with_op(dst, IR.RegisterOperand("%rd1")), "g")
+end
