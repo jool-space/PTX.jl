@@ -184,6 +184,14 @@ struct RawLine <: Statement
     text::String
 end
 
+# A module-level `.section <name> { ... }` block — debug metadata such as
+# `.debug_str`/`.debug_loc` emitted by `--lineinfo`/`-g` compiles. The body is
+# opaque data, kept verbatim for round-trip; it carries no kernel semantics.
+struct Section <: Statement
+    name::String
+    raw::String     # full source text of the block, braces included
+end
+
 # Nested `{ }` scope (PTX register-lifetime scoping).
 Base.@kwdef struct Block <: Statement
     body::Tuple{Vararg{Statement}}

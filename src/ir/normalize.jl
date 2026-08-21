@@ -69,6 +69,10 @@ function _normalize_statements(statements::Tuple{Vararg{Statement}})
             # An opaque parser fallback is structure, not whitespace. It must
             # survive in both module and function positions.
             push!(out, s)
+        elseif s isa Section
+            # A debug-metadata block is opaque data captured verbatim; like
+            # RawLine, it survives normalization and compares by content.
+            push!(out, s)
         elseif s isa Comment || s isa BlankLine
             continue
         elseif s isa Function
@@ -207,6 +211,9 @@ function _diff_statement!(diffs::Vector{String}, sa::Statement, sb::Statement,
     elseif sa isa RawLine
         sa.text == (sb::RawLine).text ||
             push!(diffs, "$prefix raw: $(repr(sa.text)) vs $(repr((sb::RawLine).text))")
+    elseif sa isa Section
+        (sa.name == (sb::Section).name && sa.raw == (sb::Section).raw) ||
+            push!(diffs, "$prefix section: $(sa.name) vs $((sb::Section).name)")
     elseif !_eq_ignoring_formatting(sa, sb)
         push!(diffs, "$prefix: $(_stmt_summary(sa)) vs $(_stmt_summary(sb))")
     end
@@ -231,6 +238,7 @@ _stmt_summary(s::RegDecl)     = ".reg $(s.vector_shape === nothing ? "" : "$(s.v
 _stmt_summary(s::VarDecl)     = "VarDecl($(s.vector_shape === nothing ? "" : "$(s.vector_shape) ")$(s.name))"
 _stmt_summary(s::Label)       = "$(s.name):"
 _stmt_summary(s::RawLine)     = "RawLine($(repr(s.text)))"
+_stmt_summary(s::Section)     = "Section($(repr(s.name)))"
 _stmt_summary(s::Block)       = "Block($(length(s.body)) statements)"
 _stmt_summary(s::IntrinsicScope) = "IntrinsicScope($(repr(s.name)))"
 _stmt_summary(s)              = repr(s)

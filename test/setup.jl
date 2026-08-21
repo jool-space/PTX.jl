@@ -593,12 +593,12 @@ external_corpus_shard(shard::Int) = _EXTERNAL_SWEEP_ASSIGNMENT[shard]
 # deliberate review point: parser progress (or a regression) changes it only
 # with an explicit manifest update.
 const EXTERNAL_SWEEP_RAWLINE_MANIFEST = Dict(
-    "triton/fa_ws_pingpong_sm90a.ptx" => 494,
-    "triton/matmul_tma_sm120a.ptx" => 233,
-    "triton/matmul_tma_v33_sm90a.ptx" => 240,
-    "triton/matmul_tma_v34_sm90a.ptx" => 241,
-    "triton/matmul_tma_v35_sm90a.ptx" => 244,
-    "triton/matmul_wgmma_v32_sm90a.ptx" => 245,
+    "triton/fa_ws_pingpong_sm90a.ptx" => 261,
+    "triton/matmul_tma_sm120a.ptx" => 34,
+    "triton/matmul_tma_v33_sm90a.ptx" => 33,
+    "triton/matmul_tma_v34_sm90a.ptx" => 38,
+    "triton/matmul_tma_v35_sm90a.ptx" => 38,
+    "triton/matmul_wgmma_v32_sm90a.ptx" => 61,
 )
 
 function _deep_structural_roundtrip(src::String, name::String;

@@ -64,7 +64,12 @@ const _TRANSPILE_GENERIC_FORMS = Dict{Tuple{String, Tuple{Vararg{String}}},
     (("add", (".u32",)) => _transpile_result(:u32, (:u32, :u32), "§9.7.1.1")),
     (("add", (".u64",)) => _transpile_result(:u64, (:u64, :u64), "§9.7.1.1")),
     (("add", (".s32",)) => _transpile_result(:s32, (:s32, :s32), "§9.7.1.1")),
+    (("add", (".s64",)) => _transpile_result(:s64, (:s64, :s64), "§9.7.1.1")),
     (("add", (".f32",)) => _transpile_result(:f32, (:f32, :f32), "§9.7.3.3")),
+    # `.rn` is f32 add's default rounding made explicit (NVVM always spells
+    # it); same operand contract as the bare form.
+    (("add", (".rn", ".f32")) =>
+        _transpile_result(:f32, (:f32, :f32), "§9.7.3.3")),
     (("sub", (".u32",)) => _transpile_result(:u32, (:u32, :u32), "§9.7.1.2")),
     (("sub", (".u64",)) => _transpile_result(:u64, (:u64, :u64), "§9.7.1.2")),
     (("sub", (".s32",)) => _transpile_result(:s32, (:s32, :s32), "§9.7.1.2")),
@@ -78,6 +83,19 @@ const _TRANSPILE_GENERIC_FORMS = Dict{Tuple{String, Tuple{Vararg{String}}},
         _transpile_result(:u32, (:u32, :u32, :u32), "§9.7.1.4")),
     (("shl", (".b32",)) => _transpile_result(:b32, (:b32, :u32), "§9.7.8.8")),
     (("shl", (".b64",)) => _transpile_result(:b64, (:b64, :u32), "§9.7.8.8")),
+    (("shr", (".u32",)) => _transpile_result(:u32, (:u32, :u32), "§9.7.8.9")),
+    (("shr", (".u64",)) => _transpile_result(:u64, (:u64, :u32), "§9.7.8.9")),
+    (("shr", (".s32",)) => _transpile_result(:s32, (:s32, :u32), "§9.7.8.9")),
+    (("shr", (".s64",)) => _transpile_result(:s64, (:s64, :u32), "§9.7.8.9")),
+
+    # Bitwise logic (§§9.7.8.1–2); `or.pred` shares the section with the
+    # bit-typed forms.
+    (("and", (".b32",)) => _transpile_result(:b32, (:b32, :b32), "§9.7.8.1")),
+    (("and", (".b64",)) => _transpile_result(:b64, (:b64, :b64), "§9.7.8.1")),
+    (("or", (".b32",)) => _transpile_result(:b32, (:b32, :b32), "§9.7.8.2")),
+    (("or", (".b64",)) => _transpile_result(:b64, (:b64, :b64), "§9.7.8.2")),
+    (("and", (".pred",)) => _transpile_result(:pred, (:pred, :pred), "§9.7.8.1")),
+    (("or", (".pred",)) => _transpile_result(:pred, (:pred, :pred), "§9.7.8.2")),
 
     # Scalar parameter/global/shared memory subset (load §9.7.9.8,
     # store §9.7.9.11).
@@ -85,6 +103,13 @@ const _TRANSPILE_GENERIC_FORMS = Dict{Tuple{String, Tuple{Vararg{String}}},
         _transpile_result(:u32, (:param_u32_address,), "§9.7.9.8")),
     (("ld", (".param", ".u64")) =>
         _transpile_result(:u64, (:param_u64_address,), "§9.7.9.8")),
+    # NVVM/tileiras spell param loads with bit types. A .b32 load may target
+    # a wider integer register, which zero-extends (§9.4.1, Table 28);
+    # emission makes that extension explicit.
+    (("ld", (".param", ".b32")) =>
+        _transpile_result(:b32, (:param_u32_address,), "§9.7.9.8")),
+    (("ld", (".param", ".b64")) =>
+        _transpile_result(:b64, (:param_u64_address,), "§9.7.9.8")),
     (("ld", (".global", ".f32")) =>
         _transpile_result(:f32, (:global_address,), "§9.7.9.8")),
     (("ld", (".global", ".u32")) =>
@@ -239,9 +264,51 @@ _stmt_path(parent::AbstractString, i::Integer, s::Statement) =
 
 function _validate_nonsemantic_statement(s::Statement, path::String)
     (s isa Comment || s isa BlankLine) && return
+    # Debug-metadata sections (`.debug_str`, `.debug_loc`, ...) carry no
+    # kernel semantics; omitting them from the emitted Julia is safe.
+    s isa IR.Section && startswith(s.name, ".debug") && return
     _transpile_reject(path,
         "module-level $(nameof(typeof(s))) is not in the supported subset; " *
         "it would otherwise be silently omitted")
+end
+
+# Whether any operand in any function body names `name` — the reference scan
+# that decides if a module-level VarDecl can be omitted. Conservative: a
+# RawLine mentioning the name counts as a reference.
+function _module_symbol_referenced(mod::Module, name::String)
+    found = false
+    scan_operand(op::Operand) = begin
+        if op isa RegisterOperand
+            op.name == name && (found = true)
+        elseif op isa LabelOperand
+            op.name == name && (found = true)
+        elseif op isa AddressOperand
+            op.base == name && (found = true)
+        elseif op isa VectorOperand
+            foreach(scan_operand, op.elements)
+        elseif op isa ParenthesizedOperand
+            foreach(scan_operand, op.elements)
+        elseif op isa NegatedOperand
+            scan_operand(op.operand)
+        elseif op isa PipeOperand
+            scan_operand(op.left); scan_operand(op.right)
+        end
+    end
+    scan_stmt(stmt::Statement) = begin
+        if stmt isa Instruction
+            foreach(scan_operand, stmt.operands)
+        elseif stmt isa Block || stmt isa IR.IntrinsicScope
+            foreach(scan_stmt, stmt.body)
+        elseif stmt isa RawLine
+            occursin(name, stmt.text) && (found = true)
+        end
+    end
+    for d in mod.directives
+        d isa Function || continue
+        foreach(scan_stmt, d.body)
+        found && return true
+    end
+    false
 end
 
 function _validate_param!(state::_TranspileContractState, p::Param,
@@ -256,10 +323,12 @@ function _validate_param!(state::_TranspileContractState, p::Param,
         _transpile_reject(path, "array parameters are not represented by one Julia argument")
     p.alignment === nothing ||
         _transpile_reject(path, "parameter .align is not preserved by the emitted Julia signature")
-    p.ptr_state_space === nothing || _transpile_reject(path,
-        "parameter .ptr state-space metadata is emitted only as a comment")
-    p.ptr_alignment === nothing || _transpile_reject(path,
-        "parameter .ptr .align metadata is not preserved by the emitted Julia signature")
+    # `.ptr` parameter annotations are optimization hints:
+    # they inform aliasing/caching decisions but do not change kernel
+    # semantics, and the `raw_params` metadata header preserves them verbatim
+    # (e.g. "u64.ptr.global.palign1"). Compiler-emitted PTX (nvcc, tileiras)
+    # carries them on every pointer parameter, so rejecting them would
+    # exclude virtually all real kernels.
     haskey(state.params, p.name) &&
         _transpile_reject(path, "duplicate parameter name $(repr(p.name))")
     jname = julia_var(p.name)
@@ -379,6 +448,26 @@ function _validate_address!(state::_TranspileContractState,
             "non-literal address offset $(repr(op.offset)) is not supported")
 end
 
+# §9.4.1 relaxation for `ld`: the destination register may be wider than the
+# instruction type (bit/integer types zero-extend). Accepted only for param
+# loads, where emission spells the extension out; other generic forms keep
+# the exact-width contract.
+function _validate_param_load_destination!(state::_TranspileContractState,
+                                           op::Operand, kind::Symbol, path::String)
+    kind in (:b32, :u32) ||
+        return _validate_generic_destination!(state, op, kind, path)
+    (op isa RegisterOperand || op isa LabelOperand) || _transpile_reject(path,
+        "generic result destinations must be declared scalar registers, not $(nameof(typeof(op)))")
+    decl = _declared_register(state.cg, op)
+    decl === nothing &&
+        _transpile_reject(path, "destination register $(op.name) has no preceding .reg declaration")
+    accepted = (_structured_decl_types(kind)...,
+                ScalarType.B64, ScalarType.U64, ScalarType.S64)
+    decl.type in accepted || _transpile_reject(path,
+        "destination $(op.name) is $(ptx(decl.type)), expected " *
+        join(ptx.(accepted), "/"))
+end
+
 function _validate_generic_destination!(state::_TranspileContractState,
                                         op::Operand, kind::Symbol, path::String)
     (op isa RegisterOperand || op isa LabelOperand) || _transpile_reject(path,
@@ -425,7 +514,12 @@ function _validate_typed_source!(state::_TranspileContractState, op::Operand,
             # not encoded by the inventory and must remain explicit follow-up.
             op.name in ("%tid.x", "%tid.y", "%tid.z", "%ntid.x", "%ntid.y",
                         "%ntid.z", "%ctaid.x", "%ctaid.y", "%ctaid.z",
-                        "%nctaid.x", "%nctaid.y", "%nctaid.z", "%laneid") &&
+                        "%nctaid.x", "%nctaid.y", "%nctaid.z", "%laneid",
+                        # Cluster-rank components: `.sreg .v4 .u32` like
+                        # %ctaid (§10.12–13); tileiras indexes blocks with
+                        # %clusterid on sm_90+.
+                        "%clusterid.x", "%clusterid.y", "%clusterid.z",
+                        "%nclusterid.x", "%nclusterid.y", "%nclusterid.z") &&
                 kind === :u32 || _transpile_reject(path,
                     "special register $(op.name) has no reviewed .$kind carrier mapping")
             return
@@ -725,7 +819,15 @@ function _emit_transpile_form!(cg::CodeGenState, inst::Instruction)
     if roles in ((:param_u32_address,), (:param_u64_address,))
         destination, names = render_dst(inst.operands[1], cg)
         address_operand = only(sources)::AddressOperand
-        emit_with_predicate!(cg, destination * " = " * julia_var(address_operand.base),
+        value = julia_var(address_operand.base)
+        # §9.4.1: a 32-bit param load into a 64-bit register zero-extends;
+        # spell it out so the bound value carries the width downstream.
+        decl = _declared_register(cg, inst.operands[1])
+        if roles == (:param_u32_address,) && decl !== nothing &&
+                decl.type in _REGISTER_TYPES_64
+            value = "UInt64(" * value * ")"
+        end
+        emit_with_predicate!(cg, destination * " = " * value,
                              inst.predicate, names)
         return
     end
@@ -798,8 +900,13 @@ function _validate_instruction!(state::_TranspileContractState,
     source_start = rule.destination === nothing ? 1 : 2
     if rule.destination !== nothing
         isempty(inst.operands) && _transpile_reject(path, "result form is missing its destination")
-        _validate_generic_destination!(state, inst.operands[1], rule.destination,
-                                       path * ".destination")
+        if inst.opcode == "ld" && !isempty(inst.modifiers) && inst.modifiers[1] == ".param"
+            _validate_param_load_destination!(state, inst.operands[1], rule.destination,
+                                              path * ".destination")
+        else
+            _validate_generic_destination!(state, inst.operands[1], rule.destination,
+                                           path * ".destination")
+        end
     end
     sources = inst.operands[source_start:end]
     variants = [variant for variant in rule.sources if length(variant) == length(sources)]
@@ -926,13 +1033,29 @@ function _validate_body!(state::_TranspileContractState,
     end
 end
 
+# Function directives that constrain the launch configuration — or record
+# source-language provenance (`.language`, PTX ISA 9.3) — rather than the
+# body's computation. The emitted Julia function is launch-agnostic (the
+# caller supplies the geometry), and the values are preserved verbatim in the
+# `#   directives  = [...]` metadata header. `.pragma` and `.noreturn` can
+# alter code semantics and remain rejected.
+const _TRANSPILE_LAUNCH_DIRECTIVES = Set{String}((
+    "maxnreg", "maxntid", "reqntid",
+    "minnctapersm", "maxnctapersm", "minperctamemory",
+    "explicitcluster", "reqnctapercluster", "cluster_dim",
+    "language",
+))
+
 function _validate_function!(func::Function, path::String)
     func.return_params === nothing ||
         _transpile_reject(path, ".func return parameters are not represented")
     func.linking in (nothing, LinkingDirective.VISIBLE) ||
         _transpile_reject(path, "$(ptx(func.linking)) function linkage is not preserved")
-    isempty(func.directives) || _transpile_reject(path,
-        "function directives are currently emitted as comments, not semantics")
+    for d in func.directives
+        lstrip(d.name, '.') in _TRANSPILE_LAUNCH_DIRECTIVES || _transpile_reject(path,
+            "function directive .$(d.name) can alter body semantics and is " *
+            "not preserved by the emitted Julia")
+    end
     !func.is_entry && isempty(func.body) &&
         _transpile_reject(path, "body-less .func declarations cannot become Julia definitions")
 
@@ -984,6 +1107,14 @@ function validate_transpilable(mod::Module)
         elseif stmt isa TargetDirective
             _transpile_reject(path,
                 "a later .target changes the active feature set and cannot be ignored")
+        elseif stmt isa VarDecl
+            # Module-level globals the kernels never touch (e.g. tileiras'
+            # `___NV_TILE_LAUNCH_META_DATA___`, read by the CUDA driver at
+            # module load) do not affect the emitted Julia; ones that ARE
+            # referenced would change kernel semantics if dropped.
+            _module_symbol_referenced(mod, stmt.name) && _transpile_reject(path,
+                "module-level VarDecl $(repr(stmt.name)) is referenced by a " *
+                "function body and has no Julia carrier")
         else
             _validate_nonsemantic_statement(stmt, path)
         end
