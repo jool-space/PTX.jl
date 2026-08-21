@@ -546,3 +546,36 @@ end
     @test !occursin("NV_TILE_LAUNCH_META_DATA", out)
     @test !occursin("debug_str", out)
 end
+
+# The zero-init hoist recovers a register's carrier from its `.reg`
+# declaration via the Julia variable name. Two lookup edges: PTX permits
+# declarations without the `%` sigil (the re-prefixed lookup misses, the bare
+# fallback hits), and `$`-carrying compiler names mangle irreversibly (both
+# lookups miss — the hoist degrades to a bare `local`, the pre-zero-init
+# behavior, rather than guessing a type).
+@testset "zero-init hoist: declaration lookup edges" begin
+    percentless = """.version 8.5
+.target sm_90a
+.address_size 64
+.visible .entry percentless()
+{
+\t.reg .pred %p<2>;
+\t.reg .b32 r<3>;
+\tsetp.eq.s32 %p0, r0, 0;
+\t@%p0 bra SKIP;
+\tmov.b32 r1, 1;
+SKIP:
+\tret;
+}
+"""
+    @test occursin("local r1 = zero(UInt32)", ptx_to_julia(percentless))
+
+    mangled = replace(percentless,
+        "percentless" => "mangled",
+        ".reg .b32 r<3>;" => ".reg .b32 %r\$<3>;",
+        "setp.eq.s32 %p0, r0, 0;" => "setp.eq.s32 %p0, %r\$0, 0;",
+        "mov.b32 r1, 1;" => "mov.b32 %r\$1, 1;")
+    out = ptx_to_julia(mangled)
+    @test occursin(r"^    local r1$"m, out)
+    @test !occursin("local r1 = zero", out)
+end
