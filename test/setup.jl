@@ -367,7 +367,12 @@ function golden_test(name::String, f, tt::Type{<:Tuple}; cap::VersionNumber,
         @error "golden baseline missing — create it deliberately with PTX_UPDATE_GOLDEN=1 and review the git diff" name path
         return false
     end
-    want = read(path, String)
+    # The `.version` header is a toolkit stamp, not lowering evidence: the
+    # backend emits the toolkit-negotiated ISA, so the same tree produces a
+    # different header under a different CUDA_Compiler_jll. Stamp the
+    # committed baseline to the active assembler's ISA; every other byte
+    # stays an exact structural lock.
+    want = _stamp_version(read(path, String))
     want == got && return true
     println("=== golden mismatch: $name ===")
     println("    (if this lowering change is INTENDED, regenerate with PTX_UPDATE_GOLDEN=1")
