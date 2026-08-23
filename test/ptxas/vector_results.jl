@@ -15,17 +15,19 @@ function _vr_partition(form)
     error("unpartitioned vector-result form $(form.op).$(join(form.coremods, '.'))")
 end
 
-# The managed assembler tops out at PTX ISA 9.3 (CUDA 13.3); ledger forms
-# introduced by 9.4 are spelled-only and excluded from every assembly
-# partition. Bump this gate when CUDA_Compiler_jll ships 13.4+ — the pinned
-# skip count below fails loudly if the exclusion drifts.
-const _VR_SPELLED_ONLY_FLOOR = v"9.4"
-_vr_spelled_only(form) = form.ptx_version >= _VR_SPELLED_ONLY_FLOOR
+# Ledger forms beyond the managed assembler's ISA ceiling are spelled-only
+# and excluded from every assembly partition. The exclusion tracks the
+# shipped toolkit (CUDA 13.3 → 9.3 skips the two 9.4 forms; a 13.4+ artifact
+# assembles them) — the pinned per-ceiling skip count below fails loudly if
+# the exclusion drifts. Resolved once at load: the partition bodies are
+# built during @generated expansion, which must not touch artifact state.
+const _VR_ASSEMBLER_ISA = _ptxas_isa()
+_vr_spelled_only(form) = form.ptx_version > _VR_ASSEMBLER_ISA
 
-@testset "spelled-only 9.4 forms are excluded, and counted" begin
+@testset "forms beyond the assembler ceiling are excluded, and counted" begin
     skipped = [form for form in PTX.VECTOR_RESULT_CORE_FORMS
                if _vr_spelled_only(form)]
-    @test length(skipped) == 2
+    @test length(skipped) == (_VR_ASSEMBLER_ISA >= v"9.4" ? 0 : 2)
     @test all(f -> f.coremods[1] === :add && :noftz in f.coremods &&
                    f.lane_kind === :f32, skipped)
 end
@@ -147,10 +149,13 @@ function _vr_retarget_sm100_to_sm110(ptx::String, source_target::String,
 end
 
 @testset "ptxas-accepted vector-result cells at retained targets" begin
+    # The two 9.4 add.noftz.f32 forms join :atom90 once the assembler
+    # accepts ISA 9.4 — both counts stay pinned per ceiling.
+    atom90_count = _VR_ASSEMBLER_ISA >= v"9.4" ? 34 : 32
     partitions = (
         (_vr_ld75!, :ld75, 24, v"7.5", :baseline),
         (_vr_ld100!, :ld100, 8, v"10.0", :baseline),
-        (_vr_atom90!, :atom90, 32, v"9.0", :baseline),
+        (_vr_atom90!, :atom90, atom90_count, v"9.0", :baseline),
         (_vr_multimem90!, :multimem90, 42, v"9.0", :baseline),
         (_vr_multimem_fp8!, :multimem_fp8, 56, v"10.0", :arch),
     )
