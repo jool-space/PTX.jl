@@ -61,8 +61,8 @@ end
 function _bf16_conversion_probe!(out, raw_out, input)
     i = Int(threadIdx().x)
     @inbounds begin
-        out[i] = ptx"cvt.rn.bf16.f32"(input[i])
-        raw_out[i] = ptx"cvt.rn.bf16.f32"raw(input[i])
+        out[i] = reinterpret(BFloat16, ptx"cvt.rn.bf16.f32"(input[i]))
+        raw_out[i] = reinterpret(BFloat16, ptx"cvt.rn.bf16.f32"raw(input[i]))
     end
     return nothing
 end

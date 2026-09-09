@@ -550,8 +550,10 @@ end
 function _scalar_destination_role(schema)
     schema.rettype === Float16 && return :f16
     schema.rettype === Int16 && return :s16
-    schema.rettype === BFloat16 && return :bf16
-    schema.rettype === UInt16 && return :u16
+    if schema.rettype === UInt16
+        # set.bf16.<source> carries a bf16 result as raw UInt16 bits.
+        return schema.mods[end-1] === :bf16 ? :bf16 : :u16
+    end
     schema.rettype === Float32 && return :f32
     schema.rettype === Float64 && return :f64
     schema.rettype === Int32 && return :s32

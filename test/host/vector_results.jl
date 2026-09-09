@@ -7,7 +7,7 @@ const _VR_LANE_TYPE = Dict(
     :b16 => UInt16, :u16 => UInt16, :s16 => Int16,
     :b32 => UInt32, :u32 => UInt32, :s32 => Int32,
     :b64 => UInt64, :u64 => UInt64, :s64 => Int64,
-    :f16 => Float16, :bf16 => BFloat16, :f32 => Float32, :f64 => Float64,
+    :f16 => Float16, :bf16 => UInt16, :f32 => Float32, :f64 => Float64,
     :f16x2 => UInt32, :bf16x2 => UInt32,
     :e4m3 => UInt8, :e5m2 => UInt8,
     :e4m3x2 => UInt16, :e5m2x2 => UInt16,

@@ -177,7 +177,7 @@ function _expected_scalar_result_forms()
                      src === :f64 ? v"1.3" : nothing, src === :f32, cmps))
     end
     for (dst, result, version, sm) in ((:f16, Float16, v"4.2", v"5.3"),
-                                      (:bf16, BFloat16, v"7.8", v"9.0")),
+                                      (:bf16, UInt16, v"7.8", v"9.0")),
         src in (:b16, :b32, :b64, :u16, :u32, :u64, :s16, :s32, :s64, :f16, :f32, :f64)
         cmps = src in (:b16, :b32, :b64) ? (:eq, :ne) :
                src in (:f16, :f32, :f64) ? floating : basic

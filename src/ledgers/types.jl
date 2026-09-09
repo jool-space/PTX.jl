@@ -24,7 +24,7 @@ constraint_letter(::Type{<:Core.LLVMPtr}) = "l"
 
 const DTYPE_RETTYPE = Dict{Symbol, Type}(
     :f64 => Float64, :f32 => Float32, :f16 => Float16,
-    :bf16 => BFloat16, :tf32 => UInt32,
+    :bf16 => UInt16, :tf32 => UInt32,
     :u64 => UInt64,  :u32 => UInt32,  :u16 => UInt16, :u8 => UInt8,
     :s64 => Int64,   :s32 => Int32,   :s16 => Int16,  :s8 => Int8,
     :b64 => UInt64,  :b32 => UInt32,  :b16 => UInt16, :b8 => UInt8,

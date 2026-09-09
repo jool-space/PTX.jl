@@ -1788,9 +1788,9 @@ end
     @test spec.rettype === UInt32
     @test spec.constraints == "=r,f"
 
-    # bf16: typed scalar result in a 16-bit register.
+    # bf16: i16 carrier.
     spec = build_call(:cvt, (:rn, :bf16, :f32), (Float32,))
-    @test spec.rettype === BFloat16
+    @test spec.rettype === UInt16
     @test spec.constraints == "=h,f"
 
     # `.scaled::n2::ue8m0` modifier — munged through `__` → `::`. Trailing

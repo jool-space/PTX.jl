@@ -126,7 +126,7 @@ function _set_scalar_schemas!(schemas, dtype, stype, comparisons, admits_ftz,
              dtype === :f32 ? Float32 :
              dtype === :s16 ? Int16 :
              dtype === :s32 ? Int32 :
-             dtype === :bf16 ? BFloat16 : dtype === :u16 ? UInt16 : UInt32
+             dtype in (:u16, :bf16) ? UInt16 : UInt32
     source = stype in (:f16x2, :bf16x2) ? :b32 : stype
     for cmp in comparisons, boolop in (nothing, :and, :or, :xor),
         ftz in (admits_ftz ? (false, true) : (false,))

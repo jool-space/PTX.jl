@@ -146,8 +146,7 @@ operand carriers.
 | `.u64` / `.u32` / `.u16` / `.u8` | `UInt64` / `UInt32` / `UInt16` / `UInt8` |
 | `.s64` / `.s32` / `.s16` / `.s8` | `Int64` / `Int32` / `Int16` / `Int8` |
 | `.b64` / `.b32` / `.b16` / `.b8` | `UInt64` / `UInt32` / `UInt16` / `UInt8` |
-| `.bf16` | `BFloat16` (from BFloat16s.jl) |
-| `.tf32` | `UInt32` (bit-pattern carrier) |
+| `.bf16` / `.tf32` | `UInt16` / `UInt32` (bit-pattern carrier) |
 | `.pred` | `Bool` |
 | `.f16x2` / `.bf16x2` | `UInt32` (packed FP carrier) |
 | `.e4m3x2` / `.e5m2x2` / `.e2m1x2` / `.e3m2x2` / `.ue8m0x2` / … | `UInt16` (packed FP carrier) |
