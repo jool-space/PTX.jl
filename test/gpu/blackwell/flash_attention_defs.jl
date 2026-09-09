@@ -501,20 +501,20 @@ end
     # scoreboard mode, immediately — up to two loads in flight, the RAW
     # hazard left to the SASS register scoreboard as FA4 does), and flies
     # under exp/pack/store(c) ──
-    sb || ptx"tcgen05.wait::ld.sync.aligned"()
+    v0 = sb ? v0 : PTX.wait_registers(ptx"tcgen05.wait::ld.sync.aligned", v0)
     v1 = ptx"tcgen05.ld.sync.aligned.32x32b.x32.b32"(sp_base + UInt32(32))
     macc, sacc = fab_softmax_chunk(Val(0), sp, emu, v0, ntuple(_ -> 0.0f0, Val(4)),
                                     ntuple(_ -> 0.0f0, Val(4)),
                                     sp_base, pq_ptr, qk_scale, qk2, mneg)
-    sb || ptx"tcgen05.wait::ld.sync.aligned"()
+    v1 = sb ? v1 : PTX.wait_registers(ptx"tcgen05.wait::ld.sync.aligned", v1)
     v2 = ptx"tcgen05.ld.sync.aligned.32x32b.x32.b32"(sp_base + UInt32(64))
     macc, sacc = fab_softmax_chunk(Val(1), sp, emu, v1, macc, sacc,
                                     sp_base, pq_ptr, qk_scale, qk2, mneg)
-    sb || ptx"tcgen05.wait::ld.sync.aligned"()
+    v2 = sb ? v2 : PTX.wait_registers(ptx"tcgen05.wait::ld.sync.aligned", v2)
     v3 = ptx"tcgen05.ld.sync.aligned.32x32b.x32.b32"(sp_base + UInt32(96))
     macc, sacc = fab_softmax_chunk(Val(2), sp, emu, v2, macc, sacc,
                                     sp_base, pq_ptr, qk_scale, qk2, mneg)
-    sb || ptx"tcgen05.wait::ld.sync.aligned"()
+    v3 = sb ? v3 : PTX.wait_registers(ptx"tcgen05.wait::ld.sync.aligned", v3)
     macc, sacc = fab_softmax_chunk(Val(3), sp, emu, v3, macc, sacc,
                                     sp_base, pq_ptr, qk_scale, qk2, mneg)
 
@@ -562,7 +562,7 @@ end
         for half in 0:1
             addr = o_addr + UInt32(half * 64)
             ov = ptx"tcgen05.ld.sync.aligned.32x32b.x64.b32"(addr)
-            ptx"tcgen05.wait::ld.sync.aligned"()
+            ov = PTX.wait_registers(ptx"tcgen05.wait::ld.sync.aligned", ov)
             ptx"tcgen05.st.sync.aligned.32x32b.x64.b32"(addr, fab_scale64(ov, alpha))
         end
         ptx"tcgen05.wait::st.sync.aligned"()
@@ -586,7 +586,7 @@ end
     for half in 0:1
         addr = o_addr + UInt32(half * 64)
         ov = ptx"tcgen05.ld.sync.aligned.32x32b.x64.b32"(addr)
-        ptx"tcgen05.wait::ld.sync.aligned"()
+        ov = PTX.wait_registers(ptx"tcgen05.wait::ld.sync.aligned", ov)
         if STAGE == 1 && half == 1
             # the LAST TMEM read is complete: everything the gates protect
             # (the readout) is done, and the remaining normalize/pack/store

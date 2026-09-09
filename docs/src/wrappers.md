@@ -252,6 +252,30 @@ PTX.layout_for_a
 PTX.layout_for_mn_major
 ```
 
+## Register dependencies on waits
+
+`PTX.wait_registers` attaches register values to a wait's input/output
+operands. Consumers must use the returned values; calling a void wait and
+returning the original values does not establish that compiler dependency.
+The wait keeps its existing memory clobber and collective semantics.
+
+The initial surface covers `tcgen05.wait::ld.sync.aligned` and
+`tcgen05.wait::st.sync.aligned`, with scalar or homogeneous tuple values.
+Adjacent 32-bit tuple elements use paired 64-bit operands. The
+`ptxas/wait_registers` test compiles six attention configurations with and
+without register bindings and compares machine-instruction encodings
+under the same toolchain, including any spill instructions.
+
+Register operands and memory clobbers describe different compiler effects;
+see [NVIDIA's inline-PTX documentation](https://docs.nvidia.com/cuda/inline-ptx-assembly/index.html#incorrect-optimization)
+and [LLVM's tied input constraints](https://llvm.org/docs/LangRef.html#input-constraints).
+This is an API addition for expressing register dependencies; no
+wrong-result bug has been demonstrated in the existing no-argument wait.
+
+```@docs
+PTX.wait_registers
+```
+
 ## Host-side TMA descriptors
 
 Hopper TMA (`cp.async.bulk.tensor.*`) consumes a 128-byte
