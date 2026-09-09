@@ -152,3 +152,11 @@ end
     # touches the low 14 bits in practice.
     @test PTX.step_desc(base, 2048) >> 16 == base >> 16
 end
+
+@testset "K-major tf32 32B swizzle uses the 16 by 8 canonical tile" begin
+    # ((8,2),(4,2)):((8,64),(1,4)) uses 64 tf32 elements for SBO.
+    layout = layout_for_a(dtype=:tf32, m=16, k=8)
+    @test layout.layout_type == WgmmaSwizzle.B32
+    @test layout.stride_byte_offset == 64 * sizeof(Float32)
+    @test layout.leading_byte_offset == 16
+end
