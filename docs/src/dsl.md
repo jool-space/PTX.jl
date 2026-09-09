@@ -146,7 +146,8 @@ operand carriers.
 | `.u64` / `.u32` / `.u16` / `.u8` | `UInt64` / `UInt32` / `UInt16` / `UInt8` |
 | `.s64` / `.s32` / `.s16` / `.s8` | `Int64` / `Int32` / `Int16` / `Int8` |
 | `.b64` / `.b32` / `.b16` / `.b8` | `UInt64` / `UInt32` / `UInt16` / `UInt8` |
-| `.bf16` / `.tf32` | `UInt16` / `UInt32` (bit-pattern carrier) |
+| `.bf16` | `BFloat16` (from BFloat16s.jl) |
+| `.tf32` | `UInt32` (bit-pattern carrier) |
 | `.pred` | `Bool` |
 | `.f16x2` / `.bf16x2` | `UInt32` (packed FP carrier) |
 | `.e4m3x2` / `.e5m2x2` / `.e2m1x2` / `.e3m2x2` / `.ue8m0x2` / … | `UInt16` (packed FP carrier) |
@@ -467,7 +468,7 @@ Per-arg from a small mapping:
 |---|---|---|
 | `Float64` | `d` | `f64` |
 | `Float32` | `f` | `f32` |
-| `Float16`, `Int16`/`UInt16`, `Int8`/`UInt8` | `h` | `i16` (NVPTX has no native i8 register) |
+| `Float16`, `BFloat16`, `Int16`/`UInt16`, `Int8`/`UInt8` | `h` | 16-bit register (NVPTX has no native i8 register) |
 | `Int32`/`UInt32` | `r` | `i32` |
 | `Int64`/`UInt64` | `l` | `i64` |
 | `Bool` | `b` | `i1` (predicate) |

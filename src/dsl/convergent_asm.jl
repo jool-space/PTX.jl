@@ -30,6 +30,7 @@ _asm_lltype(T::Type) =
     T === Int64   ? "i64"   :
     T === Float64 ? "double" :
     T === Float16 ? "half"  :
+    T === BFloat16 ? (isdefined(Core, :BFloat16) && T === Core.BFloat16 ? "bfloat" : "i16") :
     T === UInt16  ? "i16"   :
     T === Int16   ? "i16"   :
     T === UInt8   ? "i8"    :

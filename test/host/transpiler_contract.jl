@@ -177,19 +177,19 @@ end
             category = :unsupported)
     end
 
-    # The lower-level type lookups remain carrier-correct even though the
+    # The lower-level type lookups retain BFloat16 even though the
     # contract above deliberately makes their BF16 declaration entry
     # unreachable. This prevents a future contract expansion from silently
     # allocating Float16 shared storage for BF16 bit patterns.
-    @test PTX.Codegen.scalar_to_julia(IR.ScalarType.BF16) === :UInt16
-    @test PTX.Codegen.MODIFIER_TO_JULIA_TYPE[:bf16] == "UInt16"
+    @test PTX.Codegen.scalar_to_julia(IR.ScalarType.BF16) === :BFloat16
+    @test PTX.Codegen.MODIFIER_TO_JULIA_TYPE[:bf16] == "BFloat16"
 
     b16_storage = IR.VarDecl(state_space = IR.StateSpace.SHARED,
                              type = IR.ScalarType.B16,
-                             name = "bf16_bits", array_size = 2)
+                             name = "bf16_storage", array_size = 2)
     julia = ir_to_julia(_contract_module(
         _contract_function((b16_storage, _CONTRACT_RET))))
-    @test occursin("bf16_bits = CuStaticSharedArray(UInt16, 2)", julia)
+    @test occursin("bf16_storage = CuStaticSharedArray(UInt16, 2)", julia)
 end
 
 @testset "transpiler contract: declaration namespaces and block scope" begin

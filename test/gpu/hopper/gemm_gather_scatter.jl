@@ -59,13 +59,13 @@ const GS_B_BYTES = GS_BK * GS_BN * 2
 
 function _gs_gemm_kernel!(
         D::CuDeviceVector{Float32, 1},
-        A_src::CuDeviceVector{UInt16, 1},
+        A_src::CuDeviceVector{BFloat16, 1},
         gather_idx::CuDeviceVector{Int32, 1},
         scatter_idx::CuDeviceVector{Int32, 1},
         tma_B::PTX.TMADescriptorPtr)
 
-    smem_A = CuStaticSharedArray(UInt16, GS_BM * GS_BK)
-    smem_B = CuStaticSharedArray(UInt16, GS_BK * GS_BN)
+    smem_A = CuStaticSharedArray(BFloat16, GS_BM * GS_BK)
+    smem_B = CuStaticSharedArray(BFloat16, GS_BK * GS_BN)
     mbar   = CuStaticSharedArray(UInt64, 1)
 
     a_ptr  = pointer(smem_A)
@@ -153,7 +153,7 @@ end
 # ── Cross-arch ptxas validation ────────────────────────────────────────
 
 @testset "gather-GEMM-scatter fusion compiles at sm_90a" begin
-    types = Tuple{CuDeviceVector{Float32, 1}, CuDeviceVector{UInt16, 1},
+    types = Tuple{CuDeviceVector{Float32, 1}, CuDeviceVector{BFloat16, 1},
                   CuDeviceVector{Int32, 1}, CuDeviceVector{Int32, 1},
                   PTX.TMADescriptorPtr}
     @test ptxas_compiles(_gs_gemm_kernel!, types;
@@ -183,13 +183,13 @@ if test_runtime_supported(@__FILE__)
 
         # Pack the FULL A source K-fast (the kernel gathers rows out of
         # it); B packs as usual.
-        A_packed = Array{UInt16}(undef, GS_BK, GS_M_TOTAL)
-        B_packed = Array{UInt16}(undef, GS_BK, GS_BN)
+        A_packed = Array{BFloat16}(undef, GS_BK, GS_M_TOTAL)
+        B_packed = Array{BFloat16}(undef, GS_BK, GS_BN)
         for m in 1:GS_M_TOTAL, k in 1:GS_BK
-            A_packed[k, m] = bf16_bits(A_src[m, k])
+            A_packed[k, m] = BFloat16(A_src[m, k])
         end
         for n in 1:GS_BN, k in 1:GS_BK
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         A_d = CuArray(vec(A_packed))
         B_d = CuArray(B_packed)

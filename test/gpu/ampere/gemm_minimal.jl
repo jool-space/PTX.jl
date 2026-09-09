@@ -19,12 +19,9 @@
 # --- bf16 packing -----------------------------------------------------------
 #
 # bf16 = top 16 bits of an IEEE Float32 (sign + 8-bit exp + 7-bit mantissa).
-# Round-to-nearest-truncate is what Float32→bf16 reduces to; on bf16-friendly
-# inputs the lost mantissa bits are negligible.
+# BFloat16 conversion rounds inputs to nearest, with ties to even.
 
-bf16_bits(x::Float32) = UInt16(reinterpret(UInt32, x) >> 16)
-bf16_to_f32(b::UInt16) = reinterpret(Float32, UInt32(b) << 16)
-bf16_pack(lo::UInt16, hi::UInt16) = UInt32(lo) | (UInt32(hi) << 16)
+bf16_pack(lo::BFloat16, hi::BFloat16) = ptx"mov.b32"((lo, hi))
 
 # --- mma m16n8k16 fragment layout (PTX ISA 9.2 §9.7.13.4) ------------------
 #
@@ -51,8 +48,8 @@ bf16_pack(lo::UInt16, hi::UInt16) = UInt32(lo) | (UInt32(hi) << 16)
 # --- the kernel -------------------------------------------------------------
 
 function gemm_tile_kernel!(D, A_bits, B_bits)
-    smem_A = CuStaticSharedArray(UInt16, 256)   # 16×16 bf16
-    smem_B = CuStaticSharedArray(UInt16, 128)   # 16×8 bf16
+    smem_A = CuStaticSharedArray(BFloat16, 256)   # 16×16 bf16
+    smem_B = CuStaticSharedArray(BFloat16, 128)   # 16×8 bf16
 
     tid = ptx"mov.u32"(sreg"tid.x")
 
@@ -111,31 +108,29 @@ end
 
 # --- correctness checks -----------------------------------------------------
 
-# Pack a Float32 matrix (row-major Julia layout) to bf16 UInt16 storage,
+# Pack a Float32 matrix (row-major Julia layout) to BFloat16 storage,
 # row-major flattened. Each output is bf16 of the input value.
 function pack_bf16_row(A::AbstractMatrix{Float32})
     m, n = size(A)
-    out = Vector{UInt16}(undef, m * n)
+    out = Vector{BFloat16}(undef, m * n)
     @inbounds for i in 1:m, j in 1:n
-        out[(i-1)*n + j] = bf16_bits(A[i, j])
+        out[(i-1)*n + j] = BFloat16(A[i, j])
     end
     out
 end
 
-# Pack a Float32 matrix to bf16 UInt16 storage, column-major flattened.
+# Pack a Float32 matrix to BFloat16 storage, column-major flattened.
 function pack_bf16_col(B::AbstractMatrix{Float32})
     m, n = size(B)
-    out = Vector{UInt16}(undef, m * n)
+    out = Vector{BFloat16}(undef, m * n)
     @inbounds for j in 1:n, i in 1:m
-        out[(j-1)*m + i] = bf16_bits(B[i, j])
+        out[(j-1)*m + i] = BFloat16(B[i, j])
     end
     out
 end
 
-# Quantize a Float32 matrix to bf16 precision (round-to-truncate by passing
-# through bf16 storage and back). Used for the reference matmul so we
-# compare apples-to-apples.
-quantize_bf16(A) = bf16_to_f32.(bf16_bits.(A))
+# Round the reference inputs to the same bf16 precision as the kernel.
+quantize_bf16(A) = Float32.(BFloat16.(A))
 
 @testset "GEMM tile (manual frag): A=B=1.0, C=0 → D == 16.0" begin
     A_f32 = ones(Float32, 16, 16)
@@ -192,8 +187,8 @@ end
 # return tuple feeds into mma without re-shuffling.
 
 function gemm_tile_ldmatrix_kernel!(D, A_bits, B_bits)
-    smem_A = CuStaticSharedArray(UInt16, 256)
-    smem_B = CuStaticSharedArray(UInt16, 128)
+    smem_A = CuStaticSharedArray(BFloat16, 256)
+    smem_B = CuStaticSharedArray(BFloat16, 128)
 
     tid = ptx"mov.u32"(sreg"tid.x")
 
@@ -218,7 +213,7 @@ function gemm_tile_ldmatrix_kernel!(D, A_bits, B_bits)
     col_block  = octet >> 1                 # 0 → left half, 1 → right half
     row_in_A   = row_block * 8 + in_octet
     col_in_A   = col_block * 8
-    a_addr     = pointer(smem_A) + (row_in_A * 16 + col_in_A) * sizeof(UInt16)
+    a_addr     = pointer(smem_A) + (row_in_A * 16 + col_in_A) * sizeof(BFloat16)
     a          = ptx"ldmatrix.sync.aligned.m8n8.x4.shared.b16"(a_addr)
 
     # B still uses manual fragment construction. Phase 3 would swap in
@@ -297,8 +292,8 @@ end
 # address (any element of smem_B works).
 
 function gemm_tile_ldmatrix_full_kernel!(D, A_bits, B_bits)
-    smem_A = CuStaticSharedArray(UInt16, 256)
-    smem_B = CuStaticSharedArray(UInt16, 128)
+    smem_A = CuStaticSharedArray(BFloat16, 256)
+    smem_B = CuStaticSharedArray(BFloat16, 128)
 
     tid = ptx"mov.u32"(sreg"tid.x")
 
@@ -323,14 +318,14 @@ function gemm_tile_ldmatrix_full_kernel!(D, A_bits, B_bits)
     col_block  = octet >> 1
     row_in_A   = row_block * 8 + in_octet
     col_in_A   = col_block * 8
-    a_addr     = pointer(smem_A) + (row_in_A * 16 + col_in_A) * sizeof(UInt16)
+    a_addr     = pointer(smem_A) + (row_in_A * 16 + col_in_A) * sizeof(BFloat16)
     a          = ptx"ldmatrix.sync.aligned.m8n8.x4.shared.b16"(a_addr)
 
     # ldmatrix.x2 for B. octet 0 → frag 0 (B rows 0..7), octet 1 → frag 1
     # (B rows 8..15). Lanes 16..31 are inactive but need a valid address;
     # we compute one anyway via clamping the byte offset within smem_B.
     half_offset = (octet & 1) * 8
-    b_byte_off  = (in_octet * 16 + half_offset) * sizeof(UInt16)
+    b_byte_off  = (in_octet * 16 + half_offset) * sizeof(BFloat16)
     b_addr      = pointer(smem_B) + b_byte_off
     b           = ptx"ldmatrix.sync.aligned.m8n8.x2.shared.b16"(b_addr)
 

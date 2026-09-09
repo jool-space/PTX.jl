@@ -2,7 +2,7 @@
 # The bfloat forms require CC 9.0. Packed integer set requires CC 10.7 and
 # has separate offline assembly coverage; this kernel uses scalar/half forms.
 function _set_semantics!(out, a::Int64, b::Int64, gate::Bool,
-                          h1::Float16, h2::Float16, bf1::UInt16, bf2::UInt16,
+                          h1::Float16, h2::Float16, bf1::BFloat16, bf2::BFloat16,
                           fp_nan::Float32, tiny::Float32)
     @inbounds begin
         out[1] = ptx"set.lt.u32.s64"(a, b)
@@ -21,7 +21,7 @@ function _set_semantics!(out, a::Int64, b::Int64, gate::Bool,
         out[14] = UInt32(reinterpret(UInt16, ptx"set.lt.f16.f16"(h1, h2)))
         out[15] = UInt32(ptx"set.lt.u16.f16"(h1, h2))
         out[16] = UInt32(reinterpret(UInt16, ptx"set.lt.s16.f16"(h1, h2)))
-        out[17] = UInt32(ptx"set.lt.bf16.f16"(h1, h2))
+        out[17] = UInt32(reinterpret(UInt16, ptx"set.lt.bf16.f16"(h1, h2)))
         out[18] = ptx"set.lt.u32.bf16"(bf1, bf2)
         # Lane 0 compares -1 < 0 (true), lane 1 compares 2 < 1 (false).
         out[19] = ptx"set.lt.f16x2.f16x2"(UInt32(0x4000bc00), UInt32(0x3c000000))
@@ -50,7 +50,7 @@ end
 @testset "set numeric results, NaNs, predicates, and packed lane masks" begin
     out = CUDACore.zeros(UInt32, 32)
     @cuda threads=1 _set_semantics!(out, Int64(-2), Int64(1), true,
-        Float16(-1), Float16(2), UInt16(0xbf80), UInt16(0x4000),
+        Float16(-1), Float16(2), BFloat16(-1), BFloat16(2),
         Float32(NaN), reinterpret(Float32, UInt32(1)))
     CUDACore.synchronize()
     expected = UInt32[

@@ -51,7 +51,7 @@ end
     )
     for (name, cfg) in configs
         @testset "$name" begin
-            tt = Tuple{CuDeviceVector{UInt16,1},
+            tt = Tuple{CuDeviceVector{BFloat16,1},
                        PTX.TMADescriptorPtr, PTX.TMADescriptorPtr, PTX.TMADescriptorPtr,
                        UInt32, UInt32, UInt32, UInt32, UInt32, Float32,
                        CuDeviceVector{UInt32,1}, typeof(Val(cfg))}

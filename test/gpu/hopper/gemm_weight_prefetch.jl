@@ -52,8 +52,8 @@ function _wpf_gemm_kernel!(
         K::Int32,
         prefetch_k_tiles::Int32)
 
-    smem_A = CuStaticSharedArray(UInt16, WPF_N_STAGES * WPF_BM * WPF_BK)
-    smem_B = CuStaticSharedArray(UInt16, WPF_N_STAGES * WPF_BK * WPF_BN)
+    smem_A = CuStaticSharedArray(BFloat16, WPF_N_STAGES * WPF_BM * WPF_BK)
+    smem_B = CuStaticSharedArray(BFloat16, WPF_N_STAGES * WPF_BK * WPF_BN)
     mbar_full  = CuStaticSharedArray(UInt64, WPF_N_STAGES)
     mbar_empty = CuStaticSharedArray(UInt64, WPF_N_STAGES)
 
@@ -180,13 +180,13 @@ if test_runtime_supported(@__FILE__)
         A_f32 = randn(rng, Float32, WPF_BM, K_test) .* 0.1f0
         B_f32 = randn(rng, Float32, K_test, WPF_BN) .* 0.1f0
 
-        A_packed = Array{UInt16}(undef, K_test, WPF_BM)
-        B_packed = Array{UInt16}(undef, K_test, WPF_BN)
+        A_packed = Array{BFloat16}(undef, K_test, WPF_BM)
+        B_packed = Array{BFloat16}(undef, K_test, WPF_BN)
         for m in 1:WPF_BM, k in 1:K_test
-            A_packed[k, m] = bf16_bits(A_f32[m, k])
+            A_packed[k, m] = BFloat16(A_f32[m, k])
         end
         for k in 1:K_test, n in 1:WPF_BN
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)

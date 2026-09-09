@@ -52,8 +52,8 @@ function _act_gemm_kernel!(
         beta::Float32,
         scale::Float32)
 
-    smem_A = CuStaticSharedArray(UInt16, ACT_BM * ACT_BK)
-    smem_B = CuStaticSharedArray(UInt16, ACT_BK * ACT_BN)
+    smem_A = CuStaticSharedArray(BFloat16, ACT_BM * ACT_BK)
+    smem_B = CuStaticSharedArray(BFloat16, ACT_BK * ACT_BN)
     mbar   = CuStaticSharedArray(UInt64, 1)
 
     a_ptr  = pointer(smem_A)
@@ -154,13 +154,13 @@ if test_runtime_supported(@__FILE__)
         alpha, beta = 1.25f0, 0.75f0
         scale = 0.625f0                  # example draws it from [0.5, 1.0)
 
-        A_packed = Array{UInt16}(undef, ACT_BK, ACT_BM)
-        B_packed = Array{UInt16}(undef, ACT_BK, ACT_BN)
+        A_packed = Array{BFloat16}(undef, ACT_BK, ACT_BM)
+        B_packed = Array{BFloat16}(undef, ACT_BK, ACT_BN)
         for m in 1:ACT_BM, k in 1:ACT_BK
-            A_packed[k, m] = bf16_bits(A_f32[m, k])
+            A_packed[k, m] = BFloat16(A_f32[m, k])
         end
         for n in 1:ACT_BN, k in 1:ACT_BK
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)
@@ -203,13 +203,13 @@ if test_runtime_supported(@__FILE__)
         B_f32 = Float32.(randn(rng, ACT_BK, ACT_BN)) .* 0.5f0
         alpha, scale = 2f0, 1f0
 
-        A_packed = Array{UInt16}(undef, ACT_BK, ACT_BM)
-        B_packed = Array{UInt16}(undef, ACT_BK, ACT_BN)
+        A_packed = Array{BFloat16}(undef, ACT_BK, ACT_BM)
+        B_packed = Array{BFloat16}(undef, ACT_BK, ACT_BN)
         for m in 1:ACT_BM, k in 1:ACT_BK
-            A_packed[k, m] = bf16_bits(A_f32[m, k])
+            A_packed[k, m] = BFloat16(A_f32[m, k])
         end
         for n in 1:ACT_BN, k in 1:ACT_BK
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)

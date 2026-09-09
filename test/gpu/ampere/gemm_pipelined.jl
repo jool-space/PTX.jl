@@ -25,8 +25,8 @@
 #   N_FRAG_N = BN / 8 = 8 mma.sync per warp per K-iter
 #
 # Inputs (flat row-major flattened):
-#   A    :: (M, K) bf16  stored as UInt16
-#   B_T  :: (N, K) bf16  stored as UInt16  (B^T, K-contiguous for mma row.col)
+#   A    :: (M, K) BFloat16
+#   B_T  :: (N, K) BFloat16  (B^T, K-contiguous for mma row.col)
 #   D    :: (M, N) f32
 #
 # Grid:  (N/BN, M/BM)
@@ -36,19 +36,17 @@
 using Random
 using Base: @nexprs
 
-bf16_bits_p(x::Float32)  = UInt16(reinterpret(UInt32, x) >> 16)
-bf16_to_f32_p(b::UInt16) = reinterpret(Float32, UInt32(b) << 16)
 
 function pack_bf16_rowmajor_p(A::AbstractMatrix{Float32})
     rows, cols = size(A)
-    out = Vector{UInt16}(undef, rows * cols)
+    out = Vector{BFloat16}(undef, rows * cols)
     @inbounds for i in 1:rows, j in 1:cols
-        out[(i-1)*cols + j] = bf16_bits_p(A[i, j])
+        out[(i-1)*cols + j] = BFloat16(A[i, j])
     end
     out
 end
 
-quantize_bf16_p(A) = bf16_to_f32_p.(bf16_bits_p.(A))
+quantize_bf16_p(A) = Float32.(BFloat16.(A))
 
 const PIPE_BM, PIPE_BN, PIPE_BK = 64, 64, 16
 const PIPE_NUM_WARPS = 4
@@ -64,8 +62,8 @@ const PIPE_SMEM_BYTES    = PIPE_STAGES * (PIPE_A_STAGE_BYTES + PIPE_B_STAGE_BYTE
 
 function gemm_pipelined_kernel!(
         D::CuDeviceVector{Float32},
-        A::CuDeviceVector{UInt16},
-        B_T::CuDeviceVector{UInt16},
+        A::CuDeviceVector{BFloat16},
+        B_T::CuDeviceVector{BFloat16},
         ::Val{M}, ::Val{N}, ::Val{K}) where {M, N, K}
 
     smem      = CuDynamicSharedArray(UInt8, PIPE_SMEM_BYTES)

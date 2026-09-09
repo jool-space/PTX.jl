@@ -7,9 +7,9 @@
 function _mixed_scalar_results_runtime!(out, one_h::Float16,
                                         quarter_h::Float16,
                                         half_h::Float16,
-                                        quarter_b::UInt16,
-                                        half_b::UInt16,
-                                        three_quarters_b::UInt16)
+                                        quarter_b::BFloat16,
+                                        half_b::BFloat16,
+                                        three_quarters_b::BFloat16)
     tie = reinterpret(Float32, UInt32(0x33800000)) # 2^-24
     @inbounds begin
         out[1] = ptx"add.rn.f32.f16"(one_h, tie)
@@ -33,7 +33,7 @@ end
     out = CUDACore.zeros(Float32, 8)
     @cuda threads=1 _mixed_scalar_results_runtime!(
         out, Float16(1), Float16(0.25), Float16(0.5),
-        bf16_bits(0.25f0), bf16_bits(0.5f0), bf16_bits(0.75f0))
+        BFloat16(0.25f0), BFloat16(0.5f0), BFloat16(0.75f0))
     CUDACore.synchronize()
 
     got = Array(out)

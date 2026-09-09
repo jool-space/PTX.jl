@@ -185,8 +185,8 @@ end
 # but ptxas validates that every step lowers to a sm_90a-acceptable PTX.
 
 function _hopper_pipeline_kernel!(D, A_bits, B_bits)
-    smem_A = CuStaticSharedArray(UInt16, 1024)        # 64×16 bf16 (m64k16)
-    smem_B = CuStaticSharedArray(UInt16, 128)         # 16×8 bf16 (k16n8)
+    smem_A = CuStaticSharedArray(BFloat16, 1024)        # 64×16 bf16 (m64k16)
+    smem_B = CuStaticSharedArray(BFloat16, 128)        # 16×8 bf16 (k16n8)
     tid = ptx"mov.u32"(sreg"tid.x")
 
     # 1. cp.async load (cooperative, 16-byte chunks).
@@ -237,8 +237,8 @@ end
 
 @testset "Hopper full pipeline (cp.async + wgmma)" begin
     types = Tuple{CuDeviceVector{Float32, 1},
-                  CuDeviceVector{UInt16, 1},
-                  CuDeviceVector{UInt16, 1}}
+                  CuDeviceVector{BFloat16, 1},
+                  CuDeviceVector{BFloat16, 1}}
     @test ptxas_compiles(_hopper_pipeline_kernel!, types;
                          cap = v"9.0", feature_set = :arch)
     ptx = emit_ptx(_hopper_pipeline_kernel!, types;

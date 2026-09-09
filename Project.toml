@@ -7,6 +7,7 @@ authors = ["Anton Oresten <antonoresten@proton.me>"]
 projects = ["test", "docs"]
 
 [deps]
+BFloat16s = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
 EnumX = "4e289a0a-7415-4d19-859d-a7e5c4648b56"
 LLVM = "929cbde3-209d-540e-8aea-75f648917ca0"
 Republic = "27243419-9dde-4721-b67c-fd63626fea7f"
@@ -19,6 +20,7 @@ NVPTX_LLVM_Backend_jll = "ef6e0fe3-e6ef-59c0-bde6-4989574699e0"
 CUDACoreExt = "CUDACore"
 
 [compat]
+BFloat16s = "0.6"
 CUDACore = "6.2"
 EnumX = "1"
 LLVM = "9.7.1"

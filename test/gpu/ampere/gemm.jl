@@ -14,8 +14,8 @@
 # A future high-perf variant layers cp.async + SMEM staging + ldmatrix on top.
 #
 # Inputs (flat row-major flattened):
-#   A    :: (M, K) bf16  stored as UInt16, row-major
-#   B_T  :: (N, K) bf16  stored as UInt16, row-major  (B^T so K is contiguous)
+#   A    :: (M, K) BFloat16, row-major
+#   B_T  :: (N, K) BFloat16, row-major  (B^T so K is contiguous)
 #   D    :: (M, N) f32   row-major
 #
 # Grid:  (N/8, M/16)        — blockIdx.x picks N tile, blockIdx.y picks M tile
@@ -40,15 +40,13 @@
 
 using Random
 
-bf16_bits(x::Float32)  = UInt16(reinterpret(UInt32, x) >> 16)
-bf16_to_f32(b::UInt16) = reinterpret(Float32, UInt32(b) << 16)
 
-# Pack a (rows × cols) Float32 matrix into row-major bf16 UInt16 flat storage.
+# Pack a (rows × cols) Float32 matrix into row-major BFloat16 flat storage.
 function pack_bf16_rowmajor(A::AbstractMatrix{Float32})
     rows, cols = size(A)
-    out = Vector{UInt16}(undef, rows * cols)
+    out = Vector{BFloat16}(undef, rows * cols)
     @inbounds for i in 1:rows, j in 1:cols
-        out[(i-1)*cols + j] = bf16_bits(A[i, j])
+        out[(i-1)*cols + j] = BFloat16(A[i, j])
     end
     out
 end
@@ -56,14 +54,14 @@ end
 # Quantize Float32 to bf16 precision via round-trip through bf16 storage,
 # so the host-side reference matmul accumulates over the same bits the kernel
 # saw — no spurious tolerance budget burned on input quantization.
-quantize_bf16(A) = bf16_to_f32.(bf16_bits.(A))
+quantize_bf16(A) = Float32.(BFloat16.(A))
 
 const BM, BN, BK = 16, 8, 16
 
 function gemm_ampere_kernel!(
         D::CuDeviceVector{Float32},
-        A::CuDeviceVector{UInt16},
-        B_T::CuDeviceVector{UInt16},
+        A::CuDeviceVector{BFloat16},
+        B_T::CuDeviceVector{BFloat16},
         ::Val{M}, ::Val{N}, ::Val{K}) where {M, N, K}
     n_iters = K ÷ BK
 

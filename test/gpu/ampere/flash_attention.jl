@@ -53,10 +53,10 @@ fam_k_bytes(HD)    = FAM_BN * HD * 2
 fam_smem_bytes(HD) = fam_q_bytes(HD) + 2 * fam_k_bytes(HD) + HD * FAM_BN * 2
 
 function fam_kernel!(
-        O::CuDeviceVector{UInt16},
-        Q::CuDeviceVector{UInt16},
-        K::CuDeviceVector{UInt16},
-        V::CuDeviceVector{UInt16},
+        O::CuDeviceVector{BFloat16},
+        Q::CuDeviceVector{BFloat16},
+        K::CuDeviceVector{BFloat16},
+        V::CuDeviceVector{BFloat16},
         seqlen::UInt32,
         qk2::Float32,                   # sm_scale * log2(e)
         ::Val{HD}, ::Val{CAUSAL}) where {HD, CAUSAL}
@@ -283,9 +283,9 @@ end
 # f32 reference with bf16-quantized inputs, per (batch*head) slice.
 function fam_cpu_ref(Q::Matrix{Float32}, K::Matrix{Float32},
                       V::Matrix{Float32}, sm_scale::Float32, causal::Bool)
-    Qb = bf16_to_f32.(bf16_bits.(Q))
-    Kb = bf16_to_f32.(bf16_bits.(K))
-    Vb = bf16_to_f32.(bf16_bits.(V))
+    Qb = Float32.(BFloat16.(Q))
+    Kb = Float32.(BFloat16.(K))
+    Vb = Float32.(BFloat16.(V))
     scores = (Qb * Kb') .* sm_scale
     if causal
         S = size(scores, 1)
@@ -298,12 +298,12 @@ function fam_cpu_ref(Q::Matrix{Float32}, K::Matrix{Float32},
     return (ex ./ sum(ex; dims = 2)) * Vb
 end
 
-# (rows, HD) f32 → bf16 bits, HD-fast row-major.
+# (rows, HD) f32 → BFloat16, HD-fast row-major.
 function fam_pack(X::Matrix{Float32})
     rows, hd = size(X)
-    out = Array{UInt16}(undef, hd, rows)
+    out = Array{BFloat16}(undef, hd, rows)
     for r in 1:rows, h in 1:hd
-        @inbounds out[h, r] = bf16_bits(X[r, h])
+        @inbounds out[h, r] = BFloat16(X[r, h])
     end
     out
 end
@@ -324,7 +324,7 @@ function run_fam(B, H, S, HD; causal = false)
     Q_d = CuArray(vec(fam_pack(Q)))
     K_d = CuArray(vec(fam_pack(K)))
     V_d = CuArray(vec(fam_pack(V)))
-    O_d = CUDACore.zeros(UInt16, total_rows * HD)
+    O_d = CUDACore.zeros(BFloat16, total_rows * HD)
 
     args = (O_d, Q_d, K_d, V_d, UInt32(S), sm_scale * Float32(FAM_LOG2E),
             Val(HD), Val(causal))
@@ -340,7 +340,7 @@ function run_fam(B, H, S, HD; causal = false)
     maxdiff = 0.0f0
     for i in 1:bh
         r = ((i - 1) * S + 1):(i * S)
-        O_got = permutedims(bf16_to_f32.(O_packed[:, r]))
+        O_got = permutedims(Float32.(O_packed[:, r]))
         O_ref = fam_cpu_ref(Q[r, :], K[r, :], V[r, :], sm_scale, causal)
         maxdiff = max(maxdiff, maximum(abs.(O_got - O_ref)))
     end

@@ -152,7 +152,7 @@ lanes = ptx"set.ge.s16x2"(packed_a, packed_b)         # UInt32 lane masks
 For scalar forms, the destination type precedes the source type. Integer
 destinations return an all-ones mask for true and zero for false; floating
 destinations return one or zero. `.f16` results use `Float16`, while `.bf16`
-results use `UInt16` bits (`0x3f80` for one). Integer result types preserve
+results use `BFloat16`. Integer result types preserve
 their signedness and width.
 
 Scalar `.f16` results are formed from a 32-bit integer comparison mask, then

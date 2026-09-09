@@ -24,19 +24,17 @@
 using Random
 using Base: @nexprs
 
-bf16_bits_hs(x::Float32)  = UInt16(reinterpret(UInt32, x) >> 16)
-bf16_to_f32_hs(b::UInt16) = reinterpret(Float32, UInt32(b) << 16)
 
 function pack_bf16_rowmajor_hs(A::AbstractMatrix{Float32})
     rows, cols = size(A)
-    out = Vector{UInt16}(undef, rows * cols)
+    out = Vector{BFloat16}(undef, rows * cols)
     @inbounds for i in 1:rows, j in 1:cols
-        out[(i-1)*cols + j] = bf16_bits_hs(A[i, j])
+        out[(i-1)*cols + j] = BFloat16(A[i, j])
     end
     out
 end
 
-quantize_bf16_hs(A) = bf16_to_f32_hs.(bf16_bits_hs.(A))
+quantize_bf16_hs(A) = Float32.(BFloat16.(A))
 
 const HPS_BM, HPS_BN, HPS_BK = 128, 128, 32
 const HPS_THREADS = 128
@@ -49,8 +47,8 @@ const HPS_SMEM_BYTES    = HPS_STAGES * (HPS_A_STAGE_BYTES + HPS_B_STAGE_BYTES)
 
 function gemm_highperf_swizzled_kernel!(
         D::CuDeviceVector{Float32},
-        A::CuDeviceVector{UInt16},
-        B_T::CuDeviceVector{UInt16},
+        A::CuDeviceVector{BFloat16},
+        B_T::CuDeviceVector{BFloat16},
         ::Val{M}, ::Val{N}, ::Val{K},
         ::Val{LOG_GROUP}) where {M, N, K, LOG_GROUP}
 

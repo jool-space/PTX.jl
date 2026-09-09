@@ -84,7 +84,7 @@ end
         out_s32::CuDeviceVector{Int32,1},
         out_u64::CuDeviceVector{UInt64,1},
         out_s64::CuDeviceVector{Int64,1},
-        f16::Float16, bf16::UInt16, f32::Float32,
+        f16::Float16, bf16::BFloat16, f32::Float32,
         u16::UInt16, s16::Int16, u32::UInt32, s32::Int32,
         u64::UInt64, s64::Int64)
     _scalar_ptxas_body(:sm75)
@@ -96,7 +96,7 @@ end
         out_s32::CuDeviceVector{Int32,1},
         out_u64::CuDeviceVector{UInt64,1},
         out_s64::CuDeviceVector{Int64,1},
-        f16::Float16, bf16::UInt16, f32::Float32,
+        f16::Float16, bf16::BFloat16, f32::Float32,
         u16::UInt16, s16::Int16, u32::UInt32, s32::Int32,
         u64::UInt64, s64::Int64)
     _scalar_ptxas_body(:sm90)
@@ -108,7 +108,7 @@ end
         out_s32::CuDeviceVector{Int32,1},
         out_u64::CuDeviceVector{UInt64,1},
         out_s64::CuDeviceVector{Int64,1},
-        f16::Float16, bf16::UInt16, f32::Float32,
+        f16::Float16, bf16::BFloat16, f32::Float32,
         u16::UInt16, s16::Int16, u32::UInt32, s32::Int32,
         u64::UInt64, s64::Int64)
     _scalar_ptxas_body(:sm100)
@@ -120,7 +120,7 @@ end
         out_s32::CuDeviceVector{Int32,1},
         out_u64::CuDeviceVector{UInt64,1},
         out_s64::CuDeviceVector{Int64,1},
-        f16::Float16, bf16::UInt16, f32::Float32,
+        f16::Float16, bf16::BFloat16, f32::Float32,
         u16::UInt16, s16::Int16, u32::UInt32, s32::Int32,
         u64::UInt64, s64::Int64)
     _scalar_ptxas_body(:sm120f)
@@ -132,7 +132,7 @@ end
         out_s32::CuDeviceVector{Int32,1},
         out_u64::CuDeviceVector{UInt64,1},
         out_s64::CuDeviceVector{Int64,1},
-        f16::Float16, bf16::UInt16, f32::Float32,
+        f16::Float16, bf16::BFloat16, f32::Float32,
         u16::UInt16, s16::Int16, u32::UInt32, s32::Int32,
         u64::UInt64, s64::Int64)
     _scalar_ptxas_body(:sm107f)
@@ -144,7 +144,7 @@ end
         out_s32::CuDeviceVector{Int32,1},
         out_u64::CuDeviceVector{UInt64,1},
         out_s64::CuDeviceVector{Int64,1},
-        f16::Float16, bf16::UInt16, f32::Float32,
+        f16::Float16, bf16::BFloat16, f32::Float32,
         u16::UInt16, s16::Int16, u32::UInt32, s32::Int32,
         u64::UInt64, s64::Int64)
     _scalar_ptxas_body(:alternate)
@@ -153,7 +153,7 @@ end
 const _SCALAR_ALL_TYPES = Tuple{
     CuDeviceVector{Float32,1}, CuDeviceVector{UInt32,1},
     CuDeviceVector{Int32,1}, CuDeviceVector{UInt64,1},
-    CuDeviceVector{Int64,1}, Float16, UInt16, Float32,
+    CuDeviceVector{Int64,1}, Float16, BFloat16, Float32,
     UInt16, Int16, UInt32, Int32, UInt64, Int64,
 }
 @testset "fixed scalar-result forms assemble at retained/exact floors" begin

@@ -59,8 +59,8 @@ function _pc_gemm_kernel!(
         K::Int32)
 
     # Ring buffers — N_STAGES copies of each tile, contiguous in SMEM.
-    smem_A = CuStaticSharedArray(UInt16, PC_N_STAGES * PC_BM * PC_BK)
-    smem_B = CuStaticSharedArray(UInt16, PC_N_STAGES * PC_BK * PC_BN)
+    smem_A = CuStaticSharedArray(BFloat16, PC_N_STAGES * PC_BM * PC_BK)
+    smem_B = CuStaticSharedArray(BFloat16, PC_N_STAGES * PC_BK * PC_BN)
     mbar_full  = CuStaticSharedArray(UInt64, PC_N_STAGES)
     mbar_empty = CuStaticSharedArray(UInt64, PC_N_STAGES)
 
@@ -212,13 +212,13 @@ if test_runtime_supported(@__FILE__)
         # Pack to bf16 with K-fast convention (matches gemm_warpgroup.jl).
         # A: (M, K) → Julia (K, M) col-major (K innermost).
         # B: (K, N) → Julia (K, N) col-major (K innermost).
-        A_packed = Array{UInt16}(undef, K_test, PC_BM)
-        B_packed = Array{UInt16}(undef, K_test, PC_BN)
+        A_packed = Array{BFloat16}(undef, K_test, PC_BM)
+        B_packed = Array{BFloat16}(undef, K_test, PC_BN)
         for m in 1:PC_BM, k in 1:K_test
-            A_packed[k, m] = bf16_bits(A_f32[m, k])
+            A_packed[k, m] = BFloat16(A_f32[m, k])
         end
         for k in 1:K_test, n in 1:PC_BN
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)
@@ -255,13 +255,13 @@ if test_runtime_supported(@__FILE__)
         A_f32 = randn(rng, Float32, PC_BM, K_test) .* 0.1f0
         B_f32 = randn(rng, Float32, K_test, PC_BN) .* 0.1f0
 
-        A_packed = Array{UInt16}(undef, K_test, PC_BM)
-        B_packed = Array{UInt16}(undef, K_test, PC_BN)
+        A_packed = Array{BFloat16}(undef, K_test, PC_BM)
+        B_packed = Array{BFloat16}(undef, K_test, PC_BN)
         for m in 1:PC_BM, k in 1:K_test
-            A_packed[k, m] = bf16_bits(A_f32[m, k])
+            A_packed[k, m] = BFloat16(A_f32[m, k])
         end
         for k in 1:K_test, n in 1:PC_BN
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)
