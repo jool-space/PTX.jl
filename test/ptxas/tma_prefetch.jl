@@ -53,9 +53,11 @@ end
     @test ptxas_compiles(_tma_tile_prefetch_surface!, types; cap = v"9.0")
 
     ptx = emit_ptx(_tma_tile_prefetch_surface!, types; cap = v"9.0")
-    # The instruction was introduced in PTX 8.0; the pinned backend emits its
-    # current module version (9.3), independently of this instruction's floor.
-    @test occursin(".version 9.3", ptx)
+    # The instruction was introduced in PTX 8.0; the backend stamps the module
+    # with the toolkit-negotiated ISA (the assembler ceiling — 13.3 → 9.3,
+    # 13.4 → 9.4), independently of this instruction's floor.
+    isa = _ptxas_isa()
+    @test occursin(".version $(isa.major).$(isa.minor)", ptx)
     @test occursin(".target sm_90", ptx)
     lines = [String(line) for line in eachline(IOBuffer(ptx))
              if occursin("cp.async.bulk.prefetch.tensor", line)]

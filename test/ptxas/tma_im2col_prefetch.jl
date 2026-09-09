@@ -48,7 +48,10 @@ end
     @test ptxas_compiles(_tma_im2col_prefetch_surface!, types; cap = v"9.0")
 
     ptx = emit_ptx(_tma_im2col_prefetch_surface!, types; cap = v"9.0")
-    @test occursin(".version 9.3", ptx)
+    # Module version tracks the toolkit-negotiated ISA, not this
+    # instruction's PTX 8.0 floor (see ptxas/tma_prefetch.jl).
+    isa = _ptxas_isa()
+    @test occursin(".version $(isa.major).$(isa.minor)", ptx)
     @test occursin(".target sm_90", ptx)
     lines = [String(line) for line in eachline(IOBuffer(ptx))
              if occursin("cp.async.bulk.prefetch.tensor", line)]
