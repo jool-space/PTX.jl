@@ -561,7 +561,8 @@ function _scalar_destination_role(schema)
         # prmt and packed lane arithmetic use a typeless 32-bit carrier. The
         # remaining UInt32-result islands (popc/clz, unsigned dp/wide, and
         # cvt.pack) have an exact .u32 destination.
-        packed = any(mod -> occursin(r"(?:8x4|16x2)$", String(mod)), schema.mods)
+        packed = any(mod -> occursin(r"(?:8x4|16x2)$", String(mod)), schema.mods) ||
+                 :e4m3x4 in schema.mods || :e5m2x4 in schema.mods
         return schema.op === :prmt || packed ? :b32 : :u32
     end
     error("unmapped scalar-result destination carrier $(schema.rettype) for " *

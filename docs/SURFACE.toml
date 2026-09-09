@@ -89,9 +89,9 @@ notes = "No distinct opcode heads: mixed-precision add/sub/fma forms flow throug
 [[family]]
 section = "9.7.6"
 title = "Alternate Floating-Point Instructions"
-status = "raw-only"
+status = "generic"
 opcodes = []
-notes = "New family in PTX ISA 9.4: FP8/FP6/FP4 x4 packed add/sub/mul/fma (sm_100a/sm_103a). No distinct opcode heads — the add/sub/mul/fma heads are owned by §9.7.1/§9.7.3, but their FORMS contracts must not be extended to these dtype.atype tails without review (tail names an operand type, not the result); raw-only until the packed forms get audited two-type schemas. ptxas cannot assemble ISA 9.4 until a CUDA 13.4+ compiler artifact ships."
+notes = "PTX ISA 9.4 alternate packed add/sub/mul/fma have 896 canonical scalar-result schemas and seven exact documented postfix-satfinite compatibility forms. Results use UInt32; compact e2m1x4 inputs use UInt16, while padded e2m1p4x4 and the other x4 formats use UInt32. Restricted to sm_100a and sm_103a; every form is assembled with stored results when the managed compiler supports ISA 9.4. Runtime execution on those targets remains unverified."
 
 # ── §9.7.7 / §9.7.8 Comparison and Selection ──────────────────────────────────
 

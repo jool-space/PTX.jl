@@ -158,15 +158,17 @@ a pure PTX instruction cannot silently become destination-less asm. Reviewed
 sink and side-effect families whose contract is genuinely void still return
 `Nothing`.
 
-The fixed-result ledger contains 162 exact spellings. Of these, 157 are
-canonical ISA grammar (`provenance = :isa`). Five are the exact contradictory
+The fixed-result ledger contains 1,065 exact spellings. Of these, 1,053 are
+canonical ISA grammar (`provenance = :isa`). Twelve are exact contradictory
 spellings printed by PTX ISA examples—three mixed-float examples,
-`add.s8x4.sat`, and `min.s16x2.relu`—and are marked
+`add.s8x4.sat`, `min.s16x2.relu`, and seven alternate packed examples with
+postfix `.satfinite`—and are marked
 `provenance = :ptxas_compat`. This compatibility layer is deliberately not a
 license to accept every modifier permutation ptxas happens to assemble;
 undocumented postfix or duplicated variants fail loud. Each schema also records
 its PTX version and target feature set, including `sm_120f` packed integer
-operations and the PTX 9.4 `sm_107f` mixed-precision packed forms.
+operations, the PTX 9.4 `sm_107f` mixed-precision packed forms, and alternate
+packed arithmetic restricted to `sm_100a`/`sm_103a`.
 
 The exceptions are:
 
@@ -175,6 +177,9 @@ The exceptions are:
   `add.rz.bf16x2.f32x2.f32x2` returns `UInt32` from two `UInt64` inputs.
   See [Mixed-precision packed arithmetic](@ref) for the carrier and grammar rules.
 
+- **Alternate packed arithmetic** — FP8/FP6/FP4 `add/sub/mul/fma` always
+  return packed FP8 in `UInt32`; compact `e2m1x4` inputs use `UInt16` while
+  padded `e2m1p4x4` inputs use `UInt32`. See [Alternate packed arithmetic](@ref).
 - **Ordinary `cvt`** — grammar is `cvt.<modifiers...>.<dst>.<src>`, so the
   destination is `parts[end-1]`. Both terminal tokens must be recognized dtypes
   in that canonical order; `cvt.rn.f16.f32` returns `Float16`. A reviewed

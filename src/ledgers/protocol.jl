@@ -109,6 +109,12 @@ function island_of(op::Symbol, mods::Tuple{Vararg{Symbol}})
     elseif (op === :min || op === :max) && :relu in mods
         ScalarLedger()
     elseif (op === :add || op === :sub || op === :mul || op === :fma) &&
+           any(t -> t in (:e5m2x4, :e4m3x4, :e3m2x4, :e2m3x4,
+                          :e2m1x4, :e2m1p4x4, :ue8m0x4), mods)
+        # Alternate x4 arithmetic needs a complete destination/source tail;
+        # even a single type token is an in-island miss, including raw calls.
+        ScalarLedger()
+    elseif (op === :add || op === :sub || op === :mul || op === :fma) &&
            count(t -> t in (:f16x2, :bf16x2, :f32x2), mods) >= 2
         # Multiple packed type tokens describe distinct destination/source
         # widths. Claim all orders, including malformed or incomplete tails;
