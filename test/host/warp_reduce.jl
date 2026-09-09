@@ -53,7 +53,7 @@ end
 const _WR_TT = Tuple{CuDeviceVector{Float32, 1}}
 
 @testset "warp_reduce: full-warp ladder structure" begin
-    ptx = emit_ptx(_wr_full_kernel!, _WR_TT; cap = v"8.9")
+    ptx = emit_host_ptx(_wr_full_kernel!, _WR_TT; cap = v"8.9")
     shfls = collect(eachmatch(r"shfl\.sync\.bfly\.b32 \t%r\d+, %r\d+, (\d+), (\d+), -1;", ptx))
     @test length(shfls) == 5
     @test [m.captures[1] for m in shfls] == ["16", "8", "4", "2", "1"]
@@ -62,7 +62,7 @@ const _WR_TT = Tuple{CuDeviceVector{Float32, 1}}
 end
 
 @testset "warp_reduce: 4-lane segments" begin
-    ptx = emit_ptx(_wr_seg4_kernel!, _WR_TT; cap = v"8.9")
+    ptx = emit_host_ptx(_wr_seg4_kernel!, _WR_TT; cap = v"8.9")
     shfls = collect(eachmatch(r"shfl\.sync\.bfly\.b32 \t%r\d+, %r\d+, (\d+), (\d+), -1;", ptx))
     @test length(shfls) == 2
     @test [m.captures[1] for m in shfls] == ["2", "1"]
@@ -80,9 +80,9 @@ end
                       r"%(r|rd|f|p)\d+" => s"%\1",
                       r"_Z\d+_wr_\w+?_kernel" => "_wr_kernel",
                       r"(julia_[A-Za-z_]+)_\d+" => s"\1")
-    a = norm(emit_ptx(_wr_full_kernel!, _WR_TT; cap = v"8.9"))
-    b = norm(emit_ptx(_wr_hand_kernel!, _WR_TT; cap = v"8.9"))
-    c = norm(emit_ptx(_wr_closure_kernel!, _WR_TT; cap = v"8.9"))
+    a = norm(emit_host_ptx(_wr_full_kernel!, _WR_TT; cap = v"8.9"))
+    b = norm(emit_host_ptx(_wr_hand_kernel!, _WR_TT; cap = v"8.9"))
+    c = norm(emit_host_ptx(_wr_closure_kernel!, _WR_TT; cap = v"8.9"))
     @test a == b
     @test a == c
 end

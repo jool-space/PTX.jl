@@ -28,7 +28,7 @@ function _wr_scalar_dependency!(out::CuDeviceVector{UInt64,1}, value::UInt64)
 end
 
 @testset "a register consumer depends on the wait's output" begin
-    ir = emit_llvm(_wr_scalar_dependency!,
+    ir = emit_host_llvm(_wr_scalar_dependency!,
                    Tuple{CuDeviceVector{UInt64,1},UInt64};
                    cap=v"10.0", feature_set=:arch)
     wait = match(r"(%[\w.]+) = (?:tail )?call i64 asm sideeffect \"tcgen05\.wait::ld\.sync\.aligned;\", \"=l,0,~\{memory\}\"\(i64 [^\n]+\) #(\d+)", ir)
@@ -64,7 +64,7 @@ end
             (NTuple{2,UInt64}, "=l,=l,0,1,~{memory}"),
             (NTuple{2,Float64}, "=d,=d,0,1,~{memory}"))
         T = eltype(V)
-        ir = emit_llvm(_wr_tuple_copy!, Tuple{CuDeviceVector{T,1},V,typeof(_WR_LD)};
+        ir = emit_host_llvm(_wr_tuple_copy!, Tuple{CuDeviceVector{T,1},V,typeof(_WR_LD)};
                        cap=v"10.0", feature_set=:arch)
         @test occursin(expected, ir)
         @test !occursin("alloca", ir)

@@ -10,7 +10,9 @@
 #   gpu/    — active-device compilation and/or real execution. Routed by the
 #             structured `# TEST_TARGET:` banner (see runtests.jl).
 #
-# `emit_ptx` stops at the LLVM NVPTX backend (string-match only, no ptxas).
+# `emit_host_ptx` and `emit_host_llvm` need only the LLVM NVPTX backend.
+# `emit_ptx` and `emit_llvm` also use CUDA toolkit target selection and
+# library linking, but stop before ptxas.
 # `ptxas_compiles` runs LLVM → PTX → ptxas → cubin and stops before `link`,
 # so the cubin is never loaded onto a device — meaning a host with no visible
 # GPU can validate sm_90a or sm_100a wrapper output. ptxas's stderr surfaces
@@ -18,7 +20,7 @@
 
 using CUDACore
 using CUDATools
-using CUDACore.GPUCompiler: methodinstance, CompilerJob
+using CUDACore.GPUCompiler: methodinstance, CompilerJob, CompilerConfig, PTXCompilerTarget
 
 # Independent transcription of PTX ISA 9.4 section 11.1.2's target-string
 # introduction notes. Besides the direct header oracle, this identifies
@@ -92,7 +94,7 @@ end
 test_runtime_supported(file::AbstractString) =
     TestTargets.runtime_supported(file, _test_device_capability())
 
-# LLVM NVPTX backend → PTX text. No ptxas, no driver. Compiled with
+# Explicit CUDA toolkit target, with no driver/device discovery. Compiled with
 # kernel ABI so `kernel_state` intrinsics (e.g. ptx"mov.u32"(sreg"%tid.x"))
 # resolve correctly.
 #
@@ -116,8 +118,11 @@ end
 function emit_ptx(f, tt::Type{<:Tuple};
                   cap::VersionNumber, feature_set::Symbol = :baseline,
                   kwargs...)
+    emit_ptx(_explicit_target_job(f, tt; cap, feature_set, kwargs...))
+end
+
+function emit_ptx(job::CompilerJob)
     io = IOBuffer()
-    job = _explicit_target_job(f, tt; cap, feature_set, kwargs...)
     CUDACore.invoke_frozen(CUDACore.GPUCompiler.code_native, io, job)
     String(take!(io))
 end
@@ -128,12 +133,40 @@ end
 function emit_llvm(f, tt::Type{<:Tuple};
                    cap::VersionNumber, feature_set::Symbol = :baseline,
                    kwargs...)
+    emit_llvm(_explicit_target_job(f, tt; cap, feature_set, kwargs...))
+end
+
+function emit_llvm(job::CompilerJob)
     io = IOBuffer()
-    job = _explicit_target_job(f, tt; cap, feature_set, kwargs...)
     CUDACore.invoke_frozen(CUDACore.GPUCompiler.code_llvm, io, job;
                            optimize = true, dump_module = true)
     String(take!(io))
 end
+
+# Host inspection has no assembler target to negotiate and must not link
+# libdevice or the device runtime. Construct a GPUCompiler job directly:
+# CUDACore.compiler_config queries ptxas even with an explicit target/ISA.
+# These probes must use targets supported by LLVM and self-contained device
+# code; toolkit-backed inspection and assembly keep the path above.
+function _host_target_job(f, tt::Type{<:Tuple};
+                          cap::VersionNumber, feature_set::Symbol = :baseline,
+                          kwargs...)
+    arch = SMVersion(cap.major, cap.minor, feature_set)
+    support = CUDACore.llvm_compat()
+    arch in support.sm ||
+        throw(ArgumentError("host inspection target $arch is not supported by LLVM"))
+    ptx = maximum(support.ptx)
+    target = PTXCompilerTarget(; cap, ptx, feature_set, debuginfo = true, kwargs...)
+    params = CUDACore.CUDACompilerParams(; sm = arch, ptx)
+    config = CompilerConfig(target, params; kernel = true, libraries = false)
+    source = methodinstance(typeof(f), Base.to_tuple_type(tt))
+    CompilerJob(source, config)
+end
+
+emit_host_ptx(f, tt::Type{<:Tuple}; kwargs...) =
+    emit_ptx(_host_target_job(f, tt; kwargs...))
+emit_host_llvm(f, tt::Type{<:Tuple}; kwargs...) =
+    emit_llvm(_host_target_job(f, tt; kwargs...))
 
 # Full LLVM → PTX → ptxas → cubin path; no `link`, so no device load.
 # Throws on ptxas rejection (stderr is in the error message).
