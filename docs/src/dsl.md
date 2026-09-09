@@ -158,7 +158,7 @@ a pure PTX instruction cannot silently become destination-less asm. Reviewed
 sink and side-effect families whose contract is genuinely void still return
 `Nothing`.
 
-The fixed-result ledger contains 1,065 exact spellings. Of these, 1,053 are
+The fixed-result ledger contains 4,209 exact spellings. Of these, 4,197 are
 canonical ISA grammar (`provenance = :isa`). Twelve are exact contradictory
 spellings printed by PTX ISA examples—three mixed-float examples,
 `add.s8x4.sat`, `min.s16x2.relu`, and seven alternate packed examples with
@@ -191,6 +191,9 @@ The exceptions are:
   ABI.
 - **`cvt.pack`** — every reviewed pack form returns `UInt32`; its conversion,
   source, and optional carry-in width tokens all describe inputs.
+- **`set`** — general and half forms name the destination before the source
+  type; packed integer forms return `UInt32` lane masks. Optional Boolean
+  combination takes a trailing `Bool`. See [`set` comparison results](@ref).
 - **`setp`** — general `setp.<cmp>[.<boolop>][.ftz].<dtype>` returns `Bool`;
   the leading Julia-only `.dual` selector returns `(compare, complement)` as
   `Tuple{Bool,Bool}`. Scalar `.f16`/`.bf16` also return `Bool`, while packed

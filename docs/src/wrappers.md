@@ -135,6 +135,47 @@ The assembler suite checks every form with stored results on both supported
 targets when PTX ISA 9.4 is available. Execution on B200/B300 hardware remains
 unverified for these new forms.
 
+## `set` comparison results
+
+`set` compares two values and returns a numeric result. Its closed grammar
+covers 1,152 general scalar forms, 1,960 half/BF16 forms, and the 32 packed
+integer forms introduced in PTX ISA 9.4. An optional `.and`, `.or`, or `.xor`
+combines the comparison with a trailing `Bool` input.
+
+```julia
+mask = ptx"set.lt.u32.s64"(Int64(-2), Int64(1))       # UInt32(0xffffffff)
+value = ptx"set.lt.f32.s64"(Int64(-2), Int64(1))      # 1.0f0
+gated = ptx"set.lt.and.f32.s64"(a, b, gate)           # gate::Bool
+lanes = ptx"set.ge.s16x2"(packed_a, packed_b)         # UInt32 lane masks
+```
+
+For scalar forms, the destination type precedes the source type. Integer
+destinations return an all-ones mask for true and zero for false; floating
+destinations return one or zero. `.f16` results use `Float16`, while `.bf16`
+results use `UInt16` bits (`0x3f80` for one). Integer result types preserve
+their signedness and width.
+
+Scalar `.f16` results are formed from a 32-bit integer comparison mask, then
+converted to the half zero/one encoding. This avoids a ptxas widening defect
+where native `set.f16.f16` can retain a duplicate high half through
+`cvt.u32.u16`. The public result remains `Float16`, including on the raw path.
+For `.f16` sources, this lowering uses PTX ISA 6.5 instructions.
+
+Half/BF16 x2 comparisons return two packed results. Integer destinations pack
+16-bit masks; `.f16x2`/`.bf16x2` destinations pack the corresponding floating
+one/zero encodings. Packed integer `set` uses a single type token and returns
+one 8-bit or 16-bit mask per lane in `UInt32`, including signed input formats.
+
+Ordered floating comparisons return false when either input is NaN; unordered
+comparisons and `.num`/`.nan` follow their PTX definitions. `.ftz` is restricted
+to the reviewed f32/f16 comparison forms. Incorrect modifier order, comparison
+operators, operand widths, or predicate inputs fail before LLVM compilation,
+including through `ptx"..."raw`.
+
+All admitted spellings have offline assembly coverage. Packed integer forms
+require PTX ISA 9.4 and the `sm_107f` family (also `sm_107a`); older compilers
+explicitly skip that partition. Their hardware execution remains unverified.
+
 ## Schema-driven structured results
 
 `setp`, `lop3`, `match.sync`, and `elect.sync` no longer rely on a small set of

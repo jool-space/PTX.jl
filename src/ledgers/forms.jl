@@ -169,16 +169,15 @@ const FORMS = Dict{Symbol, FormFamily}(
     # dst-at-end-1 rule lives in infer_rettype; setp's scalar/grouped ABI lives
     # in structured_results.jl.
     # Deliberately curated, not the whole ISA: an op joins this list only
-    # after checking purity AND that its result ABI is generic or audited (e.g.
-    # `set.CmpOp.dtype.stype` does NOT qualify — its tail names the source
-    # type — so it stays unregistered until given an entry that handles its
-    # grammar).
+    # after checking purity AND that its result ABI is generic or audited.
+    # set's destination/source tail is closed by scalar_results.jl; slct's
+    # dtype.ctype grammar still needs its own review.
     (op => FormFamily(_PURE) for op in (
         :mov, :add, :sub, :mul, :mad, :mul24, :mad24, :fma, :div, :rem,
         :abs, :neg, :min, :max, :and, :or, :xor, :not, :shl, :shr, :shf,
         :bfe, :bfi, :brev, :popc, :clz, :prmt, :lop3, :sad, :dp4a, :dp2a,
         :ex2, :lg2, :sin, :cos, :sqrt, :rsqrt, :rcp, :tanh, :copysign,
-        :selp, :szext, :cvt, :cvta, :setp,
+        :selp, :szext, :cvt, :cvta, :setp, :set,
         # `clmad.{lo,hi}.type d, a, b, c;` — carryless multiply-add
         # (PTX 9.3, sm_80+). Pure ALU; tail names the result type.
         :clmad,

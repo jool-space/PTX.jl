@@ -27,6 +27,7 @@ _scalar_ptxas_arg(kind) =
     error("unknown scalar ptxas operand kind $kind")
 
 function _scalar_ptxas_partition(schema)
+    schema.op === :set && return :set # Exhaustive partitions live in ptxas/set.jl.
     label = string(schema.op, ".", join(schema.mods, "."))
     if schema.ptx_version == v"9.4" && schema.feature_set === :arch &&
        schema.min_sm == v"10.0"

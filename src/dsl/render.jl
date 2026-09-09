@@ -453,6 +453,16 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
     full_operands = rettype === Nothing ? operand_strs : ["\$0"; operand_strs]
     asm = isempty(full_operands) ? head * ";" : head * " " * join(full_operands, ", ") * ";"
 
+    if op === :set && rettype === Float16
+        # Native scalar f16 set can leave a replicated high half that ptxas
+        # then incorrectly preserves through cvt.u32.u16. Form the 0/1 half
+        # encoding from a full-width integer comparison mask instead.
+        mask_head = build_head(:set, (mods[1:end-2]..., :u32, mods[end]))
+        mask_operands = join(["set_mask"; operand_strs], ", ")
+        asm = "{ .reg .b32 set_mask; $mask_head $mask_operands; " *
+              "and.b32 set_mask, set_mask, 15360; cvt.u16.u32 \$0, set_mask; }"
+    end
+
     cparts = String[]
     rettype === Nothing || push!(cparts, "=" * constraint_letter(rettype))
     append!(cparts, input_letters)

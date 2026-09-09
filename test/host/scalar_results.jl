@@ -4,6 +4,10 @@
 # mirrors the same ISA cross-products for reviewability.
 
 const _EXPECTED_SCALAR_SECTIONS = Dict(
+    :set =>
+        "ptx/9-instruction-set/9.7.7.1-comparison-and-selection-instructions-set.md",
+    :half_set =>
+        "ptx/9-instruction-set/9.7.8.1-half-precision-comparison-instructions-set.md",
     :alternate_add =>
         "ptx/9-instruction-set/9.7.6.1-alternate-floating-point-instructions-add.md",
     :alternate_sub =>
@@ -49,6 +53,10 @@ const _EXPECTED_SCALAR_SECTIONS = Dict(
 )
 
 function _expected_scalar_section(op, mods)
+    if op === :set
+        half = any(t -> t in (:f16, :bf16, :f16x2, :bf16x2), mods)
+        return _EXPECTED_SCALAR_SECTIONS[half ? :half_set : :set]
+    end
     if op in (:add, :sub, :mul, :fma) &&
        any(t -> t in (:e4m3x4, :e5m2x4), mods)
         return _EXPECTED_SCALAR_SECTIONS[Symbol(:alternate_, op)]
@@ -154,6 +162,58 @@ function _expected_scalar_result_forms()
         add!(op, mods, UInt32, args, v"9.4", v"10.0";
              feature_set = :arch, provenance = :ptxas_compat)
     end
+    # Independent set rows: dtype/result, stype/source carrier, version,
+    # target, and allowed comparisons. Expand prefixes only after fixing ABI.
+    basic = (:eq, :ne, :lt, :le, :gt, :ge)
+    floating = (:eq, :ne, :lt, :le, :gt, :ge,
+                :equ, :neu, :ltu, :leu, :gtu, :geu, :num, :nan)
+    rows = []
+    for (dst, result) in ((:u32, UInt32), (:s32, Int32), (:f32, Float32)),
+        src in (:b16, :b32, :b64, :s16, :s32, :s64, :u16, :u32, :u64, :f32, :f64)
+        cmps = src in (:b16, :b32, :b64) ? (:eq, :ne) :
+               src in (:u16, :u32, :u64) ? (basic..., :lo, :ls, :hi, :hs) :
+               src in (:f32, :f64) ? floating : basic
+        push!(rows, (dst, result, src, src, v"1.0",
+                     src === :f64 ? v"1.3" : nothing, src === :f32, cmps))
+    end
+    for (dst, result, version, sm) in ((:f16, Float16, v"4.2", v"5.3"),
+                                      (:bf16, UInt16, v"7.8", v"9.0")),
+        src in (:b16, :b32, :b64, :u16, :u32, :u64, :s16, :s32, :s64, :f16, :f32, :f64)
+        cmps = src in (:b16, :b32, :b64) ? (:eq, :ne) :
+               src in (:f16, :f32, :f64) ? floating : basic
+        push!(rows, (dst, result, src, src, version, sm,
+                     dst === :f16 && src in (:f16, :f32), cmps))
+    end
+    for (src, version, sm, ftz) in ((:f16, v"6.5", v"5.3", true),
+                                   (:bf16, v"7.8", v"9.0", false)),
+        (dst, result) in ((:u16, UInt16), (:s16, Int16), (:u32, UInt32), (:s32, Int32))
+        push!(rows, (dst, result, src, src, version, sm, ftz, floating))
+    end
+    for (src, dst, result, version, sm, ftz) in (
+        (:f16x2, :f16x2, UInt32, v"4.2", v"5.3", true),
+        (:f16x2, :u32, UInt32, v"6.5", v"5.3", true),
+        (:f16x2, :s32, Int32, v"6.5", v"5.3", true),
+        (:bf16x2, :bf16x2, UInt32, v"7.8", v"9.0", false),
+        (:bf16x2, :u32, UInt32, v"7.8", v"9.0", false),
+        (:bf16x2, :s32, Int32, v"7.8", v"9.0", false),
+    )
+        push!(rows, (dst, result, src, :b32, version, sm, ftz, floating))
+    end
+    for (dst, result, src, carrier, version, sm, admits_ftz, cmps) in rows,
+        cmp in cmps, combine in ((), (:and,), (:or,), (:xor,)),
+        flush in (admits_ftz ? ((), (:ftz,)) : ((),))
+        args = isempty(combine) ? (carrier, carrier) : (carrier, carrier, :pred)
+        add!(:set, (cmp, combine..., flush..., dst, src),
+             result, args, version, sm)
+    end
+    for (type, comparisons) in (
+        (:u8x4, (basic..., :lo, :ls, :hi, :hs)),
+        (:u16x2, (basic..., :lo, :ls, :hi, :hs)),
+        (:s8x4, basic), (:s16x2, basic),
+    ), cmp in comparisons
+        add!(:set, (cmp, type), UInt32, (:b32, :b32), v"9.4", v"10.7";
+             feature_set = :family)
+    end
     for op in (:popc, :clz), width in (:b32, :b64)
         add!(op, (width,), UInt32, (width,), v"2.0", v"2.0")
     end
@@ -227,6 +287,8 @@ _scalar_test_type(kind) =
     kind === :f16  ? Float16 :
     kind === :bf16 ? UInt16 :
     kind === :f32  ? Float32 :
+    kind === :f64  ? Float64 :
+    kind === :pred ? Bool :
     kind === :u16  ? UInt16 :
     kind === :s16  ? Int16 :
     kind === :u32  ? UInt32 :
@@ -241,6 +303,8 @@ _scalar_test_type(kind) =
 _scalar_test_letter(kind) =
     kind in (:f16, :bf16, :u16, :s16, :b16) ? "h" :
     kind === :f32 ? "f" :
+    kind === :f64 ? "d" :
+    kind === :pred ? "b" :
     kind in (:u32, :s32, :b32) ? "r" :
     kind in (:u64, :s64, :b64) ? "l" :
     error("unknown test operand kind $kind")
@@ -250,9 +314,10 @@ _scalar_test_letter(kind) =
     actual = Dict((schema.op, schema.mods) => schema
                   for schema in PTX.SCALAR_RESULT_SCHEMAS)
 
-    @test length(expected) == 1065
-    @test length(actual) == 1065
+    @test length(expected) == 4209
+    @test length(actual) == 4209
     @test Set(keys(actual)) == Set(keys(expected))
+    @test count(key -> key[1] === :set, keys(actual)) == 3144
     @test count(key -> key[1] === :add, keys(actual)) == 99
     @test count(key -> key[1] === :sub, keys(actual)) == 95
     @test count(key -> key[1] === :fma, keys(actual)) == 419
@@ -266,7 +331,7 @@ _scalar_test_letter(kind) =
     @test count(key -> key[1] === :neg, keys(actual)) == 1
     @test count(key -> key[1] === :min, keys(actual)) == 8
     @test count(key -> key[1] === :max, keys(actual)) == 7
-    @test count(schema -> schema.provenance === :isa, values(actual)) == 1053
+    @test count(schema -> schema.provenance === :isa, values(actual)) == 4197
     @test count(schema -> schema.provenance === :ptxas_compat,
                 values(actual)) == 12
     @test all(schema -> schema.provenance in (:isa, :ptxas_compat),
@@ -307,7 +372,14 @@ _scalar_test_letter(kind) =
                             _scalar_test_letter.(want.operands)...], ",")
         @test PTX.infer_rettype(op, mods) === want.rettype
         @test spec.rettype === want.rettype
-        @test spec.asm == "$head $operands;"
+        if op === :set && want.rettype === Float16
+            expected_head = string("set.", join((mods[1:end-2]..., :u32, mods[end]), "."))
+            sources = join(("\$" * string(i) for i in 1:length(argtypes)), ", ")
+            @test spec.asm == "{ .reg .b32 set_mask; $expected_head set_mask, $sources; " *
+                              "and.b32 set_mask, set_mask, 15360; cvt.u16.u32 \$0, set_mask; }"
+        else
+            @test spec.asm == "$head $operands;"
+        end
         @test spec.constraints == constraints
         @test spec.side_effects == false
         @test spec.convergent == false
