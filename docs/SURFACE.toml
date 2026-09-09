@@ -84,7 +84,7 @@ section = "9.7.5"
 title = "Mixed Precision Floating-Point Instructions"
 status = "generic"
 opcodes = []
-notes = "No distinct opcode heads: mixed-precision add/sub/fma forms flow through the §9.7.1/§9.7.3 entries' FORMS contracts. The PTX ISA 9.4 packed additions (f32x2/f16x2/bf16x2 add/sub/mul/fma, sm_107f) are deferred: their two-type tails end in an operand type, so they need audited scalar-result schemas before any chain spelling is admitted."
+notes = "No distinct opcode heads: mixed-precision add/sub/fma forms flow through the §9.7.1/§9.7.3 entries' FORMS contracts. The 36 PTX ISA 9.4 packed add/sub/mul/fma forms have closed scalar-result schemas for their destination and source type tails: f32x2 uses UInt64, f16x2/bf16x2 use UInt32. Target floor is sm_107f (or higher in the same family); assembly is tested when the managed compiler supports ISA 9.4. Runtime evidence on sm_107 hardware remains pending."
 
 [[family]]
 section = "9.7.6"

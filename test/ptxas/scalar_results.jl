@@ -7,7 +7,8 @@
 # CUDA 13 ptxas no longer accepts targets below sm_75, so older families
 # assemble at that retained floor. The ledger is partitioned by target metadata
 # rather than sampled: 38 retained-floor, 11 sm_90, 59 sm_100, and 18 sm_120f
-# schemas. Exact historical floors remain pinned by the independent host oracle.
+# schemas, plus 36 PTX 9.4 packed mixed forms on sm_107f/sm_107a.
+# Exact historical floors remain pinned by the independent host oracle.
 
 _scalar_ptxas_arg(kind) =
     kind === :f16  ? :f16 :
@@ -25,10 +26,14 @@ _scalar_ptxas_arg(kind) =
 
 function _scalar_ptxas_partition(schema)
     label = string(schema.op, ".", join(schema.mods, "."))
+    if schema.ptx_version >= v"9.4" && schema.feature_set === :family &&
+       schema.min_sm == v"10.7"
+        return :sm107f
+    end
     if schema.feature_set === :family
         # 10.7 is the packed-integer gate {sm_107f, sm_120f families} (PTX
-        # ISA 9.4). The offline assembler does not back sm_107 yet, so both
-        # partitions assemble under the sm_120f member of the gate set.
+        # ISA 9.4). These older forms assemble under sm_120f so that
+        # compilers supporting pre-9.4 PTX retain full coverage.
         schema.min_sm in (v"10.7", v"12.0") || error(
             "$label has family feature_set but unpartitioned min_sm=" *
             repr(schema.min_sm) * "; add an exact ptxas target partition")
@@ -114,6 +119,18 @@ end
     _scalar_ptxas_body(:sm120f)
 end
 
+@generated function _ptxas_sm107f_scalar_results!(
+        out_f32::CuDeviceVector{Float32,1},
+        out_u32::CuDeviceVector{UInt32,1},
+        out_s32::CuDeviceVector{Int32,1},
+        out_u64::CuDeviceVector{UInt64,1},
+        out_s64::CuDeviceVector{Int64,1},
+        f16::Float16, bf16::UInt16, f32::Float32,
+        u16::UInt16, s16::Int16, u32::UInt32, s32::Int32,
+        u64::UInt64, s64::Int64)
+    _scalar_ptxas_body(:sm107f)
+end
+
 const _SCALAR_ALL_TYPES = Tuple{
     CuDeviceVector{Float32,1}, CuDeviceVector{UInt32,1},
     CuDeviceVector{Int32,1}, CuDeviceVector{UInt64,1},
@@ -135,6 +152,43 @@ const _SCALAR_ALL_TYPES = Tuple{
         emitted = emit_ptx(kernel, _SCALAR_ALL_TYPES; cap, feature_set)
         for schema in schemas
             @test occursin(PTX.build_head(schema.op, schema.mods), emitted)
+        end
+    end
+end
+
+@testset "PTX 9.4 packed mixed forms assemble only on the sm_107 family" begin
+    schemas = filter(s -> _scalar_ptxas_partition(s) === :sm107f,
+                     PTX.SCALAR_RESULT_SCHEMAS)
+    @test length(schemas) == 36
+    @test count(s -> s.rettype === UInt64, schemas) == 28
+    @test count(s -> s.rettype === UInt32, schemas) == 8
+    if _ptxas_isa() < v"9.4"
+        @test_skip "PTX 9.4 assembler required for sm_107"
+    else
+        for feature_set in (:family, :arch)
+            @test ptxas_compiles(_ptxas_sm107f_scalar_results!, _SCALAR_ALL_TYPES;
+                                 cap = v"10.7", feature_set)
+            emitted = emit_ptx(_ptxas_sm107f_scalar_results!, _SCALAR_ALL_TYPES;
+                               cap = v"10.7", feature_set)
+            suffix = feature_set === :family ? "f" : "a"
+            @test occursin(".target sm_107$suffix", emitted)
+            for schema in schemas
+                @test occursin(PTX.build_head(schema.op, schema.mods), emitted)
+            end
+        end
+        for (cap, feature_set, target) in ((v"10.7", :baseline, "sm_107"),
+                                           (v"10.3", :family, "sm_103f"),
+                                           (v"12.0", :family, "sm_120f"))
+            err = try
+                ptxas_compiles(_ptxas_sm107f_scalar_results!, _SCALAR_ALL_TYPES;
+                               cap, feature_set)
+                nothing
+            catch caught
+                caught
+            end
+            @test err isa ErrorException
+            @test occursin("Failed to compile PTX code", sprint(showerror, err))
+            @test occursin("not supported on .target '$target'", sprint(showerror, err))
         end
     end
 end

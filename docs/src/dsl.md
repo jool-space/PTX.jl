@@ -158,17 +158,22 @@ a pure PTX instruction cannot silently become destination-less asm. Reviewed
 sink and side-effect families whose contract is genuinely void still return
 `Nothing`.
 
-The fixed-result ledger contains 126 exact spellings. Of these, 121 are
+The fixed-result ledger contains 162 exact spellings. Of these, 157 are
 canonical ISA grammar (`provenance = :isa`). Five are the exact contradictory
 spellings printed by PTX ISA examples—three mixed-float examples,
 `add.s8x4.sat`, and `min.s16x2.relu`—and are marked
 `provenance = :ptxas_compat`. This compatibility layer is deliberately not a
 license to accept every modifier permutation ptxas happens to assemble;
 undocumented postfix or duplicated variants fail loud. Each schema also records
-its PTX version and target feature set, including `sm_120f` family-specific
-packed operations.
+its PTX version and target feature set, including `sm_120f` packed integer
+operations and the PTX 9.4 `sm_107f` mixed-precision packed forms.
 
 The exceptions are:
+
+- **Mixed-precision packed arithmetic** — the three/four type tokens name
+  the destination first, then the sources. For example,
+  `add.rz.bf16x2.f32x2.f32x2` returns `UInt32` from two `UInt64` inputs.
+  See [Mixed-precision packed arithmetic](@ref) for the carrier and grammar rules.
 
 - **Ordinary `cvt`** — grammar is `cvt.<modifiers...>.<dst>.<src>`, so the
   destination is `parts[end-1]`. Both terminal tokens must be recognized dtypes

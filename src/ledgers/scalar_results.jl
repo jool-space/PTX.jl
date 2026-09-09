@@ -47,6 +47,8 @@ const _MIXED_SUB_SECTION =
     "ptx/9-instruction-set/9.7.5.2-mixed-precision-floating-point-instructions-sub.md"
 const _MIXED_FMA_SECTION =
     "ptx/9-instruction-set/9.7.5.3-mixed-precision-floating-point-instructions-fma.md"
+const _MIXED_MUL_SECTION =
+    "ptx/9-instruction-set/9.7.5.4-mixed-precision-floating-point-instructions-mul.md"
 
 # PTX ISA 9.3 §9.7.1.15-.16: popc/clz always write a u32 destination;
 # `.b32`/`.b64` name only the source width.
@@ -135,6 +137,41 @@ const SCALAR_RESULT_SCHEMAS = let schemas = ScalarResultSchema[]
         _scalar_result_schema!(schemas, op, mods, Float32, operands,
                                v"8.6", v"10.0", :baseline, section;
                                provenance = :ptxas_compat)
+    end
+
+    # PTX 9.4 packed mixed arithmetic has three/four type tokens: destination
+    # first, then each source. f32x2 is a b64 carrier; f16x2/bf16x2 are b32.
+    # The narrowing add/sub and mul grammars deliberately order ftz/rz
+    # differently. FMA requires an explicit rounding mode (no default).
+    for (op, section) in ((:add, _MIXED_ADD_SECTION),
+                          (:sub, _MIXED_SUB_SECTION))
+        for atype in (:f16x2, :bf16x2), rnd in (nothing, :rn, :rz, :rm, :rp)
+            prefix = rnd === nothing ? () : (rnd,)
+            _scalar_result_schema!(schemas, op, (prefix..., :f32x2, atype, :f32x2),
+                                   UInt64, (:b32, :b64),
+                                   v"9.4", v"10.7", :family, section)
+        end
+        for (prefix, dtype) in (((:rz, :ftz), :f16x2), ((:rz,), :bf16x2))
+            _scalar_result_schema!(schemas, op, (prefix..., dtype, :f32x2, :f32x2),
+                                   UInt32, (:b64, :b64),
+                                   v"9.4", v"10.7", :family, section)
+        end
+    end
+    for atype in (:f16x2, :bf16x2), rnd in (:rn, :rz, :rm, :rp)
+        # The syntax specifies btype=f32x2; the preview pseudocode's b[0:15]
+        # is inconsistent with that 64-bit operand. Preserve the syntax ABI.
+        _scalar_result_schema!(schemas, :fma, (rnd, :f32x2, atype, :f32x2, :f32x2),
+                               UInt64, (:b32, :b64, :b64),
+                               v"9.4", v"10.7", :family, _MIXED_FMA_SECTION)
+    end
+    for (mods, operands) in (
+        ((:ftz, :rz, :f16x2, :f32x2, :f32x2), (:b64, :b64)),
+        ((:rz, :bf16x2, :f32x2, :f32x2), (:b64, :b64)),
+        ((:bf16x2, :bf16x2, :f16x2), (:b32, :b32)),
+        ((:f16x2, :f16x2, :bf16x2), (:b32, :b32)),
+    )
+        _scalar_result_schema!(schemas, :mul, mods, UInt32, operands,
+                               v"9.4", v"10.7", :family, _MIXED_MUL_SECTION)
     end
 
     for (op, section) in ((:popc, _POPC_SECTION), (:clz, _CLZ_SECTION)),
