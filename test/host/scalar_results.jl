@@ -10,6 +10,8 @@ const _EXPECTED_SCALAR_SECTIONS = Dict(
         "ptx/9-instruction-set/9.7.5.2-mixed-precision-floating-point-instructions-sub.md",
     :mixed_fma =>
         "ptx/9-instruction-set/9.7.5.3-mixed-precision-floating-point-instructions-fma.md",
+    :mixed_mul =>
+        "ptx/9-instruction-set/9.7.5.4-mixed-precision-floating-point-instructions-mul.md",
     :popc =>
         "ptx/9-instruction-set/9.7.1.15-integer-arithmetic-instructions-popc.md",
     :clz =>
@@ -39,7 +41,10 @@ const _EXPECTED_SCALAR_SECTIONS = Dict(
 )
 
 function _expected_scalar_section(op, mods)
-    if op in (:add, :sub, :fma) && :f32 in mods &&
+    if op in (:add, :sub, :mul, :fma) &&
+       count(t -> t in (:f16x2, :bf16x2, :f32x2), mods) >= 2
+        return _EXPECTED_SCALAR_SECTIONS[Symbol(:mixed_, op)]
+    elseif op in (:add, :sub, :fma) && :f32 in mods &&
        any(t -> t in (:f16, :bf16), mods)
         return _EXPECTED_SCALAR_SECTIONS[Symbol(:mixed_, op)]
     elseif op === :add
@@ -82,6 +87,29 @@ function _expected_scalar_result_forms()
     )
         add!(op, mods, Float32, operands, v"8.6", v"10.0";
              provenance = :ptxas_compat)
+    end
+    for op in (:add, :sub)
+        for rnd in ((), (:rn,), (:rz,), (:rm,), (:rp,)), narrow in (:f16x2, :bf16x2)
+            add!(op, (rnd..., :f32x2, narrow, :f32x2), UInt64,
+                 (:b32, :b64), v"9.4", v"10.7"; feature_set = :family)
+        end
+        add!(op, (:rz, :ftz, :f16x2, :f32x2, :f32x2), UInt32,
+             (:b64, :b64), v"9.4", v"10.7"; feature_set = :family)
+        add!(op, (:rz, :bf16x2, :f32x2, :f32x2), UInt32,
+             (:b64, :b64), v"9.4", v"10.7"; feature_set = :family)
+    end
+    for rnd in (:rn, :rz, :rm, :rp), narrow in (:f16x2, :bf16x2)
+        add!(:fma, (rnd, :f32x2, narrow, :f32x2, :f32x2), UInt64,
+             (:b32, :b64, :b64), v"9.4", v"10.7"; feature_set = :family)
+    end
+    for mods in ((:ftz, :rz, :f16x2, :f32x2, :f32x2),
+                 (:rz, :bf16x2, :f32x2, :f32x2))
+        add!(:mul, mods, UInt32, (:b64, :b64), v"9.4", v"10.7";
+             feature_set = :family)
+    end
+    for types in ((:f16x2, :f16x2, :bf16x2), (:bf16x2, :bf16x2, :f16x2))
+        add!(:mul, types, UInt32, (:b32, :b32), v"9.4", v"10.7";
+             feature_set = :family)
     end
     for op in (:popc, :clz), width in (:b32, :b64)
         add!(op, (width,), UInt32, (width,), v"2.0", v"2.0")
@@ -178,23 +206,23 @@ _scalar_test_letter(kind) =
     actual = Dict((schema.op, schema.mods) => schema
                   for schema in PTX.SCALAR_RESULT_SCHEMAS)
 
-    @test length(expected) == 126
-    @test length(actual) == 126
+    @test length(expected) == 162
+    @test length(actual) == 162
     @test Set(keys(actual)) == Set(keys(expected))
-    @test count(key -> key[1] === :add, keys(actual)) == 30
-    @test count(key -> key[1] === :sub, keys(actual)) == 25
-    @test count(key -> key[1] === :fma, keys(actual)) == 17
+    @test count(key -> key[1] === :add, keys(actual)) == 42
+    @test count(key -> key[1] === :sub, keys(actual)) == 37
+    @test count(key -> key[1] === :fma, keys(actual)) == 25
     @test count(key -> key[1] in (:popc, :clz), keys(actual)) == 4
     @test count(key -> key[1] === :dp4a, keys(actual)) == 4
     @test count(key -> key[1] === :dp2a, keys(actual)) == 8
-    @test count(key -> key[1] === :mul, keys(actual)) == 4
+    @test count(key -> key[1] === :mul, keys(actual)) == 8
     @test count(key -> key[1] === :mad, keys(actual)) == 4
     @test count(key -> key[1] === :cvt, keys(actual)) == 8
     @test count(key -> key[1] === :prmt, keys(actual)) == 6
     @test count(key -> key[1] === :neg, keys(actual)) == 1
     @test count(key -> key[1] === :min, keys(actual)) == 8
     @test count(key -> key[1] === :max, keys(actual)) == 7
-    @test count(schema -> schema.provenance === :isa, values(actual)) == 121
+    @test count(schema -> schema.provenance === :isa, values(actual)) == 157
     @test count(schema -> schema.provenance === :ptxas_compat,
                 values(actual)) == 5
     @test all(schema -> schema.provenance in (:isa, :ptxas_compat),
@@ -554,4 +582,102 @@ end
     # plausible but wrong result type in the transpiler as well.
     @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(_scalar_transpile_module(
         "cvt.f64.bf16.rp %rd0, %h0;"))
+end
+
+@testset "packed mixed arithmetic fixes result and source widths" begin
+    cases = (
+        (ptx"add.rn.f32x2.f16x2.f32x2", (UInt32, UInt64), UInt64, "=l,r,l"),
+        (ptx"sub.rp.f32x2.bf16x2.f32x2", (UInt32, UInt64), UInt64, "=l,r,l"),
+        (ptx"add.rz.ftz.f16x2.f32x2.f32x2", (UInt64, UInt64), UInt32, "=r,l,l"),
+        (ptx"sub.rz.bf16x2.f32x2.f32x2", (UInt64, UInt64), UInt32, "=r,l,l"),
+        (ptx"mul.ftz.rz.f16x2.f32x2.f32x2", (UInt64, UInt64), UInt32, "=r,l,l"),
+        (ptx"mul.bf16x2.bf16x2.f16x2", (UInt32, UInt32), UInt32, "=r,r,r"),
+        (ptx"fma.rz.f32x2.f16x2.f32x2.f32x2",
+         (UInt32, UInt64, UInt64), UInt64, "=l,r,l,l"),
+    )
+    for (op, args, result, constraints) in cases
+        name, mods = typeof(op).parameters
+        spec = PTX.build_call(name, mods, args)
+        @test spec.rettype === result
+        @test spec.constraints == constraints
+        @test only(Base.code_typed(op, args))[2] === result
+        raw = PTX.build_call(name, mods, args; raw = true)
+        @test raw.rettype === result
+        @test raw.constraints == constraints * ",~{memory}"
+        @test raw.convergent && raw.side_effects
+        for i in eachindex(args)
+            bad = ntuple(j -> j == i ? UInt16 : args[j], length(args))
+            @test_throws ArgumentError PTX.build_call(name, mods, bad)
+            @test_throws ArgumentError PTX.build_call(name, mods, bad; raw = true)
+        end
+        @test_throws ArgumentError PTX.build_call(name, mods, args[1:end-1])
+    end
+    # FMA's b operand is f32x2 in the syntax, despite the preview
+    # pseudocode slicing it like a second 16-bit-packed operand.
+    @test_throws ArgumentError PTX.build_call(
+        :fma, (:rn, :f32x2, :f16x2, :f32x2, :f32x2), (UInt32, UInt32, UInt64))
+end
+
+@testset "packed mixed grammar misses cannot use terminal inference" begin
+    for (op, mods) in (
+        (:add, (:rn, :sat, :f32x2, :f16x2, :f32x2)),
+        (:add, (:rz, :f16x2, :f32x2, :f32x2)),
+        (:sub, (:rz, :ftz, :bf16x2, :f32x2, :f32x2)),
+        (:sub, (:rn, :ftz, :f32x2, :bf16x2, :f32x2)),
+        (:add, (:rn, :f32x2, :f16x2)),
+        (:add, (:f32x2, :rn, :f16x2, :f32x2)),
+        (:add, (:rn, :rn, :f32x2, :f16x2, :f32x2)),
+        (:mul, (:rz, :ftz, :f16x2, :f32x2, :f32x2)),
+        (:mul, (:rn, :bf16x2, :bf16x2, :f16x2)),
+        (:fma, (:f32x2, :f16x2, :f32x2, :f32x2)),
+        (:fma, (:rn, :f32x2, :f16x2, :f16x2, :f32x2)),
+        (:fma, (:rn, :sat, :f32x2, :bf16x2, :f32x2, :f32x2)),
+    )
+        @test PTX.island_of(op, mods) === PTX.ScalarLedger()
+        @test_throws ArgumentError PTX.infer_rettype(op, mods)
+        for raw in (false, true)
+            @test_throws ArgumentError PTX.build_call(op, mods, (); raw)
+        end
+    end
+    for (op, mods, result) in (
+        (:add, (:f32x2,), UInt64),
+        (:sub, (:rn, :f16x2), UInt32),
+        (:mul, (:bf16x2,), UInt32),
+        (:fma, (:rn, :f32x2), UInt64),
+    )
+        @test PTX.island_of(op, mods) === nothing
+        @test PTX.infer_rettype(op, mods) === result
+    end
+end
+
+@testset "transpiler keeps packed mixed source and destination widths" begin
+    packed_module(body; declarations = """
+        .reg .b32 %r<4>;
+        .reg .b64 %rd<4>;
+        .reg .f64 %d;
+        """) = replace(_scalar_transpile_module(body; declarations),
+                       ".version 9.3" => ".version 9.4",
+                       ".target sm_120f" => ".target sm_107f")
+    source = packed_module("""
+        add.rn.f32x2.f16x2.f32x2 %rd0, 0x3c003c00, 0x3ff000003ff00000;
+        sub.rz.bf16x2.f32x2.f32x2 %r0, %rd0, 0;
+        mul.ftz.rz.f16x2.f32x2.f32x2 %r1, %rd0, %rd0;
+        fma.rp.f32x2.bf16x2.f32x2.f32x2 %rd1, %r0, %rd0, 0;
+        add.f32x2.f16x2.f32x2 %d, %r1, %rd1;
+    """)
+    out = PTX.ptx_to_julia(source)
+    @test occursin("UInt32(0x3c003c00), UInt64(0x3ff000003ff00000)", out)
+    @test occursin("r0 = ptx\"sub.rz.bf16x2.f32x2.f32x2\"(rd0, UInt64(0))", out)
+    @test occursin("r1 = ptx\"mul.ftz.rz.f16x2.f32x2.f32x2\"(rd0, rd0)", out)
+    @test occursin("rd1 = ptx\"fma.rp.f32x2.bf16x2.f32x2.f32x2\"(r0, rd0, UInt64(0))", out)
+    @test occursin("d = ptx\"add.f32x2.f16x2.f32x2\"(r1, rd1)", out)
+    for body in (
+        "add.rn.f32x2.f16x2.f32x2 %r0, %r1, %rd0;",
+        "add.rz.ftz.f16x2.f32x2.f32x2 %rd0, %rd1, %rd2;",
+        "fma.rn.f32x2.f16x2.f32x2.f32x2 %rd0, %r0, %r1, %rd1;",
+        "add.rn.f32x2.f16x2.f32x2 %rd0, %r0;",
+        "add.rn.f32x2.f16x2 %rd0, %r0, %rd1;",
+    )
+        @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(packed_module(body))
+    end
 end

@@ -108,6 +108,12 @@ function island_of(op::Symbol, mods::Tuple{Vararg{Symbol}})
         ScalarLedger()
     elseif (op === :min || op === :max) && :relu in mods
         ScalarLedger()
+    elseif (op === :add || op === :sub || op === :mul || op === :fma) &&
+           count(t -> t in (:f16x2, :bf16x2, :f32x2), mods) >= 2
+        # Multiple packed type tokens describe distinct destination/source
+        # widths. Claim all orders, including malformed or incomplete tails;
+        # ordinary one-type packed arithmetic keeps its existing route.
+        ScalarLedger()
     elseif (op === :add || op === :sub || op === :fma) && :f32 in mods &&
            any(t -> t === :f16 || t === :bf16, mods)
         # Any permutation containing both the fixed f32 result token and a

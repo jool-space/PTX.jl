@@ -71,6 +71,28 @@ line in the loop.
 | `wgmma.mma_async` (Hopper sm_90a) | `wrappers/wgmma.jl` | `wgmma.mma_async.sync.aligned.m64nNk{8,16,32}.<d>.<a>.<b>` — accumulator passed by value (tied operands). Floating forms use all 32 N values stepped by 8 through 256; integer forms use the ISA's 16-value grid `8,16,24,32,48:16:224`. The closed surface is 256 floating + 64 integer shape/type forms, each with SS runtime/constant `scale_d` and RF-A runtime variants. |
 | `tcgen05` (Blackwell sm_100a/sm_110a and family targets) | `wrappers/tcgen05.jl` | Exact lifecycle, fence/wait, TMEM address, load/store, dense-MMA, and MX block-scale forms. MX uses the complete seven-operand schema `(d, a_desc_or_tmem, b_desc, idesc, scale_a_tmem, scale_b_tmem, enable_input_d)` and all eight legal `kind × {scale_vec,block}` spellings; the former five-argument MX surface is rejected. `shift` / `dealloc` / `cp` / `ld` / `st` take a 32-bit TMEM address returned by `tcgen05.alloc`, while alloc/commit use reviewed shared-memory carriers. `ld`/`st` cover the complete Table-52 grid — all five shapes including `16x32bx2`, whose `immHalfSplitoff` is a positional `Val(off)` immediate — each with the optional `.pack::16b`/`.unpack::16b` repack qualifier; `ld.red` reduction forms have no NVVM records at the pinned backend and stay outside the surface. `cp` covers all six shape spellings — `64x128b`/`32x128b` only with their ISA-mandated `warpx2::*`/`warpx4` multicast — each optionally with the `.b8x16.{b6x16_p32,b4x16_p64}` decompression pair. Dense MMA covers both A sources (`UInt64` SMEM descriptor vs `UInt32` TMEM address, dispatched like the ISA's `a-desc` vs `[a-tmem]`), the `collector::a::{fill,use,lastuse}` qualifiers (discard is the spelled-nothing default), `.ashift` (TMEM A; discard/lastuse only), an optional positional disable-output-lane mask (`NTuple{4|8, UInt32}` before `enable_input_d`), and an optional `Val(scale)` scale-input-d immediate (f16/tf32, 0:15). Sparse MMA (`mma.sp`) mirrors the dense grid with the mandatory sparsity-metadata TMEM address between the B descriptor and `idesc`; sp block-scale (MX) records stay outside the surface. Weight-stationary MMA (`mma.ws{.sp}`, `cta_group::1` only) exposes the addressed B-side collector (`collector::bN::{fill,use,lastuse,discard}`, spelled-nothing = `b0::discard`) and the optional trailing `UInt64` zero-column-mask descriptor. |
 
+## Mixed-precision packed arithmetic
+
+PTX ISA 9.4 adds 36 packed mixed-precision `add`, `sub`, `mul`, and `fma` forms
+for `sm_107f` (or higher in the same family, including `sm_107a`). Their type
+tokens specify the destination first, then the sources. `f32x2` uses a `UInt64`
+bit carrier; `f16x2` and `bf16x2` use `UInt32` bit carriers.
+
+```julia
+sum = ptx"add.rn.f32x2.f16x2.f32x2"(half_pair_bits, float_pair_bits) # UInt64
+result = ptx"add.rz.bf16x2.f32x2.f32x2"(sum, float_pair_bits)        # UInt32
+```
+
+The packed mixed `fma` forms require an explicit rounding mode. Their second
+and third inputs are both `f32x2` (`UInt64`). Narrowing to `f16x2` uses `.rz.ftz`
+for `add`/`sub` and `.ftz.rz` for `mul`; these modifier orders follow the instruction
+grammars. Unsupported spellings and incorrect operand widths fail before LLVM
+compilation, including through `ptx"..."raw`.
+
+The assembler tests cover every form on `sm_107f` and `sm_107a` when the managed
+compiler supports PTX ISA 9.4. Older compilers explicitly skip that partition.
+Execution on `sm_107` hardware remains unverified.
+
 ## Schema-driven structured results
 
 `setp`, `lop3`, `match.sync`, and `elect.sync` no longer rely on a small set of

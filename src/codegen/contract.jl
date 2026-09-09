@@ -552,7 +552,11 @@ function _scalar_destination_role(schema)
     schema.rettype === Float64 && return :f64
     schema.rettype === Int32 && return :s32
     schema.rettype === Int64 && return :s64
-    schema.rettype === UInt64 && return :u64
+    if schema.rettype === UInt64
+        # Packed f32x2 results use the full 64-bit bit-carrier compatibility
+        # class, including .f64 declarations; integer wide results stay u64.
+        return :f32x2 in schema.mods ? :b64 : :u64
+    end
     if schema.rettype === UInt32
         # prmt and packed lane arithmetic use a typeless 32-bit carrier. The
         # remaining UInt32-result islands (popc/clz, unsigned dp/wide, and
