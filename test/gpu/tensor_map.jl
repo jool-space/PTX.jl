@@ -15,6 +15,30 @@ const DRIVER_HAS_TMA = CUDACore.functional() &&
 if !DRIVER_HAS_TMA
     @info "skipping tensor_map driver tests (needs CUDA driver >= 12.0)"
 else
+    @testset "descriptor upload owns a device snapshot" begin
+        tmap = CuTensorMap()
+        tmap.data = ntuple(i -> UInt8(i - 1), 128)
+        expected = collect(tmap.data)
+        uploaded = PTX.upload_tma_descriptor(tmap)
+        @test uploaded.blob isa CuArray{UInt8, 1, CUDACore.DeviceMemory}
+        @test uploaded.ptr isa PTX.TMADescriptorPtr
+        GC.@preserve uploaded begin
+            @test reinterpret(UInt64, uploaded.ptr) == UInt64(pointer(uploaded.blob))
+            @test UInt64(pointer(uploaded.blob)) % 64 == 0
+            @test Array(uploaded.blob) == expected
+        end
+
+        # Host edits and subsequent uploads cannot mutate the first snapshot.
+        tmap.data = ntuple(_ -> 0xff, 128)
+        second = PTX.upload_tma_descriptor(tmap)
+        GC.@preserve uploaded second begin
+            GC.gc()
+            @test uploaded.ptr != second.ptr
+            @test Array(uploaded.blob) == expected
+            @test Array(second.blob) == fill(0xff, 128)
+        end
+    end
+
     @testset "2D bf16 tile" begin
         # 128×128 bf16 tensor; 64×128B = 64 cols × 2B = 128B box width
         # (the B128 swizzle alignment), 64 rows of box.

@@ -276,7 +276,7 @@ wrong-result bug has been demonstrated in the existing no-argument wait.
 PTX.wait_registers
 ```
 
-## Host-side TMA descriptor encoder
+## Host-side TMA descriptors
 
 Hopper TMA (`cp.async.bulk.tensor.*`) consumes a 128-byte
 `CUtensorMap` blob built host-side by the CUDA driver's
@@ -284,12 +284,25 @@ Hopper TMA (`cp.async.bulk.tensor.*`) consumes a 128-byte
 take Julia types / symbols instead of raw `CUtensorMapDataType` enums,
 with a thin convenience helper for the common 2D row-major case.
 
-These methods live in `ext/CUDACoreExt.jl` and load automatically
-when `CUDACore` is in the environment.
+[`PTX.upload_tma_descriptor`](@ref) uploads the encoded descriptor and returns
+`(; ptr, blob)`: `blob` owns the allocation, and `ptr` is the borrowed
+[`PTX.TMADescriptorPtr`](@ref) passed to kernels. Its `AS.Const` address-space
+type is the TMA wrapper carrier convention; the allocation lives in device
+**global memory**. Pointer conversion happens on the host.
+
+Preserve the returned owner and the source tensor until GPU work completes,
+including synchronization after an asynchronous launch. The uploader's
+example shows the `GC.@preserve` pattern. Uploading copies the descriptor;
+it does not take ownership of the tensor whose address it contains.
+
+Encoding and upload live in `ext/CUDACoreExt.jl` and become available
+when CUDA.jl or `CUDACore` is loaded alongside PTX.
 
 ```@docs
 PTX.tensor_map_encode_tiled
 PTX.tensor_map_tile_2d
+PTX.upload_tma_descriptor
+PTX.TMADescriptorPtr
 ```
 
 ## When to extend

@@ -6,13 +6,12 @@
 # mbarrier-waits, and each thread writes one cell back to global. The output
 # vector must match the input pattern byte-for-byte.
 #
-# This exercises every piece introduced in this branch:
+# This exercises the descriptor lifecycle:
 #
 #   1. `PTX.tensor_map_tile_2d`            — host descriptor build
-#   2. `CuTensorMap.data → CuArray{UInt8}` — descriptor upload
-#   3. `reinterpret(LLVMPtr{T, AS.Const}, UInt64(pointer(dev_blob)))`
-#      — kernel-arg dispatch path validated end-to-end (the dispatch was
-#        the unknown that gemm_warpgroup deferred numerical validation on)
+#   2. `PTX.upload_tma_descriptor`        — owned global-memory upload
+#   3. `PTX.TMADescriptorPtr`             — host-converted kernel argument
+#      (`AS.Const` is the carrier convention; storage is global memory)
 #   4. `cp.async.bulk.tensor.2d.shared::cta.global.tile`  + mbarrier
 #   5. `fence.proxy.async.shared::cta`     — generic↔async proxy ordering
 #
@@ -60,14 +59,19 @@ end
     input_vals = UInt16[(0x3f80 + i) for i in 0:63]
     src = CuArray(reshape(input_vals, 8, 8))
 
-    # 8x8 bf16 = 16 B per row → INTERLEAVE/NONE swizzle.
-    tmap_host = tensor_map_tile_2d(:bf16, pointer(src), 8, 8, 8, 8; swizzle = :NONE)
-    @test tmap_host isa CuTensorMap
-
-    src_const = upload_tma_descriptor(tmap_host)
     out = CUDACore.zeros(UInt16, 64)
-    @cuda threads = 128 _tma_copy_kernel!(out, src_const.ptr)
-    CUDACore.synchronize()
+    GC.@preserve src begin
+        # 8x8 bf16 = 16 B per row → INTERLEAVE/NONE swizzle.
+        tmap_host = tensor_map_tile_2d(:bf16, pointer(src), 8, 8, 8, 8; swizzle = :NONE)
+        @test tmap_host isa CuTensorMap
+
+        descriptor = PTX.upload_tma_descriptor(tmap_host)
+        GC.@preserve descriptor begin
+            GC.gc()
+            @cuda threads = 128 _tma_copy_kernel!(out, descriptor.ptr)
+            CUDACore.synchronize()
+        end
+    end
 
     result = Array(out)
     @test result == input_vals

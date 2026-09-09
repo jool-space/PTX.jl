@@ -14,7 +14,8 @@ PTX.jl depends on `LLVM.jl` for the inline-asm machinery (`@asmcall`).
 Kernel launch and memory go through CUDA.jl. PTX.jl itself carries no hard
 GPU dependency: it weak-depends on `CUDACore` (the runtime core CUDA.jl is
 built on), and loading either package activates the extension that provides
-the TMA tensor-map encoder ([`PTX.tensor_map_encode_tiled`](@ref)).
+TMA descriptor encoding ([`PTX.tensor_map_encode_tiled`](@ref)) and upload
+([`PTX.upload_tma_descriptor`](@ref)).
 Host-only use — parsing, transpiling, inspecting lowering — needs no GPU
 stack at all.
 
@@ -89,6 +90,10 @@ when the underlying PTX address is 32-bit (shared, param, local). The
 chain emits `l` (i64) for any `LLVMPtr`; hand-written shared-memory
 wrappers (`cp.async`, `ldmatrix`, `stmatrix`, `mbarrier`) override to
 `r` (i32) where ptxas requires the 32-bit form.
+
+[`PTX.TMADescriptorPtr`](@ref) uses `AS.Const` as the TMA wrapper carrier
+convention. Descriptors uploaded by [`PTX.upload_tma_descriptor`](@ref) live
+in device **global memory**; their pointer conversion happens on the host.
 
 ## Where to next
 
