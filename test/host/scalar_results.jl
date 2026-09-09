@@ -4,6 +4,14 @@
 # mirrors the same ISA cross-products for reviewability.
 
 const _EXPECTED_SCALAR_SECTIONS = Dict(
+    :alternate_add =>
+        "ptx/9-instruction-set/9.7.6.1-alternate-floating-point-instructions-add.md",
+    :alternate_sub =>
+        "ptx/9-instruction-set/9.7.6.2-alternate-floating-point-instructions-sub.md",
+    :alternate_mul =>
+        "ptx/9-instruction-set/9.7.6.3-alternate-floating-point-instructions-mul.md",
+    :alternate_fma =>
+        "ptx/9-instruction-set/9.7.6.4-alternate-floating-point-instructions-fma.md",
     :mixed_add =>
         "ptx/9-instruction-set/9.7.5.1-mixed-precision-floating-point-instructions-add.md",
     :mixed_sub =>
@@ -41,6 +49,10 @@ const _EXPECTED_SCALAR_SECTIONS = Dict(
 )
 
 function _expected_scalar_section(op, mods)
+    if op in (:add, :sub, :mul, :fma) &&
+       any(t -> t in (:e4m3x4, :e5m2x4), mods)
+        return _EXPECTED_SCALAR_SECTIONS[Symbol(:alternate_, op)]
+    end
     if op in (:add, :sub, :mul, :fma) &&
        count(t -> t in (:f16x2, :bf16x2, :f32x2), mods) >= 2
         return _EXPECTED_SCALAR_SECTIONS[Symbol(:mixed_, op)]
@@ -110,6 +122,37 @@ function _expected_scalar_result_forms()
     for types in ((:f16x2, :f16x2, :bf16x2), (:bf16x2, :bf16x2, :f16x2))
         add!(:mul, types, UInt32, (:b32, :b32), v"9.4", v"10.7";
              feature_set = :family)
+    end
+    # Independent transcription of the cdtype/atype[/btype] grammar.
+    for prefix in ((), (:rn,), (:satfinite,), (:rn, :satfinite)),
+        dst in (:e4m3x4, :e5m2x4)
+        sources = ((:e4m3x4, :b32), (:e5m2x4, :b32), (:e2m3x4, :b32),
+                   (:e3m2x4, :b32), (:e2m1x4, :b16), (:e2m1p4x4, :b32),
+                   (:ue8m0x4, :b32))
+        for (a, acarrier) in sources
+            for op in (:add, :sub)
+                add!(op, (prefix..., dst, a), UInt32, (acarrier, :b32),
+                     v"9.4", v"10.0"; feature_set = :arch)
+            end
+            for (b, bcarrier) in sources
+                add!(:mul, (prefix..., dst, a, b), UInt32, (acarrier, bcarrier),
+                     v"9.4", v"10.0"; feature_set = :arch)
+                add!(:fma, (prefix..., dst, a, b), UInt32, (acarrier, bcarrier, :b32),
+                     v"9.4", v"10.0"; feature_set = :arch)
+            end
+        end
+    end
+    for (op, mods, args) in (
+        (:add, (:rn, :e5m2x4, :e4m3x4, :satfinite), (:b32, :b32)),
+        (:sub, (:rn, :e5m2x4, :ue8m0x4, :satfinite), (:b32, :b32)),
+        (:sub, (:rn, :e5m2x4, :e2m3x4, :satfinite), (:b32, :b32)),
+        (:mul, (:rn, :e5m2x4, :e3m2x4, :e2m1x4, :satfinite), (:b32, :b16)),
+        (:mul, (:rn, :e5m2x4, :e3m2x4, :e2m3x4, :satfinite), (:b32, :b32)),
+        (:fma, (:rn, :e5m2x4, :ue8m0x4, :e2m1p4x4, :satfinite), (:b32, :b32, :b32)),
+        (:fma, (:rn, :e4m3x4, :e3m2x4, :e2m1x4, :satfinite), (:b32, :b16, :b32)),
+    )
+        add!(op, mods, UInt32, args, v"9.4", v"10.0";
+             feature_set = :arch, provenance = :ptxas_compat)
     end
     for op in (:popc, :clz), width in (:b32, :b64)
         add!(op, (width,), UInt32, (width,), v"2.0", v"2.0")
@@ -190,12 +233,13 @@ _scalar_test_type(kind) =
     kind === :s32  ? Int32 :
     kind === :u64  ? UInt64 :
     kind === :s64  ? Int64 :
+    kind === :b16  ? UInt16 :
     kind === :b32  ? UInt32 :
     kind === :b64  ? UInt64 :
     error("unknown test operand kind $kind")
 
 _scalar_test_letter(kind) =
-    kind in (:f16, :bf16, :u16, :s16) ? "h" :
+    kind in (:f16, :bf16, :u16, :s16, :b16) ? "h" :
     kind === :f32 ? "f" :
     kind in (:u32, :s32, :b32) ? "r" :
     kind in (:u64, :s64, :b64) ? "l" :
@@ -206,25 +250,25 @@ _scalar_test_letter(kind) =
     actual = Dict((schema.op, schema.mods) => schema
                   for schema in PTX.SCALAR_RESULT_SCHEMAS)
 
-    @test length(expected) == 162
-    @test length(actual) == 162
+    @test length(expected) == 1065
+    @test length(actual) == 1065
     @test Set(keys(actual)) == Set(keys(expected))
-    @test count(key -> key[1] === :add, keys(actual)) == 42
-    @test count(key -> key[1] === :sub, keys(actual)) == 37
-    @test count(key -> key[1] === :fma, keys(actual)) == 25
+    @test count(key -> key[1] === :add, keys(actual)) == 99
+    @test count(key -> key[1] === :sub, keys(actual)) == 95
+    @test count(key -> key[1] === :fma, keys(actual)) == 419
     @test count(key -> key[1] in (:popc, :clz), keys(actual)) == 4
     @test count(key -> key[1] === :dp4a, keys(actual)) == 4
     @test count(key -> key[1] === :dp2a, keys(actual)) == 8
-    @test count(key -> key[1] === :mul, keys(actual)) == 8
+    @test count(key -> key[1] === :mul, keys(actual)) == 402
     @test count(key -> key[1] === :mad, keys(actual)) == 4
     @test count(key -> key[1] === :cvt, keys(actual)) == 8
     @test count(key -> key[1] === :prmt, keys(actual)) == 6
     @test count(key -> key[1] === :neg, keys(actual)) == 1
     @test count(key -> key[1] === :min, keys(actual)) == 8
     @test count(key -> key[1] === :max, keys(actual)) == 7
-    @test count(schema -> schema.provenance === :isa, values(actual)) == 157
+    @test count(schema -> schema.provenance === :isa, values(actual)) == 1053
     @test count(schema -> schema.provenance === :ptxas_compat,
-                values(actual)) == 5
+                values(actual)) == 12
     @test all(schema -> schema.provenance in (:isa, :ptxas_compat),
               values(actual))
     compat_keys = Set([
@@ -233,6 +277,13 @@ _scalar_test_letter(kind) =
         (:fma, (:rz, :sat, :f32, :f16, :sat)),
         (:add, (:s8x4, :sat)),
         (:min, (:s16x2, :relu)),
+        (:add, (:rn, :e5m2x4, :e4m3x4, :satfinite)),
+        (:sub, (:rn, :e5m2x4, :ue8m0x4, :satfinite)),
+        (:sub, (:rn, :e5m2x4, :e2m3x4, :satfinite)),
+        (:mul, (:rn, :e5m2x4, :e3m2x4, :e2m1x4, :satfinite)),
+        (:mul, (:rn, :e5m2x4, :e3m2x4, :e2m3x4, :satfinite)),
+        (:fma, (:rn, :e5m2x4, :ue8m0x4, :e2m1p4x4, :satfinite)),
+        (:fma, (:rn, :e4m3x4, :e3m2x4, :e2m1x4, :satfinite)),
     ])
     @test Set(key for (key, schema) in actual
               if schema.provenance === :ptxas_compat) == compat_keys

@@ -50,6 +50,17 @@ const _MIXED_FMA_SECTION =
 const _MIXED_MUL_SECTION =
     "ptx/9-instruction-set/9.7.5.4-mixed-precision-floating-point-instructions-mul.md"
 
+# Alternate packed arithmetic is restricted to sm_100a and sm_103a.
+# min_sm records the lowest admitting target, not support on later arches.
+const _ALTERNATE_ADD_SECTION =
+    "ptx/9-instruction-set/9.7.6.1-alternate-floating-point-instructions-add.md"
+const _ALTERNATE_SUB_SECTION =
+    "ptx/9-instruction-set/9.7.6.2-alternate-floating-point-instructions-sub.md"
+const _ALTERNATE_MUL_SECTION =
+    "ptx/9-instruction-set/9.7.6.3-alternate-floating-point-instructions-mul.md"
+const _ALTERNATE_FMA_SECTION =
+    "ptx/9-instruction-set/9.7.6.4-alternate-floating-point-instructions-fma.md"
+
 # PTX ISA 9.3 §9.7.1.15-.16: popc/clz always write a u32 destination;
 # `.b32`/`.b64` name only the source width.
 const _POPC_SECTION =
@@ -172,6 +183,49 @@ const SCALAR_RESULT_SCHEMAS = let schemas = ScalarResultSchema[]
     )
         _scalar_result_schema!(schemas, :mul, mods, UInt32, operands,
                                v"9.4", v"10.7", :family, _MIXED_MUL_SECTION)
+    end
+
+    # Alternate x4 arithmetic returns packed FP8 in b32. Compact e2m1x4
+    # occupies b16; every other input uses b32, including padded e2m1p4x4.
+    alternate_types = (:e5m2x4, :e4m3x4, :e3m2x4, :e2m3x4,
+                       :e2m1x4, :e2m1p4x4, :ue8m0x4)
+    for (op, section) in ((:add, _ALTERNATE_ADD_SECTION),
+                          (:sub, _ALTERNATE_SUB_SECTION),
+                          (:mul, _ALTERNATE_MUL_SECTION),
+                          (:fma, _ALTERNATE_FMA_SECTION)),
+        dtype in (:e5m2x4, :e4m3x4), atype in alternate_types,
+        explicit_rn in (false, true), satfinite in (false, true)
+        prefix = explicit_rn ? (:rn,) : ()
+        satfinite && (prefix = (prefix..., :satfinite))
+        a = atype === :e2m1x4 ? :b16 : :b32
+        if op === :add || op === :sub
+            _scalar_result_schema!(schemas, op, (prefix..., dtype, atype),
+                                   UInt32, (a, :b32), v"9.4", v"10.0", :arch,
+                                   section)
+        else
+            for btype in alternate_types
+                b = btype === :e2m1x4 ? :b16 : :b32
+                operands = op === :fma ? (a, b, :b32) : (a, b)
+                _scalar_result_schema!(schemas, op, (prefix..., dtype, atype, btype),
+                                       UInt32, operands, v"9.4", v"10.0", :arch,
+                                       section)
+            end
+        end
+    end
+    # The examples place satfinite after the types, unlike the prefix grammar.
+    # Only these exact documented exceptions have a compatibility entry.
+    for (op, types, operands, section) in (
+        (:add, (:e5m2x4, :e4m3x4), (:b32, :b32), _ALTERNATE_ADD_SECTION),
+        (:sub, (:e5m2x4, :ue8m0x4), (:b32, :b32), _ALTERNATE_SUB_SECTION),
+        (:sub, (:e5m2x4, :e2m3x4), (:b32, :b32), _ALTERNATE_SUB_SECTION),
+        (:mul, (:e5m2x4, :e3m2x4, :e2m1x4), (:b32, :b16), _ALTERNATE_MUL_SECTION),
+        (:mul, (:e5m2x4, :e3m2x4, :e2m3x4), (:b32, :b32), _ALTERNATE_MUL_SECTION),
+        (:fma, (:e5m2x4, :ue8m0x4, :e2m1p4x4), (:b32, :b32, :b32), _ALTERNATE_FMA_SECTION),
+        (:fma, (:e4m3x4, :e3m2x4, :e2m1x4), (:b32, :b16, :b32), _ALTERNATE_FMA_SECTION),
+    )
+        _scalar_result_schema!(schemas, op, (:rn, types..., :satfinite), UInt32,
+                               operands, v"9.4", v"10.0", :arch, section;
+                               provenance = :ptxas_compat)
     end
 
     for (op, section) in ((:popc, _POPC_SECTION), (:clz, _CLZ_SECTION)),

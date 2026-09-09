@@ -93,6 +93,48 @@ The assembler tests cover every form on `sm_107f` and `sm_107a` when the managed
 compiler supports PTX ISA 9.4. Older compilers explicitly skip that partition.
 Execution on `sm_107` hardware remains unverified.
 
+## Alternate packed arithmetic
+
+PTX ISA 9.4 alternate floating-point `add`, `sub`, `mul`, and `fma` support
+four-lane FP8/FP6/FP4 arithmetic on **`sm_100a` and `sm_103a` only**. These
+forms are unavailable on `sm_100f`, `sm_103f`, and `sm_107a`.
+
+The result is always packed `e4m3x4` or `e5m2x4` in a `UInt32` bit carrier.
+Source carriers are fixed by the instruction schema:
+
+| Source format | Julia bit carrier | Layout |
+|---|---|---|
+| `e4m3x4`, `e5m2x4`, `ue8m0x4` | `UInt32` | Four bytes |
+| `e2m3x4`, `e3m2x4` | `UInt32` | Six bits per byte, with two padding bits |
+| `e2m1p4x4` | `UInt32` | Four bits per byte, with four padding bits |
+| `e2m1x4` | `UInt16` | Four contiguous four-bit values |
+
+```julia
+compact = UInt16(0x2222)     # four e2m1 values
+padded = UInt32(0x02020202)  # the same values in e2m1p4x4
+acc = UInt32(0x38383838)    # four e4m3 values
+sum = ptx"add.rn.e4m3x4.e2m1x4"(compact, acc)
+product = ptx"mul.rn.satfinite.e5m2x4.e2m1x4.e2m1p4x4"(compact, padded)
+result = ptx"fma.e4m3x4.e2m1x4.e2m1x4"(compact, compact, sum)
+```
+
+`add`/`sub` use a shared destination/last-source type followed by the first
+source type. `mul` specifies destination, first source, and second source types;
+`fma` shares its destination type with the accumulator and then specifies its
+two multiplicand types. Thus the final type token alone cannot determine the
+result or all input widths.
+
+Rounding defaults to `.rn`; `.satfinite` optionally clamps overflow to the
+largest finite value of the destination format, preserving the sign. The
+canonical order puts `.rn` and `.satfinite` before the type tokens. The ledger
+admits all 896 canonical forms plus seven exact specification examples with
+postfix `.satfinite`, marked `:ptxas_compat`. Other modifier permutations and
+incorrect carrier widths are rejected, including through `ptx"..."raw`.
+
+The assembler suite checks every form with stored results on both supported
+targets when PTX ISA 9.4 is available. Execution on B200/B300 hardware remains
+unverified for these new forms.
+
 ## Schema-driven structured results
 
 `setp`, `lop3`, `match.sync`, and `elect.sync` no longer rely on a small set of
