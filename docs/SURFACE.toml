@@ -173,9 +173,10 @@ section = "9.7.10.8"
 title = "Data Movement and Conversion Instructions: ld, ldu, st"
 status = "generic"
 opcodes = ["ld", "ldu", "st"]
-notes = "Bracketed memory ops (st is a sink: the dtype tail names the value written); covers ld.global.nc, st.async (§9.7.9.12), and st.bulk (§9.7.9.14); vector and .b128 forms are audited in their ledgers, and vec_ldst typed wrappers cover the tuple API."
+notes = "Bracketed memory ops (st is a sink: the dtype tail names the value written); covers ld.global.nc, st.async (§9.7.9.12), and st.bulk (§9.7.9.14); vector and .b128 forms are audited in their ledgers, and vec_ldst typed wrappers cover the tuple API. Scalar ld{.global}.type.proxy::readonly reads its result type before the trailing proxy, with host, assembly, and numeric coverage."
 owner = ["src/ledgers/forms.jl", "src/wrappers/vec_ldst.jl",
-         "src/ledgers/vector_results.jl", "src/ledgers/b128_forms.jl"]
+         "src/ledgers/vector_results.jl", "src/ledgers/b128_forms.jl",
+         "src/ledgers/types.jl"]
 
 [[family]]
 section = "9.7.10.15"
@@ -221,7 +222,7 @@ section = "9.7.10.21"
 title = "Data Movement and Conversion Instructions: createpolicy"
 status = "raw-only"
 opcodes = ["createpolicy"]
-notes = "Cache-policy handle creation; raw renders the correct scalar .b64 destination, unregistered because nothing needed it yet."
+notes = "Cache-policy handle creation; ordinary raw forms render a scalar .b64 destination. The PTX 9.4 range.fabric form needs a composite [endpoint, offset] operand and has no reviewed binding."
 
 [[family]]
 section = "9.7.10.22"
@@ -244,7 +245,7 @@ section = "9.7.10.24"
 title = "Data Movement and Conversion Instructions: cvt"
 status = "generic"
 opcodes = ["cvt"]
-notes = "Destination is the penultimate type token (audited in infer_rettype); source carriers for ordinary cvt and cvt.pack (§9.7.10.25) come from the closed cvt ledger, with exact wrappers for the microfloat/stochastic forms. PTX ISA 9.4 additions (ue5m3x2, scaled::n1::ue8m0, .pzo/.rz widenings; sm_107f) are spelled-only until a CUDA 13.4+ ptxas ships; the n1 scale factor is physically b8, carried as b16 (no i8 constraint) — exact b8-bridging wrappers are deferred to hardware validation."
+notes = "Destination is the penultimate type token (audited in infer_rettype); source carriers for ordinary cvt and cvt.pack (§9.7.10.25) come from the closed cvt ledger, with exact wrappers for the microfloat/stochastic forms. PTX ISA 9.4 additions (ue5m3x2, scaled::n1::ue8m0, .pzo/.rz widenings; sm_107f) have source-carrier coverage but still need dedicated assembly and numeric coverage. Stochastic .rs rejects .pzo; the n1 scale factor is physically b8, carried as b16 (no i8 constraint) — exact b8-bridging wrappers are deferred to hardware validation."
 owner = ["src/ledgers/forms.jl", "src/ledgers/cvt_forms.jl", "src/wrappers/cvt.jl"]
 
 [[family]]
@@ -286,7 +287,7 @@ section = "9.7.11"
 title = "Fabric Instructions"
 status = "strict"
 opcodes = ["fabric"]
-notes = "Hand-written asm wrappers (submit/wait/try_get/try_put, PTX 9.3 sm_100+): the two-register CFT handle operand has no chain-default rendering, so :fabric is deliberately NOT in FORMS; try_red/try_pullred and the cp_mask/counted::bytes put forms are deferred."
+notes = "Hand-written asm wrappers (submit/wait/try_get/try_put, PTX 9.3 sm_100+): the two-register CFT handle operand has no chain-default rendering, so :fabric is deliberately NOT in FORMS; try_red/try_pullred and the cp_mask/counted::bytes put forms are deferred. PTX 9.4 tensor get/put/red, try_atom, and cache-policy operands remain unimplemented. The deferred try_pullred.sync form requires a literal full-warp member mask."
 owner = ["src/wrappers/fabric.jl"]
 
 # ── §9.7.12 / §9.7.13 Texture and Surface ─────────────────────────────────────
@@ -346,7 +347,7 @@ section = "9.7.15.4"
 title = "Parallel Synchronization and Communication Instructions: fence"
 status = "strict"
 opcodes = ["fence"]
-notes = "Ordinary fence forms are chain-generic, but the tensormap::generic proxy fences are typed-wrapper-only (direction-specific acquire/release ABIs, exact scope set, ISA-fixed 128-byte acquire range); intrinsic/core-IR wrappers cover the common scoped fences."
+notes = "Ordinary fence forms are chain-generic, but the tensormap::generic proxy fences are typed-wrapper-only (direction-specific acquire/release ABIs, exact scope set, ISA-fixed 128-byte acquire range); intrinsic/core-IR wrappers cover the common scoped fences. PTX 9.4 alias acquire/release.sys and async::generic release.sync_restrict::shared::cluster::read.cluster have host and sm_90 assembly coverage. The cluster-read fence is non-cumulative; assembly does not establish concurrent runtime ordering."
 owner = ["src/ledgers/forms.jl", "src/wrappers/fence.jl"]
 
 [[family]]
@@ -452,7 +453,7 @@ section = "9.7.16.5.15"
 title = "Warp-level matrix load instruction: ldmatrix"
 status = "strict"
 opcodes = ["ldmatrix"]
-notes = "Typed-wrapper-only: shape/count-dependent grouped results (two registers per matrix for m16n16) and format-specific arity. The PTX ISA 9.4 sign-extending .s8.s4 m8n16 forms (sm_90a + 100f/110f/120f families) are asm-tier, spelled-only until a CUDA 13.4+ ptxas ships."
+notes = "Typed-wrapper-only: shape/count-dependent grouped results (two registers per matrix for m16n16) and format-specific arity. The PTX ISA 9.4 sign-extending .s8.s4 m8n16 forms (sm_90a + 100f/110f/120f families) are asm-tier and still need dedicated PTX 9.4 assembly and runtime coverage."
 owner = ["src/wrappers/ldmatrix.jl"]
 
 [[family]]
@@ -488,7 +489,7 @@ section = "9.7.18"
 title = "TensorCore 5th Generation Family Instructions"
 status = "strict"
 opcodes = ["tcgen05"]
-notes = "Typed-wrapper-only: one head spans address destinations, register vectors, sinks, fences, and matrix descriptors (alloc/dealloc, ld/st grids, cp, mma dense/sp/ws/mx, commit, fences). The management verbs (alloc/dealloc/relinquish_alloc_permit/commit/cp), the waits, and the PTX ISA 9.4 additions (.exclusive alloc/dealloc, commit multicast::cluster::{16b,32b} and sync_restrict::shared::read::mma::a — spelled-only until a ptxas that accepts ISA 9.4 ships) are single-route asm, as are ld.red (no upstream intrinsics; ISA target floor sm_103f/sm_110a — no sm_100 support) and the block-scale mma family, dense and sp (sp with the mxf4 kinds is a-variant-exclusive per the §9.7.18.10 support list); ld/st, shift, and non-block-scale dense/sp/ws mma lower via tier-2 intrinsics. Not wrapped: the ISA 9.4 sm_107f additions ti16, collector::b outside the ws family, and decompress::lut::b (gated on the 9.4-GA defect recheck) — the pre-9.4 surface is complete up to the deliberately out-of-scope generic-AS forms."
+notes = "Typed-wrapper-only: one head spans address destinations, register vectors, sinks, fences, and matrix descriptors (alloc/dealloc, ld/st grids, cp, mma dense/sp/ws/mx, commit, fences). The management verbs (alloc/dealloc/relinquish_alloc_permit/commit/cp), the waits, and the PTX ISA 9.4 additions (.exclusive alloc/dealloc, commit multicast::cluster::{16b,32b} and sync_restrict::shared::read::mma::a — dedicated PTX 9.4 assembly/runtime coverage remains pending) are single-route asm, as are ld.red (no upstream intrinsics; ISA target floor sm_103f/sm_110a — no sm_100 support) and the block-scale mma family, dense and sp (sp with the mxf4 kinds is a-variant-exclusive per the §9.7.18.10 support list); ld/st, shift, and non-block-scale dense/sp/ws mma lower via tier-2 intrinsics. Not wrapped: the ISA 9.4 sm_107f additions ti16, collector::b outside the ws family, and decompress::lut::b (the GA specification retains unresolved descriptor/syntax contradictions) — the pre-9.4 surface is complete up to the deliberately out-of-scope generic-AS forms."
 owner = ["src/wrappers/tcgen05.jl", "src/lib/tcgen05_descriptor.jl",
          "src/lib/tcgen05_layout.jl"]
 

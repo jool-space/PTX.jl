@@ -428,3 +428,35 @@ combination — spelling literal forms with `optype""` and routing the
 generator's bookkeeping through `register_wrapper!` /
 `wrapper_intrinsic_call` (see `src/wrappers/registry.jl`). ~80 LOC for a
 new family in most cases.
+
+
+## PTX 9.4 readonly loads and proxy fences
+
+The readonly-load spelling places the proxy after the result type:
+
+```julia
+value = ptx"ld.global.u32.proxy::readonly"(global_ptr)
+value = ptx"ld.u32.proxy::readonly"(generic_ptr)
+```
+
+The address must refer to global memory, or to global/constant memory through
+generic addressing; its contents must remain read-only for the kernel's
+lifetime. Scalar result types preserve their width and signedness. The finite
+transpiler grammar does not yet include these loads.
+
+The generic fence chains include:
+
+```julia
+ptx"fence.proxy.alias.release.sys"()
+ptx"fence.proxy.alias.acquire.sys"()
+ptx"fence.proxy.async::generic.release.sync_restrict::shared::cluster::read.cluster"()
+```
+
+These require PTX ISA 9.4 and sm_90 or higher. The cluster-read fence orders
+shared-cluster reads across the specified proxies and is non-cumulative:
+do not rely on it to transitively order other accesses. The assembly tests
+check the emitted instructions and target floors; concurrent ordering still
+depends on the surrounding synchronization protocol.
+
+Stochastic conversion (`cvt.rs`) does not permit `.pzo`. Other rounding
+and saturation modifier combinations continue to be checked by ptxas.

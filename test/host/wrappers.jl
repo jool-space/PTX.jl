@@ -1973,9 +1973,9 @@ end
     @test spec.rettype === Nothing
 
     # ld `.proxy::readonly` (§9.7.10.8): the readonly-proxy load.
-    spec = build_call(:ld, (Symbol("proxy::readonly"), :global, :u32),
+    spec = build_call(:ld, (:global, :u32, Symbol("proxy::readonly")),
                       (Core.LLVMPtr{UInt32, PTX.AS.Global},))
-    @test spec.asm == "ld.proxy::readonly.global.u32 \$0, [\$1];"
+    @test spec.asm == "ld.global.u32.proxy::readonly \$0, [\$1];"
     @test spec.rettype === UInt32
 
     # prefetch `.L1::32B.valid_addr` (§9.7.10.16): the trailing qualifier

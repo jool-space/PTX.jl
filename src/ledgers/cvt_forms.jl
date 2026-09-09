@@ -226,7 +226,8 @@ end
 function schema(::CvtLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
     op === :cvt || return nothing
     :pack in mods && return nothing
-    length(mods) >= 2 || throw(miss(CvtLedger(), op, mods))
+    err = _ordinary_cvt_result_abi_error(mods)
+    err === nothing || throw(err)
     destination, source = mods[end - 1], mods[end]
     prefix = mods[1:end - 2]
     stochastic_count = count(==(:rs), prefix)

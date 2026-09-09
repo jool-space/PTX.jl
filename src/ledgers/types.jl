@@ -48,6 +48,8 @@ const DTYPE_RETTYPE = Dict{Symbol, Type}(
 # gate the chain would reserve $0 for a phantom output and ptxas would reject
 # with "Arguments mismatch".
 function _ordinary_cvt_result_abi_error(mods::Tuple{Vararg{Symbol}})
+    :rs in mods && :pzo in mods &&
+        return ArgumentError("cvt with stochastic rounding .rs does not admit .pzo")
     length(mods) >= 2 && haskey(DTYPE_RETTYPE, mods[end - 1]) &&
         haskey(DTYPE_RETTYPE, mods[end]) && return nothing
     spelling = isempty(mods) ? "cvt" : "cvt." * join(mods, ".")
@@ -146,5 +148,13 @@ function infer_rettype(op::Symbol, mods::Tuple{Vararg{Symbol}})
     c = form_contract(op, mods)
     c !== nothing && !c.returns && return Nothing
     op === :cvt && return ledger_rettype(CvtLedger(), op, mods)
+    if op === :ld && !isempty(mods) && last(mods) === Symbol("proxy::readonly")
+        # Readonly loads put the proxy after the scalar result type.
+        length(mods) >= 2 &&
+            mods[end-1] in (:b8, :b16, :b32, :b64, :u8, :u16, :u32, :u64,
+                            :s8, :s16, :s32, :s64, :f32, :f64) ||
+            throw(ArgumentError("ld.proxy::readonly requires a scalar load type before the proxy"))
+        return DTYPE_RETTYPE[mods[end-1]]
+    end
     isempty(mods) ? Nothing : get(DTYPE_RETTYPE, last(mods), Nothing)
 end

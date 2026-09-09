@@ -341,9 +341,11 @@ matrix type the ISA-fixed `UE8M0`; `scale_a_id`/`scale_b_id` must be 0 or 2.
 Transpose is not supported for the mxf4 kinds (§9.7.18.10 Table 62) and the
 transpose bits are not caller-controlled; negation is.
 
-`sparsity_version` (bit 12) is architecture-bound: 0 on the sm_100a-class
-a-variants, 1 on sm_107a — a mismatch is undefined behavior, so it is
-caller-selected, not defaulted per target. The K-dimension encoding
+`sparsity_version` (bit 12) selects both the target and the metadata layout:
+0 uses pair-wise 4:8 sparsity on sm_100a/sm_103a/sm_110a; 1 uses element-wise
+2:4 sparsity on sm_107a. A mismatch is undefined behavior. The default is 0;
+callers targeting sm_107a must explicitly pass 1 and supply matching metadata.
+The K-dimension encoding
 (bits 3 and 31) is fixed at zero: base K (dense 64 / sparse 128).
 """
 @inline function tcgen05_instr_desc_mxf4(;
