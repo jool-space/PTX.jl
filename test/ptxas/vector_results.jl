@@ -74,49 +74,49 @@ function _vr_partition_body(partition; compat = false,
 end
 
 @generated function _vr_ld75!(ptr::Core.LLVMPtr{UInt8,PTX.AS.Global},
-                              f16::Float16, bf16::UInt16,
+                              f16::Float16, bf16::BFloat16,
                               f32::Float32, packed::UInt32)
     _vr_partition_body(:ld75)
 end
 
 @generated function _vr_ld100!(ptr::Core.LLVMPtr{UInt8,PTX.AS.Global},
-                               f16::Float16, bf16::UInt16,
+                               f16::Float16, bf16::BFloat16,
                                f32::Float32, packed::UInt32)
     _vr_partition_body(:ld100)
 end
 
 @generated function _vr_atom90!(ptr::Core.LLVMPtr{UInt8,PTX.AS.Global},
-                                f16::Float16, bf16::UInt16,
+                                f16::Float16, bf16::BFloat16,
                                 f32::Float32, packed::UInt32)
     _vr_partition_body(:atom90; compat = true)
 end
 
 @generated function _vr_multimem90!(ptr::Core.LLVMPtr{UInt8,PTX.AS.Global},
-                                    f16::Float16, bf16::UInt16,
+                                    f16::Float16, bf16::BFloat16,
                                     f32::Float32, packed::UInt32)
     _vr_partition_body(:multimem90)
 end
 
 @generated function _vr_multimem_fp8!(ptr::Core.LLVMPtr{UInt8,PTX.AS.Global},
-                                      f16::Float16, bf16::UInt16,
+                                      f16::Float16, bf16::BFloat16,
                                       f32::Float32, packed::UInt32)
     _vr_partition_body(:multimem_fp8)
 end
 
 @generated function _vr_multimem90_rejected!(
-        ptr::Core.LLVMPtr{UInt8,PTX.AS.Global}, f16::Float16, bf16::UInt16,
+        ptr::Core.LLVMPtr{UInt8,PTX.AS.Global}, f16::Float16, bf16::BFloat16,
         f32::Float32, packed::UInt32)
     _vr_partition_body(:multimem90; compiler_status = :rejected)
 end
 
 @generated function _vr_multimem_fp8_rejected!(
-        ptr::Core.LLVMPtr{UInt8,PTX.AS.Global}, f16::Float16, bf16::UInt16,
+        ptr::Core.LLVMPtr{UInt8,PTX.AS.Global}, f16::Float16, bf16::BFloat16,
         f32::Float32, packed::UInt32)
     _vr_partition_body(:multimem_fp8; compiler_status = :rejected)
 end
 
 const _VR_KERNEL_TYPES = Tuple{
-    Core.LLVMPtr{UInt8,PTX.AS.Global}, Float16, UInt16, Float32, UInt32,
+    Core.LLVMPtr{UInt8,PTX.AS.Global}, Float16, BFloat16, Float32, UInt32,
 }
 
 function _vr_run_ptxas(ptx::String, target::String)

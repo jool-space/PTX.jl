@@ -142,16 +142,22 @@ operand carriers.
 
 | Modifier | Julia type |
 |---|---|
-| `.f64` / `.f32` / `.f16` | `Float64` / `Float32` / `Float16` |
+| `.f64` / `.f32` / `.f16` / `.bf16` | `Float64` / `Float32` / `Float16` / `BFloat16` |
 | `.u64` / `.u32` / `.u16` / `.u8` | `UInt64` / `UInt32` / `UInt16` / `UInt8` |
 | `.s64` / `.s32` / `.s16` / `.s8` | `Int64` / `Int32` / `Int16` / `Int8` |
 | `.b64` / `.b32` / `.b16` / `.b8` | `UInt64` / `UInt32` / `UInt16` / `UInt8` |
-| `.bf16` / `.tf32` | `UInt16` / `UInt32` (bit-pattern carrier) |
+| `.tf32` | `UInt32` (bit-pattern carrier) |
 | `.pred` | `Bool` |
 | `.f16x2` / `.bf16x2` | `UInt32` (packed FP carrier) |
 | `.e4m3x2` / `.e5m2x2` / `.e2m1x2` / `.e3m2x2` / `.ue8m0x2` / … | `UInt16` (packed FP carrier) |
 | `.e4m3x4` / `.e5m2x4` / `.e2m3x4` / `.e3m2x4` / `.e2m1x4` | `UInt32` (packed FP carrier) |
 | `.f32x2` | `UInt64` |
+
+`BFloat16` comes from BFloat16s.jl and represents numerical bf16 results,
+including individual lanes in bf16 vector results. TF32 has an
+implementation-defined bit layout in PTX, so `.tf32` uses a `UInt32` carrier.
+Packed formats such as `.bf16x2` also use integer carriers for their combined
+lanes.
 
 For reviewed pure value opcodes, an unrecognized trailing modifier is an error:
 a pure PTX instruction cannot silently become destination-less asm. Reviewed

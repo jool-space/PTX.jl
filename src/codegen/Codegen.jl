@@ -1,6 +1,7 @@
 module Codegen
 
 using Republic: @public
+using BFloat16s: BFloat16
 
 using ..IR
 using ..IR: Module, Function, Instruction, Label, RegDecl, VarDecl, Param,

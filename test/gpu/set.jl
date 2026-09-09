@@ -21,7 +21,7 @@ function _set_semantics!(out, a::Int64, b::Int64, gate::Bool,
         out[14] = UInt32(reinterpret(UInt16, ptx"set.lt.f16.f16"(h1, h2)))
         out[15] = UInt32(ptx"set.lt.u16.f16"(h1, h2))
         out[16] = UInt32(reinterpret(UInt16, ptx"set.lt.s16.f16"(h1, h2)))
-        out[17] = UInt32(ptx"set.lt.bf16.f16"(h1, h2))
+        out[17] = UInt32(reinterpret(UInt16, ptx"set.lt.bf16.f16"(h1, h2)))
         out[18] = ptx"set.lt.u32.bf16"(bf1, bf2)
         # Lane 0 compares -1 < 0 (true), lane 1 compares 2 < 1 (false).
         out[19] = ptx"set.lt.f16x2.f16x2"(UInt32(0x4000bc00), UInt32(0x3c000000))

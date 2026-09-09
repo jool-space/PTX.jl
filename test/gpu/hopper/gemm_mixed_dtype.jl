@@ -154,7 +154,7 @@ function _md_gemm_kernel!(
         # thread tid owns exactly index tid.
         raw  = smem_Braw[Int(tid) + 1]
         f    = Float32(reinterpret(Int8, raw)) * my_scale
-        value = reinterpret(BFloat16, ptx"cvt.rn.bf16.f32"(f))
+        value = ptx"cvt.rn.bf16.f32"(f)
         # Converted tile is the canonical K-major B32 layout: logical byte
         # offset n*32 + 2k, physical = logical ⊻ (bit7 → bit4) (cute
         # Swizzle<1,4,3> — the same pattern TMA :B32 writes).
