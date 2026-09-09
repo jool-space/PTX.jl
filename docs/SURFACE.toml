@@ -105,17 +105,25 @@ owner = ["src/ledgers/forms.jl", "src/ledgers/structured_results.jl"]
 
 [[family]]
 section = "9.7.7"
-title = "Comparison and Selection Instructions: set, slct"
+title = "Comparison and Selection Instructions: set"
+status = "generic"
+opcodes = ["set"]
+notes = "Closed scalar-result grammar for 1152 general, 1960 half/BF16, and 32 PTX 9.4 packed integer set forms. Destination and source carriers, Boolean predicate inputs, and legal comparison/ftz prefixes are explicit. Packed integer forms require the sm_107f family and have complete offline assembly coverage; execution on that family remains unverified."
+owner = ["src/ledgers/forms.jl", "src/ledgers/scalar_results.jl"]
+
+[[family]]
+section = "9.7.7"
+title = "Comparison and Selection Instructions: slct"
 status = "raw-only"
-opcodes = ["set", "slct"]
-notes = "Deliberately unregistered (forms.jl header): set's dtype.stype and slct's dtype.ctype tails end in an operand type, so raw misreads the destination class whenever dtype and the tail differ (loud ptxas reject) — stays raw-only until given grammar-aware entries."
+opcodes = ["slct"]
+notes = "Deliberately unregistered: slct has a dtype.ctype tail whose final type describes the condition input. It needs a reviewed destination/source grammar before joining the registered surface."
 
 [[family]]
 section = "9.7.8"
 title = "Half Precision Comparison Instructions"
 status = "generic"
 opcodes = []
-notes = "No distinct opcode heads: f16 set/setp forms share the §9.7.6 entries (same tail-grammar caveat for set)."
+notes = "No distinct opcode heads: half/BF16 set and setp share the section 9.7.7 opcode entries. The scalar-result ledger fixes numeric set results; the structured-result ledger fixes scalar/grouped setp predicates."
 
 # ── §9.7.9 Logic and Shift ────────────────────────────────────────────────────
 

@@ -90,7 +90,7 @@ function island_of(op::Symbol, mods::Tuple{Vararg{Symbol}})
             VectorLedger() : nothing
     elseif (op === :mov || op === :ldu || op === :st) && :b128 in mods
         B128Ledger()
-    elseif op === :popc || op === :clz || op === :dp2a || op === :dp4a
+    elseif op === :set || op === :popc || op === :clz || op === :dp2a || op === :dp4a
         ScalarLedger()
     elseif (op === :mul || op === :mad) && :wide in mods
         ScalarLedger()

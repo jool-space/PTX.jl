@@ -31,7 +31,8 @@ function transpile_ledger!(::ScalarLedger, cg::CodeGenState,
     s = _instruction_scalar_result_schema(inst; result_boundary = false)
     s === nothing && return false
     dst_expr, dst_names = render_dst(inst.operands[1], cg)
-    src_strs = [_render_schema_source(op, cg, kind)
+    src_strs = [s.op === :set ? _render_structured_source(op, cg, kind) :
+                               _render_schema_source(op, cg, kind)
                 for (op, kind) in zip(inst.operands[2:end], s.operands)]
     _emit_schema_call!(cg, inst, inst.modifiers, dst_expr, dst_names, src_strs)
     true

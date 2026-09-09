@@ -113,6 +113,31 @@ const _PACKED_MAX_SECTION =
 const _CVTPACK_SECTION =
     "ptx/9-instruction-set/9.7.10.25-data-movement-and-conversion-instructions-cvt.pack.md"
 
+const _GENERAL_SET_SECTION =
+    "ptx/9-instruction-set/9.7.7.1-comparison-and-selection-instructions-set.md"
+const _HALF_SET_SECTION =
+    "ptx/9-instruction-set/9.7.8.1-half-precision-comparison-instructions-set.md"
+
+# Each row fixes destination/source types before expanding comparison,
+# Boolean-combine, and ftz prefixes. The terminal type never implies a result.
+function _set_scalar_schemas!(schemas, dtype, stype, comparisons, admits_ftz,
+                              ptx_version, min_sm, section)
+    result = dtype === :f16 ? Float16 :
+             dtype === :f32 ? Float32 :
+             dtype === :s16 ? Int16 :
+             dtype === :s32 ? Int32 :
+             dtype in (:u16, :bf16) ? UInt16 : UInt32
+    source = stype in (:f16x2, :bf16x2) ? :b32 : stype
+    for cmp in comparisons, boolop in (nothing, :and, :or, :xor),
+        ftz in (admits_ftz ? (false, true) : (false,))
+        prefix = boolop === nothing ? (cmp,) : (cmp, boolop)
+        ftz && (prefix = (prefix..., :ftz))
+        args = boolop === nothing ? (source, source) : (source, source, :pred)
+        _scalar_result_schema!(schemas, :set, (prefix..., dtype, stype),
+                               result, args, ptx_version, min_sm, :baseline, section)
+    end
+end
+
 const SCALAR_RESULT_SCHEMAS = let schemas = ScalarResultSchema[]
     narrow_carrier = Dict(:f16 => :f16, :bf16 => :bf16)
     for (op, section) in ((:add, _MIXED_ADD_SECTION),
@@ -226,6 +251,53 @@ const SCALAR_RESULT_SCHEMAS = let schemas = ScalarResultSchema[]
         _scalar_result_schema!(schemas, op, (:rn, types..., :satfinite), UInt32,
                                operands, v"9.4", v"10.0", :arch, section;
                                provenance = :ptxas_compat)
+    end
+
+    basic_cmps = (:eq, :ne, :lt, :le, :gt, :ge)
+    float_cmps = (basic_cmps..., :equ, :neu, :ltu, :leu, :gtu, :geu, :num, :nan)
+    for (types, cmps, ftz) in (
+        ((:b16, :b32, :b64), (:eq, :ne), false),
+        ((:s16, :s32, :s64), basic_cmps, false),
+        ((:u16, :u32, :u64), (basic_cmps..., :lo, :ls, :hi, :hs), false),
+        ((:f32,), float_cmps, true), ((:f64,), float_cmps, false),
+    ), stype in types, dtype in (:u32, :s32, :f32)
+        _set_scalar_schemas!(schemas, dtype, stype, cmps, ftz, v"1.0",
+                             stype === :f64 ? v"1.3" : nothing, _GENERAL_SET_SECTION)
+    end
+
+    # Half destinations allow the source classes below. Only f16/f32 source
+    # comparisons admit ftz; bfloat destinations have no ftz spelling.
+    # The half grammar does not list lo/ls/hi/hs unsigned aliases.
+    for (dtype, version, sm) in ((:f16, v"4.2", v"5.3"),
+                                 (:bf16, v"7.8", v"9.0")),
+        (types, cmps) in (((:b16, :b32, :b64), (:eq, :ne)),
+                         ((:s16, :s32, :s64, :u16, :u32, :u64), basic_cmps),
+                         ((:f16, :f32, :f64), float_cmps)),
+        stype in types
+        ftz = dtype === :f16 && stype in (:f16, :f32)
+        _set_scalar_schemas!(schemas, dtype, stype, cmps, ftz,
+                             version, sm, _HALF_SET_SECTION)
+    end
+    for (stype, version, sm, ftz) in ((:f16, v"6.5", v"5.3", true),
+                                     (:bf16, v"7.8", v"9.0", false)),
+        dtype in (:u16, :s16, :u32, :s32)
+        _set_scalar_schemas!(schemas, dtype, stype, float_cmps, ftz,
+                             version, sm, _HALF_SET_SECTION)
+    end
+    for (stype, sm, ftz) in ((:f16x2, v"5.3", true), (:bf16x2, v"9.0", false)),
+        dtype in (stype, :u32, :s32)
+        version = stype === :bf16x2 ? v"7.8" : dtype === :f16x2 ? v"4.2" : v"6.5"
+        _set_scalar_schemas!(schemas, dtype, stype, float_cmps, ftz,
+                             version, sm, _HALF_SET_SECTION)
+    end
+
+    # Packed integer set writes one all-ones/zero mask per input lane.
+    for type in (:u8x4, :s8x4, :u16x2, :s16x2)
+        cmps = type in (:u8x4, :u16x2) ? (basic_cmps..., :lo, :ls, :hi, :hs) : basic_cmps
+        for cmp in cmps
+            _scalar_result_schema!(schemas, :set, (cmp, type), UInt32, (:b32, :b32),
+                                   v"9.4", v"10.7", :family, _GENERAL_SET_SECTION)
+        end
     end
 
     for (op, section) in ((:popc, _POPC_SECTION), (:clz, _CLZ_SECTION)),
