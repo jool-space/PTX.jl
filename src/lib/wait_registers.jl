@@ -1,8 +1,8 @@
 # Register dependencies belong on the wait's own asm call: returning the
 # inputs after a separate void wait leaves their SSA uses independent.
-const _RegisterWait = Union{typeof(ptx"tcgen05.wait::ld.sync.aligned"),
-                            typeof(ptx"tcgen05.wait::st.sync.aligned")}
-const _WaitRegister = Union{UInt32, Int32, Float32, UInt64, Int64, Float64}
+const _TCGen05Wait = Union{typeof(ptx"tcgen05.wait::ld.sync.aligned"),
+                          typeof(ptx"tcgen05.wait::st.sync.aligned")}
+const _RegisterScalar = Union{UInt32, Int32, Float32, UInt64, Int64, Float64}
 
 """
     wait_registers(wait_instruction, values)
@@ -34,16 +34,16 @@ The no-argument instruction call remains available. This API makes a
 compiler dependency expressible; it does not imply a demonstrated
 wrong-result bug in that existing call.
 """
-@inline wait_registers(op::_RegisterWait, value::_WaitRegister) =
+@inline wait_registers(op::_TCGen05Wait, value::_RegisterScalar) =
     only(wait_registers(op, (value,)))
 
-@inline function wait_registers(op::_RegisterWait, ::Tuple{})
+@inline function wait_registers(op::_TCGen05Wait, ::Tuple{})
     op()
     ()
 end
 
 @generated function wait_registers(::W, values::Tuple{T,Vararg{T,M}}) where
-        {W<:_RegisterWait, M, T<:_WaitRegister}
+        {W<:_TCGen05Wait, M, T<:_RegisterScalar}
     N = M + 1
     # Packing is a bit reinterpretation, preserving NaNs and signed zeros.
     # Fully explicit tuple accesses keep wide fragments out of local memory.

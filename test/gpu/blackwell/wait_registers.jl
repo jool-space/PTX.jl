@@ -31,6 +31,25 @@ function _wr_scalar_kernel!(out, input, op)
     nothing
 end
 
+function _wr_empty_tuple_kernel!(out, op)
+    result = wait_registers(op, ())
+    lane = ptx"mov.u32"(sreg"tid.x")
+    @inbounds out[lane + UInt32(1)] = result === ()
+    nothing
+end
+
+@testset "empty tuples retain the selected wait without register operands" begin
+    for (op, mnemonic) in (
+            (ptx"tcgen05.wait::ld.sync.aligned", "tcgen05.wait::ld.sync.aligned"),
+            (ptx"tcgen05.wait::st.sync.aligned", "tcgen05.wait::st.sync.aligned"))
+        tt = Tuple{CuDeviceVector{Bool,1}, typeof(op)}
+        ir = emit_llvm(_wr_empty_tuple_kernel!, tt; cap=v"10.0", feature_set=:arch)
+        @test occursin("call void asm sideeffect \"$mnemonic;\", \"~{memory}\"()", ir)
+        @test count("tcgen05.wait::", ir) == 1
+        @test ptxas_compiles(_wr_empty_tuple_kernel!, tt; cap=v"10.0", feature_set=:arch)
+    end
+end
+
 const _WR_BIT_CASES = (
     UInt32 => UInt32[0x00000000, 0x80000000, 0xffffffff],
     Int32 => UInt32[0x80000000, 0x7fffffff, 0xffffffff],
@@ -53,6 +72,15 @@ const _WR_BIT_CASES = (
 end
 
 if test_runtime_supported(@__FILE__)
+    @testset "empty tuple waits return an empty tuple in every lane" begin
+        for op in (ptx"tcgen05.wait::ld.sync.aligned", ptx"tcgen05.wait::st.sync.aligned")
+            out = CuArray(fill(false, 32))
+            @cuda threads=32 _wr_empty_tuple_kernel!(out, op)
+            CUDACore.synchronize()
+            @test all(Array(out))
+        end
+    end
+
     @testset "register waits preserve exact bits" begin
         for op in (ptx"tcgen05.wait::ld.sync.aligned", ptx"tcgen05.wait::st.sync.aligned"),
                 (T, bits) in _WR_BIT_CASES, N in (1, 3, 32, 64)
