@@ -1,9 +1,9 @@
 module CUDACoreExt
 
-# Provides the `cuTensorMapEncodeTiled` implementation for PTX.jl. Loaded
-# automatically when CUDACore is in the user's environment alongside PTX.
-# See src/tensor_map.jl for the public surface — this module only implements
-# the methods that actually invoke the CUDA driver.
+# Provides TMA descriptor encoding and upload for PTX.jl. Loaded
+# automatically when CUDACore is loaded alongside PTX.
+# See src/lib/tensor_map.jl for the public surface — this module implements
+# the methods that need the CUDA driver or device allocations.
 
 using PTX
 using PTX: CuTensorMap, tensor_map_dtype_code, tensor_map_swizzle_code,
@@ -12,7 +12,7 @@ using PTX: CuTensorMap, tensor_map_dtype_code, tensor_map_swizzle_code,
 using CUDACore: CUtensorMap, CUtensorMapDataType, CUtensorMapInterleave,
                 CUtensorMapSwizzle, CUtensorMapL2promotion,
                 CUtensorMapFloatOOBfill, cuTensorMapEncodeTiled,
-                cuuint32_t, cuuint64_t, CuPtr
+                cuuint32_t, cuuint64_t, CuPtr, CuArray, DeviceMemory
 
 # Inner-mode driver call. `tmap` is mutable so its data field is at a stable
 # pointer for the lifetime of the GC.@preserve block.
@@ -103,6 +103,15 @@ function PTX.tensor_map_tile_2d(
         swizzle = swizzle,
         oob_fill = oob_fill,
     )
+end
+
+function PTX.upload_tma_descriptor(tmap::CuTensorMap)
+    blob = CuArray{UInt8, 1, DeviceMemory}(undef, sizeof(tmap))
+    copyto!(blob, collect(tmap.data))
+    # Host-side bit reinterpretation: AS.Const is the wrapper carrier
+    # convention, while blob owns a global-memory allocation.
+    ptr = GC.@preserve blob reinterpret(PTX.TMADescriptorPtr, UInt64(pointer(blob)))
+    return (; ptr, blob)
 end
 
 end # module

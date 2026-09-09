@@ -1,4 +1,4 @@
-# Host-side `cuTensorMapEncodeTiled` wrapper.
+# Host-side TMA descriptor encoding and upload.
 #
 # The CUDA driver packs (tensor shape, strides, dtype, swizzle, OOB
 # behaviour) into a 128-byte opaque blob (`CUtensorMap`). The kernel reads
@@ -11,6 +11,7 @@
 #   - Symbol → driver-enum codes for swizzle / OOB-fill / L2-promotion / etc.
 #   - Type/Symbol → tensor-map dtype code
 #   - `tensor_map_encode_tiled(...)` stub
+#   - `upload_tma_descriptor(...)` stub
 #
 # The actual `cuTensorMapEncodeTiled` ccall lives in `ext/CUDACoreExt.jl`
 # so PTX.jl doesn't pick up CUDACore as a hard dependency. Reference for
@@ -28,12 +29,17 @@ end
 Base.sizeof(::CuTensorMap) = 128
 Base.sizeof(::Type{CuTensorMap}) = 128
 
-# Device-side kernel-arg type for a TMA descriptor: a 128-byte blob in
-# `.const` address space, passed as `Core.LLVMPtr{UInt8, AS.Const}`. Kernels
-# receive this after a host-side `reinterpret(...)` of the device-uploaded
-# `CuTensorMap` blob pointer. Centralizing the alias here means kernel
-# signatures read as `tmap::TMADescriptorPtr` instead of repeating the
-# full `Core.LLVMPtr{UInt8, AS.Const}` spelling at every call site.
+"""
+    TMADescriptorPtr = Core.LLVMPtr{UInt8, AS.Const}
+
+Borrowed kernel-argument pointer for a 128-byte TMA descriptor. `AS.Const`
+is the carrier convention used by PTX.jl's TMA wrappers; the allocation
+created by [`upload_tma_descriptor`](@ref) lives in device **global memory**.
+The uploader converts the allocation's raw address to this type on the host.
+
+This pointer keeps neither the descriptor allocation nor its referenced
+tensor alive. Preserve their owners until all GPU work using them completes.
+"""
 const TMADescriptorPtr = Core.LLVMPtr{UInt8, AS.Const}
 
 # --- Symbol → driver enum values --------------------------------------------
@@ -151,6 +157,47 @@ for keeping `box_cols * elem_bytes` consistent with the swizzle (e.g. 128B
 for `:B128`).
 """
 function tensor_map_tile_2d end
+
+"""
+    upload_tma_descriptor(tmap::CuTensorMap) -> (; ptr, blob)
+
+Copy the 128 bytes of `tmap` into a new device global-memory allocation.
+Returns a `NamedTuple` with:
+
+- `blob`: the `CuArray{UInt8,1}` that owns the descriptor allocation.
+- `ptr::TMADescriptorPtr`: its borrowed kernel-argument pointer, converted
+  from the allocation's raw address on the **host**. `AS.Const` is the TMA
+  wrapper carrier convention; the allocation is in **global memory**.
+
+The upload is a snapshot: later changes to `tmap.data` do not update `blob`.
+Keep the returned owner (or its `blob`) alive until all GPU work using `ptr`
+completes. The source tensor whose address was encoded in `tmap` remains
+caller-owned and must also stay alive. Keeping only `ptr` retains neither
+allocation. Use `GC.@preserve` around launch and completion, for example:
+
+```julia
+using PTX, CUDA
+
+src = CuArray(reshape(UInt16.(1:64), 8, 8))
+GC.@preserve src begin
+    tmap = PTX.tensor_map_tile_2d(:u16, pointer(src), 8, 8, 8, 8;
+                                 swizzle=:NONE)
+    descriptor = PTX.upload_tma_descriptor(tmap)
+    GC.@preserve descriptor begin
+        @cuda kernel!(descriptor.ptr)  # kernel accepts PTX.TMADescriptorPtr
+        CUDA.synchronize()
+    end
+end
+```
+
+Allocation and upload use the current CUDA device and stream. Order work
+on another stream after the upload before using `ptr` there.
+
+Requires the CUDACore package extension: load CUDA.jl or CUDACore itself.
+Without it this function has no methods; a `MethodError` hint names the
+missing package.
+"""
+function upload_tma_descriptor end
 
 # --- internal helpers (no CUDACore needed) ----------------------------------
 
