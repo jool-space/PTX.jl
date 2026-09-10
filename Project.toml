@@ -30,6 +30,6 @@ LLVM = "9.7.1"
 # CUDA 6.2+ environment) without forcing the ~60 MB artifact on host-only
 # use. Bumping this means regenerating the registry (gen/) and reviewing
 # the diff; standing conformance lives in test/host/conformance.jl.
-NVPTX_LLVM_Backend_jll = "22"
+NVPTX_LLVM_Backend_jll = "22, 23.1"
 Republic = "2"
 julia = "1.10"
