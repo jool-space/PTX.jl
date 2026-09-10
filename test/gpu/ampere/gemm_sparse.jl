@@ -31,17 +31,13 @@
 #     of the first kept element, high 2 bits = the second (ascending).
 #   D: d[i] = D[g + 8*(i>>1), 2tig + (i&1)] — as every m16n8kX f32 shape.
 #
-# Storage is typed CuArray{BFloat16}; host packing is bit-level (f32→bf16
-# broadcast crashes LLVM on Julia 1.12.6/x86 — see conv2d_fprop.jl).
+# Storage uses BFloat16 for both host and device tensors.
 
 using Random
 using Microfloats: BFloat16
 
-rne_bf16_bits(x::Float32) =
-    (b = reinterpret(UInt32, x);
-     UInt16((b + 0x7fff + ((b >> 16) & 0x1)) >> 16))
-to_bf16(x::Array{Float32}) = collect(reinterpret(BFloat16, rne_bf16_bits.(x)))
-quantize_bf16(x) = reinterpret.(Float32, UInt32.(rne_bf16_bits.(x)) .<< 16)
+to_bf16(x::Array{Float32}) = BFloat16.(x)
+quantize_bf16(x) = Float32.(BFloat16.(x))
 
 const SP_BM, SP_BN, SP_BK = 16, 8, 32
 

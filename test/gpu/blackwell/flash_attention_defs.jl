@@ -118,6 +118,7 @@ using PTX.MBarriers: BarrierSet, barrierset_init!, barrier_bytes,
                      barrier_try_wait
 using PTX.NVVM                    # @nvvm_str for vote.ballot.sync
 using CUDACore
+using Microfloats: BFloat16
 using Random
 
 const FAB_BM       = 128            # rows per Q subtile
@@ -617,7 +618,7 @@ end
 # ── the kernel ──────────────────────────────────────────────────────────
 
 function fab_kernel!(
-        O::CuDeviceVector{UInt16, 1},
+        O::CuDeviceVector{BFloat16, 1},
         tma_Q::PTX.TMADescriptorPtr,
         tma_K::PTX.TMADescriptorPtr,
         tma_V::PTX.TMADescriptorPtr,
@@ -633,8 +634,8 @@ function fab_kernel!(
     # hardware under Pkg.test's --check-bounds=yes, i.e. with these calls
     # present, so `.reqntid` alone is what makes ptxas honor setmaxnreg —
     # but the checks are dead weight in a hand-verified SMEM layout.
-    smem_q    = @inbounds CuDynamicSharedArray(UInt16, FAB_Q_BYTES ÷ 2, FAB_SMEM_Q)
-    smem_kv   = @inbounds CuDynamicSharedArray(UInt16, FAB_KV_SLOTS * FAB_TILE_BYTES ÷ 2,
+    smem_q    = @inbounds CuDynamicSharedArray(BFloat16, FAB_Q_BYTES ÷ 2, FAB_SMEM_Q)
+    smem_kv   = @inbounds CuDynamicSharedArray(BFloat16, FAB_KV_SLOTS * FAB_TILE_BYTES ÷ 2,
                                                FAB_SMEM_KV)
     stats     = @inbounds CuDynamicSharedArray(Float32, 512, FAB_SMEM_STATS)
     bar_mem   = @inbounds CuDynamicSharedArray(UInt64, FAB_BAR_BYTES ÷ 8, FAB_SMEM_BARS)
@@ -964,21 +965,21 @@ end
 # f32 reference with bf16-quantized inputs, per (batch*head) slice.
 function fab_cpu_ref(Q::Matrix{Float32}, K::Matrix{Float32},
                       V::Matrix{Float32}, sm_scale::Float32)
-    Qb = bf16_to_f32.(bf16_bits.(Q))
-    Kb = bf16_to_f32.(bf16_bits.(K))
-    Vb = bf16_to_f32.(bf16_bits.(V))
+    Qb = Float32.(BFloat16.(Q))
+    Kb = Float32.(BFloat16.(K))
+    Vb = Float32.(BFloat16.(V))
     scores = (Qb * Kb') .* sm_scale
     rmax = maximum(scores; dims = 2)
     ex = exp.(scores .- rmax)
     return (ex ./ sum(ex; dims = 2)) * Vb
 end
 
-# (rows, 128) f32 → bf16 bits, row-major (HD-fast) for TMA/global IO.
+# (rows, 128) f32 → BFloat16, row-major (HD-fast) for TMA/global IO.
 function fab_pack(X::Matrix{Float32})
     rows, hd = size(X)
-    out = Array{UInt16}(undef, hd, rows)
+    out = Array{BFloat16}(undef, hd, rows)
     for r in 1:rows, h in 1:hd
-        @inbounds out[h, r] = bf16_bits(X[r, h])
+        @inbounds out[h, r] = BFloat16(X[r, h])
     end
     out
 end

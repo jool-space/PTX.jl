@@ -26,17 +26,13 @@
 # G is tiny here (≤ 8 warps); a real stream-K sizes G to one wave.
 #
 # Tiling per CTA-segment is the single-warp 16×8 bf16 m16n8k16 of gemm.jl,
-# typed BFloat16 storage (bit-level host packing — f32→bf16 broadcast
-# crashes LLVM on Julia 1.12.6/x86). Fragment layout: see gemm.jl.
+# with BFloat16 storage. Fragment layout: see gemm.jl.
 
 using Random
 using Microfloats: BFloat16
 
-rne_bf16_bits(x::Float32) =
-    (b = reinterpret(UInt32, x);
-     UInt16((b + 0x7fff + ((b >> 16) & 0x1)) >> 16))
-to_bf16(x::Array{Float32}) = collect(reinterpret(BFloat16, rne_bf16_bits.(x)))
-quantize_bf16(x) = reinterpret.(Float32, UInt32.(rne_bf16_bits.(x)) .<< 16)
+to_bf16(x::Array{Float32}) = BFloat16.(x)
+quantize_bf16(x) = Float32.(BFloat16.(x))
 
 const SK_BM, SK_BN, SK_BK = 16, 8, 16
 

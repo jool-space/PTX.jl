@@ -43,8 +43,8 @@ function _pab_gemm_kernel!(
         descs_A::CuDeviceVector{UInt64, 1},
         descs_B::CuDeviceVector{UInt64, 1})
 
-    smem_A = CuStaticSharedArray(UInt16, PAB_BM * PAB_BK)
-    smem_B = CuStaticSharedArray(UInt16, PAB_BK * PAB_BN)
+    smem_A = CuStaticSharedArray(BFloat16, PAB_BM * PAB_BK)
+    smem_B = CuStaticSharedArray(BFloat16, PAB_BK * PAB_BN)
     mbar   = CuStaticSharedArray(UInt64, 1)
 
     a_ptr  = pointer(smem_A)
@@ -146,8 +146,8 @@ if test_runtime_supported(@__FILE__)
         # addresses is uniform-stride (that's the ptr-array point).
         A_f32s = Vector{Matrix{Float32}}(undef, PAB_L)
         B_f32s = Vector{Matrix{Float32}}(undef, PAB_L)
-        A_ds   = Vector{CuArray{UInt16, 2}}(undef, PAB_L)
-        B_ds   = Vector{CuArray{UInt16, 2}}(undef, PAB_L)
+        A_ds   = Vector{CuArray{BFloat16, 2}}(undef, PAB_L)
+        B_ds   = Vector{CuArray{BFloat16, 2}}(undef, PAB_L)
         # upload_tma_descriptor blobs MUST stay alive through the launch.
         ups_A  = Vector{Any}(undef, PAB_L)
         ups_B  = Vector{Any}(undef, PAB_L)
@@ -159,13 +159,13 @@ if test_runtime_supported(@__FILE__)
             B_f32s[l] = B_f32
 
             # K-fast packing, same convention as gemm_warpgroup.jl.
-            A_packed = Array{UInt16}(undef, PAB_BK, PAB_BM)
-            B_packed = Array{UInt16}(undef, PAB_BK, PAB_BN)
+            A_packed = Array{BFloat16}(undef, PAB_BK, PAB_BM)
+            B_packed = Array{BFloat16}(undef, PAB_BK, PAB_BN)
             for m in 1:PAB_BM, k in 1:PAB_BK
-                A_packed[k, m] = bf16_bits(A_f32[m, k])
+                A_packed[k, m] = BFloat16(A_f32[m, k])
             end
             for n in 1:PAB_BN, k in 1:PAB_BK
-                B_packed[k, n] = bf16_bits(B_f32[k, n])
+                B_packed[k, n] = BFloat16(B_f32[k, n])
             end
             A_ds[l] = CuArray(A_packed)
             B_ds[l] = CuArray(B_packed)

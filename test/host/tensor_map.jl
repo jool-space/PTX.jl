@@ -48,6 +48,7 @@ end
 
     # Symbol form covers types without a Julia counterpart.
     @test tensor_map_dtype_code(:bf16) == 9
+    @test tensor_map_dtype_code(BFloat16) == 9
     @test tensor_map_dtype_code(:tf32) == 11
     @test tensor_map_dtype_code(:u4_align8b) == 13
     @test tensor_map_dtype_code(:u6_align16b) == 15

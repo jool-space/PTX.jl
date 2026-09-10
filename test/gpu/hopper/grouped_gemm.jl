@@ -46,8 +46,8 @@ function _grouped_gemm_kernel!(
         tma_B::PTX.TMADescriptorPtr,
         M::Int32, N::Int32, K::Int32)
 
-    smem_A = CuStaticSharedArray(UInt16, GG_BM * GG_BK)
-    smem_B = CuStaticSharedArray(UInt16, GG_BK * GG_BN)
+    smem_A = CuStaticSharedArray(BFloat16, GG_BM * GG_BK)
+    smem_B = CuStaticSharedArray(BFloat16, GG_BK * GG_BN)
     mbar   = CuStaticSharedArray(UInt64, 1)
 
     a_ptr  = pointer(smem_A)
@@ -189,8 +189,8 @@ if test_runtime_supported(@__FILE__)
         _, _, N = size(B3)
         @assert size(B3) == (G, K, N)
         # Round f32 → bf16 → f32 to match what the kernel sees.
-        Ab = bf16_to_f32.(bf16_bits.(A3))
-        Bb = bf16_to_f32.(bf16_bits.(B3))
+        Ab = Float32.(BFloat16.(A3))
+        Bb = Float32.(BFloat16.(B3))
         C = zeros(Float32, G, M, N)
         for g in 1:G, m in 1:M, n in 1:N
             s = 0f0
@@ -207,9 +207,9 @@ if test_runtime_supported(@__FILE__)
         # and lay out in memory as (G*M, K) row-major with K innermost, which
         # in Julia col-major terms is `(K, G*M)`.
         G, M, K = size(A3)
-        out = Array{UInt16}(undef, K, G * M)
+        out = Array{BFloat16}(undef, K, G * M)
         for g in 1:G, m in 1:M, k in 1:K
-            out[k, (g - 1) * M + m] = bf16_bits(A3[g, m, k])
+            out[k, (g - 1) * M + m] = BFloat16(A3[g, m, k])
         end
         return out
     end
@@ -219,9 +219,9 @@ if test_runtime_supported(@__FILE__)
         # (col-major (K, G*N) → K innermost in memory, N-cols striped across
         # groups). Matches the TMA descriptor with innermost=K below.
         G, K, N = size(B3)
-        out = Array{UInt16}(undef, K, G * N)
+        out = Array{BFloat16}(undef, K, G * N)
         for g in 1:G, k in 1:K, n in 1:N
-            out[k, (g - 1) * N + n] = bf16_bits(B3[g, k, n])
+            out[k, (g - 1) * N + n] = BFloat16(B3[g, k, n])
         end
         return out
     end

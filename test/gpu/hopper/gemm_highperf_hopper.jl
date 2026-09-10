@@ -54,7 +54,7 @@ using Random
 # in bf16 elements. Helper inlines + unrolls the group loop via @generated
 # so the wgmma frag indices are literals at the @asmcall site.
 @inline @generated function _ghh_stmatrix_epilogue!(
-        smem_base::Core.LLVMPtr{UInt16, AS.Shared},
+        smem_base::Core.LLVMPtr{BFloat16, AS.Shared},
         frag::NTuple{N, Float32},
         lane::UInt32,
         ::Val{ROW_STRIDE},
@@ -188,7 +188,7 @@ end
 # ── Kernel ─────────────────────────────────────────────────────────────
 
 function _ghh_gemm_kernel!(
-        C::CuDeviceVector{UInt16, 1},
+        C::CuDeviceVector{BFloat16, 1},
         tma_A::PTX.TMADescriptorPtr,
         tma_B::PTX.TMADescriptorPtr,
         tma_C::PTX.TMADescriptorPtr,
@@ -198,9 +198,9 @@ function _ghh_gemm_kernel!(
     # Dynamic SMEM: A / B ring buffers, C epilogue tile, mbarriers,
     # Hilbert schedule slice. Offsets are byte counts into the dynamic
     # block; CuDynamicSharedArray takes byte offsets.
-    smem_A      = CuDynamicSharedArray(UInt16, GHH_N_STAGES * GHH_BM_CTA * GHH_BK_TILE, GHH_OFF_A)
-    smem_B      = CuDynamicSharedArray(UInt16, GHH_N_STAGES * GHH_BK_TILE * GHH_BN, GHH_OFF_B)
-    smem_C      = CuDynamicSharedArray(UInt16, GHH_BM_CTA * GHH_BN, GHH_OFF_C)
+    smem_A      = CuDynamicSharedArray(BFloat16, GHH_N_STAGES * GHH_BM_CTA * GHH_BK_TILE, GHH_OFF_A)
+    smem_B      = CuDynamicSharedArray(BFloat16, GHH_N_STAGES * GHH_BK_TILE * GHH_BN, GHH_OFF_B)
+    smem_C      = CuDynamicSharedArray(BFloat16, GHH_BM_CTA * GHH_BN, GHH_OFF_C)
     mbar_full   = CuDynamicSharedArray(UInt64, GHH_N_STAGES, GHH_OFF_FULL)
     mbar_empty  = CuDynamicSharedArray(UInt64, GHH_N_STAGES, GHH_OFF_EMPTY)
     smem_sched  = CuDynamicSharedArray(UInt32, GHH_SPACE_LEN, GHH_OFF_SCHED)
@@ -382,7 +382,7 @@ end
 # ── Cross-arch ptxas validation ────────────────────────────────────────
 
 @testset "gemm_highperf_hopper compiles at sm_90a" begin
-    types = Tuple{CuDeviceVector{UInt16, 1},
+    types = Tuple{CuDeviceVector{BFloat16, 1},
                   PTX.TMADescriptorPtr, PTX.TMADescriptorPtr, PTX.TMADescriptorPtr,
                   CuDeviceVector{UInt32, 1},
                   Int32, Int32, Int32}
@@ -438,17 +438,17 @@ if test_runtime_supported(@__FILE__)
         A_f32 = randn(rng, Float32, M_total, K_test) .* 0.05f0
         B_f32 = randn(rng, Float32, K_test, N_total) .* 0.05f0
 
-        A_packed = Array{UInt16}(undef, K_test, M_total)
-        B_packed = Array{UInt16}(undef, K_test, N_total)
+        A_packed = Array{BFloat16}(undef, K_test, M_total)
+        B_packed = Array{BFloat16}(undef, K_test, N_total)
         for m in 1:M_total, k in 1:K_test
-            A_packed[k, m] = bf16_bits(A_f32[m, k])
+            A_packed[k, m] = BFloat16(A_f32[m, k])
         end
         for k in 1:K_test, n in 1:N_total
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)
-        C_d = CUDACore.zeros(UInt16, M_total * N_total)
+        C_d = CUDACore.zeros(BFloat16, M_total * N_total)
 
         tmap_A = tensor_map_tile_2d(:bf16, pointer(A_d),
             M_total, K_test, GHH_BM_CTA, GHH_BK_TILE; swizzle = :B128)
@@ -486,7 +486,7 @@ if test_runtime_supported(@__FILE__)
         C_packed = reshape(Array(C_d), M_total, N_total)
         C_got    = Array{Float32}(undef, M_total, N_total)
         for m in 1:M_total, n in 1:N_total
-            C_got[m, n] = bf16_to_f32(C_packed[m, n])
+            C_got[m, n] = Float32(C_packed[m, n])
         end
         C_ref = bf16_gemm_ref(A_f32, B_f32)
         return C_got, C_ref

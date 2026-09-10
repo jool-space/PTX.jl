@@ -113,10 +113,10 @@ function _fa_kernel!(
         N_seq::Int32,
         qk_scale_log2e::Float32)
 
-    sQ    = CuStaticSharedArray(UInt16, FA_BM * FA_HD)    # 64 × 16 bf16 = 2048 B
-    sK    = CuStaticSharedArray(UInt16, FA_HD * FA_BN)    # 16 × 16 bf16 = 512 B
-    sV    = CuStaticSharedArray(UInt16, FA_BN * FA_HD)    # 16 × 16 bf16 = 512 B
-    sP    = CuStaticSharedArray(UInt16, FA_BM * FA_BN)    # 64 × 16 bf16 = 2048 B
+    sQ    = CuStaticSharedArray(BFloat16, FA_BM * FA_HD)    # 64 × 16 bf16 = 2048 B
+    sK    = CuStaticSharedArray(BFloat16, FA_HD * FA_BN)    # 16 × 16 bf16 = 512 B
+    sV    = CuStaticSharedArray(BFloat16, FA_BN * FA_HD)    # 16 × 16 bf16 = 512 B
+    sP    = CuStaticSharedArray(BFloat16, FA_BM * FA_BN)    # 64 × 16 bf16 = 2048 B
     bar_q = CuStaticSharedArray(UInt64, 1)
     bar_k = CuStaticSharedArray(UInt64, 1)
 
@@ -353,9 +353,9 @@ if test_runtime_supported(@__FILE__)
                          V::Array{Float32, 2}, sm_scale::Float32)
         # Q (M, HD), K (N, HD), V (N, HD).
         M, HD = size(Q); N, _ = size(K)
-        Qb = bf16_to_f32.(bf16_bits.(Q))
-        Kb = bf16_to_f32.(bf16_bits.(K))
-        Vb = bf16_to_f32.(bf16_bits.(V))
+        Qb = Float32.(BFloat16.(Q))
+        Kb = Float32.(BFloat16.(K))
+        Vb = Float32.(BFloat16.(V))
         # scores = Q × K^T (M × N)
         scores = Qb * Kb' .* sm_scale
         # softmax over N axis (per row)
@@ -369,9 +369,9 @@ if test_runtime_supported(@__FILE__)
     function _fa_pack_K_fast_Q(Q::Array{Float32, 2})
         # Q (M, HD) → Julia (HD, M) col-major (HD-fast).
         M, HD = size(Q)
-        out = Array{UInt16}(undef, HD, M)
+        out = Array{BFloat16}(undef, HD, M)
         for m in 1:M, h in 1:HD
-            out[h, m] = bf16_bits(Q[m, h])
+            out[h, m] = BFloat16(Q[m, h])
         end
         out
     end
@@ -379,9 +379,9 @@ if test_runtime_supported(@__FILE__)
     function _fa_pack_HD_fast(X::Array{Float32, 2})
         # X (N, HD) → Julia (HD, N) col-major (HD-fast).
         N, HD = size(X)
-        out = Array{UInt16}(undef, HD, N)
+        out = Array{BFloat16}(undef, HD, N)
         for n in 1:N, h in 1:HD
-            out[h, n] = bf16_bits(X[n, h])
+            out[h, n] = BFloat16(X[n, h])
         end
         out
     end
@@ -389,9 +389,9 @@ if test_runtime_supported(@__FILE__)
     function _fa_pack_BN_fast(X::Array{Float32, 2})
         # X (N, HD) → Julia (N, HD) col-major (N-fast = BN-fast within tile).
         N, HD = size(X)
-        out = Array{UInt16}(undef, N, HD)
+        out = Array{BFloat16}(undef, N, HD)
         for n in 1:N, h in 1:HD
-            out[n, h] = bf16_bits(X[n, h])
+            out[n, h] = BFloat16(X[n, h])
         end
         out
     end

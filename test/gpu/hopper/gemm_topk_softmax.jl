@@ -81,8 +81,8 @@ function _tks_gemm_kernel!(
         tma_B::PTX.TMADescriptorPtr,
         alpha::Float32)
 
-    smem_A = CuStaticSharedArray(UInt16, TKS_BM * TKS_BK)
-    smem_B = CuStaticSharedArray(UInt16, TKS_BK * TKS_BN)
+    smem_A = CuStaticSharedArray(BFloat16, TKS_BM * TKS_BK)
+    smem_B = CuStaticSharedArray(BFloat16, TKS_BK * TKS_BN)
     mbar   = CuStaticSharedArray(UInt64, 1)
 
     a_ptr  = pointer(smem_A)
@@ -198,13 +198,13 @@ if test_runtime_supported(@__FILE__)
         alpha = 1.25f0
 
         # K-fast packing for both operands (gemm_warpgroup.jl convention).
-        A_packed = Array{UInt16}(undef, TKS_BK, TKS_BM)
-        B_packed = Array{UInt16}(undef, TKS_BK, TKS_BN)
+        A_packed = Array{BFloat16}(undef, TKS_BK, TKS_BM)
+        B_packed = Array{BFloat16}(undef, TKS_BK, TKS_BN)
         for m in 1:TKS_BM, k in 1:TKS_BK
-            A_packed[k, m] = bf16_bits(A_f32[m, k])
+            A_packed[k, m] = BFloat16(A_f32[m, k])
         end
         for n in 1:TKS_BN, k in 1:TKS_BK
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)

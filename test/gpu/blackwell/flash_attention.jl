@@ -10,7 +10,7 @@ include("flash_attention_defs.jl")
 # ── Cross-arch ptxas validation ─────────────────────────────────────────
 
 @testset "flash_attention_blackwell compiles at sm_100a" begin
-    types(cfg) = Tuple{CuDeviceVector{UInt16, 1},
+    types(cfg) = Tuple{CuDeviceVector{BFloat16, 1},
                        PTX.TMADescriptorPtr, PTX.TMADescriptorPtr, PTX.TMADescriptorPtr,
                        UInt32, UInt32, UInt32, UInt32, UInt32, Float32,
                        CuDeviceVector{UInt32, 1}, typeof(Val(cfg))}
@@ -174,7 +174,7 @@ if test_runtime_supported(@__FILE__)
         k_const = upload_tma_descriptor(tmaps[2])
         v_const = upload_tma_descriptor(tmaps[3])
 
-        O_d = CUDACore.zeros(UInt16, total_rows * FAB_HD)
+        O_d = CUDACore.zeros(BFloat16, total_rows * FAB_HD)
         dbg_d = CUDACore.zeros(UInt32, FAB_THREADS)
         args = (O_d, q_const.ptr, k_const.ptr, v_const.ptr,
                 UInt32(S), UInt32(mb_shift), UInt32(n_mblocks - 1),
@@ -192,7 +192,7 @@ if test_runtime_supported(@__FILE__)
         maxdiff = 0.0f0
         for i in 1:bh
             r = ((i - 1) * S + 1):(i * S)
-            O_got = permutedims(bf16_to_f32.(O_packed[:, r]))  # (S, HD)
+            O_got = permutedims(Float32.(O_packed[:, r]))  # (S, HD)
             O_ref = fab_cpu_ref(Q[r, :], K[r, :], V[r, :], sm_scale)
             maxdiff = max(maxdiff, maximum(abs.(O_got - O_ref)))
         end

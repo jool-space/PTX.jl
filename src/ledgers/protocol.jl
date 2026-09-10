@@ -154,9 +154,8 @@ function operand_accepts(kind::Symbol, ::Type{T}) where {T}
         # established bit-size carrier.
         return T === Float16 || T === UInt16
     elseif kind === :bf16
-        # PTX §5.2.3 requires a bf16 value to live in a .b16 register; UInt16
-        # is PTX.jl's established bit-pattern carrier.
-        return T === UInt16
+        # PTX §5.2.3 requires a bf16 value to live in a .b16 register.
+        return T === BFloat16 || T === UInt16
     elseif kind === :f32
         # A .b32 register is compatible with .f32 (§6.1).
         return T === Float32 || T === UInt32
@@ -171,7 +170,7 @@ function operand_accepts(kind::Symbol, ::Type{T}) where {T}
     elseif kind === :u64 || kind === :s64
         return T === UInt64 || T === Int64 || is_integer_immediate(T)
     elseif kind === :b16
-        return T === UInt16 || T === Int16 || T === Float16 ||
+        return T === UInt16 || T === Int16 || T === Float16 || T === BFloat16 ||
                is_integer_immediate(T)
     elseif kind === :b32
         # PTX §6.1 makes a bit-size type compatible with every same-size
@@ -198,7 +197,7 @@ function operand_description(kind::Symbol)
     kind === :pred && return "Bool predicate"
     kind === :imm8 && return "Val{N} with integer N in 0:255"
     kind === :f16  && return "Float16 or UInt16 bit carrier (.f16-compatible)"
-    kind === :bf16 && return "UInt16 (.b16 carrier for bf16)"
+    kind === :bf16 && return "BFloat16 or UInt16 bit carrier (.bf16-compatible)"
     kind === :f32  && return "Float32 or UInt32 bit carrier (.f32-compatible)"
     kind === :f64  && return "Float64 or UInt64 bit carrier (.f64-compatible)"
     kind === :u16  && return "a 16-bit integer (.u16-compatible)"

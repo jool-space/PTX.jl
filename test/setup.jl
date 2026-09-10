@@ -19,6 +19,7 @@
 # in the thrown error when it rejects.
 
 using CUDACore
+using Microfloats: BFloat16
 using CUDATools
 using CUDACore.GPUCompiler: methodinstance, CompilerJob, CompilerConfig, PTXCompilerTarget
 using PTX: upload_tma_descriptor
@@ -182,18 +183,13 @@ end
 # --- Hopper kernel test helpers ---------------------------------------------
 # Patterns repeated 3+ times across the test/gpu/hopper/*.jl kernels.
 
-# `f32 → bf16` (round-to-nearest-even) and `bf16 → f32` reinterpretations
-# used by every bf16 kernel's host-side reference + tile-pack code.
-bf16_bits(x::Float32) = UInt16((reinterpret(UInt32, x) + UInt32(0x8000)) >> 16)
-bf16_to_f32(b::UInt16) = reinterpret(Float32, UInt32(b) << 16)
-
 # bf16-round-tripping triple-loop matmul. Mirrors what a bf16-tile kernel
 # actually computes: round both inputs to bf16, then accumulate in f32.
 # Used 4× in the Hopper GEMM/FA reference paths.
 function bf16_gemm_ref(A::Array{Float32, 2}, B::Array{Float32, 2})
     M, K = size(A); _, N = size(B)
-    Ab = bf16_to_f32.(bf16_bits.(A))
-    Bb = bf16_to_f32.(bf16_bits.(B))
+    Ab = Float32.(BFloat16.(A))
+    Bb = Float32.(BFloat16.(B))
     D = zeros(Float32, M, N)
     for m in 1:M, n in 1:N, k in 1:K
         @inbounds D[m, n] += Ab[m, k] * Bb[k, n]

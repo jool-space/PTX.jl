@@ -38,8 +38,8 @@ function _hopper_warpgroup_gemm_kernel!(
         tma_A::PTX.TMADescriptorPtr,
         tma_B::PTX.TMADescriptorPtr)
 
-    smem_A = CuStaticSharedArray(UInt16, HOPPER_BM * HOPPER_BK)
-    smem_B = CuStaticSharedArray(UInt16, HOPPER_BK * HOPPER_BN)
+    smem_A = CuStaticSharedArray(BFloat16, HOPPER_BM * HOPPER_BK)
+    smem_B = CuStaticSharedArray(BFloat16, HOPPER_BK * HOPPER_BN)
     mbar   = CuStaticSharedArray(UInt64, 1)
 
     a_ptr  = pointer(smem_A)
@@ -171,13 +171,13 @@ if test_runtime_supported(@__FILE__)
         # Pack to bf16. Memory layout = K-fast for both:
         #   A: Julia (K, M) col-major → K innermost
         #   B: Julia (K, N) col-major → K innermost
-        A_packed = Array{UInt16}(undef, HOPPER_BK, HOPPER_BM)
-        B_packed = Array{UInt16}(undef, HOPPER_BK, HOPPER_BN)
+        A_packed = Array{BFloat16}(undef, HOPPER_BK, HOPPER_BM)
+        B_packed = Array{BFloat16}(undef, HOPPER_BK, HOPPER_BN)
         for m in 1:HOPPER_BM, k in 1:HOPPER_BK
-            A_packed[k, m] = bf16_bits(A_f32[m, k])
+            A_packed[k, m] = BFloat16(A_f32[m, k])
         end
         for n in 1:HOPPER_BN, k in 1:HOPPER_BK
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)

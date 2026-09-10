@@ -76,11 +76,6 @@ const MD_A_BYTES    = MD_BM * MD_BK * 2      # bf16 A tile      (2048)
 const MD_BRAW_BYTES = MD_BN * MD_BK          # raw s8 B tile    (128)
 const MD_LOAD_BYTES = MD_A_BYTES + MD_BRAW_BYTES
 
-# f32 → bf16 bits, round-to-nearest (same formula as setup.jl's bf16_bits,
-# inlined here so the device kernel doesn't depend on a test-harness helper).
-@inline _md_bf16_bits(x::Float32) =
-    UInt16((reinterpret(UInt32, x) + UInt32(0x8000)) >> 16)
-
 function _md_gemm_kernel!(
         D::CuDeviceVector{Float32, 1},
         scale_B::CuDeviceVector{Float32, 1},   # one dequant scale per B column
@@ -88,10 +83,10 @@ function _md_gemm_kernel!(
         tma_Braw::PTX.TMADescriptorPtr,
         K::Int32)
 
-    smem_A    = CuStaticSharedArray(UInt16, MD_BM * MD_BK)
+    smem_A    = CuStaticSharedArray(BFloat16, MD_BM * MD_BK)
     smem_Braw = CuStaticSharedArray(UInt8,  MD_BN * MD_BK)
     # Converted-B tile (256 B) + 256 B slack for in-kernel 256-B alignment.
-    smem_Bcvt = CuStaticSharedArray(UInt16, MD_BN * MD_BK + 128)
+    smem_Bcvt = CuStaticSharedArray(BFloat16, MD_BN * MD_BK + 128)
     mbar      = CuStaticSharedArray(UInt64, 1)
 
     a_ptr    = pointer(smem_A)
@@ -159,13 +154,13 @@ function _md_gemm_kernel!(
         # thread tid owns exactly index tid.
         raw  = smem_Braw[Int(tid) + 1]
         f    = Float32(reinterpret(Int8, raw)) * my_scale
-        bits = _md_bf16_bits(f)
+        value = ptx"cvt.rn.bf16.f32"(f)
         # Converted tile is the canonical K-major B32 layout: logical byte
         # offset n*32 + 2k, physical = logical ⊻ (bit7 → bit4) (cute
         # Swizzle<1,4,3> — the same pattern TMA :B32 writes).
         logical  = (n_row << UInt32(5)) + (k_col << UInt32(1))
         physical = logical ⊻ (((logical >> UInt32(7)) & UInt32(1)) << UInt32(4))
-        smem_Bcvt[pad_elems + (Int(physical) >> 1) + 1] = bits
+        smem_Bcvt[pad_elems + (Int(physical) >> 1) + 1] = value
 
         # Conversions (generic proxy) must be CTA-visible and ordered
         # before wgmma's async-proxy reads.
@@ -226,9 +221,9 @@ if test_runtime_supported(@__FILE__)
         # misalignment can't hide.
         sB = Float32[0.25f0 * n * (1.0f0 + 0.1f0 * rand(rng, Float32)) for n in 1:MD_BN]
 
-        A_packed = Array{UInt16}(undef, K_test, MD_BM)
+        A_packed = Array{BFloat16}(undef, K_test, MD_BM)
         for m in 1:MD_BM, k in 1:K_test
-            A_packed[k, m] = bf16_bits(A_f32[m, k])
+            A_packed[k, m] = BFloat16(A_f32[m, k])
         end
         B_packed = Array{UInt8}(undef, K_test, MD_BN)
         for k in 1:K_test, n in 1:MD_BN
@@ -263,8 +258,8 @@ if test_runtime_supported(@__FILE__)
         for m in 1:MD_BM, n in 1:MD_BN
             acc = 0f0
             for k in 1:K_test
-                a = bf16_to_f32(bf16_bits(A_f32[m, k]))
-                b = bf16_to_f32(bf16_bits(Float32(B_i8[k, n]) * sB[n]))
+                a = Float32(BFloat16(A_f32[m, k]))
+                b = Float32(BFloat16(Float32(B_i8[k, n]) * sB[n]))
                 acc += a * b
             end
             D_ref[m, n] = acc
@@ -302,7 +297,7 @@ function _md_rf_gemm_kernel!(
         K::Int32)
 
     smem_Araw = CuStaticSharedArray(UInt8,  MD_BM * MD_BK)
-    smem_B    = CuStaticSharedArray(UInt16, MD_BK * MD_BN)
+    smem_B    = CuStaticSharedArray(BFloat16, MD_BK * MD_BN)
     mbar      = CuStaticSharedArray(UInt64, 1)
 
     araw_ptr = pointer(smem_Araw)
@@ -428,9 +423,9 @@ if test_runtime_supported(@__FILE__)
         for m in 1:MD_BM, k in 1:K_test
             W_packed[k, m] = reinterpret(UInt8, W_i8[m, k])
         end
-        B_packed = Array{UInt16}(undef, K_test, MD_BN)
+        B_packed = Array{BFloat16}(undef, K_test, MD_BN)
         for k in 1:K_test, n in 1:MD_BN
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         W_d  = CuArray(W_packed)
         B_d  = CuArray(B_packed)
@@ -462,8 +457,8 @@ if test_runtime_supported(@__FILE__)
         for m in 1:MD_BM, n in 1:MD_BN
             acc = 0f0
             for k in 1:K_test
-                a = bf16_to_f32(bf16_bits(Float32(W_i8[m, k]) * sA[m]))
-                b = bf16_to_f32(bf16_bits(B_f32[k, n]))
+                a = Float32(BFloat16(Float32(W_i8[m, k]) * sA[m]))
+                b = Float32(BFloat16(B_f32[k, n]))
                 acc += a * b
             end
             D_ref[m, n] = acc

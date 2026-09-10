@@ -60,15 +60,15 @@ const PCT_EMPTY_COUNT = PCT_NUM_CONSUMERS * PCT_CLUSTERS
 const PCT_C_CONSUMER_BYTES = PCT_B_WG_M * PCT_BN * 2
 
 function _pct_gemm_kernel!(
-        C::CuDeviceVector{UInt16, 1},                      # bf16 output (stored as UInt16)
+        C::CuDeviceVector{BFloat16, 1},                      # BFloat16 output
         tma_A::PTX.TMADescriptorPtr,
         tma_B::PTX.TMADescriptorPtr,
         tma_C::PTX.TMADescriptorPtr,
         M::Int32, N::Int32, K::Int32)
 
-    smem_A = CuStaticSharedArray(UInt16, PCT_N_STAGES * PCT_BM_CTA * PCT_BK)
-    smem_B = CuStaticSharedArray(UInt16, PCT_N_STAGES * PCT_BK    * PCT_BN)
-    smem_C = CuStaticSharedArray(UInt16, PCT_BM_CTA   * PCT_BN)      # 4096 B
+    smem_A = CuStaticSharedArray(BFloat16, PCT_N_STAGES * PCT_BM_CTA * PCT_BK)
+    smem_B = CuStaticSharedArray(BFloat16, PCT_N_STAGES * PCT_BK    * PCT_BN)
+    smem_C = CuStaticSharedArray(BFloat16, PCT_BM_CTA   * PCT_BN)      # 4096 B
     mbar_full  = CuStaticSharedArray(UInt64, PCT_N_STAGES)
     mbar_empty = CuStaticSharedArray(UInt64, PCT_N_STAGES)
 
@@ -230,7 +230,7 @@ end
 # ── Cross-arch ptxas validation ────────────────────────────────────────
 
 @testset "cluster GEMM with TMA store compiles at sm_90a" begin
-    types = Tuple{CuDeviceVector{UInt16, 1},
+    types = Tuple{CuDeviceVector{BFloat16, 1},
                   PTX.TMADescriptorPtr, PTX.TMADescriptorPtr, PTX.TMADescriptorPtr,
                   Int32, Int32, Int32}
     @test ptxas_compiles(_pct_gemm_kernel!, types;
@@ -257,18 +257,18 @@ if test_runtime_supported(@__FILE__)
         A_f32 = randn(rng, Float32, M_total, K_test) .* 0.1f0
         B_f32 = randn(rng, Float32, K_test, N_total) .* 0.1f0
 
-        A_packed = Array{UInt16}(undef, K_test, M_total)
-        B_packed = Array{UInt16}(undef, K_test, N_total)
+        A_packed = Array{BFloat16}(undef, K_test, M_total)
+        B_packed = Array{BFloat16}(undef, K_test, N_total)
         for m in 1:M_total, k in 1:K_test
-            A_packed[k, m] = bf16_bits(A_f32[m, k])
+            A_packed[k, m] = BFloat16(A_f32[m, k])
         end
         for k in 1:K_test, n in 1:N_total
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)
         # bf16 output buffer (N-innermost = (N, M) col-major Julia layout).
-        C_d = CUDACore.zeros(UInt16, M_total * N_total)
+        C_d = CUDACore.zeros(BFloat16, M_total * N_total)
 
         tmap_A = tensor_map_tile_2d(:bf16, pointer(A_d),
             M_total, K_test, PCT_BM_CTA, PCT_BK; swizzle = :B32)
@@ -292,11 +292,11 @@ if test_runtime_supported(@__FILE__)
             C_d, A.ptr, B.ptr, Cd.ptr, Int32(M_total), Int32(N_total), Int32(K_test))
         CUDACore.synchronize()
 
-        # C_d is bf16 (UInt16) in N-innermost layout: (N, M) Julia col-major.
+        # C_d is BFloat16 in N-innermost layout: (N, M) Julia col-major.
         C_packed = reshape(Array(C_d), N_total, M_total)
         C_got    = Array{Float32}(undef, M_total, N_total)
         for m in 1:M_total, n in 1:N_total
-            C_got[m, n] = bf16_to_f32(C_packed[n, m])
+            C_got[m, n] = Float32(C_packed[n, m])
         end
         C_ref = bf16_gemm_ref(A_f32, B_f32)
         return C_got, C_ref

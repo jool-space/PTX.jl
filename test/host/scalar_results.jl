@@ -177,7 +177,7 @@ function _expected_scalar_result_forms()
                      src === :f64 ? v"1.3" : nothing, src === :f32, cmps))
     end
     for (dst, result, version, sm) in ((:f16, Float16, v"4.2", v"5.3"),
-                                      (:bf16, UInt16, v"7.8", v"9.0")),
+                                      (:bf16, BFloat16, v"7.8", v"9.0")),
         src in (:b16, :b32, :b64, :u16, :u32, :u64, :s16, :s32, :s64, :f16, :f32, :f64)
         cmps = src in (:b16, :b32, :b64) ? (:eq, :ne) :
                src in (:f16, :f32, :f64) ? floating : basic
@@ -285,7 +285,7 @@ end
 
 _scalar_test_type(kind) =
     kind === :f16  ? Float16 :
-    kind === :bf16 ? UInt16 :
+    kind === :bf16 ? BFloat16 :
     kind === :f32  ? Float32 :
     kind === :f64  ? Float64 :
     kind === :pred ? Bool :
@@ -389,13 +389,13 @@ end
 
 @testset "fixed scalar results and representative assembly" begin
     cases = [
-        (ptx"add.rz.sat.f32.bf16", (UInt16, Float32), Float32,
+        (ptx"add.rz.sat.f32.bf16", (BFloat16, Float32), Float32,
          "add.rz.sat.f32.bf16 \$0, \$1, \$2;", "=f,h,f"),
         (ptx"sub.f32.f16", (Float16, Float32), Float32,
          "sub.f32.f16 \$0, \$1, \$2;", "=f,h,f"),
         (ptx"fma.rn.f32.f16", (Float16, Float16, Float32), Float32,
          "fma.rn.f32.f16 \$0, \$1, \$2, \$3;", "=f,h,h,f"),
-        (ptx"add.rz.f32.bf16.sat", (UInt16, Float32), Float32,
+        (ptx"add.rz.f32.bf16.sat", (BFloat16, Float32), Float32,
          "add.rz.f32.bf16.sat \$0, \$1, \$2;", "=f,h,f"),
         (ptx"sub.rz.f32.f16.sat", (Float16, Float32), Float32,
          "sub.rz.f32.f16.sat \$0, \$1, \$2;", "=f,h,f"),

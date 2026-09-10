@@ -80,8 +80,8 @@ function _pcc_gemm_kernel!(
         tma_B::PTX.TMADescriptorPtr,
         M::Int32, N::Int32, K::Int32)
 
-    smem_A = CuStaticSharedArray(UInt16, PCC_N_STAGES * PCC_BM_CTA * PCC_BK)
-    smem_B = CuStaticSharedArray(UInt16, PCC_N_STAGES * PCC_BK    * PCC_BN)
+    smem_A = CuStaticSharedArray(BFloat16, PCC_N_STAGES * PCC_BM_CTA * PCC_BK)
+    smem_B = CuStaticSharedArray(BFloat16, PCC_N_STAGES * PCC_BK    * PCC_BN)
     mbar_full  = CuStaticSharedArray(UInt64, PCC_N_STAGES)
     mbar_empty = CuStaticSharedArray(UInt64, PCC_N_STAGES)
 
@@ -258,13 +258,13 @@ if test_runtime_supported(@__FILE__)
         A_f32 = randn(rng, Float32, M_total, K_test) .* 0.1f0
         B_f32 = randn(rng, Float32, K_test, N_total) .* 0.1f0
 
-        A_packed = Array{UInt16}(undef, K_test, M_total)
-        B_packed = Array{UInt16}(undef, K_test, N_total)
+        A_packed = Array{BFloat16}(undef, K_test, M_total)
+        B_packed = Array{BFloat16}(undef, K_test, N_total)
         for m in 1:M_total, k in 1:K_test
-            A_packed[k, m] = bf16_bits(A_f32[m, k])
+            A_packed[k, m] = BFloat16(A_f32[m, k])
         end
         for k in 1:K_test, n in 1:N_total
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)

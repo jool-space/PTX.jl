@@ -68,7 +68,7 @@ function fab_setup(B, H, S; input_scale = 0.5f0, cfg = FAB_CFG_DEFAULT)
     k_c = upload_tma_descriptor(tmaps[2])
     v_c = upload_tma_descriptor(tmaps[3])
 
-    O_d = CUDACore.zeros(UInt16, total_rows * FAB_HD)
+    O_d = CUDACore.zeros(BFloat16, total_rows * FAB_HD)
     dbg_d = CUDACore.zeros(UInt32, FAB_THREADS)
     args = (O_d, q_c.ptr, k_c.ptr, v_c.ptr,
             UInt32(S), UInt32(trailing_zeros(n_mblocks)), UInt32(n_mblocks - 1),
@@ -94,7 +94,7 @@ function fab_check(cfg = FAB_CFG_DEFAULT; B = 1, H = 2, S = 512,
     maxdiff = 0.0f0
     for i in 1:(B * H)
         r = ((i - 1) * S + 1):(i * S)
-        O_got = permutedims(bf16_to_f32.(O_packed[:, r]))
+        O_got = permutedims(Float32.(O_packed[:, r]))
         O_ref = fab_cpu_ref(p.Q[r, :], p.K[r, :], p.V[r, :], p.sm_scale)
         maxdiff = max(maxdiff, maximum(abs.(O_got - O_ref)))
     end

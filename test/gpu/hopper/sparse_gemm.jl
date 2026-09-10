@@ -47,8 +47,8 @@ function _spg_kernel!(
         tma_B::PTX.TMADescriptorPtr,       # dense B, 32-row K-fast tiles
         K::Int32)
 
-    smem_A = CuStaticSharedArray(UInt16, SPG_BM * SPG_BKP)
-    smem_B = CuStaticSharedArray(UInt16, SPG_BK * SPG_BN)
+    smem_A = CuStaticSharedArray(BFloat16, SPG_BM * SPG_BKP)
+    smem_B = CuStaticSharedArray(BFloat16, SPG_BK * SPG_BN)
     mbar   = CuStaticSharedArray(UInt64, 1)
 
     a_ptr  = pointer(smem_A)
@@ -142,11 +142,11 @@ end
 # Packed values: chunk order, two per chunk → (K/2, M) K-fast bf16 bits.
 function spg_pack_A(dense::Array{Float32, 2}, idx)
     M, K = size(dense)
-    packed = Array{UInt16}(undef, K ÷ 2, M)
+    packed = Array{BFloat16}(undef, K ÷ 2, M)
     for m in 1:M, c in 1:(K ÷ 4)
         i0, i1 = idx[m, c]
-        packed[2c - 1, m] = bf16_bits(dense[m, 4 * (c - 1) + i0 + 1])
-        packed[2c,     m] = bf16_bits(dense[m, 4 * (c - 1) + i1 + 1])
+        packed[2c - 1, m] = BFloat16(dense[m, 4 * (c - 1) + i0 + 1])
+        packed[2c,     m] = BFloat16(dense[m, 4 * (c - 1) + i1 + 1])
     end
     return packed
 end
@@ -236,9 +236,9 @@ if test_runtime_supported(@__FILE__)
         B_f32 = randn(rng, Float32, K_test, SPG_BN) .* 0.1f0
 
         A_packed = spg_pack_A(A_dense, idx)
-        B_packed = Array{UInt16}(undef, K_test, SPG_BN)
+        B_packed = Array{BFloat16}(undef, K_test, SPG_BN)
         for k in 1:K_test, n in 1:SPG_BN
-            B_packed[k, n] = bf16_bits(B_f32[k, n])
+            B_packed[k, n] = BFloat16(B_f32[k, n])
         end
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)

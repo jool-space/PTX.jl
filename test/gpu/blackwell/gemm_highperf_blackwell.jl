@@ -68,8 +68,8 @@ function _ghb_gemm_kernel!(
         tma_B::PTX.TMADescriptorPtr,
         M::Int32, N::Int32, K::Int32)
 
-    smem_A    = CuDynamicSharedArray(UInt16, GHB_STAGES * GHB_BM * GHB_BK, GHB_OFF_A)
-    smem_B    = CuDynamicSharedArray(UInt16, GHB_STAGES * GHB_BN * GHB_BK, GHB_OFF_B)
+    smem_A    = CuDynamicSharedArray(BFloat16, GHB_STAGES * GHB_BM * GHB_BK, GHB_OFF_A)
+    smem_B    = CuDynamicSharedArray(BFloat16, GHB_STAGES * GHB_BN * GHB_BK, GHB_OFF_B)
     bar_load  = CuDynamicSharedArray(UInt64, GHB_STAGES, GHB_OFF_BL)
     bar_cons  = CuDynamicSharedArray(UInt64, GHB_STAGES, GHB_OFF_BC)
     bar_mma   = CuDynamicSharedArray(UInt64, 1, GHB_OFF_BM)
@@ -209,8 +209,8 @@ end
 # Family-safe tcgen05 forms on CC 10.x/11.x; see tcgen05_smoke.jl rationale.
 if test_runtime_supported(@__FILE__)
     function _ghb_cpu_ref(A::Matrix{Float32}, B::Matrix{Float32})
-        Ab = bf16_to_f32.(bf16_bits.(A))
-        Bb = bf16_to_f32.(bf16_bits.(B))
+        Ab = Float32.(BFloat16.(A))
+        Bb = Float32.(BFloat16.(B))
         Ab * Bb
     end
 
@@ -222,13 +222,13 @@ if test_runtime_supported(@__FILE__)
 
         # A tile (M,K) K-major; B_T is (N,K) K-major (B transposed), both
         # bf16, K-fast — identical packing to grouped_gemm.
-        A_pk = Array{UInt16}(undef, K, M)
+        A_pk = Array{BFloat16}(undef, K, M)
         for m in 1:M, k in 1:K
-            @inbounds A_pk[k, m] = bf16_bits(A[m, k])
+            @inbounds A_pk[k, m] = BFloat16(A[m, k])
         end
-        B_pk = Array{UInt16}(undef, K, N)
+        B_pk = Array{BFloat16}(undef, K, N)
         for k in 1:K, n in 1:N
-            @inbounds B_pk[k, n] = bf16_bits(B[k, n])
+            @inbounds B_pk[k, n] = BFloat16(B[k, n])
         end
         A_d = CuArray(A_pk)
         B_d = CuArray(B_pk)
@@ -307,8 +307,8 @@ function _ghb_persistent_kernel!(
         tma_B::PTX.TMADescriptorPtr,
         M::Int32, N::Int32, K::Int32)
 
-    smem_A    = CuDynamicSharedArray(UInt16, GHB_STAGES * GHB_BM * GHB_BK, GHB_OFF_A)
-    smem_B    = CuDynamicSharedArray(UInt16, GHB_STAGES * GHB_BN * GHB_BK, GHB_OFF_B)
+    smem_A    = CuDynamicSharedArray(BFloat16, GHB_STAGES * GHB_BM * GHB_BK, GHB_OFF_A)
+    smem_B    = CuDynamicSharedArray(BFloat16, GHB_STAGES * GHB_BN * GHB_BK, GHB_OFF_B)
     bar_load  = CuDynamicSharedArray(UInt64, GHB_STAGES, GHB_OFF_BL)
     bar_cons  = CuDynamicSharedArray(UInt64, GHB_STAGES, GHB_OFF_BC)
     bar_mma   = CuDynamicSharedArray(UInt64, 1, GHB_OFF_BM)
@@ -472,13 +472,13 @@ if test_runtime_supported(@__FILE__)
         rng = MersenneTwister(M * 5557 + N * 89 + K * 7 + num_ctas)
         A = Float32.(randn(rng, M, K)) .* 0.1f0
         B = Float32.(randn(rng, K, N)) .* 0.1f0
-        A_pk = Array{UInt16}(undef, K, M)
+        A_pk = Array{BFloat16}(undef, K, M)
         for m in 1:M, k in 1:K
-            @inbounds A_pk[k, m] = bf16_bits(A[m, k])
+            @inbounds A_pk[k, m] = BFloat16(A[m, k])
         end
-        B_pk = Array{UInt16}(undef, K, N)
+        B_pk = Array{BFloat16}(undef, K, N)
         for k in 1:K, n in 1:N
-            @inbounds B_pk[k, n] = bf16_bits(B[k, n])
+            @inbounds B_pk[k, n] = BFloat16(B[k, n])
         end
         A_d = CuArray(A_pk)
         B_d = CuArray(B_pk)

@@ -22,12 +22,12 @@ const EPI_BM = 8
 const EPI_BN = 8
 
 function _tma_epilogue_kernel!(tma_D::PTX.TMADescriptorPtr)
-    smem = CuStaticSharedArray(UInt16, EPI_BM * EPI_BN)
+    smem = CuStaticSharedArray(BFloat16, EPI_BM * EPI_BN)
 
     tid = ptx"mov.u32"(sreg"tid.x")
 
-    # Every thread fills one cell; bf16(tid) ≈ tid for small values.
-    @inbounds smem[Int(tid) + 1] = UInt16(0x3f80) + UInt16(tid)
+    # Every thread fills one cell with an exactly representable bf16 value.
+    @inbounds smem[Int(tid) + 1] = BFloat16(1f0 + Float32(tid) / 128f0)
 
     ptx"bar.sync"(Val(0))
     # SMEM is in generic proxy here; TMA reads via async proxy. Fence converts.

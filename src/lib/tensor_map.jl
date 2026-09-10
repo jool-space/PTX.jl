@@ -90,6 +90,7 @@ const TENSOR_MAP_DATA_TYPE_CODES = Dict{Symbol, UInt32}(
 # no Julia counterpart in Base).
 _tensormap_dtype_symbol(::Type{UInt8})   = :u8
 _tensormap_dtype_symbol(::Type{UInt16})  = :u16
+_tensormap_dtype_symbol(::Type{BFloat16}) = :bf16
 _tensormap_dtype_symbol(::Type{UInt32})  = :u32
 _tensormap_dtype_symbol(::Type{UInt64})  = :u64
 _tensormap_dtype_symbol(::Type{Int32})   = :s32

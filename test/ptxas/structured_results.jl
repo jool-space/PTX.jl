@@ -110,7 +110,7 @@ end
         b16::UInt16, b32::UInt32, b64::UInt64,
         u16::UInt16, s16::Int16, u32::UInt32, s32::Int32,
         u64::UInt64, s64::Int64,
-        f16::Float16, bf16::UInt16, f32::Float32, f64::Float64)
+        f16::Float16, bf16::BFloat16, f32::Float32, f64::Float64)
     _structured_ptxas_body(:sm75)
 end
 
@@ -119,7 +119,7 @@ end
         b16::UInt16, b32::UInt32, b64::UInt64,
         u16::UInt16, s16::Int16, u32::UInt32, s32::Int32,
         u64::UInt64, s64::Int64,
-        f16::Float16, bf16::UInt16, f32::Float32, f64::Float64)
+        f16::Float16, bf16::BFloat16, f32::Float32, f64::Float64)
     _structured_ptxas_body(:sm90)
 end
 
@@ -127,7 +127,7 @@ const _STRUCTURED_PTXAS_TYPES = Tuple{
     CuDeviceVector{UInt32,1}, Bool,
     UInt16, UInt32, UInt64,
     UInt16, Int16, UInt32, Int32, UInt64, Int64,
-    Float16, UInt16, Float32, Float64,
+    Float16, BFloat16, Float32, Float64,
 }
 
 @testset "all structured-result spellings assemble at retained/exact floors" begin

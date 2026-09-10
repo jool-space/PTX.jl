@@ -43,8 +43,8 @@ else
         # 128×128 bf16 tensor; 64×128B = 64 cols × 2B = 128B box width
         # (the B128 swizzle alignment), 64 rows of box.
         rows, cols = 128, 128
-        buf = CuArray{UInt16}(undef, rows * cols)
-        tmap = tensor_map_tile_2d(:bf16, pointer(buf),
+        buf = CuArray{BFloat16}(undef, rows * cols)
+        tmap = tensor_map_tile_2d(BFloat16, pointer(buf),
                                   rows, cols, 64, 64;
                                   swizzle = :B128)
         @test tmap isa CuTensorMap
@@ -59,7 +59,7 @@ else
         # B128 swizzle line width.
         height, width = 32, 128
         elem_bytes = 2
-        buf = CuArray{UInt16}(undef, height * width)
+        buf = CuArray{BFloat16}(undef, height * width)
         tmap = tensor_map_encode_tiled(
             :bf16, pointer(buf),
             (64, height, width ÷ 64),
@@ -72,7 +72,7 @@ else
 
     @testset "rejects bad shape" begin
         # global_strides must have length N-1 = 1.
-        buf = CuArray{UInt16}(undef, 16 * 16)
+        buf = CuArray{BFloat16}(undef, 16 * 16)
         @test_throws ArgumentError tensor_map_encode_tiled(
             :bf16, pointer(buf),
             (16, 16), (32, 32),  # WRONG: should be length 1
@@ -87,10 +87,10 @@ else
 
     @testset "distinct swizzles produce distinct blobs" begin
         # Sanity: the swizzle kwarg actually reaches the driver.
-        buf = CuArray{UInt16}(undef, 128 * 128)
-        no_sw  = tensor_map_tile_2d(:bf16, pointer(buf), 128, 128, 64, 64;
+        buf = CuArray{BFloat16}(undef, 128 * 128)
+        no_sw  = tensor_map_tile_2d(BFloat16, pointer(buf), 128, 128, 64, 64;
                                      swizzle = :NONE)
-        with_sw = tensor_map_tile_2d(:bf16, pointer(buf), 128, 128, 64, 64;
+        with_sw = tensor_map_tile_2d(BFloat16, pointer(buf), 128, 128, 64, 64;
                                      swizzle = :B128)
         @test no_sw.data != with_sw.data
     end

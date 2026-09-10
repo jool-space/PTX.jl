@@ -46,8 +46,8 @@ function _grouped_gemm_bw_kernel!(
         tma_B::PTX.TMADescriptorPtr,
         M::Int32, N::Int32, K::Int32)
 
-    smem_A    = CuStaticSharedArray(UInt16, GGB_BM * GGB_BK)
-    smem_B    = CuStaticSharedArray(UInt16, GGB_BN * GGB_BK)
+    smem_A    = CuStaticSharedArray(BFloat16, GGB_BM * GGB_BK)
+    smem_B    = CuStaticSharedArray(BFloat16, GGB_BN * GGB_BK)
     bar_load  = CuStaticSharedArray(UInt64, 1)
     bar_mma   = CuStaticSharedArray(UInt64, 1)
     tmem_slot = CuStaticSharedArray(UInt32, 1)
@@ -180,8 +180,8 @@ end
 if test_runtime_supported(@__FILE__)
     function _ggb_cpu_ref(A3::Array{Float32, 3}, B3::Array{Float32, 3})
         G, M, K = size(A3); _, _, N = size(B3)
-        Ab = bf16_to_f32.(bf16_bits.(A3))
-        Bb = bf16_to_f32.(bf16_bits.(B3))
+        Ab = Float32.(BFloat16.(A3))
+        Bb = Float32.(BFloat16.(B3))
         C = zeros(Float32, G, M, N)
         for g in 1:G, m in 1:M, n in 1:N, k in 1:K
             @inbounds C[g, m, n] += Ab[g, m, k] * Bb[g, k, n]
@@ -191,17 +191,17 @@ if test_runtime_supported(@__FILE__)
 
     function _ggb_pack_A(A3)         # (G,M,K) → (K, G*M) col-major, K-fast
         G, M, K = size(A3)
-        out = Array{UInt16}(undef, K, G * M)
+        out = Array{BFloat16}(undef, K, G * M)
         for g in 1:G, m in 1:M, k in 1:K
-            out[k, (g - 1) * M + m] = bf16_bits(A3[g, m, k])
+            out[k, (g - 1) * M + m] = BFloat16(A3[g, m, k])
         end
         out
     end
     function _ggb_pack_B(B3)         # (G,K,N) → (K, G*N) col-major, K-fast
         G, K, N = size(B3)
-        out = Array{UInt16}(undef, K, G * N)
+        out = Array{BFloat16}(undef, K, G * N)
         for g in 1:G, k in 1:K, n in 1:N
-            out[k, (g - 1) * N + n] = bf16_bits(B3[g, k, n])
+            out[k, (g - 1) * N + n] = BFloat16(B3[g, k, n])
         end
         out
     end

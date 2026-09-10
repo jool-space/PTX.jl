@@ -19,10 +19,7 @@
 # W is KRSC, so a filter's reduction axis is contiguous and B fragments
 # load as plain b32 pairs, exactly like B_T in gemm.jl.
 #
-# Storage is typed: CuArray{BFloat16} (Core.BFloat16) rather than UInt16
-# bit-bags. Host-side f32→bf16 broadcast is avoided — on Julia 1.12.6/x86
-# it dies with `LLVM ERROR: Cannot select v16bf16` (vectorizer forms bf16
-# SIMD ops ISel can't match) — so packing goes through integer bit ops.
+# Storage uses BFloat16 for both host and device tensors.
 #
 # Grid:  (Kf/8, M/16), one warp per CTA, m16n8k16 bf16 mma per 16-wide
 # k-slice. R·S·C must be a multiple of 16 (C a multiple of 16 suffices).
@@ -31,14 +28,11 @@
 using Random
 using Microfloats: BFloat16
 
-bf16_pack(lo::UInt16, hi::UInt16) = UInt32(lo) | (UInt32(hi) << 16)
+bf16_pack(lo::BFloat16, hi::BFloat16) = ptx"mov.b32"((lo, hi))
 
-# f32 → bf16 bits, round-to-nearest-even, pure integer ops (see header).
-rne_bf16_bits(x::Float32) =
-    (b = reinterpret(UInt32, x);
-     UInt16((b + 0x7fff + ((b >> 16) & 0x1)) >> 16))
-to_bf16(x::Array{Float32}) = collect(reinterpret(BFloat16, rne_bf16_bits.(x)))
-quantize_bf16(x) = reinterpret.(Float32, UInt32.(rne_bf16_bits.(x)) .<< 16)
+# Round inputs to bf16 before building the Float32 reference.
+to_bf16(x::Array{Float32}) = BFloat16.(x)
+quantize_bf16(x) = Float32.(BFloat16.(x))
 
 # One implicit-A element: X[n, h, w, c] for GEMM coords (row-decoded n/p/q,
 # reduction index rsc), or zero when the tap lands in the padding halo.
@@ -47,9 +41,8 @@ quantize_bf16(x) = reinterpret.(Float32, UInt32.(rne_bf16_bits.(x)) .<< 16)
     s, c  = divrem(sc, dims.C)
     h = p * dims.stride - dims.pad + r
     w = q * dims.stride - dims.pad + s
-    (0 <= h < dims.H) & (0 <= w < dims.W) || return UInt16(0)
-    return reinterpret(UInt16,
-        @inbounds X[((n * dims.H + h) * dims.W + w) * dims.C + c + 1])
+    (0 <= h < dims.H) & (0 <= w < dims.W) || return BFloat16(0)
+    return @inbounds X[((n * dims.H + h) * dims.W + w) * dims.C + c + 1]
 end
 
 function conv2d_fprop_kernel!(

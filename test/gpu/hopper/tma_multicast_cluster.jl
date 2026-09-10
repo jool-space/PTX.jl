@@ -25,9 +25,9 @@
 # barrier.cluster via PTX tier-2 wrappers (CUDACore's cluster_arrive/wait
 # ccall-by-name silently traps on Julia ≤ 1.11 — see wrappers/barrier_cluster.jl)
 
-function _tma_multicast_cluster_kernel!(out::CuDeviceVector{UInt16, 1},
+function _tma_multicast_cluster_kernel!(out::CuDeviceVector{BFloat16, 1},
                                         tma_src::PTX.TMADescriptorPtr)
-    smem = CuStaticSharedArray(UInt16, 64)       # 8 × 8 bf16 = 128 B
+    smem = CuStaticSharedArray(BFloat16, 64)       # 8 × 8 bf16 = 128 B
     mbar = CuStaticSharedArray(UInt64, 1)
     mb_ptr = pointer(mbar)
     s_ptr  = pointer(smem)
@@ -63,7 +63,7 @@ function _tma_multicast_cluster_kernel!(out::CuDeviceVector{UInt16, 1},
 end
 
 @testset "TMA multicast — ptxas sm_90a (cluster kernel)" begin
-    types = Tuple{CuDeviceVector{UInt16, 1}, PTX.TMADescriptorPtr}
+    types = Tuple{CuDeviceVector{BFloat16, 1}, PTX.TMADescriptorPtr}
     @test ptxas_compiles(_tma_multicast_cluster_kernel!, types;
                          cap = v"9.0", feature_set = :arch)
 end
@@ -75,13 +75,13 @@ end
 # a datacenter-Blackwell cluster port would live under blackwell/.
 if test_runtime_supported(@__FILE__)
     @testset "TMA multicast cluster round-trip" begin
-        input_vals = UInt16[(0x3f80 + i) for i in 0:63]
+        input_vals = BFloat16[1 + i / 128 for i in 0:63]
         src = CuArray(reshape(input_vals, 8, 8))
 
         tmap_host = PTX.tensor_map_tile_2d(:bf16, pointer(src), 8, 8, 8, 8;
                                            swizzle = :NONE)
         src_const = upload_tma_descriptor(tmap_host)
-        out = CUDACore.zeros(UInt16, 128)
+        out = CUDACore.zeros(BFloat16, 128)
 
         # grid_dim must be a multiple of cluster_dim — set `blocks=(2,1,1)` so
         # the single cluster contains both CTAs. Default `blocks=1` would

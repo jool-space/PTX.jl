@@ -22,8 +22,8 @@
 #     overlapped with bank-1 mma.
 #
 # Inputs (flat row-major flattened):
-#   A    :: (M, K) bf16  stored as UInt16
-#   B_T  :: (N, K) bf16  stored as UInt16  (B^T, K-contiguous for mma row.col)
+#   A    :: (M, K) BFloat16
+#   B_T  :: (N, K) BFloat16  (B^T, K-contiguous for mma row.col)
 #   D    :: (M, N) f32
 #
 # Grid:  (N/128, M/128)
@@ -38,19 +38,17 @@
 using Random
 using Base: @nexprs
 
-bf16_bits_h(x::Float32)  = UInt16(reinterpret(UInt32, x) >> 16)
-bf16_to_f32_h(b::UInt16) = reinterpret(Float32, UInt32(b) << 16)
 
 function pack_bf16_rowmajor_h(A::AbstractMatrix{Float32})
     rows, cols = size(A)
-    out = Vector{UInt16}(undef, rows * cols)
+    out = Vector{BFloat16}(undef, rows * cols)
     @inbounds for i in 1:rows, j in 1:cols
-        out[(i-1)*cols + j] = bf16_bits_h(A[i, j])
+        out[(i-1)*cols + j] = BFloat16(A[i, j])
     end
     out
 end
 
-quantize_bf16_h(A) = bf16_to_f32_h.(bf16_bits_h.(A))
+quantize_bf16_h(A) = Float32.(BFloat16.(A))
 
 const HP_BM, HP_BN, HP_BK = 128, 128, 32
 const HP_NUM_WARPS = 4
@@ -71,8 +69,8 @@ const HP_SMEM_BYTES    = HP_STAGES * (HP_A_STAGE_BYTES + HP_B_STAGE_BYTES)  # 65
 
 function gemm_highperf_kernel!(
         D::CuDeviceVector{Float32},
-        A::CuDeviceVector{UInt16},
-        B_T::CuDeviceVector{UInt16},
+        A::CuDeviceVector{BFloat16},
+        B_T::CuDeviceVector{BFloat16},
         ::Val{M}, ::Val{N}, ::Val{K}) where {M, N, K}
 
     smem      = CuDynamicSharedArray(UInt8, HP_SMEM_BYTES)

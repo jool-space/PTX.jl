@@ -162,9 +162,9 @@ if test_runtime_supported(@__FILE__)
         function pack(f)
             w = Vector{UInt32}(undef, TBP_BM * TBP_ROW_WORDS)
             for r in 0:(TBP_BM - 1), kw in 0:(TBP_ROW_WORDS - 1)
-                lo = bf16_bits(f(r, 2 * kw))
-                hi = bf16_bits(f(r, 2 * kw + 1))
-                w[r * TBP_ROW_WORDS + kw + 1] = UInt32(lo) | (UInt32(hi) << 16)
+                lo = BFloat16(f(r, 2 * kw))
+                hi = BFloat16(f(r, 2 * kw + 1))
+                w[r * TBP_ROW_WORDS + kw + 1] = UInt32(reinterpret(UInt16, lo)) | (UInt32(reinterpret(UInt16, hi)) << 16)
             end
             w
         end
@@ -183,8 +183,8 @@ if test_runtime_supported(@__FILE__)
         for m in 0:(TBP_EPI_ROWS - 1), n in 0:(TBP_BN - 1)
             acc = 0.0f0
             for k in 0:(TBP_BK - 1)
-                acc += bf16_to_f32(bf16_bits(_tbp_A(m, k))) *
-                       bf16_to_f32(bf16_bits(_tbp_B(n, k)))
+                acc += Float32(BFloat16(_tbp_A(m, k))) *
+                       Float32(BFloat16(_tbp_B(n, k)))
             end
             ref[n + 1, m + 1] = acc
         end

@@ -357,7 +357,7 @@ end
 
 @testset "cvt.f32.bf16 (0x3F80 → 1.0f0)" begin
     out = CUDACore.zeros(Float32, 1)
-    @cuda threads=1 _exec_cvt_f32_bf16!(out, UInt16(0x3F80))
+    @cuda threads=1 _exec_cvt_f32_bf16!(out, BFloat16(1))
     CUDACore.synchronize()
     @test Array(out)[1] === 1.0f0
 end

@@ -39,8 +39,8 @@ function _grouped_gemm_multik_kernel!(
         tma_B::PTX.TMADescriptorPtr,
         M::Int32, N::Int32, K::Int32)
 
-    smem_A = CuStaticSharedArray(UInt16, GGM_BM * GGM_TILE_K)        # 64 × 64 bf16 = 8192 B
-    smem_B = CuStaticSharedArray(UInt16, GGM_TILE_K * GGM_BN)        # 64 × 8  bf16 = 1024 B
+    smem_A = CuStaticSharedArray(BFloat16, GGM_BM * GGM_TILE_K)        # 64 × 64 bf16 = 8192 B
+    smem_B = CuStaticSharedArray(BFloat16, GGM_TILE_K * GGM_BN)        # 64 × 8  bf16 = 1024 B
     mbar   = CuStaticSharedArray(UInt64, 1)
 
     a_ptr  = pointer(smem_A)
@@ -159,8 +159,8 @@ if test_runtime_supported(@__FILE__)
     function _multik_cpu_ref(A3::Array{Float32, 3}, B3::Array{Float32, 3})
         G, M, K = size(A3)
         _, _, N = size(B3)
-        Ab = bf16_to_f32.(bf16_bits.(A3))
-        Bb = bf16_to_f32.(bf16_bits.(B3))
+        Ab = Float32.(BFloat16.(A3))
+        Bb = Float32.(BFloat16.(B3))
         C = zeros(Float32, G, M, N)
         for g in 1:G, m in 1:M, n in 1:N
             s = 0f0
@@ -174,18 +174,18 @@ if test_runtime_supported(@__FILE__)
 
     function _multik_pack_A(A3)
         G, M, K = size(A3)
-        out = Array{UInt16}(undef, K, G * M)
+        out = Array{BFloat16}(undef, K, G * M)
         for g in 1:G, m in 1:M, k in 1:K
-            out[k, (g - 1) * M + m] = bf16_bits(A3[g, m, k])
+            out[k, (g - 1) * M + m] = BFloat16(A3[g, m, k])
         end
         out
     end
 
     function _multik_pack_B(B3)
         G, K, N = size(B3)
-        out = Array{UInt16}(undef, K, G * N)
+        out = Array{BFloat16}(undef, K, G * N)
         for g in 1:G, k in 1:K, n in 1:N
-            out[k, (g - 1) * N + n] = bf16_bits(B3[g, k, n])
+            out[k, (g - 1) * N + n] = BFloat16(B3[g, k, n])
         end
         out
     end

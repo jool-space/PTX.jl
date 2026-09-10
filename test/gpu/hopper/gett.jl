@@ -51,8 +51,8 @@ function _gett_kernel!(
         tma_B::PTX.TMADescriptorPtr,
         K::Int32)
 
-    smem_A = CuStaticSharedArray(UInt16, GETT_BM * GETT_BK)
-    smem_B = CuStaticSharedArray(UInt16, GETT_BK * GETT_BN)
+    smem_A = CuStaticSharedArray(BFloat16, GETT_BM * GETT_BK)
+    smem_B = CuStaticSharedArray(BFloat16, GETT_BK * GETT_BN)
     mbar   = CuStaticSharedArray(UInt64, 1)
 
     a_ptr  = pointer(smem_A)
@@ -147,8 +147,8 @@ if test_runtime_supported(@__FILE__)
         A_f32 = randn(rng, Float32, K_test, GETT_M0, GETT_M1) .* 0.1f0
         B_f32 = randn(rng, Float32, K_test, GETT_BN) .* 0.1f0
 
-        A_packed = bf16_bits.(A_f32)
-        B_packed = bf16_bits.(B_f32)
+        A_packed = BFloat16.(A_f32)
+        B_packed = BFloat16.(B_f32)
         A_d = CuArray(A_packed)
         B_d = CuArray(B_packed)
 
@@ -182,8 +182,8 @@ if test_runtime_supported(@__FILE__)
         end
 
         # Reference contraction over the rank-3 A, bf16-rounded inputs.
-        Ab = bf16_to_f32.(A_packed)
-        Bb = bf16_to_f32.(B_packed)
+        Ab = Float32.(A_packed)
+        Bb = Float32.(B_packed)
         D_ref = zeros(Float32, GETT_M0, GETT_M1, GETT_BN)
         for m0 in 1:GETT_M0, m1 in 1:GETT_M1, n in 1:GETT_BN, k in 1:K_test
             D_ref[m0, m1, n] += Ab[k, m0, m1] * Bb[k, n]
