@@ -22,6 +22,8 @@ if lane == "test"
         push!(specs, PackageSpec(path = joinpath(checkout, directory)))
     end
 end
+# Pkg.develop does not refresh cached registries on persistent CI runners.
+Pkg.Registry.update()
 Pkg.develop(specs)
 Pkg.instantiate()
 if haskey(ENV, "GITHUB_ENV")
