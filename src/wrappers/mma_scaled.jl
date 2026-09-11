@@ -16,11 +16,6 @@
 # (`mma.sync.aligned.m16n8k32.row.col.kind::mxf8f6f4.block_scale.scale_vec::
 # 1X.f32...`) where the asm tier put kind first. ptxas accepts both.
 #
-# Residue: `mxf4nvf4` with `scale_vec::4X` and a `ue8m0` scale type has no
-# intrinsic at 22.1.7 (only the `ue4m3` 4X and `ue8m0` 2X nvf4 forms are
-# registered) — it falls back to the asm tier, same as the dense
-# kind::f8f6f4 m16n8k16 forms.
-
 # m16n8k32 reuses the kind::f8f6f4 counts; m16n8k64 with .e2m1 is unique to
 # the scaled mxf4* path (§9.7.14.5.11).
 const MMA_SCALED_FRAGS = Dict{Tuple{Symbol, Symbol, Symbol}, NTuple{3, Int}}(
@@ -53,11 +48,6 @@ function _mma_scaled_register(kind::Symbol, scale_vec::Symbol,
            "$c_ty.$a_ty.$b_ty.$c_ty.$s_ty"
     full = "llvm.nvvm." * name
 
-    if !NVVM.isintrinsic(full)
-        return _mma_scaled_register_asm(mods, kind, scale_vec, shape,
-                                        layA, layB, a_ty, b_ty, c_ty, s_ty,
-                                        n_a, n_b, n_cd)
-    end
     call = wrapper_intrinsic_call(:mma_scaled, :mma, mods, full)
     cd_J = c_ty === :f32 ? :Float32 : :UInt32
 
@@ -77,51 +67,6 @@ function _mma_scaled_register(kind::Symbol, scale_vec::Symbol,
     nothing
 end
 
-# Asm-tier residue (forms with no intrinsic at 22.1.7). Identical body to
-# the pre-migration generator.
-function _mma_scaled_register_asm(mods, kind, scale_vec, shape, layA, layB,
-                                  a_ty, b_ty, c_ty, s_ty, n_a, n_b, n_cd)
-    register_wrapper!(:mma_scaled, :mma, mods, :asm)
-    slots(off, n) = "{" * join(("\$$i" for i in off:off+n-1), ", ") * "}"
-    base = 2 * n_cd + n_a + n_b
-    asm = "mma.sync.aligned.kind::$kind.block_scale.scale_vec::$scale_vec." *
-          "$shape.$layA.$layB.$c_ty.$a_ty.$b_ty.$c_ty.$s_ty " *
-          "$(slots(0, n_cd)), $(slots(n_cd, n_a)), " *
-          "$(slots(n_cd + n_a, n_b)), $(slots(n_cd + n_a + n_b, n_cd)), " *
-          "\$$(base + 0), {\$$(base + 1), \$$(base + 2)}, " *
-          "\$$(base + 3), {\$$(base + 4), \$$(base + 5)};"
-    cd_let = c_ty === :f32 ? "f" : "r"
-    cd_J   = c_ty === :f32 ? :Float32 : :UInt32
-    constraints = join(vcat(fill("=$cd_let", n_cd), fill("r", n_a + n_b),
-                            fill(cd_let, n_cd),
-                            ["r", "h", "h", "r", "h", "h"], ["~{memory}"]), ",")
-    flat = vcat(fill(:UInt32, n_a + n_b), fill(cd_J, n_cd),
-                [:UInt32, :UInt16, :UInt16, :UInt32, :UInt16, :UInt16])
-    # mma.sync is warp-collective — emitted via convergent_asm_ir like the
-    # dense fallbacks so the call carries `convergent nomerge` (aeff3ee
-    # converted wgmma + dense mma but missed this file; @asmcall cannot
-    # attach call-site attributes).
-    cdT = c_ty === :f32 ? Float32 : UInt32
-    flat_types = vcat(fill(UInt32, n_a + n_b), fill(cdT, n_cd),
-                      [UInt32, UInt16, UInt16, UInt32, UInt16, UInt16])
-    ir = convergent_asm_ir(asm, constraints, NTuple{n_cd, cdT}, flat_types)
-    a_args = [:(a[$i]) for i in 1:n_a]
-    b_args = [:(b[$i]) for i in 1:n_b]
-    c_args = [:(c[$i]) for i in 1:n_cd]
-    @eval function (::Operation{:mma, $mods})(
-            a::NTuple{$n_a, UInt32}, b::NTuple{$n_b, UInt32},
-            c::NTuple{$n_cd, $cd_J},
-            sa::UInt32, bida::UInt16, tida::UInt16,
-            sb::UInt32, bidb::UInt16, tidb::UInt16)
-        Base.@inline
-        Base.llvmcall(($ir, "entry"),
-                      NTuple{$n_cd, $cd_J}, Tuple{$(flat...)},
-                      $(a_args...), $(b_args...), $(c_args...),
-                      sa, bida, tida, sb, bidb, tidb)
-    end
-    nothing
-end
-
 # Per Table 36 of PTX 9.2 §9.7.14.3. Layout `.row.col` only.
 _mma_scaled_register(:mxf4, Symbol("2X"), :m16n8k64, :row, :col,
                      :f32, :e2m1, :e2m1, :f32, :ue8m0)
@@ -129,7 +74,7 @@ _mma_scaled_register(:mxf4, Symbol("2X"), :m16n8k64, :row, :col,
 _mma_scaled_register(:mxf4nvf4, Symbol("2X"), :m16n8k64, :row, :col,
                      :f32, :e2m1, :e2m1, :f32, :ue8m0)
 _mma_scaled_register(:mxf4nvf4, Symbol("4X"), :m16n8k64, :row, :col,
-                     :f32, :e2m1, :e2m1, :f32, :ue8m0)   # asm residue (no intrinsic)
+                     :f32, :e2m1, :e2m1, :f32, :ue8m0)
 _mma_scaled_register(:mxf4nvf4, Symbol("4X"), :m16n8k64, :row, :col,
                      :f32, :e2m1, :e2m1, :f32, :ue4m3)
 

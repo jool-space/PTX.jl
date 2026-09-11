@@ -53,7 +53,7 @@ end
         r"tcgen05\.mma\.sp\.cta_group::1\.kind::tf32\.collector::a::use \[%r\d+\], \[%r\d+\], %rd\d+, \[%r\d+\], %r\d+, %p\d+;",
         ptx1)
     @test occursin(
-        r"tcgen05\.mma\.sp\.cta_group::1\.kind::i8\.collector::a::discard\.ashift \[%r\d+\], \[%r\d+\], %rd\d+, \[%r\d+\]",
+        r"tcgen05\.mma\.sp\.cta_group::1\.kind::i8\.ashift\.collector::a::discard \[%r\d+\], \[%r\d+\], %rd\d+, \[%r\d+\]",
         ptx1)
     @test occursin(
         r"tcgen05\.mma\.sp\.cta_group::1\.kind::f8f6f4\.collector::a::discard \[%r\d+\], %rd\d+, %rd\d+, \[%r\d+\], %r\d+, \{%r\d+, %r\d+, %r\d+, %r\d+\}, %p\d+;",

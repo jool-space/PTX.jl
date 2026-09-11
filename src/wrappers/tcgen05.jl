@@ -40,8 +40,8 @@
 #   - pointer/static-SMEM operands materialize through mov/cvt instead of
 #     folding into the operand (ptxas folds these in SASS).
 #
-# Intrinsic mapping for the surviving tier-2 forms (probed against llc
-# 22.1.7, sm_100a):
+# Intrinsic mapping for the surviving tier-2 forms (probed against the backend
+# 23.1.1, sm_100a):
 #   - shift → shift.down.cgN: 1:1, identical spelling.
 #   - ld/st → ld.<shape>.<count> / st.<shape>.<count>: identical
 #     spellings. The data moves as an LLVM vector (v<N>i32), so the
@@ -68,8 +68,8 @@
 #   4 for 16x256b
 # (PTX 9.3 §9.7.17.8 Table 52). count ∈ {x1..x128} with per_lane ≤ 128.
 # The `.pack::16b`/`.unpack::16b` repack variants cover the same grid.
-# `tcgen05.ld.red` (load-with-reduction, PTX 8.8) has no NVVM intrinsic
-# records at the pinned backend and is a single-route asm family below.
+# `tcgen05.ld.red` (load-with-reduction, PTX 8.8) retains its reviewed
+# assembly route alongside the backend's newer intrinsic records.
 #
 # Irregular families are written out literally so every intrinsic they
 # stand on is greppable — test/host/conformance.jl scans for `nvvm"..."`
@@ -85,7 +85,7 @@
 
 # tcgen05.ld returns / tcgen05.st takes LLVM vectors; the notation surface
 # uses plain tuples (scalar for the single-register forms).
-@inline _tc_unvec(x::UInt32) = x
+@inline _tc_unvec(v::NTuple{1, VecElement{UInt32}}) = v[1].value
 @inline _tc_unvec(v::NTuple{N, VecElement{UInt32}}) where {N} =
     ntuple(i -> v[i].value, Val(N))
 @inline _tc_vec(t::NTuple{N, UInt32}) where {N} =
@@ -239,7 +239,7 @@ function _tcgen05_ldst_register(op::Symbol, shape::Symbol, base::Int,
             _tc_unvec($call(_tmem(taddr), $(hso_arg...), Val($repack)))
         _tcgen05_adapter!(mods, Address{UInt32}, hso_T...)
     else
-        src = n == 1 ? :(src[1]) : :(_tc_vec(src))
+        src = :(_tc_vec(src))
         @eval @inline (::Operation{:tcgen05, $mods})(
                 taddr::UInt32, $(hso_decl...), src::NTuple{$n, UInt32}) =
             $call(_tmem(taddr), $(hso_arg...), $src, Val($repack))
@@ -256,8 +256,8 @@ end
 
 # --- ld.red (load-with-reduction, generated asm family) -------------------------
 #
-# `tcgen05.ld.red` (PTX 8.8 §9.7.18.8) has no NVVM intrinsic records at the
-# pinned backend, so the family is single-route convergent asm under the
+# `tcgen05.ld.red` (PTX 8.8 §9.7.18.8) retains its reviewed assembly route
+# alongside the backend's newer intrinsic records, under the
 # family-wide sideeffect + ~{memory} + convergent nomerge contract
 # (`.sync.aligned` = warp-collective, same hazard class as the mbarrier
 # family). Target reality: the ISA supports ld.red on sm_110a and the
@@ -446,8 +446,8 @@ for cg in 1:2
 end
 
 # --- PTX ISA 9.4 alloc/dealloc/commit forms, asm tier -------------------------
-# No NVVM intrinsics exist for any of these at 22.1.7; spelled-only until a
-# CUDA 13.4+ ptxas ships. All are convergent per their form contracts, so
+# No NVVM intrinsics exist for these at the pinned backend; assembly requires
+# a PTX 9.4-capable ptxas. All are convergent per their form contracts, so
 # they go through convergent_asm_ir like the other tcgen05 asm forms; the
 # conservative ~{memory} clobber matches the family's asm tier today.
 #
@@ -622,7 +622,7 @@ end
 # (family :tcgen05_mma_dense) records every tier-2 name for the
 # conformance replay (the mma.jl generated-family standing guarantee).
 #
-# Empirical NVVM collector enum (llc 22.1.7): 0=discard, 1=lastuse,
+# Empirical NVVM collector enum (LLVM 23.1.1): 0=discard, 1=lastuse,
 # 2=fill, 3=use. The ashift variants' immarg range [0, 2) is exactly the
 # ISA's "no fill/use with ashift" rule.
 const _TCGEN05_DENSE_KINDS =
@@ -809,7 +809,7 @@ end
 # The optional zero-column-mask descriptor is a runtime 64-bit operand
 # trailing enable-input-d (separate .zero_col_mask records). The sp
 # forms insert the sparsity-metadata TMEM address between the B
-# descriptor and idesc. Empirical NVVM enums (llc 22.1.7): the buffer
+# descriptor and idesc. Empirical NVVM enums (LLVM 23.1.1): the buffer
 # immarg is identity (0..3 → b0..b3); the op immarg matches dense
 # (0=discard, 1=lastuse, 2=fill, 3=use).
 const _TCGEN05_WS_COLLECTORS = begin

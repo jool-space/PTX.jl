@@ -2,7 +2,13 @@ using PTX: NVVM
 using PTX.NVVM: Intrinsic, intrinsic, isintrinsic, matching, overloaded,
                 llvmtype, ptr, slot, anyptr, anyint, anyfloat, TABLE,
                 synthesize, IntrinsicCall, @nvvm_str
-using InteractiveUtils: code_llvm
+# Use a device target even though these probes only inspect LLVM on the host:
+# Julia 1.13 rejects foreign-target intrinsics during CPU llvmcall lowering.
+# Raw output preserves the return metadata and call-site attribute groups.
+function _nvvm_optimizer_llvm(f, tt)
+    job = _host_target_job(f, tt; cap=v"10.0", feature_set=:arch, kernel=false)
+    emit_llvm(job; raw=true, debuginfo=:none)
+end
 
 # Host-optimizer contract probe. Both branches deliberately call the same
 # recognized NVVM intrinsic with identical operands; without call-site
@@ -69,7 +75,6 @@ end
 const RETURN_NOUNDEF_EXPECTED = let
     names = collect(RETURN_RANGE_EXPECTED)
     append!(names, (
-        "llvm.nvvm.internal.addrspace.wrap",
         "llvm.nvvm.is_explicit_cluster",
         "llvm.nvvm.read.ptx.sreg.aggr_smem_size",
         "llvm.nvvm.read.ptx.sreg.clock",
@@ -84,28 +89,33 @@ const RETURN_NOUNDEF_EXPECTED = let
         "llvm.nvvm.read.ptx.sreg.nwarpid",
         "llvm.nvvm.read.ptx.sreg.smid",
         "llvm.nvvm.read.ptx.sreg.total_smem_size",
+        "llvm.nvvm.read.ptx.sreg.reserved_smem_offset_0",
+        "llvm.nvvm.read.ptx.sreg.reserved_smem_offset_1",
+        "llvm.nvvm.read.ptx.sreg.reserved_smem_offset_begin",
+        "llvm.nvvm.read.ptx.sreg.reserved_smem_offset_cap",
+        "llvm.nvvm.read.ptx.sreg.reserved_smem_offset_end",
         "llvm.nvvm.read.ptx.sreg.warpid",
     ))
     append!(names, ("llvm.nvvm.read.ptx.sreg.envreg$i" for i in 0:31))
     append!(names, ("llvm.nvvm.read.ptx.sreg.lanemask.$suffix"
                     for suffix in ("eq", "ge", "gt", "le", "lt")))
-    append!(names, ("llvm.nvvm.read.ptx.sreg.pm$i" for i in 0:3))
+    append!(names, ("llvm.nvvm.read.ptx.sreg.pm$i" for i in 0:4))
     Set(names)
 end
 
 # The registry's contract: the committed table
 # is the backend's intrinsic surface, queryable, with no silent gaps. The
-# extraction itself is conformance-checked against the llc binary's name
+# extraction itself is conformance-checked against the backend library's name
 # table at generation time (gen/extract_intrinsics.sh); these tests pin the
 # Julia-side representation against independently hand-verified facts from
 # the original llc experiments and the validation spikes.
 
 @testset "table shape" begin
-    # exact agreement with the 22.1.7 llc name table, established at
+    # exact agreement with the 23.1.1 library name table, established at
     # extraction; a regenerated table that drifts in count means tblgen
-    # skew (gen/ must run tblgen at the backend's exact version)
-    @test length(TABLE) == 2569
-    @test NVVM.BACKEND_LLVM_VERSION == v"22.1.7"
+    # skew (the name table is independently checked against the library)
+    @test length(TABLE) == 2633
+    @test NVVM.BACKEND_LLVM_VERSION == v"23.1.1"
     @test all(k == i.name for (k, i) in TABLE)
 end
 
@@ -118,7 +128,7 @@ end
     @test ranged == RETURN_RANGE_EXPECTED
     @test noundef == RETURN_NOUNDEF_EXPECTED
     @test length(ranged) == 34
-    @test length(noundef) == 91
+    @test length(noundef) == 96
     @test ranged ⊆ noundef
 
     # Every current range is one scalar-i32 interval. The emitter deliberately
@@ -230,17 +240,17 @@ end
     @test (0, 0, 1024) in tid.ranges
     @test (0, :noundef) in tid.argattrs
 
-    # overload-slot matching: atomics repeat slot 0 for the value operand
-    at = intrinsic("llvm.nvvm.atomic.add.gen.f.cta")
-    @test at.ret == (anyfloat,)
-    @test at.params == (anyptr, slot(0))
-    @test overloaded(at)
+    # Overload-slot matching: fma repeats the return slot for each input.
+    fma = intrinsic("llvm.nvvm.fma.rn.oob")
+    @test fma.ret == (anyfloat,)
+    @test fma.params == (slot(0), slot(0), slot(0))
+    @test overloaded(fma)
 end
 
 @testset "block-scaled mma is in the table" begin
     # the GB10 sm_121a MXFP8 path — the reason tier 2 pays for itself
     @test isintrinsic("llvm.nvvm.mma.block.scale.m16n8k32.row.col.mxf8f6f4.f32.e4m3.e4m3.f32.ue8m0")
-    @test length(matching("llvm.nvvm.mma.block.scale.")) == 54
+    @test length(matching("llvm.nvvm.mma.block.scale.")) == 55
     # wgmma.mma_async is NOT upstream; only its fences are — the asm tier
     # stays load-bearing for it
     @test isempty(matching("llvm.nvvm.wgmma.mma_async"))
@@ -295,7 +305,7 @@ end
 # --- Synthesis (emit.jl) ----------------------------------------------------
 #
 # Host-side checks of the llvmcall IR the @generated path splices. The same
-# IR was validated against the real 22.1.7 llc during development (every
+# IR was validated against the 23.1.1 backend library (every
 # case below selected its instruction); the ptxas/ and gpu/ tiers re-prove
 # that continuously through the actual pipeline. Here we pin the *text*: the
 # declaration, the attribute groups, mangling, glue, and repacking.
@@ -334,11 +344,8 @@ end
     @test !occursin("call noundef", control.ir)
     @test !occursin("!range", control.ir)
 
-    # Exhaust every callable inventory member, not just representatives. The
-    # sole exception has a return-only overload slot and is already rejected
-    # by the tier-2 ABI before any declaration can be generated.
-    for name in setdiff(RETURN_NOUNDEF_EXPECTED,
-                        Set(("llvm.nvvm.internal.addrspace.wrap",)))
+    # Exhaust every inventory member, not just representatives.
+    for name in RETURN_NOUNDEF_EXPECTED
         member = intrinsic(name)
         emitted = synthesize(name, ()).ir
         @test occursin("declare noundef ", emitted)
@@ -353,7 +360,7 @@ end
         end
     end
     wrap_error = try
-        synthesize("llvm.nvvm.internal.addrspace.wrap",
+        synthesize("llvm.nvvm.move.ptr",
                    (Core.LLVMPtr{UInt8,0},))
         ""
     catch err
@@ -384,10 +391,7 @@ end
 end
 
 @testset "optimized host LLVM retains stored return contracts" begin
-    llvm = sprint() do io
-        code_llvm(io, _nvvm_return_contract_probe, Tuple{};
-                  optimize=true, raw=true, debuginfo=:none, dump_module=true)
-    end
+    llvm = _nvvm_optimizer_llvm(_nvvm_return_contract_probe, Tuple{})
     name = "@llvm.nvvm.read.ptx.sreg.cluster.nctaid.x"
     calls = [String(line) for line in eachline(IOBuffer(llvm))
              if occursin(" call ", line) && occursin(name, line)]
@@ -444,11 +448,8 @@ end
 end
 
 @testset "optimized WMMA calls retain their branch-local convergence sites" begin
-    llvm = sprint() do io
-        code_llvm(io, _wmma_convergence_probe,
-                  Tuple{Bool,Float64,Float64,Float64,Float64};
-                  optimize=true, raw=true, debuginfo=:none, dump_module=true)
-    end
+    llvm = _nvvm_optimizer_llvm(_wmma_convergence_probe,
+                                Tuple{Bool,Float64,Float64,Float64,Float64})
     name = "@llvm.nvvm.wmma.m8n8k4.mma.row.col.f64"
     calls = [String(line) for line in eachline(IOBuffer(llvm))
              if occursin(" call ", line) && occursin(name, line)]
@@ -473,10 +474,7 @@ end
 end
 
 @testset "side-effecting no-memory calls survive optimization" begin
-    llvm = sprint() do io
-        code_llvm(io, _nomem_sideeffects_optimizer_probe, Tuple{UInt32};
-                  optimize=true, raw=true, debuginfo=:none, dump_module=true)
-    end
+    llvm = _nvvm_optimizer_llvm(_nomem_sideeffects_optimizer_probe, Tuple{UInt32})
     # Exactly one call to each closed-world member must remain. Looking only
     # for declarations would reproduce the old false-positive: the optimizer
     # retained declarations after deleting the observable void calls.
@@ -509,21 +507,15 @@ end
     @test occursin(".b16.p0$psuf\"", s.ir)
 end
 
-@testset "synthesize: two-slot mangle in canonical order (atomic)" begin
-    psuf = Base.libllvm_version < v"17" ? "i8" : ""
-    # ret slot (f32) precedes the pointer slot (p1) — the order llc's
-    # remangler normalizes to
-    s = synthesize("llvm.nvvm.atomic.add.gen.f.cta",
-                   (Core.LLVMPtr{Float32,1}, Float32))
-    @test occursin("@\"llvm.nvvm.atomic.add.gen.f.cta.f32.p1$psuf\"", s.ir)
-    @test occursin("nocapture", s.ir)
+@testset "synthesize: repeated return-slot binding" begin
+    s = synthesize("llvm.nvvm.fma.rn.oob", (Float32, Float32, Float32))
+    @test occursin("@\"llvm.nvvm.fma.rn.oob.f32\"", s.ir)
     @test s.rettype == Float32
-
-    # the value argument binds the ret slot — Float64 flips it to .f64
-    s = synthesize("llvm.nvvm.atomic.add.gen.f.cta",
-                   (Core.LLVMPtr{Float64,1}, Float64))
-    @test occursin(".f64.p1$psuf\"", s.ir)
+    s = synthesize("llvm.nvvm.fma.rn.oob", (Float64, Float64, Float64))
+    @test occursin("@\"llvm.nvvm.fma.rn.oob.f64\"", s.ir)
     @test s.rettype == Float64
+    @test_throws ErrorException synthesize("llvm.nvvm.fma.rn.oob",
+                                           (Float32, Float64, Float32))
 end
 
 @testset "synthesize: heterogeneous struct return (shfl pred variant)" begin

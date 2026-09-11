@@ -21,8 +21,7 @@ mma.sync.aligned.m16n8k64.row.col.kind::mxf4.block_scale.scale_vec::2X.f32.e2m1.
 st.global.b32 [%rd0+4], %r13;
 mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue4m3 {%r17, %r18, %r19, %r20}, {%r0, %r1, %r2, %r3}, {%r4, %r5}, {%r8, %r8, %r8, %r8}, %r6, {%rs0, %rs1}, %r7, {%rs0, %rs1};
 st.global.b32 [%rd0+8], %r17;
-mov.b32 %r21, 0;
-mma.sync.aligned.kind::mxf4nvf4.block_scale.scale_vec::4X.m16n8k64.row.col.f32.e2m1.e2m1.f32.ue8m0 {%r22, %r23, %r24, %r25}, {%r0, %r1, %r2, %r3}, {%r4, %r5}, {%r21, %r21, %r21, %r21}, %r6, {%rs0, %rs1}, %r7, {%rs0, %rs1};
-st.global.b32 [%rd0+12], %r22;
+mma.sync.aligned.m16n8k64.row.col.kind::mxf4nvf4.block_scale.scale_vec::4X.f32.e2m1.e2m1.f32.ue8m0 {%r21, %r22, %r23, %r24}, {%r0, %r1, %r2, %r3}, {%r4, %r5}, {%r8, %r8, %r8, %r8}, %r6, {%rs0, %rs1}, %r7, {%rs0, %rs1};
+st.global.b32 [%rd0+12], %r21;
 ret;
 }

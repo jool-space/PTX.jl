@@ -23,7 +23,7 @@ generator halves and the extracted JSON snapshot they communicate through.
   `github.com/llvm/llvm-project`.
 - `julia --project=gen` resolves `LLVM_full_jll` to supply `llvm-tblgen`.
   The tblgen need only understand the tag's TableGen *language*, not match
-  its version (LLVM 18's chokes on 22's `!listflatten`; 21's parses 22.1.7
+  its version (LLVM 18's chokes on 22's `!listflatten`; 21's parses 23.1.1
   cleanly). If a future tag outgrows the pinned tblgen, bump
   `LLVM_full_jll` here — this pin is independent of the backend version.
 
@@ -47,7 +47,7 @@ entry in the root `Project.toml` is the trigger — see the comment there):
    `gen/nvvm_intrinsics_X.Y.Z.json`; delete the previous snapshot —
    `generate_registry.jl` with no argument expects exactly one.
 2. **Check the record count** the script prints against the intrinsic
-   name table embedded in the new backend's `llc` binary (the standing
+   name table embedded in the new backend's `libnvptx` library (the standing
    "registry names" testset in `test/host/conformance.jl` does this set
    equality; a count mismatch at this stage means tblgen-version skew).
 3. **Generate**: `julia --project=gen gen/generate_registry.jl`. If it
@@ -67,4 +67,14 @@ entry in the root `Project.toml` is the trigger — see the comment there):
    `IntrConvergent`, at which point the overlay in `src/nvvm/emit.jl`
    shrinks instead).
 6. **Run the conformance suites**:
-   `julia --project=test test/runtests.jl host/nvvm host/conformance`.
+   `julia --project=test test/runtests.jl host/nvvm host/conformance host/nvptx_backend`.
+   Direct probes use the installed library's C API, accept textual LLVM IR,
+   and check diagnostics and instruction selection without CUDA artifacts.
+
+The backend 23 environment requires GPUCompiler 2.7 and a CUDACore version
+supporting that backend. While registered CUDACore releases constrain the
+backend to 22, run `julia .ci/prepare.jl test` to create an isolated environment
+using the pinned CUDA.jl main sources. The script prints the environment
+path; pass it to `julia --project=<path> test/runtests.jl ...`. CI uses this
+same setup on Julia 1.10 and later. The root package keeps CUDA and the
+backend as weak dependencies, so host-only use does not require either.

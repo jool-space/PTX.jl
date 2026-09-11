@@ -3,7 +3,7 @@
 # `.layout::v1` (see wrappers/mbarrier.jl for the report-aware test_wait /
 # try_wait variants).
 #
-# Asm tier by necessity: the NVVM registry (LLVM 22.1.7) has no fabric
+# Asm tier by necessity: the NVVM registry (LLVM 23.1.1) has no fabric
 # intrinsics. Hand-written rather than chain-default: the two-register CFT
 # handle operand `[leId, off]` (u32 + u64 inside one bracketed group) has no
 # chain-default rendering, so `:fabric` is deliberately NOT in the form
