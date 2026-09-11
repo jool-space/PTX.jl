@@ -51,7 +51,9 @@ const ARGATTRS = Dict(
 # sync with NVVM.llvmtype
 const VTS = Set(["i1", "i8", "i16", "i32", "i64", "i128",
                  "f16", "bf16", "f32", "f64", "Metadata",
-                 "v2f16", "v2bf16", "v2i32", "v4i8", "v4i32", "v4f32",
+                 "v2f16", "v2bf16", "v1i32", "v2i32", "v4i8", "v4i32",
+                 "v2f32", "v4f32", "v8f32", "v16f32", "v32f32",
+                 "v64f32", "v128f32",
                  "v8i32", "v16i32", "v32i32", "v64i32", "v128i32"])
 
 const ANYS = Dict("pAny" => "anyptr", "iAny" => "anyint", "fAny" => "anyfloat")
@@ -138,7 +140,7 @@ function generate_table_source(input::AbstractString)
         #   julia --project=gen gen/generate_registry.jl
         #
         # $(length(lines)) intrinsics from IntrinsicsNVVM.td at llvmorg-$version,
-        # name-conformant with the intrinsic table in that tag's llc binary.
+        # name-conformant with the intrinsic table in the backend library.
 
         const BACKEND_LLVM_VERSION = v"$version"
 

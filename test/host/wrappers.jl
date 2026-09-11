@@ -580,7 +580,7 @@ end
 end
 
 @testset "mbarrier PTX 9.3 extensions (layout / phase_type / report)" begin
-    # Asm tier by necessity (no NVVM intrinsics at 22.1.7). Prefix-matching
+    # Asm tier by necessity (no NVVM intrinsics at 23.1.1). Prefix-matching
     # on the @generated body's asm head plus rettype pins; `:report` is the
     # audited synthetic report selector for the predicate pair + value.
     pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
@@ -806,7 +806,7 @@ end
         @test occursin("convergent", s)
     end
 
-    # mma asm fallback: kind::f8f6f4 at m16n8k16 (no intrinsic at 22.1.7).
+    # mma asm fallback: kind::f8f6f4 at m16n8k16 (no intrinsic at 23.1.1).
     mma_fb = Operation{:mma, (:sync, :aligned, Symbol("kind::f8f6f4"),
                               :m16n8k16, :row, :col,
                               :f32, :e4m3, :e4m3, :f32)}()
@@ -817,23 +817,22 @@ end
     @test occursin("asm sideeffect", s)
     @test occursin("convergent", s)
 
-    # mma_scaled asm fallback: mxf4nvf4 scale_vec::4X ue8m0 (no intrinsic
-    # at 22.1.7). aeff3ee converted wgmma + dense mma but missed this file
-    # — found and fixed during B4; this pin keeps it fixed.
-    mma_sc_fb = Operation{:mma, (:sync, :aligned, Symbol("kind::mxf4nvf4"),
+    # The ue8m0 4X scaled MMA now uses an intrinsic; convergence remains
+    # mandatory on its call site.
+    mma_sc = Operation{:mma, (:sync, :aligned, Symbol("kind::mxf4nvf4"),
                                  :block_scale, Symbol("scale_vec::4X"),
                                  :m16n8k64, :row, :col,
                                  :f32, :e2m1, :e2m1, :f32, :ue8m0)}()
-    ci, rt = first(Base.code_typed(mma_sc_fb,
+    ci, rt = first(Base.code_typed(mma_sc,
         (NTuple{4, UInt32}, NTuple{2, UInt32}, NTuple{4, Float32},
          UInt32, UInt16, UInt16, UInt32, UInt16, UInt16)))
     @test rt === NTuple{4, Float32}
     s = unescape(string(ci))
-    @test occursin("asm sideeffect", s)
+    @test occursin("llvm.nvvm.mma.block.scale.m16n8k64.row.col.mxf4nvf4.scale.4x", s)
     @test occursin("convergent nomerge", s)
 
     # Tier-2 mma (dense + scaled): upstream props lack IntrConvergent (the
-    # whole generated `llvm.nvvm.mma.` surface is IntrNoMem only at 22.1.7).
+    # whole generated `llvm.nvvm.mma.` surface is IntrNoMem only at 23.1.1).
     # The emission overlay must put `convergent nomerge` on the call site;
     # retaining it on the declaration is harmless but insufficient alone.
     mma_t2 = Operation{:mma, (:sync, :aligned, :m16n8k16, :row, :col,
@@ -1211,7 +1210,7 @@ end
 
 @testset "fabric proxy fences (PTX 9.3, asm tier)" begin
     # `fence.proxy.<to::from>.alias.<sem>.sys;` — no NVVM intrinsics at
-    # 22.1.7, so unlike the proxy/init fences above these stay on the asm
+    # 23.1.1, so unlike the proxy/init fences above these stay on the asm
     # tier: sideeffect + `~{memory}`, not convergent.
     for dir in (Symbol("generic::fabric"), Symbol("fabric::generic"),
                 Symbol("fabric::fabric")),

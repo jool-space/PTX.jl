@@ -21,15 +21,15 @@ CUDACoreExt = "CUDACore"
 
 [compat]
 BFloat16s = "0.6"
-CUDACore = "6.2"
+CUDACore = "6.3"
 EnumX = "1"
 LLVM = "9.7.1"
 # The NVVM registry (src/nvvm/table.jl) is generated from the backend's
 # IntrinsicsNVVM.td and is valid within that backend major. The weakdep
 # compat constrains any environment that carries the backend (i.e. every
-# CUDA 6.2+ environment) without forcing the ~60 MB artifact on host-only
+# CUDA 6.3+ environment) without forcing the ~60 MB artifact on host-only
 # use. Bumping this means regenerating the registry (gen/) and reviewing
 # the diff; standing conformance lives in test/host/conformance.jl.
-NVPTX_LLVM_Backend_jll = "22"
+NVPTX_LLVM_Backend_jll = "23"
 Republic = "2"
 julia = "1.10"

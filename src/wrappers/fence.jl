@@ -9,7 +9,7 @@
 # The generic memory fences (`fence.sc.*`, `fence.acq_rel.*`) are TIER-1
 # core IR: `fence <ordering> syncscope(...)`. This is a *semantic*
 # translation of the PTX sem/scope pair, not a renaming — each mapping below
-# was verified by trial compilation through the artifact llc 22.1.7
+# was verified by trial compilation through the artifact llc 23.1.1
 # (expected instruction asserted, not just acceptance):
 #
 #   PTX sem    LLVM ordering      PTX scope   LLVM syncscope
@@ -144,7 +144,7 @@ end
 # and the generic proxy. All three handle directions × {acquire, release}
 # are enumerated. `.alias` and `.sys` are mandatory per the PTX 9.3 spec
 # (§9.7.14.4); no scope/sem variation beyond what's shown. No NVVM
-# intrinsics exist at 22.1.7, so these stay on the asm tier — like the
+# intrinsics exist at 23.1.1, so these stay on the asm tier — like the
 # other fences, NOT convergent (duplicating an ordering fence is harmless),
 # but sideeffect + `~{memory}` so nothing moves across them.
 

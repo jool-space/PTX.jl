@@ -171,3 +171,32 @@ end
     CUDACore.synchronize()
     @test all(Array(out) .== 64.0f0)
 end
+
+# The ue8m0 4X form uses the backend intrinsic and has a PTX 9.1 floor.
+function _sm121a_mma_mxf4nvf4_ue8m0!(out, sa::UInt32, sb::UInt32, bias::Float32)
+    one8 = UInt32(0x2222_2222)  # eight e2m1 values of 1.0
+    a = (one8, one8, one8, one8)
+    b = (one8, one8)
+    c = (bias, bias, bias, bias)
+    d = ptx"mma.sync.aligned.kind::mxf4nvf4.block_scale.scale_vec::4X.m16n8k64.row.col.f32.e2m1.e2m1.f32.ue8m0"(
+        a, b, c, sa, UInt16(0), UInt16(0), sb, UInt16(0), UInt16(0))
+    off = Int(ptx"mov.u32"(sreg"tid.x")) * 4
+    @inbounds out[off + 1] = d[1]
+    @inbounds out[off + 2] = d[2]
+    @inbounds out[off + 3] = d[3]
+    @inbounds out[off + 4] = d[4]
+    nothing
+end
+
+@testset "mma mxf4nvf4 4X ue8m0 scales and accumulation" begin
+    out = CUDACore.zeros(Float32, 32 * 4)
+    # ue8m0 is an unsigned exponent with bias 127; repeat each scale in
+    # all four bytes so every scale group has the same independent oracle.
+    for (sa, sb, bias, expected) in (
+            (0x7f7f7f7f, 0x7f7f7f7f, 0f0, 64f0),
+            (0x80808080, 0x81818181, 3f0, 515f0),
+            (0x7e7e7e7e, 0x7f7f7f7f, -1f0, 31f0))
+        @cuda threads=32 _sm121a_mma_mxf4nvf4_ue8m0!(out, sa, sb, bias)
+        @test all(Array(out) .== expected)
+    end
+end

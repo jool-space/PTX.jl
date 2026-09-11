@@ -155,10 +155,10 @@ function memory_attr(props)::Union{String,Nothing}
     return nothing
 end
 
-# Upstream-props corrections: IntrinsicsNVVM.td at 22.1.7 omits
+# Upstream-props corrections: IntrinsicsNVVM.td at 23.1.1 omits
 # IntrConvergent from both warp-collective matrix namespaces:
 #
-#   - the existing `llvm.nvvm.mma.` namespace (390 pinned records);
+#   - the existing `llvm.nvvm.mma.` namespace (392 pinned records);
 #   - all 414 `wmma` load/mma/store records.
 #
 # PTX requires every lane to execute the same instruction in both families.

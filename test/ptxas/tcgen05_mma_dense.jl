@@ -62,7 +62,7 @@ end
         r"tcgen05\.mma\.cta_group::1\.kind::tf32\.collector::a::use \[%r\d+\], \[%r\d+\]",
         ptx1)
     @test occursin(
-        r"tcgen05\.mma\.cta_group::1\.kind::i8\.collector::a::discard\.ashift \[%r\d+\], \[%r\d+\]",
+        r"tcgen05\.mma\.cta_group::1\.kind::i8\.ashift\.collector::a::discard \[%r\d+\], \[%r\d+\]",
         ptx1)
     # mask vector before the enable predicate; scale immediate after it
     @test occursin(
@@ -83,6 +83,6 @@ end
         r"tcgen05\.mma\.cta_group::2\.kind::tf32\.collector::a::fill \[%r\d+\], %rd\d+, %rd\d+, %r\d+, \{(%r\d+, ){7}%r\d+\}, %p\d+;",
         ptx2)
     @test occursin(
-        r"tcgen05\.mma\.cta_group::2\.kind::f16\.collector::a::discard\.ashift \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, %p\d+, 3;",
+        r"tcgen05\.mma\.cta_group::2\.kind::f16\.ashift\.collector::a::discard \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, %p\d+, 3;",
         ptx2)
 end
