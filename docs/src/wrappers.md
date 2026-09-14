@@ -369,7 +369,9 @@ The initial surface covers `tcgen05.wait::ld.sync.aligned` and
 Adjacent 32-bit tuple elements use paired 64-bit operands. The
 `ptxas/wait_registers` test compiles six attention configurations with and
 without register bindings and compares machine-instruction encodings
-under the same toolchain, including any spill instructions.
+under the same toolchain, including any spill instructions. Debug metadata
+is stripped before backend code generation so it cannot perturb the
+instruction comparison.
 
 Register operands and memory clobbers describe different compiler effects;
 see [NVIDIA's inline-PTX documentation](https://docs.nvidia.com/cuda/inline-ptx-assembly/index.html#incorrect-optimization)
