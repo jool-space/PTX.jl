@@ -330,6 +330,65 @@ for shape in (Symbol("32x32b"), Symbol("16x32bx2")),
     _tcgen05_ldred_register(shape, count, redop, variant, dtype)
 end
 
+# --- ld.spcompress (load with 2:4 compression, generated asm family) ---------
+#
+# `tcgen05.ld{.red}.spcompress` (PTX 9.4 §9.7.18.8, sm_107a only) loads the
+# 32x32b shape and compresses each lane's row 2:4 in flight: the two kept
+# elements of every group of four land in `cdata` (num/2 b32 registers) and
+# their 2-bit indices in `mdata` (ceil(num/32) b32 registers); `.red`
+# additionally reduces the row into `redval` (f32). Same warp-collective
+# sideeffect + ~{memory} + convergent nomerge contract as ld.red. ptxas 13.4
+# admits the family at sm_107a and rejects `.sp::2:4` at sm_107f.
+#
+# Grid: num {x4..x128} × rowop {min, max} × {∅, .abs}, further × {∅, .NaN}
+# for `.ld.red` = 72 forms. Calls return the grouped tuple
+# (mdata, cdata[, redval]); the indices and the kept data keep their ISA
+# operand order.
+
+function _tcgen05_ldspc_ir(mods::Tuple{Vararg{Symbol}}, red::Bool, n::Int)
+    head = "tcgen05." * join(String.(mods), ".")
+    nm = cld(n, 32)
+    nc = n ÷ 2
+    total = nm + nc
+    mregs = join(("\$$(k - 1)" for k in 1:nm), ", ")
+    cregs = join(("\$$(k - 1)" for k in nm + 1:total), ", ")
+    redval = red ? ", \$$total" : ""
+    addr = red ? total + 1 : total
+    asm = "$head {$mregs}, {$cregs}$redval, [\$$addr];"
+    constraints = join(fill("=r", total), ",") * (red ? ",=f" : "") *
+                  ",r,~{memory}"
+    flat = Tuple{fill(UInt32, total)..., (red ? (Float32,) : ())...}
+    convergent_asm_ir(asm, constraints, flat, (UInt32,)), flat, nm, nc
+end
+
+function _tcgen05_ldspc_register(red::Bool, count::Int, rowop::Symbol,
+                                 variant::Tuple{Vararg{Symbol}})
+    mods = (:ld, (red ? (:red,) : ())..., :spcompress, :sync, :aligned,
+            Symbol("32x32b"), Symbol("x", count), rowop, Symbol("sp::2:4"),
+            variant..., :f32, :b2)
+    register_wrapper!(:tcgen05_ldspc, :tcgen05, mods, :asm)
+    ir, flat, nm, nc = _tcgen05_ldspc_ir(mods, red, count)
+    mvals = [:(r[$i]) for i in 1:nm]
+    cvals = [:(r[$i]) for i in nm + 1:nm + nc]
+    tail = red ? (:(r[$(nm + nc + 1)]),) : ()
+    rt = Tuple{NTuple{nm, UInt32}, NTuple{nc, UInt32},
+               (red ? (Float32,) : ())...}
+    @eval @inline function (::Operation{:tcgen05, $mods})(taddr::UInt32)
+        r = Base.llvmcall(($ir, "entry"), $flat, Tuple{UInt32}, taddr)
+        (($(mvals...),), ($(cvals...),), $(tail...))::$rt
+    end
+    _tcgen05_adapter!(mods, Address{UInt32})
+    nothing
+end
+
+for red in (false, true), count in (4, 8, 16, 32, 64, 128),
+        rowop in (:min, :max),
+        variant in (red ? ((), (:abs,), (Symbol("NaN"),),
+                           (:abs, Symbol("NaN"))) :
+                          ((), (:abs,)))
+    _tcgen05_ldspc_register(red, count, rowop, variant)
+end
+
 # --- alloc / relinquish / wait / commit ----------------------------------------
 
 # Single-route asm (see header). The generic-address alloc form keeps its

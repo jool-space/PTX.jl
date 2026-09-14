@@ -280,6 +280,22 @@ opcodes = ["tensormap"]
 notes = "Sink (the type tail names the replaced field); the head also covers tensormap.cp_fenceproxy (§9.7.14.17); the tensormap PROXY FENCES live under the fence head and are typed-wrapper-only."
 owner = ["src/ledgers/forms.jl", "src/lib/tensor_map.jl"]
 
+[[family]]
+section = "9.7.10.30"
+title = "Data Movement and Conversion Instructions: spcompress"
+status = "strict"
+opcodes = ["spcompress"]
+notes = "Typed-wrapper-only (PTX 9.4, sm_107a): the dense input, kept-element, and index vectors are qualifier-dependent b32 register groups with two leading grouped destinations, so the chain cannot render them. The closed 28-form grid ({b8,b16} x {b2,b4} x x1..x64) is asm-tier without a sideeffect marker (register-only, :pure) and early-clobber outputs; spcompress_desc packs the Table 38 descriptor. Assembled at sm_107a and rejected at sm_107f/sm_100a; no runtime evidence (needs sm_107a hardware)."
+owner = ["src/wrappers/spcompress.jl", "src/lib/sparsity_descriptor.jl"]
+
+[[family]]
+section = "9.7.10.31"
+title = "Data Movement and Conversion Instructions: spdecompress"
+status = "strict"
+opcodes = ["spdecompress"]
+notes = "Typed-wrapper-only (PTX 9.4, sm_107a): the index, compressed, and dense vectors are qualifier-dependent b32 register groups with a leading grouped destination. The 143 admitted (elemsize, idxsize, sp::S:T, num) tuples follow the five ISA validity conditions (S·elemsize <= 32, .b2 indexes T <= 4, output 32..4096 bits, register cap); asm-tier without a sideeffect marker (register-only, :pure) and early-clobber outputs. Assembled at sm_107a and rejected at sm_107f/sm_100a; no runtime evidence (needs sm_107a hardware)."
+owner = ["src/wrappers/spcompress.jl"]
+
 # ── §9.7.11 Fabric ────────────────────────────────────────────────────────────
 
 [[family]]

@@ -302,6 +302,7 @@ bit-packing helpers for both:
 | `tcgen05_instr_desc_f8f6f4` | `.kind::f8f6f4` instruction descriptor (independent e4m3/e5m2/e2m3/e3m2/e2m1 A/B types, f16 or f32 destination). |
 | `tcgen05_instr_desc_mxf8f6f4` | `.kind::mxf8f6f4` block-scale instruction descriptor (scale-factor data IDs; scale matrix type is the ISA-fixed UE8M0). |
 | `tcgen05_instr_desc_mxf4`, `tcgen05_instr_desc_mxf4nvf4` | `.kind::mxf4` / `.kind::mxf4nvf4` block-scale instruction descriptors (E2M1 elements; transpose ISA-unsupported; nvf4 additionally chooses the scale matrix type). |
+| `spcompress_desc`, `spcompress_elemsize` | `spcompress` (PTX 9.4, sm_107a) sparsity descriptor: selection rule plus dense element type, and the `.elemsize` qualifier that type requires. |
 | `smem_addr_u32` | Convert a `Core.LLVMPtr{T, AS.Shared}` to its 32-bit in-CTA SMEM offset (used as the `smem_addr_u32` argument to the descriptor builders). |
 | `step_desc` | Advance a wgmma SMEM-operand descriptor's start address by a byte offset — walking a SMEM ring buffer or stepping K within a tile without re-packing. |
 
@@ -341,6 +342,8 @@ PTX.tcgen05_instr_desc_f8f6f4
 PTX.tcgen05_instr_desc_mxf8f6f4
 PTX.tcgen05_instr_desc_mxf4
 PTX.tcgen05_instr_desc_mxf4nvf4
+PTX.spcompress_desc
+PTX.spcompress_elemsize
 ```
 
 ## GMMA layout helpers

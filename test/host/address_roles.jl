@@ -97,6 +97,16 @@ function _expected_tcgen05_integer_address_forms()
         push!(forms, (:ld, :red, :sync, :aligned, shape, Symbol("x", count),
                       redop, variant..., dtype))
     end
+    # ld.spcompress (PTX 9.4, sm_107a): the 32x32b shape only, num ≥ x4,
+    # f32 rows with .b2 indices; .NaN belongs to the .red grammar alone.
+    for red in (false, true), count in (4, 8, 16, 32, 64, 128),
+            rowop in (:min, :max),
+            variant in (red ? ((), (:abs,), (Symbol("NaN"),),
+                               (:abs, Symbol("NaN"))) : ((), (:abs,)))
+        push!(forms, (:ld, (red ? (:red,) : ())..., :spcompress, :sync,
+                      :aligned, Symbol("32x32b"), Symbol("x", count), rowop,
+                      Symbol("sp::2:4"), variant..., :f32, :b2))
+    end
     for cg in 1:2
         cta = Symbol("cta_group::", cg)
         push!(forms, (:alloc, cta, :sync, :aligned,
@@ -195,6 +205,10 @@ function _expected_tcgen05_integer_address_adapters()
             continue
         end
         argtypes = if first(mods) === :shift
+            (A32,)
+        elseif first(mods) === :ld && :spcompress in mods
+            # mdata/cdata (and redval) are destinations; only taddr is an
+            # operand.
             (A32,)
         elseif first(mods) === :ld && mods[2] === :red
             # redval is a second DESTINATION, not an operand: the adapter
@@ -352,12 +366,12 @@ end
 @testset "closed tcgen05 integer-address adapters" begin
     expected_forms = _expected_tcgen05_integer_address_forms()
     @test Set(PTX.TCGEN05_INTEGER_ADDRESS_FORMS) == expected_forms
-    @test length(expected_forms) == 714
+    @test length(expected_forms) == 786
     expected = _expected_tcgen05_integer_address_adapters()
     actual = Set((s.mods, s.argtypes)
                  for s in PTX.TCGEN05_INTEGER_ADDRESS_ADAPTERS)
     @test actual == expected
-    @test length(actual) == 1610
+    @test length(actual) == 1682
     for (mods, signature) in actual
         # Immediate specs are the abstract `Val` (dispatch admits any
         # immediate); lowering probes need a concrete instance, as every
