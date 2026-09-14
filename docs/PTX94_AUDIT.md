@@ -123,8 +123,8 @@ the producer overwrote it. The slot is now released by a per-K-tile
 `tcgen05.commit` onto the consumed barrier, the completion-backed idiom the
 FlashAttention kernel already used. The TMEM roundtrip consumed `tcgen05.ld`
 results without `wait::ld`; it now waits through `PTX.wait_registers` before
-the stores and the deallocation. Both compile at sm_100a; the B300 runtime
-record in `test/EVIDENCE.toml` states which tree executed them. No
+the stores and the deallocation. Both compile at sm_100a and pass on a B200 (CC 10.0) at tree 435fb84 with
+the rest of the `gpu/blackwell` tier; `test/EVIDENCE.toml` records the run. No
 wrong-result failure was reproduced before the change.
 
 ## PR #150
