@@ -97,5 +97,66 @@ end
         ptx = emit_ptx(_ga_spdecompress!, types; cap = v"10.7", feature_set = :arch)
         @test occursin(r"spdecompress\.b8\.b2\.sp::2:4\.x32 \{(%r\d+, ){31}%r\d+\}, \{%r\d+, %r\d+, %r\d+, %r\d+\}, \{(%r\d+, ){15}%r\d+\};",
                        ptx)
+@testset "tcgen05 ti16, collector::b, and lut::b mma assemble on sm_107" begin
+    if _ptxas_isa() < v"9.4"
+        @test_skip "PTX 9.4 assembler required"
+    else
+        family = ((_ga_t5_ti16_cg1!, _GA_T5_TI16_CG1_TT),
+                  (_ga_t5_ti16_cg2!, _GA_T5_TI16_CG2_TT),
+                  (_ga_t5_collb_cg1!, _GA_T5_MX_TT),
+                  (_ga_t5_lut_cg1!, _GA_T5_MX_TT))
+        for (kernel, tt) in family, feature_set in (:family, :arch)
+            @test ptxas_compiles(kernel, tt; cap = v"10.7", feature_set)
+        end
+        @test ptxas_compiles(_ga_t5_collb_avariant!, _GA_T5_MX_TT;
+                             cap = v"10.7", feature_set = :arch)
+
+        ptx = emit_ptx(_ga_t5_ti16_cg1!, _GA_T5_TI16_CG1_TT;
+                       cap = v"10.7", feature_set = :family)
+        @test occursin(".target sm_107f", ptx)
+        # The operand schema per form: sp metadata bracketed after B, the
+        # mask before enable-input-d, the ws zero-column mask last.
+        @test occursin(r"tcgen05\.mma\.cta_group::1\.kind::ti16 \[%r\d+\], %rd\d+, %rd\d+, %r\d+, %p\d+;",
+                       ptx)
+        @test occursin(r"tcgen05\.mma\.cta_group::1\.kind::ti16\.collector::b::fill \[%r\d+\], %rd\d+, %rd\d+, %r\d+, \{%r\d+, %r\d+, %r\d+, %r\d+\}, %p\d+;",
+                       ptx)
+        @test occursin(r"tcgen05\.mma\.cta_group::1\.kind::ti16\.ashift\.collector::a::lastuse\.collector::b::lastuse \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, \{%r\d+, %r\d+, %r\d+, %r\d+\}, %p\d+;",
+                       ptx)
+        @test occursin(r"tcgen05\.mma\.sp\.cta_group::1\.kind::ti16\.collector::b::fill \[%r\d+\], %rd\d+, %rd\d+, \[%r\d+\], %r\d+, %p\d+;",
+                       ptx)
+        @test occursin(r"tcgen05\.mma\.ws\.cta_group::1\.kind::ti16\.collector::b1::fill \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, %p\d+, %rd\d+;",
+                       ptx)
+        @test occursin(r"tcgen05\.mma\.ws\.sp\.cta_group::1\.kind::ti16\.collector::b3::lastuse \[%r\d+\], %rd\d+, %rd\d+, \[%r\d+\], %r\d+, %p\d+;",
+                       ptx)
+
+        ptx = emit_ptx(_ga_t5_collb_cg1!, _GA_T5_MX_TT;
+                       cap = v"10.7", feature_set = :family)
+        # scale-input-d is a trailing immediate; the block-scale forms keep
+        # the two scale addresses.
+        @test occursin(r"tcgen05\.mma\.cta_group::1\.kind::f16\.collector::a::fill\.collector::b::use \[%r\d+\], %rd\d+, %rd\d+, %r\d+, \{%r\d+, %r\d+, %r\d+, %r\d+\}, %p\d+, 5;",
+                       ptx)
+        @test occursin(r"tcgen05\.mma\.cta_group::1\.kind::tf32\.ashift\.collector::a::lastuse\.collector::b::lastuse \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, %p\d+, 1;",
+                       ptx)
+        @test occursin(r"tcgen05\.mma\.sp\.cta_group::1\.kind::tf32\.ashift\.collector::b::use \[%r\d+\], \[%r\d+\], %rd\d+, \[%r\d+\], %r\d+, \{%r\d+, %r\d+, %r\d+, %r\d+\}, %p\d+, 15;",
+                       ptx)
+        @test occursin(r"tcgen05\.mma\.sp\.cta_group::1\.kind::mxf8f6f4\.block_scale\.block32\.collector::a::fill\.collector::b::use \[%r\d+\], %rd\d+, %rd\d+, \[%r\d+\], %r\d+, \[%r\d+\], \[%r\d+\], %p\d+;",
+                       ptx)
+
+        ptx = emit_ptx(_ga_t5_lut_cg1!, _GA_T5_MX_TT;
+                       cap = v"10.7", feature_set = :family)
+        @test occursin(r"tcgen05\.mma\.cta_group::1\.kind::f8f6f4\.decompress::lut::b \[%r\d+\], %rd\d+, %rd\d+, \[%r\d+\], %r\d+, %p\d+;",
+                       ptx)
+        @test occursin(r"tcgen05\.mma\.cta_group::1\.kind::mxf8f6f4\.block_scale\.decompress::lut::b\.block32\.collector::b::lastuse \[%r\d+\], \[%r\d+\], %rd\d+, \[%r\d+\], %r\d+, \[%r\d+\], \[%r\d+\], %p\d+;",
+                       ptx)
+
+        for (kernel, tt) in family,
+                (cap, feature_set, target) in ((v"10.0", :family, "sm_100f"),
+                                               (v"10.3", :arch, "sm_103a"),
+                                               (v"12.0", :family, "sm_120f"))
+            @test _ga_rejected_at(kernel, tt, cap, feature_set, target)
+        end
+        # The sparse mxf4 kinds refuse the family target even on sm_107.
+        @test _ga_rejected_at(_ga_t5_collb_avariant!, _GA_T5_MX_TT, v"10.7",
+                          :family, "sm_107f")
     end
 end

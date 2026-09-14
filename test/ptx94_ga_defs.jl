@@ -81,3 +81,106 @@ end
         return nothing
     end
 end
+# --- tcgen05 PTX ISA 9.4 mma forms (sm_107f) ----------------------------------
+# One kernel per cta_group (ptxas rejects mixing cta_group::1/::2 in one
+# function). Every form is a side-effecting asm call, so nothing is
+# eliminated; the trailing store keeps the TMEM address live.
+function _ga_t5_ti16_cg1!(out::Core.LLVMPtr{UInt32, 1}, d::UInt32,
+                          adesc::UInt64, bdesc::UInt64, meta::UInt32,
+                          idesc::UInt32, zcm::UInt64)
+    mask = (UInt32(0), UInt32(0), UInt32(0), UInt32(0))
+    ptx"tcgen05.mma.cta_group::1.kind::ti16"(d, adesc, bdesc, idesc, false)
+    ptx"tcgen05.mma.cta_group::1.kind::ti16.collector::b::fill"(
+        d, adesc, bdesc, idesc, mask, false)
+    ptx"tcgen05.mma.cta_group::1.kind::ti16.collector::a::fill.collector::b::use"(
+        d, d, bdesc, idesc, false)
+    ptx"tcgen05.mma.cta_group::1.kind::ti16.ashift.collector::a::lastuse.collector::b::lastuse"(
+        d, d, bdesc, idesc, mask, false)
+    ptx"tcgen05.mma.sp.cta_group::1.kind::ti16.collector::b::fill"(
+        d, adesc, bdesc, meta, idesc, false)
+    ptx"tcgen05.mma.sp.cta_group::1.kind::ti16.ashift.collector::b::use"(
+        d, d, bdesc, meta, idesc, mask, false)
+    ptx"tcgen05.mma.ws.cta_group::1.kind::ti16"(d, adesc, bdesc, idesc, false)
+    ptx"tcgen05.mma.ws.cta_group::1.kind::ti16.collector::b1::fill"(
+        d, d, bdesc, idesc, false, zcm)
+    ptx"tcgen05.mma.ws.sp.cta_group::1.kind::ti16.collector::b3::lastuse"(
+        d, adesc, bdesc, meta, idesc, false)
+    ptx"st.global.b32"(out, d)
+    return nothing
+end
+
+function _ga_t5_ti16_cg2!(out::Core.LLVMPtr{UInt32, 1}, d::UInt32,
+                          adesc::UInt64, bdesc::UInt64, meta::UInt32,
+                          idesc::UInt32)
+    mask = ntuple(_ -> UInt32(0), Val(8))
+    ptx"tcgen05.mma.cta_group::2.kind::ti16.collector::b::lastuse"(
+        d, adesc, bdesc, idesc, false)
+    ptx"tcgen05.mma.cta_group::2.kind::ti16.collector::a::use.collector::b::fill"(
+        d, adesc, bdesc, idesc, mask, false)
+    ptx"tcgen05.mma.sp.cta_group::2.kind::ti16.ashift"(
+        d, d, bdesc, meta, idesc, false)
+    ptx"st.global.b32"(out, d)
+    return nothing
+end
+
+function _ga_t5_collb_cg1!(out::Core.LLVMPtr{UInt32, 1}, d::UInt32,
+                           adesc::UInt64, bdesc::UInt64, meta::UInt32,
+                           idesc::UInt32, sa::UInt32, sb::UInt32)
+    mask = (UInt32(0), UInt32(0), UInt32(0), UInt32(0))
+    ptx"tcgen05.mma.cta_group::1.kind::f16.collector::b::fill"(
+        d, adesc, bdesc, idesc, false)
+    ptx"tcgen05.mma.cta_group::1.kind::f16.collector::a::fill.collector::b::use"(
+        d, adesc, bdesc, idesc, mask, false, Val(5))
+    ptx"tcgen05.mma.cta_group::1.kind::tf32.ashift.collector::a::lastuse.collector::b::lastuse"(
+        d, d, bdesc, idesc, false, Val(1))
+    ptx"tcgen05.mma.cta_group::1.kind::f8f6f4.collector::b::use"(
+        d, d, bdesc, idesc, mask, false)
+    ptx"tcgen05.mma.sp.cta_group::1.kind::f16.collector::b::fill"(
+        d, adesc, bdesc, meta, idesc, false)
+    ptx"tcgen05.mma.sp.cta_group::1.kind::tf32.ashift.collector::b::use"(
+        d, d, bdesc, meta, idesc, mask, false, Val(15))
+    ptx"tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale.block32.collector::b::fill"(
+        d, adesc, bdesc, idesc, sa, sb, false)
+    ptx"tcgen05.mma.cta_group::1.kind::mxf4nvf4.block_scale.block16.collector::a::use.collector::b::lastuse"(
+        d, d, bdesc, idesc, sa, sb, false)
+    ptx"tcgen05.mma.sp.cta_group::1.kind::mxf8f6f4.block_scale.block32.collector::a::fill.collector::b::use"(
+        d, adesc, bdesc, meta, idesc, sa, sb, false)
+    ptx"st.global.b32"(out, d)
+    return nothing
+end
+
+# The sparse mxf4 kinds are a-variant-exclusive, so their B-collector forms
+# assemble on sm_107a only.
+function _ga_t5_collb_avariant!(out::Core.LLVMPtr{UInt32, 1}, d::UInt32,
+                                adesc::UInt64, bdesc::UInt64, meta::UInt32,
+                                idesc::UInt32, sa::UInt32, sb::UInt32)
+    ptx"tcgen05.mma.sp.cta_group::1.kind::mxf4.block_scale.block32.collector::a::fill.collector::b::fill"(
+        d, adesc, bdesc, meta, idesc, sa, sb, false)
+    ptx"tcgen05.mma.sp.cta_group::1.kind::mxf4nvf4.block_scale.block32.collector::b::use"(
+        d, d, bdesc, meta, idesc, sa, sb, false)
+    ptx"st.global.b32"(out, d)
+    return nothing
+end
+
+function _ga_t5_lut_cg1!(out::Core.LLVMPtr{UInt32, 1}, d::UInt32,
+                         adesc::UInt64, bdesc::UInt64, lut::UInt32,
+                         idesc::UInt32, sa::UInt32, sb::UInt32)
+    mask = (UInt32(0), UInt32(0), UInt32(0), UInt32(0))
+    ptx"tcgen05.mma.cta_group::1.kind::f8f6f4.decompress::lut::b"(
+        d, adesc, bdesc, lut, idesc, false)
+    ptx"tcgen05.mma.cta_group::1.kind::f8f6f4.decompress::lut::b.collector::a::fill.collector::b::use"(
+        d, d, bdesc, lut, idesc, mask, false)
+    ptx"tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale.decompress::lut::b.block32"(
+        d, adesc, bdesc, lut, idesc, sa, sb, false)
+    ptx"tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale.decompress::lut::b.block32.collector::b::lastuse"(
+        d, d, bdesc, lut, idesc, sa, sb, false)
+    ptx"st.global.b32"(out, d)
+    return nothing
+end
+
+const _GA_T5_TI16_CG1_TT = Tuple{Core.LLVMPtr{UInt32, 1}, UInt32, UInt64,
+                                 UInt64, UInt32, UInt32, UInt64}
+const _GA_T5_TI16_CG2_TT = Tuple{Core.LLVMPtr{UInt32, 1}, UInt32, UInt64,
+                                 UInt64, UInt32, UInt32}
+const _GA_T5_MX_TT = Tuple{Core.LLVMPtr{UInt32, 1}, UInt32, UInt64, UInt64,
+                           UInt32, UInt32, UInt32, UInt32}
