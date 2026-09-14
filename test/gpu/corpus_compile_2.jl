@@ -3,12 +3,12 @@ using PTX: IR
 using PTX.Parser: parse as parse_ptx
 using PTX.IR: format
 
-# ptxas external-corpus shard 2 of 4 — ptxas-acceptance of this shard's slice
+# ptxas external-corpus shard 2 of 2 — ptxas-acceptance of this shard's slice
 # of the real-world corpus, for both the source and its structural re-emit.
 # The machinery and design rationale (malformed-fixture filter, version
 # stamping, arch retargeting, corpus selection, size-balanced slicing) live
 # in test/setup.jl (ptxas external-corpus acceptance support); host/corpus.jl
-# pins that the four slices partition the selected corpus exactly.
+# pins that the two slices partition the selected corpus exactly.
 
 @testset "ptxas accepts source + structural re-emit ($(basename(path)))" for (path, arch) in ptxas_corpus_shard(2)
     # Preserve provenance fixtures on disk. The host header tier asserts the

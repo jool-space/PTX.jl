@@ -180,6 +180,22 @@ function ptxas_compiles(f, tt::Type{<:Tuple};
     true
 end
 
+# The assembler rejection twin of `ptxas_compiles`: true when ptxas refuses
+# the kernel at the given target and names `target` in its diagnostic, so a
+# below-floor spelling is pinned to the assembler, not to a Julia-side error.
+function ptxas_rejects(f, tt::Type{<:Tuple}; cap::VersionNumber,
+                       feature_set::Symbol = :baseline, target::AbstractString)
+    err = try
+        ptxas_compiles(f, tt; cap, feature_set)
+        nothing
+    catch caught
+        caught
+    end
+    err isa ErrorException || return false
+    msg = sprint(showerror, err)
+    occursin("Failed to compile PTX code", msg) && occursin(target, msg)
+end
+
 # --- Hopper kernel test helpers ---------------------------------------------
 # Patterns repeated 3+ times across the test/gpu/hopper/*.jl kernels.
 
@@ -587,11 +603,10 @@ const EXTERNAL_SWEEP_FILES = _gather_corpus_ptx(EXTERNAL_SWEEP_DIR)
 # Number of host/corpus_external_* shard files. The shards must partition
 # EXTERNAL_SWEEP_FILES exactly; host/corpus.jl asserts the partition.
 # Deterministic greedy bin-packing by byte size (largest first, into the
-# currently lightest shard). Per-file cost is strongly size-correlated and
-# superlinear for the largest compiler outputs — one ~50 KB kernel costs
-# ~58s of deep-structural evidence on its own, so it must sit alone; a
-# plain alphabetical stride measured 106s vs 16s across shards.
-const EXTERNAL_SWEEP_SHARDS = 6
+# currently lightest shard): per-file cost is strongly size-correlated and
+# superlinear for the largest compiler outputs, so an alphabetical stride
+# would leave one shard owning most of the wall clock.
+const EXTERNAL_SWEEP_SHARDS = 3
 const _EXTERNAL_SWEEP_ASSIGNMENT = let
     bins = [String[] for _ in 1:EXTERNAL_SWEEP_SHARDS]
     load = zeros(Int, EXTERNAL_SWEEP_SHARDS)
@@ -854,7 +869,7 @@ end
 # each file costs two standalone ptxas invocations whose cost is strongly
 # size-correlated, and the largest compiler outputs dwarf the median — an
 # alphabetical stride would leave one shard owning most of the wall clock.
-const PTXAS_CORPUS_SHARDS = 4
+const PTXAS_CORPUS_SHARDS = 2
 const _PTXAS_CORPUS_ASSIGNMENT =
     Ref{Union{Nothing, Vector{Vector{Tuple{String, String}}}}}(nothing)
 function ptxas_corpus_shard(shard::Int)

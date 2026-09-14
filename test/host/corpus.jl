@@ -147,7 +147,7 @@ end
 # gpu/corpus_compile_* (see test/setup.jl, ptxas external-corpus acceptance
 # support). Its selection (malformed-fixture filter + `.target` scan) and
 # size-balanced shard assignment are pure host, so pin here — on every lane,
-# toolchain or not — that the four slices partition the selected corpus
+# toolchain or not — that the two slices partition the selected corpus
 # exactly: no file dropped, none doubled.
 @testset "ptxas corpus shard partition is exact" begin
     selected = ptxas_corpus_files()

@@ -1,7 +1,7 @@
 # Independent inventory of the PTX ISA 9.4 tensor-copy forms (§9.7.10.28,
 # §9.7.10.19), re-derived from the ISA syntax blocks rather than from the
 # wrapper generators, plus the sink kernels the offline legs assemble.
-# Shared by the host oracle and the ptxas legs so both see one list.
+# Included by host/tma.jl and ptxas/tma.jl so both legs see one list.
 #
 # Each entry is `(op, mods, kinds, n)`; `kinds` names every Julia argument
 # in call order with the vocabulary below, and `n` is the tensor rank.

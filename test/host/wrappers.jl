@@ -1227,6 +1227,25 @@ end
     end
 end
 
+@testset "alias and async::generic proxy fences (PTX ISA 9.4, asm tier)" begin
+    # `fence.proxy.alias.<sem>.sys` and the async::generic release with a
+    # cluster-read restriction: side-effecting with a memory clobber, so the
+    # compiler keeps their ordering, and not convergent.
+    for mods in (
+        (:proxy, :alias, :acquire, :sys),
+        (:proxy, :alias, :release, :sys),
+        (:proxy, Symbol("async::generic"), :release,
+         Symbol("sync_restrict::shared::cluster::read"), :cluster),
+    )
+        spec = build_call(:fence, mods, ())
+        @test spec.rettype === Nothing
+        @test spec.asm == "fence." * join(mods, ".") * ";"
+        @test spec.side_effects
+        @test occursin("~{memory}", spec.constraints)
+        @test !spec.convergent
+    end
+end
+
 @testset "generic memory fences (tier-1 core IR)" begin
     # fence.{sc,acq_rel}.{cta,cluster,gpu,sys} lower to a core-IR
     # `fence <ordering> syncscope(...)` — the PTX↔LLVM mapping is pinned
@@ -1323,7 +1342,7 @@ end
     end
 
     # PTX ISA 9.4 alloc/dealloc/commit forms (sm_100f+/sm_107f,
-    # assembled in test/ptxas/ptx94_bindings.jl): asm tier by necessity,
+    # assembled in test/ptxas/blackwell.jl): asm tier by necessity,
     # convergent, full clobber.
     pS32 = Core.LLVMPtr{UInt32, PTX.AS.Shared}
     syncres = Symbol("sync_restrict::shared::read::mma::a")
@@ -1802,7 +1821,7 @@ end
                       (UInt16, UInt16))
     @test spec.rettype === UInt32
 
-    # PTX ISA 9.4 (sm_107f; assembled in test/ptxas/ptx94_bindings.jl):
+    # PTX ISA 9.4 (sm_107f; assembled in test/ptxas/cvt_immediate_carriers.jl):
     # ue5m3x2 destination/source, single-scale n1 with its b16-carried b8
     # scale factor, and .pzo/.rz as structural prefix pass-throughs.
     @test format_call(ptx"cvt.rp.satfinite.ue5m3x2.f32",
@@ -1980,16 +1999,34 @@ end
     @test spec.asm == "red.add.noftz.f32 [\$0], \$1;"
     @test spec.rettype === Nothing
 
-    # ld `.proxy::readonly` (§9.7.10.8): the readonly-proxy load.
-    spec = build_call(:ld, (:global, :u32, Symbol("proxy::readonly")),
-                      (Core.LLVMPtr{UInt32, PTX.AS.Global},))
-    @test spec.asm == "ld.global.u32.proxy::readonly \$0, [\$1];"
-    @test spec.rettype === UInt32
-
     # prefetch `.L1::32B.valid_addr` (§9.7.10.16): the trailing qualifier
     # is not a dtype token, so no phantom output register is reserved.
     spec = build_call(:prefetch, (:global, Symbol("L1::32B"), :valid_addr),
                       (Core.LLVMPtr{UInt8, PTX.AS.Global},))
     @test spec.asm == "prefetch.global.L1::32B.valid_addr [\$0];"
     @test spec.rettype === Nothing
+end
+
+@testset "readonly load has a result before its trailing proxy" begin
+    # ld `.proxy::readonly` (§9.7.10.8): the qualifier follows the type
+    # token, so result inference must not treat it as the destination type.
+    for (kind, T) in (
+            (:b8, UInt8), (:b16, UInt16), (:b32, UInt32), (:b64, UInt64),
+            (:u8, UInt8), (:u16, UInt16), (:u32, UInt32), (:u64, UInt64),
+            (:s8, Int8), (:s16, Int16), (:s32, Int32), (:s64, Int64),
+            (:f32, Float32), (:f64, Float64)),
+        raw in (false, true),
+        (space, as) in (((), PTX.AS.Generic), ((:global,), PTX.AS.Global))
+        mods = (space..., kind, Symbol("proxy::readonly"))
+        spec = build_call(:ld, mods, (Core.LLVMPtr{UInt64, as},); raw)
+        @test spec.rettype === T
+        @test spec.asm == "ld." * join(mods, ".") * " \$0, [\$1];"
+        @test startswith(spec.constraints, "=")
+        @test spec.side_effects
+    end
+    for mods in ((Symbol("proxy::readonly"),),
+                 (:global, :f16, Symbol("proxy::readonly")),
+                 (:global, :pred, Symbol("proxy::readonly")))
+        @test_throws ArgumentError PTX.infer_rettype(:ld, mods)
+    end
 end
