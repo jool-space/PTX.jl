@@ -646,6 +646,110 @@ end
     @test occursin("tcgen05.commit.cta_group::2.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64", ptx)
 end
 
+# --- PTX ISA 9.4 tcgen05 allocation and commit forms ----------------------------
+# `.exclusive` alloc/dealloc, the explicit `::16b` multicast commit (the 9.4
+# name of the pre-9.4 default width, sm_100 family), and the sm_107f-only
+# `::32b` multicast and early A-read commits. One kernel per cta_group.
+
+function _bw_tcgen05_alloc_exclusive_cg1!(slot::Core.LLVMPtr{UInt32, PTX.AS.Shared},
+                                          ncols::UInt32)
+    ptx"tcgen05.alloc.exclusive.cta_group::1.sync.aligned.b32"(slot, ncols)
+    ptx"tcgen05.alloc.exclusive.cta_group::1.sync.aligned.shared::cta.b32"(
+        PTX.smem_addr_u32(slot), ncols)
+    taddr = @inbounds unsafe_load(slot)
+    ptx"tcgen05.dealloc.exclusive.cta_group::1.sync.aligned.b32"(taddr, ncols)
+    return nothing
+end
+
+function _bw_tcgen05_alloc_exclusive_cg2!(slot::Core.LLVMPtr{UInt32, PTX.AS.Shared},
+                                          ncols::UInt32)
+    ptx"tcgen05.alloc.exclusive.cta_group::2.sync.aligned.b32"(slot, ncols)
+    ptx"tcgen05.alloc.exclusive.cta_group::2.sync.aligned.shared::cta.b32"(
+        PTX.smem_addr_u32(slot), ncols)
+    taddr = @inbounds unsafe_load(slot)
+    ptx"tcgen05.dealloc.exclusive.cta_group::2.sync.aligned.b32"(taddr, ncols)
+    return nothing
+end
+
+function _bw_tcgen05_commit_mc16_cg1!(mbar::UInt32, mask::UInt16)
+    ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.multicast::cluster::16b.b64"(
+        mbar, mask)
+    return nothing
+end
+
+function _bw_tcgen05_commit_mc16_cg2!(mbar::UInt32, mask::UInt16)
+    ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.multicast::cluster::16b.b64"(
+        mbar, mask)
+    return nothing
+end
+
+function _bw_tcgen05_commit_isa94_cg1!(mbar::UInt32, mask::UInt32)
+    ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.multicast::cluster::32b.b64"(
+        mbar, mask)
+    ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.sync_restrict::shared::read::mma::a.shared::cluster.b64"(
+        mbar)
+    ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.sync_restrict::shared::read::mma::a.shared::cluster.multicast::cluster::32b.b64"(
+        mbar, mask)
+    return nothing
+end
+
+function _bw_tcgen05_commit_isa94_cg2!(mbar::UInt32, mask::UInt32)
+    ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.shared::cluster.multicast::cluster::32b.b64"(
+        mbar, mask)
+    ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.sync_restrict::shared::read::mma::a.shared::cluster.b64"(
+        mbar)
+    ptx"tcgen05.commit.cta_group::2.mbarrier::arrive::one.sync_restrict::shared::read::mma::a.shared::cluster.multicast::cluster::32b.b64"(
+        mbar, mask)
+    return nothing
+end
+
+@testset "tcgen05 exclusive allocation assembles on sm_100f and sm_107f" begin
+    types = Tuple{Core.LLVMPtr{UInt32, PTX.AS.Shared}, UInt32}
+    if _ptxas_isa() < v"9.4"
+        @test_skip "PTX 9.4 assembler required"
+    else
+        for kernel in (_bw_tcgen05_alloc_exclusive_cg1!,
+                       _bw_tcgen05_alloc_exclusive_cg2!)
+            # The ISA's target list omits sm_107f while its nCols range
+            # (up to 576) requires it; the assembler admits the family.
+            for (cap, feature_set) in ((v"10.0", :family), (v"10.7", :family),
+                                       (v"10.7", :arch))
+                @test ptxas_compiles(kernel, types; cap, feature_set)
+            end
+            ptx = emit_ptx(kernel, types; cap = v"10.7", feature_set = :family)
+            @test occursin("tcgen05.alloc.exclusive.cta_group::", ptx)
+            @test occursin("tcgen05.dealloc.exclusive.cta_group::", ptx)
+            @test ptxas_rejects(kernel, types; cap = v"9.0", feature_set = :arch,
+                                target = "sm_90a")
+        end
+    end
+end
+
+@testset "PTX ISA 9.4 tcgen05.commit forms assemble at their floors" begin
+    if _ptxas_isa() < v"9.4"
+        @test_skip "PTX 9.4 assembler required"
+    else
+        t16 = Tuple{UInt32, UInt16}
+        for kernel in (_bw_tcgen05_commit_mc16_cg1!, _bw_tcgen05_commit_mc16_cg2!)
+            @test ptxas_compiles(kernel, t16; cap = v"10.0", feature_set = :family)
+            @test ptxas_compiles(kernel, t16; cap = v"10.7", feature_set = :family)
+            @test occursin("multicast::cluster::16b.b64",
+                           emit_ptx(kernel, t16; cap = v"10.0", feature_set = :family))
+        end
+        t32 = Tuple{UInt32, UInt32}
+        for kernel in (_bw_tcgen05_commit_isa94_cg1!, _bw_tcgen05_commit_isa94_cg2!)
+            @test ptxas_compiles(kernel, t32; cap = v"10.7", feature_set = :family)
+            @test ptxas_compiles(kernel, t32; cap = v"10.7", feature_set = :arch)
+            ptx = emit_ptx(kernel, t32; cap = v"10.7", feature_set = :family)
+            @test count("multicast::cluster::32b.b64", ptx) == 2
+            @test count("sync_restrict::shared::read::mma::a", ptx) == 2
+            @test ptxas_rejects(kernel, t32; cap = v"10.0", feature_set = :family,
+                                target = "sm_100f")
+        end
+    end
+end
+
+
 function _bw_tma_cta_group2!(dst::Core.LLVMPtr{UInt16, PTX.AS.Shared},
                              tm::Core.LLVMPtr{UInt8, PTX.AS.Const},
                              mbar::Core.LLVMPtr{UInt64, PTX.AS.Shared})

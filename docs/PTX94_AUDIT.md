@@ -48,12 +48,15 @@ To reproduce, sort all file paths under `ptx/`; hash each relative path includin
   full-warp mask `0xffffffff`. No wrapper currently implements this operation;
   the deferred implementation must enforce the mask and convergence rules.
 
-Validation uses the `host/ptx94_ga`, `ptxas/ptx94_ga`, and `gpu/ptx94_ga`
-tests plus existing conversion, wrapper, descriptor, layout, barrier,
-transpiler-contract, surface, and Aqua tests. CUDA 13.3 explicitly skips
-the new assembly/runtime tests. CUDA 13.4.46 provides assembly evidence;
-GB10 provides readonly-load numeric evidence. No fabric or CC 10.7 runtime
-evidence was obtained.
+Validation lives in the feature-named test files (readonly loads and the
+proxy fences in `host/wrappers`, `ptxas/hopper`, and `gpu/readonly_loads`;
+spcompress in `host/spcompress` and `ptxas/spcompress`; the tcgen05 forms in
+`host/tcgen05_mma`, `host/tcgen05_ldst`, `ptxas/tcgen05_mma`, and
+`ptxas/tcgen05_ldst`) plus the existing conversion, wrapper, descriptor,
+layout, barrier, transpiler-contract, surface, and Aqua tests. CUDA 13.3
+explicitly skips the new assembly/runtime tests. CUDA 13.4.46 provides
+assembly evidence; GB10 provides readonly-load numeric evidence. No fabric
+or CC 10.7 runtime evidence was obtained.
 
 ## Feature coverage
 
@@ -67,7 +70,7 @@ retain that distinction.
 | Mixed packed arithmetic | All 36 forms; complete target-positive/negative assembly tests; CC 10.7 runtime pending. |
 | Alternate FP8/FP6/FP4 x4 arithmetic | 896 canonical plus seven documented compatibility forms; assembly on `sm_100a/sm_103a`; runtime pending. |
 | Packed integer `set` | All 32 forms plus 3,112 scalar/half forms; assembly covered by #158; packed runtime pending. |
-| `cvt.pzo`, x2 `.rz`, `ue5m3x2`, n1 scaling | Carrier/schema coverage plus sm_107f/sm_107a assembly of 49 forms (`test/ptxas/ptx94_bindings.jl`), rejected at sm_100f/sm_120f. The n1 scale factor and e2m1x2 operands are bridged through `.b8` registers by the chain render. Numeric validation needs CC 10.7 hardware. Stochastic `.pzo` is rejected. |
+| `cvt.pzo`, x2 `.rz`, `ue5m3x2`, n1 scaling | Carrier/schema coverage plus sm_107f/sm_107a assembly of 49 forms (`test/ptxas/cvt_immediate_carriers.jl`), rejected at sm_100f/sm_120f. The n1 scale factor and e2m1x2 operands are bridged through `.b8` registers by the chain render. Numeric validation needs CC 10.7 hardware. Stochastic `.pzo` is rejected. |
 | Mbarrier multicast `::32b` | 26 schemas (36 operand arities) and exact wrappers; all assemble at sm_107f and are rejected at sm_100f. Runtime evidence needs CC 10.7 hardware. |
 | Mbarrier layout, phase types, report operands, check-layout | Already implemented and tested. Although §1.3 lists them under 9.4, individual instruction notes identify 9.3; the existing 9.3 metadata is correct. |
 | Bulk/TMA multicast `::16b/::32b` | `tcgen05.commit` and `cp.async.bulk.tensor` bindings (both widths, with and without `cta_group::2`) plus the `cp.async.bulk` chain spellings assemble at sm_107f/sm_107a; `::16b` assembles at sm_90 and `::32b` is rejected at sm_100f. |

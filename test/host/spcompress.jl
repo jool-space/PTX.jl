@@ -2,7 +2,7 @@
 # enumeration of the admitted qualifier tuples from the ISA's sizing tables
 # and validity conditions, checked against the wrapper registry, plus
 # lowered-code assertions for the pure, early-clobber register contract and
-# the grouped return ABI. Assembler evidence lives in ptxas/ptx94_ga.jl;
+# the grouped return ABI. Assembler evidence lives in ptxas/spcompress.jl;
 # runtime evidence needs a CC 10.7 device.
 
 using PTX: Operation, spcompress_desc, spcompress_elemsize

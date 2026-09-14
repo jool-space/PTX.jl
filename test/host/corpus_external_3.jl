@@ -1,8 +1,8 @@
-# External-corpus shard 3 of 6 — lossless acceptance, RawLine-manifest
+# External-corpus shard 3 of 3 — lossless acceptance, RawLine-manifest
 # inventory, and deep structural round-trip for this shard's slice of the
 # real-world corpus. The slicing, manifest, and roundtrip helper live in
 # test/setup.jl (external-corpus sweep support); host/corpus.jl pins that
-# the six slices partition the corpus exactly.
+# the three slices partition the corpus exactly.
 
 using PTX: IR
 using PTX.Parser: parse as parse_ptx

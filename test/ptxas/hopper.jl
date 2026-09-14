@@ -522,6 +522,32 @@ end
 end
 
 
+# PTX ISA 9.4 proxy fences: the alias fences at system scope and the
+# async::generic release with a cluster-read restriction, all sm_90.
+function _hopper_proxy_fences!()
+    ptx"fence.proxy.alias.acquire.sys"()
+    ptx"fence.proxy.alias.release.sys"()
+    ptx"fence.proxy.async::generic.release.sync_restrict::shared::cluster::read.cluster"()
+    return nothing
+end
+
+@testset "PTX ISA 9.4 proxy fences at sm_90" begin
+    if _ptxas_isa() < v"9.4"
+        @test_skip "PTX 9.4 assembler required"
+    else
+        @test ptxas_compiles(_hopper_proxy_fences!, Tuple{}; cap = v"9.0")
+        fences = emit_ptx(_hopper_proxy_fences!, Tuple{}; cap = v"9.0")
+        for head in ("fence.proxy.alias.acquire.sys",
+                     "fence.proxy.alias.release.sys",
+                     "fence.proxy.async::generic.release.sync_restrict::shared::cluster::read.cluster")
+            @test occursin(head, fences)
+        end
+        @test_throws ErrorException ptxas_compiles(_hopper_proxy_fences!, Tuple{};
+                                                   cap = v"8.0")
+    end
+end
+
+
 # --- tensormap descriptor mutation (host-side TMA descriptor build) ------
 #
 # Triton's matmul_tma_sm120a kernel patches a shared-memory copy of the TMA

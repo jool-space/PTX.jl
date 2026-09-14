@@ -1,9 +1,10 @@
 # TEST_TARGET: requires=toolkit evidence=mixed runtime=cc==10|cc==11|cc==12
 #
 # PTX 9.3 §9.7.15.5.15: optional 4-/6-bit to 8-bit decompression is a
-# Blackwell-family ldmatrix feature. Offline compilation pins the complete
-# typed form matrix at each architecture-specific family root; eligible live
-# devices additionally check nonzero decompression semantics.
+# Blackwell-family ldmatrix feature, and PTX ISA 9.4 adds the sign-extending
+# .s8.s4 form. Offline compilation pins the complete typed form matrix at
+# each admitting target; eligible live devices additionally check the
+# decompression semantics.
 
 function _ldmatrix_decompression_surface!(out::CuDeviceVector{UInt32,1})
     buf = CuStaticSharedArray(UInt8, 512)
@@ -92,5 +93,77 @@ if test_runtime_supported(@__FILE__)
         @cuda threads=32 _ldmatrix_decompression_runtime!(out)
         CUDACore.synchronize()
         @test all(Array(out) .== UInt32(1))
+    end
+end
+
+# --- .s8.s4 sign-extending decompression (PTX ISA 9.4) -------------------------
+# Signed 4-bit elements are expanded to signed 8-bit during the load. Every
+# byte of shared memory carries the same nibble pair, so each lane's fragment
+# must be that nibble sign-extended four times regardless of the fragment
+# layout; three fills cover a negative, a positive, and the most negative
+# nibble. The form assembles on sm_90a and the sm_100f/sm_110f/sm_120f
+# families; baseline sm_90 is not an admitting target.
+
+function _ldmatrix_s4_runtime!(out::CuDeviceVector{UInt32, 1}, fill::UInt8)
+    buf = CuStaticSharedArray(UInt8, 512)
+    lane = Int(ptx"mov.u32"(sreg"tid.x"))
+    @inbounds for i in 0:15
+        buf[lane * 16 + i + 1] = fill
+    end
+    sync_threads()
+    addr = pointer(buf) + lane * 16
+    a = ptx"ldmatrix.sync.aligned.m8n16.x1.shared.s8.s4"(addr)
+    b = ptx"ldmatrix.sync.aligned.m8n16.x2.shared.s8.s4"(addr)
+    c = ptx"ldmatrix.sync.aligned.m8n16.x4.shared.s8.s4"(addr)
+    d = ptx"ldmatrix.sync.aligned.m8n16.x1.shared::cta.s8.s4"(addr)
+    e = ptx"ldmatrix.sync.aligned.m8n16.x2.shared::cta.s8.s4"(addr)
+    f = ptx"ldmatrix.sync.aligned.m8n16.x4.shared::cta.s8.s4"(addr)
+    base = lane * 14
+    @inbounds begin
+        out[base + 1] = a
+        out[base + 2] = b[1]; out[base + 3] = b[2]
+        out[base + 4] = c[1]; out[base + 5] = c[2]
+        out[base + 6] = c[3]; out[base + 7] = c[4]
+        out[base + 8] = d
+        out[base + 9] = e[1]; out[base + 10] = e[2]
+        out[base + 11] = f[1]; out[base + 12] = f[2]
+        out[base + 13] = f[3]; out[base + 14] = f[4]
+    end
+    return nothing
+end
+
+const _LDMATRIX_S4_TYPES = Tuple{CuDeviceVector{UInt32, 1}, UInt8}
+
+@testset "ldmatrix .m8n16 .s8.s4 assembles on sm_90a and the sm_100f+ families" begin
+    if _ptxas_isa() < v"9.4"
+        @test_skip "PTX 9.4 assembler required"
+    else
+        for (cap, feature_set) in ((v"9.0", :arch), (v"10.0", :family),
+                                   (v"12.0", :family), (v"12.1", :arch))
+            @test ptxas_compiles(_ldmatrix_s4_runtime!, _LDMATRIX_S4_TYPES;
+                                 cap, feature_set)
+        end
+        ptx = emit_ptx(_ldmatrix_s4_runtime!, _LDMATRIX_S4_TYPES;
+                       cap = v"9.0", feature_set = :arch)
+        for count in ("x1", "x2", "x4"), space in ("shared", "shared::cta")
+            @test occursin("ldmatrix.sync.aligned.m8n16.$count.$space.s8.s4 ", ptx)
+        end
+        @test ptxas_rejects(_ldmatrix_s4_runtime!, _LDMATRIX_S4_TYPES;
+                            cap = v"9.0", target = "sm_90")
+        @test ptxas_rejects(_ldmatrix_s4_runtime!, _LDMATRIX_S4_TYPES;
+                            cap = v"8.0", target = "sm_80")
+    end
+end
+
+if test_runtime_supported(@__FILE__)
+    @testset "ldmatrix .s8.s4 sign-extends 4-bit elements" begin
+        for (fill, expected) in ((0xff, 0xffffffff),   # -1 -> 0xff
+                                 (0x77, 0x07070707),   #  7 -> 0x07
+                                 (0x88, 0xf8f8f8f8))   # -8 -> 0xf8
+            out = CUDACore.zeros(UInt32, 32 * 14)
+            @cuda threads=32 _ldmatrix_s4_runtime!(out, UInt8(fill))
+            CUDACore.synchronize()
+            @test all(Array(out) .== UInt32(expected))
+        end
     end
 end

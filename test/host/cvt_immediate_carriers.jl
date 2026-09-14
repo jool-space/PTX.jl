@@ -428,3 +428,28 @@ end
     @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(_cvt_immediate_module(
         "cvt.f32.s32.future_modifier %f0, 7;"))
 end
+
+@testset "stochastic cvt does not admit pzo" begin
+    for dst in (:f16x2, :bf16x2, :e4m3x4, :e5m2x4, :e2m1x4, :e2m3x4, :e3m2x4)
+        half = dst in (:f16x2, :bf16x2)
+        args = half ? (Float32, Float32, UInt32) : (NTuple{4,Float32}, UInt32)
+        prefix = half ? (:rs,) : (:rs, :satfinite)
+        for raw in (false, true)
+            @test PTX.build_call(:cvt, (prefix..., dst, :f32), args; raw).rettype !== Nothing
+            @test_throws ArgumentError PTX.build_call(
+                :cvt, (prefix..., :pzo, dst, :f32), args; raw)
+        end
+    end
+    source = """
+    .version 9.4
+    .target sm_107f
+    .address_size 64
+    .entry invalid_pzo() {
+        .reg .b32 r, random;
+        .reg .f32 a, b;
+        cvt.rs.pzo.f16x2.f32 r, a, b, random;
+        ret;
+    }
+    """
+    @test_throws PTX.Codegen.TranspilerError PTX.ptx_to_julia(source)
+end

@@ -239,3 +239,108 @@ const _CVT_S2F6_SYNTAX_TYPES = Tuple{UInt16}
     @test occursin(
         "cvt.rn.satfinite.scaled::n2::ue8m0.s2f6x2.f32", syntax_ptx)
 end
+
+# --- PTX ISA 9.4 qualifiers (sm_107f) -------------------------------------------
+# Independent enumeration from §9.7.10.24; the ledger is not consulted to
+# build this list. Operand kinds come from the schema so the argument
+# carriers match the reviewed ABI. Each form assembles on the sm_107 family
+# and is rejected on the sm_100f and sm_120f families.
+
+const _CVT_ISA94_FORMS = let forms = Tuple{Vararg{Symbol}}[]
+    n1 = Symbol("scaled::n1::ue8m0")
+    n2 = Symbol("scaled::n2::ue8m0")
+    # .rz on the five 8-/6-/4-bit x2 destinations from f32, f16x2, bf16x2.
+    for dst in (:e4m3x2, :e5m2x2, :e2m3x2, :e3m2x2, :e2m1x2),
+            src in (:f32, :f16x2, :bf16x2)
+        push!(forms, (:rz, :satfinite, dst, src))
+    end
+    # ue5m3x2: frnd4 down-converts from f32, rn from the packed halves,
+    # up-converts into both packed halves, and the n2-scaled bf16x2 form.
+    for rnd in (:rn, :rz, :rp)
+        push!(forms, (rnd, :satfinite, :ue5m3x2, :f32))
+    end
+    for src in (:f16x2, :bf16x2)
+        push!(forms, (:rn, :satfinite, :ue5m3x2, src))
+    end
+    push!(forms, (:rn, :f16x2, :ue5m3x2))
+    push!(forms, (:rn, :bf16x2, :ue5m3x2))
+    push!(forms, (:rn, :satfinite, n2, :bf16x2, :ue5m3x2))
+    # .scaled::n1::ue8m0 on every narrow x2 destination from each source.
+    for dst in (:e4m3x2, :e5m2x2, :e2m1x2, :e2m3x2, :e3m2x2, :ue5m3x2),
+            src in (:f32, :f16x2, :bf16x2)
+        push!(forms, (:rn, :satfinite, n1, dst, src))
+    end
+    # .pzo on float-to-narrower conversions, one per destination class.
+    push!(forms, (:rn, :pzo, :f16, :f32))
+    push!(forms, (:rn, :pzo, :bf16, :f32))
+    push!(forms, (:rn, :pzo, :f16x2, :f32))
+    push!(forms, (:rn, :pzo, :bf16x2, :f32))
+    push!(forms, (:rn, :pzo, :tf32, :f32))
+    push!(forms, (:rn, :satfinite, :pzo, :e4m3x2, :f32))
+    push!(forms, (:rn, :satfinite, :pzo, :e2m1x2, :f16x2))
+    push!(forms, (:rn, :satfinite, :pzo, n1, :e5m2x2, :bf16x2))
+    forms
+end
+
+@generated function _cvt_isa94_surface!(out::CuDeviceVector{UInt32, 1},
+                                        f32a::Float32, f32b::Float32,
+                                        u32::UInt32, u16::UInt16)
+    body = Expr(:block)
+    for (i, mods) in enumerate(_CVT_ISA94_FORMS)
+        schema = PTX.schema(PTX.CvtLedger(), :cvt, mods)
+        args = Symbol[]
+        seen_f32 = 0
+        for kind in schema.operands
+            if kind === :f32
+                seen_f32 += 1
+                push!(args, seen_f32 == 1 ? :f32a : :f32b)
+            elseif kind === :b32
+                push!(args, :u32)
+            elseif kind === :b16
+                push!(args, :u16)
+            else
+                error("unexpected cvt operand kind $kind for $mods")
+            end
+        end
+        argtypes = Tuple(a === :u32 ? UInt32 : a === :u16 ? UInt16 : Float32
+                         for a in args)
+        rettype = PTX.build_call(:cvt, mods, argtypes).rettype
+        bits = sizeof(rettype) == 2 ? UInt16 : UInt32
+        call = :(PTX.Operation{:cvt, $mods}()($(args...)))
+        push!(body.args,
+              :(Base.@inbounds out[$i] = UInt32(reinterpret($bits, $call))))
+    end
+    push!(body.args, :(return nothing))
+    body
+end
+
+const _CVT_ISA94_TYPES = Tuple{CuDeviceVector{UInt32, 1}, Float32, Float32,
+                               UInt32, UInt16}
+
+@testset "PTX ISA 9.4 cvt qualifiers assemble on the sm_107 family" begin
+    @test length(_CVT_ISA94_FORMS) == 49
+    @test count(m -> :rz in m && :ue5m3x2 ∉ m, _CVT_ISA94_FORMS) == 15
+    @test count(m -> Symbol("scaled::n1::ue8m0") in m, _CVT_ISA94_FORMS) == 19
+    @test count(m -> :pzo in m, _CVT_ISA94_FORMS) == 8
+    @test count(m -> :ue5m3x2 in m, _CVT_ISA94_FORMS) == 8 + 3
+    if _ptxas_isa() < v"9.4"
+        @test_skip "PTX 9.4 assembler required"
+    else
+        for feature_set in (:family, :arch)
+            @test ptxas_compiles(_cvt_isa94_surface!, _CVT_ISA94_TYPES;
+                                 cap = v"10.7", feature_set)
+        end
+        ptx = emit_ptx(_cvt_isa94_surface!, _CVT_ISA94_TYPES;
+                       cap = v"10.7", feature_set = :family)
+        @test occursin(".target sm_107f", ptx)
+        for mods in _CVT_ISA94_FORMS
+            @test occursin(PTX.build_head(:cvt, mods) * " ", ptx)
+        end
+        # Every n1 form reads its scale factor from a .b8 register.
+        @test count("cvt.u8.u16 cvt_scale, ", ptx) == 19
+        @test ptxas_rejects(_cvt_isa94_surface!, _CVT_ISA94_TYPES; cap = v"10.0",
+                            feature_set = :family, target = "sm_100f")
+        @test ptxas_rejects(_cvt_isa94_surface!, _CVT_ISA94_TYPES; cap = v"12.0",
+                            feature_set = :family, target = "sm_120f")
+    end
+end

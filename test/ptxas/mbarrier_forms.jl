@@ -206,3 +206,44 @@ const _MBARRIER_RAW_REPORT_TYPES =
     @test ptxas_compiles(_mbarrier_raw_report!, _MBARRIER_RAW_REPORT_TYPES;
                          cap = v"9.0")
 end
+
+# --- .multicast::cluster::32b (PTX ISA 9.4, sm_107f) ----------------------------
+# Every reviewed schema carrying the 32-bit multicast qualifier, at every
+# operand arity it admits. The mask is the mandatory trailing operand.
+
+_mbarrier_mc32_schemas() =
+    [s for s in PTX.MBARRIER_FORM_SCHEMAS
+     if Symbol("multicast::cluster::32b") in s.mods]
+
+@generated function _mbarrier_mc32!(mbar::Core.LLVMPtr{UInt64, PTX.AS.Shared},
+                                    count::UInt32, mask::UInt32)
+    body = Expr(:block)
+    for s in _mbarrier_mc32_schemas(), v in s.variants
+        args = length(v.operands) == 3 ? (:mbar, :count, :mask) : (:mbar, :mask)
+        push!(body.args, :(PTX.Operation{:mbarrier, $(s.mods)}()($(args...))))
+    end
+    push!(body.args, :(return nothing))
+    body
+end
+
+const _MBARRIER_MC32_TYPES =
+    Tuple{Core.LLVMPtr{UInt64, PTX.AS.Shared}, UInt32, UInt32}
+
+@testset "mbarrier .multicast::cluster::32b assembles on sm_107f" begin
+    schemas = _mbarrier_mc32_schemas()
+    @test length(schemas) == 26
+    @test sum(length(s.variants) for s in schemas) == 36
+    if _ptxas_isa() < v"9.4"
+        @test_skip "PTX 9.4 assembler required"
+    else
+        @test ptxas_compiles(_mbarrier_mc32!, _MBARRIER_MC32_TYPES;
+                             cap = v"10.7", feature_set = :family)
+        ptx = emit_ptx(_mbarrier_mc32!, _MBARRIER_MC32_TYPES;
+                       cap = v"10.7", feature_set = :family)
+        for s in schemas
+            @test occursin(PTX.build_head(:mbarrier, s.ptxmods) * " ", ptx)
+        end
+        @test ptxas_rejects(_mbarrier_mc32!, _MBARRIER_MC32_TYPES; cap = v"10.0",
+                            feature_set = :family, target = "sm_100f")
+    end
+end
