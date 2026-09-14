@@ -43,12 +43,28 @@ _asm_lltype(T::Type) =
                          "i8 addrspace($(T.parameters[2]))*") :
     error("convergent_asm_ir: no LLVM mapping for $T")
 
-function convergent_asm_ir(asm::String, constraints::String,
-                           rettype::Type, argtypes)::String
+convergent_asm_ir(asm::String, constraints::String, rettype::Type,
+                  argtypes)::String =
+    _asm_ir(asm, constraints, rettype, argtypes;
+            sideeffect = true, attrs = "convergent nomerge nounwind")
+
+# Same call shape without the convergence contract, for forms whose
+# FORMS entry is deliberately non-convergent (tcgen05.mma) or pure
+# (register-only data movement). `sideeffect = false` lets LLVM drop or
+# merge the call like any other pure computation; pass true for
+# observable operations.
+plain_asm_ir(asm::String, constraints::String, rettype::Type, argtypes;
+             sideeffect::Bool = true)::String =
+    _asm_ir(asm, constraints, rettype, argtypes;
+            sideeffect, attrs = "nounwind")
+
+function _asm_ir(asm::String, constraints::String, rettype::Type, argtypes;
+                 sideeffect::Bool, attrs::String)::String
     params = ["$(_asm_lltype(T)) %a$(k - 1)" for (k, T) in enumerate(argtypes)]
     callargs = join(("$(_asm_lltype(T)) %a$(k - 1)"
                      for (k, T) in enumerate(argtypes)), ", ")
-    asmcall(ret) = "call $ret asm sideeffect \"$asm\", \"$constraints\"($callargs) #0"
+    se = sideeffect ? " sideeffect" : ""
+    asmcall(ret) = "call $ret asm$se \"$asm\", \"$constraints\"($callargs) #0"
     # `nomerge` alongside `convergent`: LLVM ≤ 16 (Julia ≤ 1.11) hoists
     # identical convergent calls from both arms of a divergent branch into
     # one site — the collective-op miscompile. See NVVM.fnattrs.
@@ -89,7 +105,7 @@ function convergent_asm_ir(asm::String, constraints::String,
     define $entryret @entry($(join(params, ", "))) #1 {
     $(join(body, "\n"))
     }
-    attributes #0 = { convergent nomerge nounwind }
+    attributes #0 = { $attrs }
     attributes #1 = { alwaysinline }
     """
 end
