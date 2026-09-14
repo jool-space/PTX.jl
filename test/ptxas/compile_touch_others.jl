@@ -27,5 +27,5 @@
     @test isempty(result.unsynthesized)
     # Regression floor: the sweep must actually be sweeping. Update when
     # the wrapper surface grows or shrinks deliberately.
-    @test result.touched >= 190
+    @test result.touched >= 600
 end

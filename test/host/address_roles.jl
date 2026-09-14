@@ -57,6 +57,7 @@ const EXPECTED_STRUCTURED_ADDRESS_FALLBACK_RULES = Set([
     (:cp, (:async, :bulk, :prefetch, :tensor), nothing),
     (:cp, (:reduce, :async, :bulk, :tensor), nothing),
     (:tcgen05, (), nothing), (:fabric, (), nothing),
+    (:applypriority, (:async, :bulk, :tensor), nothing),
 ])
 
 function _expected_tcgen05_integer_address_forms()
@@ -312,7 +313,7 @@ end
     actual = Set((r.op, r.prefix, r.marker)
                  for r in PTX.STRUCTURED_ADDRESS_FALLBACK_RULES)
     @test actual == EXPECTED_STRUCTURED_ADDRESS_FALLBACK_RULES
-    @test length(actual) == 25
+    @test length(actual) == 26
 
     A32, A64 = Address{UInt32}, Address{UInt64}
     cases = (
@@ -328,6 +329,8 @@ end
          (A32, A64, Int32, A32)),
         (ptx"fabric.try_get.async.shared::cta.mbarrier::complete_tx::bytes.mbarrier::report::fabric.relaxed.sys.b128",
          (A32, UInt32, UInt64, UInt32, A32)),
+        (ptx"applypriority.async.bulk.tensor.1d.global.bulk_group.tile.L2::evict_normal",
+         (A64, Int32)),
     )
     for (op, argtypes) in cases
         op_sym, mods = typeof(op).parameters

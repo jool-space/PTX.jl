@@ -142,6 +142,8 @@ const TYPED_WRAPPER_ONLY_RULES = (
      detail = "spcompress has num/elemsize/idxsize-dependent grouped register vectors with two leading grouped destinations"),
     (op = :spdecompress, prefix = (),        marker = nothing,
      detail = "spdecompress has spfactor/num/elemsize/idxsize-dependent grouped register vectors with a leading grouped destination"),
+    (op = :applypriority, prefix = (:async, :bulk, :tensor), marker = nothing,
+     detail = "applypriority.async.bulk.tensor has rank-dependent coordinate vectors and override operand groups inside the tensor-map bracket"),
 )
 
 function _mods_start_with(mods::Tuple{Vararg{Symbol}}, prefix::Tuple)
@@ -242,7 +244,11 @@ const FORMS = Dict{Symbol, FormFamily}(
     :fence    => FormFamily(_MEM),              # brackets vacuous (no ptr args); kept as-was
     :tensormap => FormFamily(_MEMSINK),
     :discard  => FormFamily(_MEM),
-    :applypriority => FormFamily(_MEM),
+    :applypriority => FormFamily(_MEM, [
+        # `applypriority.async.bulk{.tensor}` (PTX ISA 9.4) ends in an
+        # eviction priority, not a dtype; weak memory operation, no result.
+        (:async, :bulk) => _MEMSINK,
+    ]),
     :cp       => FormFamily(_MEM, [
         # `.b64` tail is the mbarrier address width, not a return.
         (:async, :mbarrier, :arrive) => _MEMSINK,

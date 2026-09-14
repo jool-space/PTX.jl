@@ -204,10 +204,24 @@ notes = "Uniform-cache prefetch; raw renders the correct no-result bracketed for
 [[family]]
 section = "9.7.10.17"
 title = "Data Movement and Conversion Instructions: applypriority"
-status = "generic"
+status = "strict"
 opcodes = ["applypriority"]
-notes = "Bracketed eviction-priority hint."
-owner = ["src/ledgers/forms.jl"]
+notes = "Bracketed eviction-priority hint; the scalar form and the PTX ISA 9.4 applypriority.async.bulk form are chain-renderable under a sink override (the eviction priority is the terminal token, not a dtype). applypriority.async.bulk.tensor (§9.7.10.19) is typed-wrapper-only in the TMA wrappers."
+owner = ["src/ledgers/forms.jl", "src/wrappers/tma.jl"]
+
+[[family]]
+section = "9.7.10.18"
+title = "Data Movement and Conversion Instructions: applypriority.async.bulk"
+status = "generic"
+opcodes = []
+notes = "No distinct opcode head: `applypriority.async.bulk{.global}.bulk_group.L2::evict_normal [a], size` (PTX ISA 9.4, sm_107f family) renders through the §9.7.10.17 entry's sink override; assembled at sm_107f when the managed compiler supports ISA 9.4."
+
+[[family]]
+section = "9.7.10.19"
+title = "Data Movement and Conversion Instructions: applypriority.async.bulk.tensor"
+status = "strict"
+opcodes = []
+notes = "No distinct opcode head: the tensor eviction hint (PTX ISA 9.4, sm_107f family) is typed-wrapper-only under the §9.7.10.17 entry. Wrapped: tile ranks 1d-5d, base im2col ranks 3d-5d with N-2 offsets, and tile ranks with the global-address and attribute overrides. Not wrapped: tile::gather4 and the im2col::w modes."
 
 [[family]]
 section = "9.7.10.20"
@@ -269,7 +283,7 @@ section = "9.7.10.28"
 title = "Data Movement and Conversion Instructions: Asynchronous copy (cp.async, cp.async.bulk, TMA)"
 status = "strict"
 opcodes = ["cp"]
-notes = "cp.async and the bulk/tensor forms are chain-renderable under sink overrides (the terminal type token is an operand descriptor), cp.async.bulk.prefetch.tensor is typed-wrapper-only (rank-dependent coordinate vectors plus a paired cache-hint operand), and the TMA wrappers own the tensor-copy API. The whole cp.async.bulk.tensor/prefetch wrapper family is single-route asm — the former tier-2 intrinsic route was demoted (observable async effects; the argmem-widen A/B on B200 showed the conservative clobber is codegen-free) — making the notation WYSIWYG: cluster cta_group::2 renders after the rank like the pre-existing shared::cta residue (ptxas accepts both orders)."
+notes = "cp.async and the bulk/tensor forms are chain-renderable under sink overrides (the terminal type token is an operand descriptor), cp.async.bulk.prefetch.tensor is typed-wrapper-only (rank-dependent coordinate vectors plus a paired cache-hint operand), and the TMA wrappers own the tensor-copy API. The whole cp.async.bulk.tensor/prefetch wrapper family is single-route asm — the former tier-2 intrinsic route was demoted (observable async effects; the argmem-widen A/B on B200 showed the conservative clobber is codegen-free) — making the notation WYSIWYG: cluster cta_group::2 renders after the rank like the pre-existing shared::cta residue (ptxas accepts both orders). PTX ISA 9.4 (sm_107f family) wrapped inventory: .multicast::cluster::{16b,32b} on the cluster loads (with and without cta_group::2); the six .report_mechanism spellings on both load directions (no multicast or ::32b); .override::global_address alone and with the rank-determined .override_attribute on both load directions (no multicast or ::32b), the tile store, the tile reduce (all eight redOps), the tile prefetch, and the tile eviction hint; .im2col_no_offs and .im2col_no_offs::w on the store and reduce directions (3d-5d); .L2::evict_last on the tile and base-im2col prefetches; plus the pre-9.4 cp.reduce.async.bulk.tensor tile forms. Not wrapped: report×override crosses, report/override with cta_group::2, .L2::cache_hint on copies or with overrides/evict_last, tile::gather4 and im2col::w modes. Assembly evidence at sm_107f/sm_107a only; no runtime evidence. The chain cp.async.bulk ::16b/::32b/report and cp.async.bulk.prefetch .L2::evict_last spellings render under the sink override."
 owner = ["src/ledgers/forms.jl", "src/wrappers/cp_async.jl", "src/wrappers/tma.jl"]
 
 [[family]]
