@@ -43,6 +43,11 @@ function _tcgen05_roundtrip_kernel!(O::CuDeviceVector{Float32, 1})
         ptx"tcgen05.st.sync.aligned.32x32b.x64.b32"(tmem_addr, src)
         ptx"tcgen05.wait::st.sync.aligned"()
         dst = ptx"tcgen05.ld.sync.aligned.32x32b.x64.b32"(tmem_addr)
+        # tcgen05.ld is asynchronous: the destination registers are
+        # undefined until wait::ld. The tied-register form makes the
+        # consumer depend on the wait. The same 32 threads deallocate
+        # below, after this wait, so no TMEM access is outstanding then.
+        dst = PTX.wait_registers(ptx"tcgen05.wait::ld.sync.aligned", dst)
 
         base = Int(tid) * TCR_COLS
         for c in 1:TCR_COLS
@@ -66,6 +71,7 @@ end
     @test occursin("tcgen05.st.sync.aligned.32x32b.x64.b32", ptx)
     @test occursin("tcgen05.wait::st.sync.aligned", ptx)
     @test occursin("tcgen05.ld.sync.aligned.32x32b.x64.b32", ptx)
+    @test occursin("tcgen05.wait::ld.sync.aligned", ptx)
 end
 
 # Family-safe tcgen05 forms on CC 10.x/11.x; see tcgen05_smoke.jl for the
