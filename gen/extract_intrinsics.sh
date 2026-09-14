@@ -6,16 +6,13 @@
 # records. The back half (generate_registry.jl, emitting Julia registry
 # source) consumes the JSON this produces.
 #
-# tblgen version note: the tblgen need only understand the tag's TableGen
-# *language*, not match its version. LLVM 18's chokes on 22's !listflatten;
-# LLVM 21's (from LLVM_full_jll) parses 22.1.7 cleanly and its output count
-# agrees with the intrinsic name table embedded in the 22.1.7 llc binary
-# (2569 records). Re-verify that agreement on every backend bump — it's the
-# cheap conformance check for tblgen-version skew.
+# The tblgen executable must understand the source tag's TableGen language;
+# it need not match the backend version. LLVM_full_jll 21 parses LLVM 23's
+# definitions. Verify the extracted names against libnvptx on every bump.
 #
 # Name mapping: most records derive their name as int_nvvm_foo_bar →
 # llvm.nvvm.foo.bar (every underscore becomes a dot — even multi-word
-# segments like expect_tx → expect.tx), but 353 records carry an explicit
+# segments like expect_tx → expect.tx). Some records carry an explicit
 # LLVMName override, typically to *keep* an underscore inside a segment:
 # int_nvvm_fence_mbarrier_init_release_cluster →
 # llvm.nvvm.fence.mbarrier_init.release.cluster. The generator MUST prefer
@@ -32,14 +29,14 @@
 #   props      intrinsic-level properties (IntrConvergent, IntrNoMem, ...)
 #   arg_props  per-position properties; "arg" is a 0-based parameter index
 #              or "ret" (tblgen's AttrIndex 0 = return is normalized here).
-#              Kinds seen at 22.1.7: ImmArg (operand must be an immediate
+#              Reviewed kinds: ImmArg (operand must be an immediate
 #              constant in emitted IR), Range {lower, upper(exclusive)},
 #              NoCapture, NoAlias, NoUndef, ReadOnly, WriteOnly, and ArgName
 #              (operand name from ArgInfo — documentation metadata; ArgInfo's
 #              ImmArgPrinter hints are C++-side and deliberately dropped).
 #
 # Usage: gen/extract_intrinsics.sh <llvm-tag> [tblgen-path]
-#   e.g.: gen/extract_intrinsics.sh llvmorg-22.1.7
+#   e.g.: gen/extract_intrinsics.sh llvmorg-23.1.1
 
 set -euo pipefail
 
@@ -63,9 +60,11 @@ jq '
   . as $all
   | def rtype:
       $all[.def] as $d
-      | if $d.isAny == 1 then {any: $d.VT.def}
+      # LLVM 23 stores overload identity in class ancestry, and dependent
+      # types carry OverloadIndex rather than the former Number field.
+      | if ($d["!superclasses"] | index("LLVMAnyType")) then {any: $d.VT.def}
         elif ($d["!superclasses"] | index("LLVMQualPointerType")) then {ptr: ($d.Sig[1] // 0)}
-        elif ($d["!superclasses"] | index("LLVMMatchType")) then {match: $d.Number}
+        elif ($d["!superclasses"] | index("LLVMMatchType")) then {match: ($d.OverloadIndex // $d.Number)}
         else $d.VT.def
         end;
     def rprop:

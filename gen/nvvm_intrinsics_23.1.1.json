@@ -27,7 +27,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -44,7 +45,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -61,7 +63,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -78,7 +81,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -95,7 +99,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -112,7 +117,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -129,7 +135,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -146,7 +153,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -163,7 +171,44 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_add_rn_ftz_sat_f16",
+    "llvm_name": "",
+    "ret": [
+      "f16"
+    ],
+    "params": [
+      "f16",
+      "f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_add_rn_ftz_sat_v2f16",
+    "llvm_name": "",
+    "ret": [
+      "v2f16"
+    ],
+    "params": [
+      "v2f16",
+      "v2f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -180,7 +225,44 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_add_rn_sat_f16",
+    "llvm_name": "",
+    "ret": [
+      "f16"
+    ],
+    "params": [
+      "f16",
+      "f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_add_rn_sat_v2f16",
+    "llvm_name": "",
+    "ret": [
+      "v2f16"
+    ],
+    "params": [
+      "v2f16",
+      "v2f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -197,7 +279,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -214,7 +297,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -231,7 +315,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -248,7 +333,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -265,7 +351,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -282,7 +369,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -299,7 +387,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -316,7 +405,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -333,7 +423,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -350,7 +441,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -407,606 +499,6 @@
       {
         "kind": "ImmArg",
         "arg": 1
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_add_gen_f_cta",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "fAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_add_gen_f_sys",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "fAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_add_gen_i_cta",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_add_gen_i_sys",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_and_gen_i_cta",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_and_gen_i_sys",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_cas_gen_i_cta",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_cas_gen_i_sys",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_dec_gen_i_cta",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_dec_gen_i_sys",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_exch_gen_i_cta",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_exch_gen_i_sys",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_inc_gen_i_cta",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_inc_gen_i_sys",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_max_gen_i_cta",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_max_gen_i_sys",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_min_gen_i_cta",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_min_gen_i_sys",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_or_gen_i_cta",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_or_gen_i_sys",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_xor_gen_i_cta",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
-      }
-    ]
-  },
-  {
-    "record": "int_nvvm_atomic_xor_gen_i_sys",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "iAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      },
-      {
-        "match": 0
-      }
-    ],
-    "props": [
-      "IntrArgMemOnly",
-      "IntrNoCallback"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoCapture",
-        "arg": 0
       }
     ]
   },
@@ -1370,6 +862,200 @@
     "arg_props": []
   },
   {
+    "record": "int_nvvm_bf16x2_to_e2m1x2_rn_relu_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2bf16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_bf16x2_to_e2m1x2_rn_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2bf16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_bf16x2_to_e2m3x2_rn_relu_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2bf16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_bf16x2_to_e2m3x2_rn_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2bf16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_bf16x2_to_e3m2x2_rn_relu_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2bf16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_bf16x2_to_e3m2x2_rn_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2bf16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_bf16x2_to_e4m3x2_rn_relu_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2bf16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_bf16x2_to_e4m3x2_rn_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2bf16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_bf16x2_to_e5m2x2_rn_relu_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2bf16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_bf16x2_to_e5m2x2_rn_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2bf16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_bf16x2_to_s2f6x2_rn_relu_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2bf16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_bf16x2_to_s2f6x2_rn_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2bf16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
     "record": "int_nvvm_bf16x2_to_ue8m0x2_rp",
     "llvm_name": "",
     "ret": [
@@ -1380,7 +1066,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -1395,7 +1082,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -1410,7 +1098,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -1425,7 +1114,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -1440,7 +1130,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -1455,7 +1146,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -1471,7 +1163,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -1487,7 +1180,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -1502,7 +1196,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -1517,7 +1212,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -1532,7 +1228,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -1666,7 +1363,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -1680,7 +1378,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6805,7 +6504,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6820,7 +6520,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6835,7 +6536,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6850,7 +6552,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6865,7 +6568,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6880,7 +6584,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6895,7 +6600,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6910,7 +6616,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6925,7 +6632,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6940,7 +6648,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6955,7 +6664,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6970,7 +6680,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -6985,7 +6696,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7000,7 +6712,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7015,7 +6728,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7030,7 +6744,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7045,7 +6760,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7060,7 +6776,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7075,7 +6792,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7090,7 +6808,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7105,7 +6824,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7120,7 +6840,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7135,7 +6856,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7150,7 +6872,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7165,7 +6888,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7180,7 +6904,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7243,7 +6968,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7258,7 +6984,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7273,7 +7000,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7288,7 +7016,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7303,7 +7032,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7318,7 +7048,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7333,7 +7064,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7348,7 +7080,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7363,7 +7096,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7378,7 +7112,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7393,7 +7128,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7408,7 +7144,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7423,7 +7160,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7438,7 +7176,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7453,7 +7192,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7468,7 +7208,76 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e2m1x2_to_bf16x2_rn_relu_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e2m1x2_to_bf16x2_rn_relu_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e2m1x2_to_bf16x2_rn_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e2m1x2_to_bf16x2_rn_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7483,7 +7292,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7498,7 +7308,76 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e2m3x2_to_bf16x2_rn_relu_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e2m3x2_to_bf16x2_rn_relu_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e2m3x2_to_bf16x2_rn_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e2m3x2_to_bf16x2_rn_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7513,7 +7392,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7528,7 +7408,76 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e3m2x2_to_bf16x2_rn_relu_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e3m2x2_to_bf16x2_rn_relu_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e3m2x2_to_bf16x2_rn_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e3m2x2_to_bf16x2_rn_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7543,7 +7492,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7558,7 +7508,76 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e4m3x2_to_bf16x2_rn_relu_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e4m3x2_to_bf16x2_rn_relu_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e4m3x2_to_bf16x2_rn_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e4m3x2_to_bf16x2_rn_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7573,7 +7592,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7588,7 +7608,76 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e5m2x2_to_bf16x2_rn_relu_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e5m2x2_to_bf16x2_rn_relu_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e5m2x2_to_bf16x2_rn_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_e5m2x2_to_bf16x2_rn_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7603,7 +7692,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7618,7 +7708,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7687,6 +7778,102 @@
     "arg_props": []
   },
   {
+    "record": "int_nvvm_f16x2_to_e2m1x2_rn_relu_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_f16x2_to_e2m1x2_rn_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_f16x2_to_e2m3x2_rn_relu_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_f16x2_to_e2m3x2_rn_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_f16x2_to_e3m2x2_rn_relu_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_f16x2_to_e3m2x2_rn_satfinite",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "v2f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
     "record": "int_nvvm_f16x2_to_e4m3x2_rn",
     "llvm_name": "",
     "ret": [
@@ -7697,7 +7884,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7712,7 +7900,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7727,7 +7916,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7742,7 +7932,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7757,7 +7948,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7772,7 +7964,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7787,7 +7980,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7802,7 +7996,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7817,7 +8012,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7832,7 +8028,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7847,7 +8044,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7862,7 +8060,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7877,7 +8076,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7892,7 +8092,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7907,7 +8108,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7922,7 +8124,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7937,7 +8140,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7952,7 +8156,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7967,7 +8172,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7982,7 +8188,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -7997,7 +8204,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8012,7 +8220,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8027,7 +8236,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8042,7 +8252,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8057,7 +8268,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8072,7 +8284,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8087,7 +8300,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8102,7 +8316,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8117,7 +8332,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8132,7 +8348,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8147,7 +8364,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8162,7 +8380,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8177,7 +8396,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8192,7 +8412,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8207,7 +8428,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8222,7 +8444,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8237,7 +8460,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8252,7 +8476,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8267,7 +8492,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8282,7 +8508,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8297,7 +8524,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8312,7 +8540,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8327,7 +8556,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8342,7 +8572,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8357,7 +8588,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8372,7 +8604,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8387,7 +8620,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8402,7 +8636,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8417,7 +8652,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8432,7 +8668,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8447,7 +8684,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8462,7 +8700,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8477,7 +8716,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8492,7 +8732,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8507,7 +8748,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8522,7 +8764,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8537,7 +8780,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8552,7 +8796,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8567,7 +8812,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8582,7 +8828,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8597,7 +8844,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8612,7 +8860,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8627,7 +8876,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8642,7 +8892,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8658,7 +8909,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8674,7 +8926,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8690,7 +8943,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8706,7 +8960,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8722,7 +8977,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8738,7 +8994,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8754,7 +9011,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8770,7 +9028,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8786,7 +9045,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8802,7 +9062,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8821,7 +9082,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -8840,7 +9102,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9114,7 +9377,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9130,7 +9394,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9146,7 +9411,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9162,7 +9428,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9179,7 +9446,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9196,7 +9464,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9213,7 +9482,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9230,7 +9500,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9246,7 +9517,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9262,7 +9534,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9278,7 +9551,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9294,7 +9568,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9310,7 +9585,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9326,7 +9602,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9342,7 +9619,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9358,7 +9636,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9375,7 +9654,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9392,7 +9672,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9409,7 +9690,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9426,7 +9708,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9442,7 +9725,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9458,7 +9742,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9474,7 +9759,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9490,7 +9776,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9506,7 +9793,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9522,7 +9810,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9538,7 +9827,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9554,7 +9844,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9570,7 +9861,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9586,7 +9878,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9602,7 +9895,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9618,7 +9912,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9634,7 +9929,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9650,7 +9946,44 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_ff_to_s2f6x2_rn_relu_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "f32",
+      "f32",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_ff_to_s2f6x2_rn_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "i16"
+    ],
+    "params": [
+      "f32",
+      "f32",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9666,7 +9999,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9682,7 +10016,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9698,7 +10033,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9714,7 +10050,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9732,7 +10069,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": [
       {
@@ -9755,7 +10093,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": [
       {
@@ -9775,7 +10114,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9790,7 +10130,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9805,7 +10146,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9840,7 +10182,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9857,7 +10200,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9874,7 +10218,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9891,7 +10236,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9908,7 +10254,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9925,7 +10272,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9960,7 +10308,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9977,7 +10326,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -9994,41 +10344,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
-    ],
-    "arg_props": []
-  },
-  {
-    "record": "int_nvvm_fma_rn_ftz_bf16",
-    "llvm_name": "",
-    "ret": [
-      "bf16"
-    ],
-    "params": [
-      "bf16",
-      "bf16",
-      "bf16"
-    ],
-    "props": [
-      "IntrNoMem",
-      "IntrSpeculatable"
-    ],
-    "arg_props": []
-  },
-  {
-    "record": "int_nvvm_fma_rn_ftz_bf16x2",
-    "llvm_name": "",
-    "ret": [
-      "v2bf16"
-    ],
-    "params": [
-      "v2bf16",
-      "v2bf16",
-      "v2bf16"
-    ],
-    "props": [
-      "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10045,7 +10362,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10062,7 +10380,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10079,41 +10398,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
-    ],
-    "arg_props": []
-  },
-  {
-    "record": "int_nvvm_fma_rn_ftz_relu_bf16",
-    "llvm_name": "",
-    "ret": [
-      "bf16"
-    ],
-    "params": [
-      "bf16",
-      "bf16",
-      "bf16"
-    ],
-    "props": [
-      "IntrNoMem",
-      "IntrSpeculatable"
-    ],
-    "arg_props": []
-  },
-  {
-    "record": "int_nvvm_fma_rn_ftz_relu_bf16x2",
-    "llvm_name": "",
-    "ret": [
-      "v2bf16"
-    ],
-    "params": [
-      "v2bf16",
-      "v2bf16",
-      "v2bf16"
-    ],
-    "props": [
-      "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10130,7 +10416,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10147,41 +10434,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
-    ],
-    "arg_props": []
-  },
-  {
-    "record": "int_nvvm_fma_rn_ftz_sat_bf16",
-    "llvm_name": "",
-    "ret": [
-      "bf16"
-    ],
-    "params": [
-      "bf16",
-      "bf16",
-      "bf16"
-    ],
-    "props": [
-      "IntrNoMem",
-      "IntrSpeculatable"
-    ],
-    "arg_props": []
-  },
-  {
-    "record": "int_nvvm_fma_rn_ftz_sat_bf16x2",
-    "llvm_name": "",
-    "ret": [
-      "v2bf16"
-    ],
-    "params": [
-      "v2bf16",
-      "v2bf16",
-      "v2bf16"
-    ],
-    "props": [
-      "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10198,7 +10452,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10215,7 +10470,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10232,7 +10488,60 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_fma_rn_oob",
+    "llvm_name": "",
+    "ret": [
+      {
+        "any": "fAny"
+      }
+    ],
+    "params": [
+      {
+        "match": 0
+      },
+      {
+        "match": 0
+      },
+      {
+        "match": 0
+      }
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_fma_rn_oob_relu",
+    "llvm_name": "",
+    "ret": [
+      {
+        "any": "fAny"
+      }
+    ],
+    "params": [
+      {
+        "match": 0
+      },
+      {
+        "match": 0
+      },
+      {
+        "match": 0
+      }
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10249,7 +10558,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10266,7 +10576,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10283,7 +10594,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10300,41 +10612,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
-    ],
-    "arg_props": []
-  },
-  {
-    "record": "int_nvvm_fma_rn_sat_bf16",
-    "llvm_name": "",
-    "ret": [
-      "bf16"
-    ],
-    "params": [
-      "bf16",
-      "bf16",
-      "bf16"
-    ],
-    "props": [
-      "IntrNoMem",
-      "IntrSpeculatable"
-    ],
-    "arg_props": []
-  },
-  {
-    "record": "int_nvvm_fma_rn_sat_bf16x2",
-    "llvm_name": "",
-    "ret": [
-      "v2bf16"
-    ],
-    "params": [
-      "v2bf16",
-      "v2bf16",
-      "v2bf16"
-    ],
-    "props": [
-      "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10351,7 +10630,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10368,7 +10648,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10385,7 +10666,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10420,7 +10702,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10437,7 +10720,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10454,7 +10738,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10471,7 +10756,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10506,7 +10792,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10523,7 +10810,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10540,7 +10828,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10557,7 +10846,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10574,7 +10864,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10591,7 +10882,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10608,7 +10900,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10625,7 +10918,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10642,7 +10936,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10659,7 +10954,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10676,7 +10972,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10693,7 +10990,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10710,7 +11008,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10727,7 +11026,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10744,7 +11044,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10761,7 +11062,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10778,7 +11080,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10795,7 +11098,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10812,7 +11116,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10829,7 +11134,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10846,7 +11152,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10863,7 +11170,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10880,7 +11188,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10897,7 +11206,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10914,7 +11224,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10931,7 +11242,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10948,7 +11260,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10965,7 +11278,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10982,7 +11296,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -10999,7 +11314,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11016,7 +11332,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11033,7 +11350,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11050,7 +11368,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11067,7 +11386,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11084,7 +11404,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11101,7 +11422,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11118,7 +11440,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11135,7 +11458,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11152,7 +11476,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11169,7 +11494,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11186,7 +11512,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11203,7 +11530,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11220,7 +11548,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11237,7 +11566,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11254,7 +11584,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11271,7 +11602,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11288,7 +11620,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11305,7 +11638,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11322,7 +11656,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11339,7 +11674,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11356,7 +11692,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11373,7 +11710,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11390,7 +11728,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11407,7 +11746,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11424,7 +11764,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11441,7 +11782,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11458,7 +11800,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11475,7 +11818,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11492,7 +11836,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11509,7 +11854,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11526,7 +11872,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11543,7 +11890,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11560,7 +11908,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11577,7 +11926,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11594,7 +11944,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11611,7 +11962,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11628,7 +11980,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11645,7 +11998,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11662,7 +12016,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11679,7 +12034,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11696,7 +12052,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11713,7 +12070,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11730,7 +12088,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11747,7 +12106,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11764,7 +12124,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11781,7 +12142,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11798,7 +12160,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11815,7 +12178,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11832,7 +12196,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11849,7 +12214,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11866,7 +12232,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11883,7 +12250,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11900,7 +12268,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11917,7 +12286,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11934,7 +12304,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11951,7 +12322,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11968,7 +12340,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -11993,7 +12366,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12018,7 +12392,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12099,7 +12474,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12114,7 +12490,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12129,7 +12506,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12144,7 +12522,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12159,7 +12538,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12174,7 +12554,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12189,7 +12570,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12204,7 +12586,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12222,7 +12605,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": [
       {
@@ -12245,7 +12629,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": [
       {
@@ -12268,7 +12653,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": [
       {
@@ -12291,7 +12677,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": [
       {
@@ -12313,7 +12700,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12330,7 +12718,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12347,7 +12736,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -12364,37 +12754,10 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
-  },
-  {
-    "record": "int_nvvm_internal_addrspace_wrap",
-    "llvm_name": "",
-    "ret": [
-      {
-        "any": "pAny"
-      }
-    ],
-    "params": [
-      {
-        "any": "pAny"
-      }
-    ],
-    "props": [
-      "IntrNoMem",
-      "IntrSpeculatable"
-    ],
-    "arg_props": [
-      {
-        "kind": "NoUndef",
-        "arg": 0
-      },
-      {
-        "kind": "NoUndef",
-        "arg": "ret"
-      }
-    ]
   },
   {
     "record": "int_nvvm_is_explicit_cluster",
@@ -13232,7 +13595,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -13247,7 +13611,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -13262,7 +13627,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -13277,7 +13643,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -13292,7 +13659,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -13307,7 +13675,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -13322,7 +13691,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -13337,7 +13707,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -13353,7 +13724,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -14408,8 +14780,7 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrConvergent",
-      "IntrNoCallback"
+      "IntrSpeculatable"
     ],
     "arg_props": []
   },
@@ -16884,6 +17255,39 @@
   },
   {
     "record": "int_nvvm_mma_block_scale_m16n8k64_row_col_mxf4nvf4_scale_4x_f32_e2m1_e2m1_f32_ue4m3",
+    "llvm_name": "",
+    "ret": [
+      "f32",
+      "f32",
+      "f32",
+      "f32"
+    ],
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "f32",
+      "f32",
+      "f32",
+      "f32",
+      "i32",
+      "i16",
+      "i16",
+      "i32",
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrNoCallback"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_mma_block_scale_m16n8k64_row_col_mxf4nvf4_scale_4x_f32_e2m1_e2m1_f32_ue8m0",
     "llvm_name": "",
     "ret": [
       "f32",
@@ -22214,6 +22618,54 @@
   },
   {
     "record": "int_nvvm_mma_sp_ordered_metadata_block_scale_m16n8k128_row_col_mxf4nvf4_scale_4x_f32_e2m1_e2m1_f32_ue4m3",
+    "llvm_name": "",
+    "ret": [
+      "f32",
+      "f32",
+      "f32",
+      "f32"
+    ],
+    "params": [
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "i32",
+      "f32",
+      "f32",
+      "f32",
+      "f32",
+      "i32",
+      "i32",
+      "i32",
+      "i16",
+      "i16",
+      "i32",
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrNoCallback"
+    ],
+    "arg_props": [
+      {
+        "kind": "ImmArg",
+        "arg": 13
+      },
+      {
+        "kind": "Range",
+        "arg": 13,
+        "lower": 0,
+        "upper": 1
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_mma_sp_ordered_metadata_block_scale_m16n8k128_row_col_mxf4nvf4_scale_4x_f32_e2m1_e2m1_f32_ue8m0",
     "llvm_name": "",
     "ret": [
       "f32",
@@ -28579,6 +29031,23 @@
     "arg_props": []
   },
   {
+    "record": "int_nvvm_movmatrix_sync_aligned_m8n8_trans_b16",
+    "llvm_name": "",
+    "ret": [
+      "i32"
+    ],
+    "params": [
+      "i32"
+    ],
+    "props": [
+      "IntrInaccessibleMemOnly",
+      "IntrConvergent",
+      "IntrNoCallback",
+      "IntrNoFree"
+    ],
+    "arg_props": []
+  },
+  {
     "record": "int_nvvm_mul24_i",
     "llvm_name": "",
     "ret": [
@@ -28591,7 +29060,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28608,7 +29078,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28625,7 +29096,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28642,7 +29114,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28659,7 +29132,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28676,7 +29150,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28693,7 +29168,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28710,7 +29186,80 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_mul_rn_ftz_sat_f16",
+    "llvm_name": "",
+    "ret": [
+      "f16"
+    ],
+    "params": [
+      "f16",
+      "f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_mul_rn_ftz_sat_v2f16",
+    "llvm_name": "",
+    "ret": [
+      "v2f16"
+    ],
+    "params": [
+      "v2f16",
+      "v2f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_mul_rn_sat_f16",
+    "llvm_name": "",
+    "ret": [
+      "f16"
+    ],
+    "params": [
+      "f16",
+      "f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_mul_rn_sat_v2f16",
+    "llvm_name": "",
+    "ret": [
+      "v2f16"
+    ],
+    "params": [
+      "v2f16",
+      "v2f16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28727,7 +29276,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28744,7 +29294,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28761,7 +29312,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28778,7 +29330,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28795,7 +29348,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28812,7 +29366,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28829,7 +29384,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28846,7 +29402,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28863,7 +29420,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28880,7 +29438,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28897,7 +29456,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28914,7 +29474,8 @@
     "props": [
       "IntrNoMem",
       "IntrSpeculatable",
-      "Commutative"
+      "Commutative",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28943,7 +29504,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -28958,7 +29520,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29224,7 +29787,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29241,7 +29805,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29257,7 +29822,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29273,7 +29839,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29290,7 +29857,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29306,7 +29874,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29322,7 +29891,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29336,7 +29906,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29350,7 +29921,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29364,7 +29936,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29378,7 +29951,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29392,7 +29966,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29406,7 +29981,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29420,7 +29996,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29434,7 +30011,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29448,7 +30026,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29462,7 +30041,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29476,7 +30056,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29490,7 +30071,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29504,7 +30086,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -29518,7 +30101,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31171,6 +31755,116 @@
     ]
   },
   {
+    "record": "int_nvvm_read_ptx_sreg_pm4",
+    "llvm_name": "",
+    "ret": [
+      "i32"
+    ],
+    "params": [],
+    "props": [
+      "IntrInaccessibleMemOnly",
+      "IntrNoCallback",
+      "IntrNoFree",
+      "IntrWillReturn"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoUndef",
+        "arg": "ret"
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_read_ptx_sreg_reserved_smem_offset_0",
+    "llvm_name": "llvm.nvvm.read.ptx.sreg.reserved_smem_offset_0",
+    "ret": [
+      "i32"
+    ],
+    "params": [],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoUndef",
+        "arg": "ret"
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_read_ptx_sreg_reserved_smem_offset_1",
+    "llvm_name": "llvm.nvvm.read.ptx.sreg.reserved_smem_offset_1",
+    "ret": [
+      "i32"
+    ],
+    "params": [],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoUndef",
+        "arg": "ret"
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_read_ptx_sreg_reserved_smem_offset_begin",
+    "llvm_name": "llvm.nvvm.read.ptx.sreg.reserved_smem_offset_begin",
+    "ret": [
+      "i32"
+    ],
+    "params": [],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoUndef",
+        "arg": "ret"
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_read_ptx_sreg_reserved_smem_offset_cap",
+    "llvm_name": "llvm.nvvm.read.ptx.sreg.reserved_smem_offset_cap",
+    "ret": [
+      "i32"
+    ],
+    "params": [],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoUndef",
+        "arg": "ret"
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_read_ptx_sreg_reserved_smem_offset_end",
+    "llvm_name": "llvm.nvvm.read.ptx.sreg.reserved_smem_offset_end",
+    "ret": [
+      "i32"
+    ],
+    "params": [],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoUndef",
+        "arg": "ret"
+      }
+    ]
+  },
+  {
     "record": "int_nvvm_read_ptx_sreg_smid",
     "llvm_name": "",
     "ret": [
@@ -31644,7 +32338,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31659,7 +32354,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31674,7 +32370,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31688,7 +32385,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31702,7 +32400,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31716,7 +32415,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31730,7 +32430,76 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_s2f6x2_to_bf16x2_rn_relu_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_s2f6x2_to_bf16x2_rn_relu_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_s2f6x2_to_bf16x2_rn_satfinite_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
+    ],
+    "arg_props": []
+  },
+  {
+    "record": "int_nvvm_s2f6x2_to_bf16x2_rn_scale_n2_ue8m0",
+    "llvm_name": "",
+    "ret": [
+      "v2bf16"
+    ],
+    "params": [
+      "i16",
+      "i16"
+    ],
+    "props": [
+      "IntrNoMem",
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31747,7 +32516,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31764,7 +32534,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31781,7 +32552,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31798,7 +32570,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31815,7 +32588,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31832,7 +32606,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31847,7 +32622,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31862,7 +32638,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31877,7 +32654,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31943,7 +32721,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31959,7 +32738,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -31977,7 +32757,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -31996,7 +32778,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32014,7 +32798,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32033,7 +32819,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32051,7 +32839,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32070,7 +32860,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32088,7 +32880,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32107,7 +32901,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32125,7 +32921,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32144,7 +32942,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32162,7 +32962,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32181,7 +32983,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32511,7 +33315,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32530,7 +33336,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32548,7 +33356,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32567,7 +33377,9 @@
     "props": [
       "IntrInaccessibleMemOnly",
       "IntrConvergent",
-      "IntrNoCallback"
+      "IntrNoCallback",
+      "IntrReadMem",
+      "IntrWillReturn"
     ],
     "arg_props": []
   },
@@ -32581,7 +33393,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32595,7 +33408,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32609,7 +33423,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32623,7 +33438,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32637,7 +33453,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32651,7 +33468,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32665,7 +33483,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32679,7 +33498,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32693,7 +33513,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32707,7 +33528,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32721,7 +33543,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32735,7 +33558,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32749,7 +33573,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32763,7 +33588,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32777,7 +33603,8 @@
       "f64"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32791,7 +33618,8 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -32805,9 +33633,115 @@
       "f32"
     ],
     "props": [
-      "IntrNoMem"
+      "IntrNoMem",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
+  },
+  {
+    "record": "int_nvvm_st_async",
+    "llvm_name": "",
+    "ret": [],
+    "params": [
+      {
+        "ptr": 7
+      },
+      {
+        "any": "iAny"
+      },
+      {
+        "ptr": 7
+      }
+    ],
+    "props": [
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "WriteOnly",
+        "arg": 0
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_st_async_gpu",
+    "llvm_name": "",
+    "ret": [],
+    "params": [
+      {
+        "ptr": 1
+      },
+      {
+        "any": "iAny"
+      },
+      "i1"
+    ],
+    "props": [],
+    "arg_props": [
+      {
+        "kind": "WriteOnly",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ArgName",
+        "arg": 2,
+        "name": "isMultimem"
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_st_async_mmio_sys",
+    "llvm_name": "",
+    "ret": [],
+    "params": [
+      {
+        "ptr": 1
+      },
+      {
+        "any": "iAny"
+      }
+    ],
+    "props": [],
+    "arg_props": [
+      {
+        "kind": "WriteOnly",
+        "arg": 0
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_st_async_sys",
+    "llvm_name": "",
+    "ret": [],
+    "params": [
+      {
+        "ptr": 1
+      },
+      {
+        "any": "iAny"
+      },
+      "i1"
+    ],
+    "props": [],
+    "arg_props": [
+      {
+        "kind": "WriteOnly",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ArgName",
+        "arg": 2,
+        "name": "isMultimem"
+      }
+    ]
   },
   {
     "record": "int_nvvm_st_bulk",
@@ -41932,7 +42866,7 @@
     "record": "int_nvvm_tcgen05_ld_16x32bx2_x1",
     "llvm_name": "",
     "ret": [
-      "i32"
+      "v1i32"
     ],
     "params": [
       {
@@ -42188,7 +43122,7 @@
     "record": "int_nvvm_tcgen05_ld_16x64b_x1",
     "llvm_name": "",
     "ret": [
-      "i32"
+      "v1i32"
     ],
     "params": [
       {
@@ -42404,7 +43338,7 @@
     "record": "int_nvvm_tcgen05_ld_32x32b_x1",
     "llvm_name": "",
     "ret": [
-      "i32"
+      "v1i32"
     ],
     "params": [
       {
@@ -42600,6 +43534,1000 @@
         "ptr": 6
       },
       "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x128_f32",
+    "llvm_name": "",
+    "ret": [
+      "v128f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 4
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x128_i32",
+    "llvm_name": "",
+    "ret": [
+      "v128i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x16_f32",
+    "llvm_name": "",
+    "ret": [
+      "v16f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 4
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x16_i32",
+    "llvm_name": "",
+    "ret": [
+      "v16i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x2_f32",
+    "llvm_name": "",
+    "ret": [
+      "v2f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 4
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x2_i32",
+    "llvm_name": "",
+    "ret": [
+      "v2i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x32_f32",
+    "llvm_name": "",
+    "ret": [
+      "v32f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 4
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x32_i32",
+    "llvm_name": "",
+    "ret": [
+      "v32i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x4_f32",
+    "llvm_name": "",
+    "ret": [
+      "v4f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 4
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x4_i32",
+    "llvm_name": "",
+    "ret": [
+      "v4i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x64_f32",
+    "llvm_name": "",
+    "ret": [
+      "v64f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 4
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x64_i32",
+    "llvm_name": "",
+    "ret": [
+      "v64i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x8_f32",
+    "llvm_name": "",
+    "ret": [
+      "v8f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 4
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_16x32bx2_x8_i32",
+    "llvm_name": "",
+    "ret": [
+      "v8i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i64",
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x128_f32",
+    "llvm_name": "",
+    "ret": [
+      "v128f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x128_i32",
+    "llvm_name": "",
+    "ret": [
+      "v128i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x16_f32",
+    "llvm_name": "",
+    "ret": [
+      "v16f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x16_i32",
+    "llvm_name": "",
+    "ret": [
+      "v16i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x2_f32",
+    "llvm_name": "",
+    "ret": [
+      "v2f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x2_i32",
+    "llvm_name": "",
+    "ret": [
+      "v2i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x32_f32",
+    "llvm_name": "",
+    "ret": [
+      "v32f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x32_i32",
+    "llvm_name": "",
+    "ret": [
+      "v32i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x4_f32",
+    "llvm_name": "",
+    "ret": [
+      "v4f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x4_i32",
+    "llvm_name": "",
+    "ret": [
+      "v4i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x64_f32",
+    "llvm_name": "",
+    "ret": [
+      "v64f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x64_i32",
+    "llvm_name": "",
+    "ret": [
+      "v64i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x8_f32",
+    "llvm_name": "",
+    "ret": [
+      "v8f32",
+      "f32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32",
+      "i1",
+      "i1"
+    ],
+    "props": [
+      "IntrConvergent",
+      "IntrArgMemOnly"
+    ],
+    "arg_props": [
+      {
+        "kind": "NoCapture",
+        "arg": 0
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 1
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 2
+      },
+      {
+        "kind": "ImmArg",
+        "arg": 3
+      }
+    ]
+  },
+  {
+    "record": "int_nvvm_tcgen05_ld_red_32x32b_x8_i32",
+    "llvm_name": "",
+    "ret": [
+      "v8i32",
+      "i32"
+    ],
+    "params": [
+      {
+        "ptr": 6
+      },
+      "i32"
     ],
     "props": [
       "IntrConvergent",
@@ -47032,7 +48960,7 @@
         "ptr": 6
       },
       "i64",
-      "i32",
+      "v1i32",
       "i1"
     ],
     "props": [
@@ -47279,7 +49207,7 @@
       {
         "ptr": 6
       },
-      "i32",
+      "v1i32",
       "i1"
     ],
     "props": [
@@ -47487,7 +49415,7 @@
       {
         "ptr": 6
       },
-      "i32",
+      "v1i32",
       "i1"
     ],
     "props": [
@@ -47732,6 +49660,12 @@
       {
         "kind": "NoCapture",
         "arg": 0
+      },
+      {
+        "kind": "Range",
+        "arg": 1,
+        "lower": 0,
+        "upper": 5
       }
     ]
   },
@@ -47758,6 +49692,12 @@
       {
         "kind": "NoCapture",
         "arg": 0
+      },
+      {
+        "kind": "Range",
+        "arg": 1,
+        "lower": 0,
+        "upper": 5
       }
     ]
   },
@@ -47877,6 +49817,12 @@
       {
         "kind": "NoCapture",
         "arg": 0
+      },
+      {
+        "kind": "Range",
+        "arg": 1,
+        "lower": 0,
+        "upper": 5
       }
     ]
   },
@@ -47903,6 +49849,12 @@
       {
         "kind": "NoCapture",
         "arg": 0
+      },
+      {
+        "kind": "Range",
+        "arg": 1,
+        "lower": 0,
+        "upper": 5
       }
     ]
   },
@@ -52248,7 +54200,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52263,7 +54216,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52278,7 +54232,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52405,7 +54360,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52420,7 +54376,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52435,7 +54392,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52450,7 +54408,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52465,7 +54424,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52480,7 +54440,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52495,7 +54456,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52510,7 +54472,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52525,7 +54488,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52540,7 +54504,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52555,7 +54520,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52570,7 +54536,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52585,7 +54552,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52600,7 +54568,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52615,7 +54584,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52630,7 +54600,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -52645,7 +54616,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -66710,7 +68682,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   },
@@ -66726,7 +68699,8 @@
     ],
     "props": [
       "IntrNoMem",
-      "IntrSpeculatable"
+      "IntrSpeculatable",
+      "IntrNoCreateUndefOrPoison"
     ],
     "arg_props": []
   }

@@ -45,7 +45,7 @@ _b1_mma_intrinsic(row) =
         info = PTX.lowering(op, argtypes)
         @test info.rettype === NTuple{row.n_cd, Int32}
         if row.shape === :m8n8k128 && row.bitop === :xor
-            # LLVM 22.1.7 cannot select its existing intrinsic at sm_75, so
+            # LLVM 23.1.1 cannot select its existing intrinsic at sm_75, so
             # this sole form is a typed convergent asm fallback.
             @test info.tier === :asm
             @test isempty(info.intrinsics)

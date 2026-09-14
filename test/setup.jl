@@ -138,10 +138,10 @@ function emit_llvm(f, tt::Type{<:Tuple};
     emit_llvm(_explicit_target_job(f, tt; cap, feature_set, kwargs...))
 end
 
-function emit_llvm(job::CompilerJob)
+function emit_llvm(job::CompilerJob; kwargs...)
     io = IOBuffer()
     CUDACore.invoke_frozen(CUDACore.GPUCompiler.code_llvm, io, job;
-                           optimize = true, dump_module = true)
+                           optimize = true, dump_module = true, kwargs...)
     String(take!(io))
 end
 
@@ -152,7 +152,7 @@ end
 # code; toolkit-backed inspection and assembly keep the path above.
 function _host_target_job(f, tt::Type{<:Tuple};
                           cap::VersionNumber, feature_set::Symbol = :baseline,
-                          kwargs...)
+                          kernel::Bool = true, kwargs...)
     arch = SMVersion(cap.major, cap.minor, feature_set)
     support = CUDACore.llvm_compat()
     arch in support.sm ||
@@ -160,7 +160,7 @@ function _host_target_job(f, tt::Type{<:Tuple};
     ptx = maximum(support.ptx)
     target = PTXCompilerTarget(; cap, ptx, feature_set, debuginfo = true, kwargs...)
     params = CUDACore.CUDACompilerParams(; sm = arch, ptx)
-    config = CompilerConfig(target, params; kernel = true, libraries = false)
+    config = CompilerConfig(target, params; kernel, libraries = false)
     source = methodinstance(typeof(f), Base.to_tuple_type(tt))
     CompilerJob(source, config)
 end

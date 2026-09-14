@@ -4,13 +4,13 @@
 #   1. Version: the artifact the environment resolved is the version the
 #      table was generated from (compat pins the major; this catches
 #      minor/patch skew worth knowing about at a glance).
-#   2. Names: every table entry's name exists in the artifact llc binary's
+#   2. Names: every table entry's name exists in the backend library's
 #      intrinsic name table, and vice versa — the same diff the extraction
 #      pipeline runs at generation time, re-checked continuously against
 #      the binary that environments actually resolve.
 #   3. Selection: for every intrinsic the package's wrappers stand on,
-#      synthesized IR compiles through the artifact `llc` and selects the
-#      *expected instruction*. Acceptance alone proves nothing — llc
+#      synthesized IR compiles through the backend library and selects the
+#      *expected instruction*. Acceptance alone proves nothing — the backend
 #      remangles wrong names and upgrades sloppy callsites silently — so
 #      each probe asserts instruction text.
 #
@@ -20,15 +20,16 @@
 
 using PTX
 using PTX.NVVM: NVVM, synthesize, TABLE, BACKEND_LLVM_VERSION
-using NVPTX_LLVM_Backend_jll: NVPTX_LLVM_Backend_jll, llc
+include(joinpath(@__DIR__, "..", "nvptx_backend_defs.jl"))
 
 @testset "backend artifact matches the registry's generation version" begin
     jll = pkgversion(NVPTX_LLVM_Backend_jll)
     @test VersionNumber(jll.major, jll.minor, jll.patch) == BACKEND_LLVM_VERSION
+    @test nvptx_backend_version() == BACKEND_LLVM_VERSION
 end
 
-@testset "table names == llc binary's intrinsic name table" begin
-    blob = read(llc().exec[1], String)
+@testset "table names == backend library's intrinsic name table" begin
+    blob = read(libnvptx, String)
     binary_names = Set{String}()
     for s in eachsplit(blob, '\0')
         startswith(s, "llvm.nvvm.") && push!(binary_names, String(s))
@@ -242,7 +243,7 @@ for (shape, base) in (("16x64b", 1), ("32x32b", 1), ("16x128b", 2),
                    (p6, split..., Val{repack}),
                    "sm_100a", "+ptx86",
                    Regex("tcgen05\\.ld\\.sync\\.aligned\\.$shape\\.x$c$ldre\\.b32")))
-    data = n == 1 ? UInt32 : NTuple{n, VecElement{UInt32}}
+    data = NTuple{n, VecElement{UInt32}}
     push!(PROBES, ("llvm.nvvm.tcgen05.st.$shape.x$c",
                    (p6, split..., data, Val{repack}),
                    "sm_100a", "+ptx86",
@@ -290,11 +291,11 @@ let v4 = NTuple{4, VecElement{UInt32}}, v8 = NTuple{8, VecElement{UInt32}}
         ("llvm.nvvm.tcgen05.mma.tensor.ashift",
          (p6, p6, UInt64, UInt32, Bool, Val{0}, Val{1}, Val{0}),
          "sm_100a", "+ptx88",
-         r"tcgen05\.mma\.cta_group::1\.kind::f16\.collector::a::discard\.ashift"),
+         r"tcgen05\.mma\.cta_group::1\.kind::f16\.ashift\.collector::a::discard"),
         ("llvm.nvvm.tcgen05.mma.tensor.ashift",
          (p6, p6, UInt64, UInt32, Bool, Val{3}, Val{1}, Val{1}),
          "sm_100a", "+ptx88",
-         r"tcgen05\.mma\.cta_group::1\.kind::i8\.collector::a::lastuse\.ashift"),
+         r"tcgen05\.mma\.cta_group::1\.kind::i8\.ashift\.collector::a::lastuse"),
         ("llvm.nvvm.tcgen05.mma.shared.disable_output_lane.cg1",
          (p6, UInt64, UInt64, UInt32, Bool, v4, Val{0}, Val{0}),
          "sm_100a", "+ptx88",
@@ -316,8 +317,7 @@ let v4 = NTuple{4, VecElement{UInt32}}, v8 = NTuple{8, VecElement{UInt32}}
          "sm_100a", "+ptx88",
          r"tcgen05\.mma\.cta_group::1\.kind::f16\.ashift\.collector::a::lastuse \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, \{%r\d+, %r\d+, %r\d+, %r\d+\}, %p\d+;"),
         # (every masked .ashift record renders `.ashift` before the
-        # collector; the unmasked .ashift records render it after — see
-        # the ISel-order note below.)
+        # collector, matching the unmasked forms.)
         ("llvm.nvvm.tcgen05.mma.tensor.disable_output_lane.cg2.ashift",
          (p6, p6, UInt64, UInt32, Bool, v8, Val{0}, Val{0}),
          "sm_100a", "+ptx88",
@@ -333,7 +333,7 @@ let v4 = NTuple{4, VecElement{UInt32}}, v8 = NTuple{8, VecElement{UInt32}}
         ("llvm.nvvm.tcgen05.mma.tensor.scale_d.ashift",
          (p6, p6, UInt64, UInt32, Bool, Val{9}, Val{1}, Val{1}, Val{1}),
          "sm_100a", "+ptx88",
-         r"tcgen05\.mma\.cta_group::1\.kind::tf32\.collector::a::lastuse\.ashift \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, %p\d+, 9;"),
+         r"tcgen05\.mma\.cta_group::1\.kind::tf32\.ashift\.collector::a::lastuse \[%r\d+\], \[%r\d+\], %rd\d+, %r\d+, %p\d+, 9;"),
         ("llvm.nvvm.tcgen05.mma.shared.scale_d.disable_output_lane.cg1",
          (p6, UInt64, UInt64, UInt32, Bool, Val{5}, v4, Val{0}, Val{0}),
          "sm_100a", "+ptx88",
@@ -350,9 +350,7 @@ let v4 = NTuple{4, VecElement{UInt32}}, v8 = NTuple{8, VecElement{UInt32}}
          (p6, p6, UInt64, UInt32, Bool, Val{5}, v8, Val{0}, Val{0}),
          "sm_100a", "+ptx88",
          r"tcgen05\.mma\.cta_group::2\.kind::f16\.collector::a::discard \[%r\d+\], \[%r\d+\]"),
-        # ISel is inconsistent about the two ISA-legal qualifier orders:
-        # these two records render `.ashift` BEFORE the collector, unlike
-        # every other .ashift record. Pinned as observed (llc 22.1.7).
+        # Both masked and unmasked forms place .ashift before the collector.
         ("llvm.nvvm.tcgen05.mma.tensor.scale_d.disable_output_lane.cg1.ashift",
          (p6, p6, UInt64, UInt32, Bool, Val{5}, v4, Val{0}, Val{1}),
          "sm_100a", "+ptx88",
@@ -365,8 +363,8 @@ end
 
 # Sparse mma (generated, wrappers/tcgen05.jl): the dense grid plus the
 # sparsity-metadata TMEM operand, rendered bracketed between the B
-# descriptor and idesc. Same collector enum and ISel qualifier-order
-# quirks as dense (masked .ashift records spell .ashift first).
+# descriptor and idesc. Same collector enum and qualifier
+# order as dense (.ashift precedes the collector).
 let v4 = NTuple{4, VecElement{UInt32}}, v8 = NTuple{8, VecElement{UInt32}}
     push!(PROBES,
         ("llvm.nvvm.tcgen05.mma.sp.shared",
@@ -384,7 +382,7 @@ let v4 = NTuple{4, VecElement{UInt32}}, v8 = NTuple{8, VecElement{UInt32}}
         ("llvm.nvvm.tcgen05.mma.sp.tensor.ashift",
          (p6, p6, UInt64, UInt32, Bool, p6, Val{3}, Val{1}, Val{1}),
          "sm_100a", "+ptx88",
-         r"tcgen05\.mma\.sp\.cta_group::1\.kind::i8\.collector::a::lastuse\.ashift"),
+         r"tcgen05\.mma\.sp\.cta_group::1\.kind::i8\.ashift\.collector::a::lastuse"),
         ("llvm.nvvm.tcgen05.mma.sp.shared.disable_output_lane.cg1",
          (p6, UInt64, UInt64, UInt32, Bool, p6, v4, Val{0}, Val{0}),
          "sm_100a", "+ptx88",
@@ -420,7 +418,7 @@ let v4 = NTuple{4, VecElement{UInt32}}, v8 = NTuple{8, VecElement{UInt32}}
         ("llvm.nvvm.tcgen05.mma.sp.tensor.scale_d.ashift",
          (p6, p6, UInt64, UInt32, Bool, p6, Val{9}, Val{1}, Val{1}, Val{1}),
          "sm_100a", "+ptx88",
-         r"tcgen05\.mma\.sp\.cta_group::1\.kind::tf32\.collector::a::lastuse\.ashift"),
+         r"tcgen05\.mma\.sp\.cta_group::1\.kind::tf32\.ashift\.collector::a::lastuse"),
         ("llvm.nvvm.tcgen05.mma.sp.shared.scale_d.disable_output_lane.cg1",
          (p6, UInt64, UInt64, UInt32, Bool, p6, Val{5}, v4, Val{0}, Val{0}),
          "sm_100a", "+ptx88",
@@ -660,7 +658,7 @@ end
 const _MMA_B1_SWEPT = Set{String}()
 function _mma_b1_sweep!(shape, bitop)
     name = "llvm.nvvm." * PTX._mma_b1_intrinsic_name(shape, bitop)
-    # LLVM 22.1.7 carries this intrinsic but rejects the ISA-legal sm_75
+    # LLVM 23.1.1 carries this intrinsic but rejects the ISA-legal sm_75
     # floor. The wrapper uses typed convergent asm; ptxas/mma_b1.jl proves
     # exact-floor selection independently.
     shape === :m8n8k128 && bitop === :xor && return nothing
@@ -746,11 +744,13 @@ const _MMA_SCALED_SWEPT = Set{String}()
 function _mma_scaled_sweep!(kind, sv, a, b, s; shape = :m16n8k32)
     infix = PTX._MMA_SCALE_VEC_INFIX[sv]
     name = "llvm.nvvm.mma.block.scale.$shape.row.col.$kind.$infix.f32.$a.$b.f32.$s"
-    NVVM.isintrinsic(name) || return   # asm-tier residue (nvf4 4X ue8m0)
     n_a, n_b, n_cd = PTX.MMA_SCALED_FRAGS[(shape, a, :f32)]
     args = (fill(UInt32, n_a + n_b)..., fill(Float32, n_cd)...,
             UInt32, UInt16, UInt16, UInt32, UInt16, UInt16)
-    push!(PROBES, (name, args, "sm_121a", "+ptx88",
+    # PTX 9.1 adds the ue8m0 4X combination; other forms start at 8.8.
+    isa = kind === :mxf4nvf4 && sv === Symbol("4X") && s === :ue8m0 ?
+          "+ptx91" : "+ptx88"
+    push!(PROBES, (name, args, "sm_121a", isa,
         Regex("mma\\.sync\\.aligned\\.$shape\\.row\\.col\\.kind::$kind\\." *
               "block_scale\\.scale_vec::$sv\\.f32\\.$a\\.$b\\.f32\\.$s")))
     push!(_MMA_SCALED_SWEPT, name)
@@ -839,13 +839,14 @@ end
 
 # Same standing guarantee for the generated ld/st grid: the recorded name
 # table must equal the NVVM registry's complete tcgen05.{ld,st} inventory
-# (ld.red has no records at the pinned backend), and every name keeps a
+# (ld.red is checked separately in host/nvptx_backend.jl), and every name keeps a
 # selection probe.
 @testset "tcgen05 ld/st generated family: full probe coverage" begin
     names = PTX.wrapper_intrinsic_names(:tcgen05_ldst)
     @test length(names) == 74
     registry = [n for n in keys(PTX.NVVM.TABLE)
-                if startswith(n, "llvm.nvvm.tcgen05.ld.") ||
+                if (startswith(n, "llvm.nvvm.tcgen05.ld.") &&
+                    !startswith(n, "llvm.nvvm.tcgen05.ld.red.")) ||
                    startswith(n, "llvm.nvvm.tcgen05.st.")]
     @test Set(names) == Set(registry)
     probed = Set(p[1] for p in PROBES)
@@ -865,7 +866,7 @@ end
     @test length(unique(r.intrinsic
                         for r in PTX.wrapper_records(:mma_sp, :mma_sp_ordered)
                         if :s32 in r.mods)) == 64
-    @test length(PTX.wrapper_intrinsic_names(:mma_scaled)) == 28
+    @test length(PTX.wrapper_intrinsic_names(:mma_scaled)) == 29
     @test _MMA_SWEPT == Set(PTX.wrapper_intrinsic_names(:mma))
     @test _MMA_B1_SWEPT == Set(PTX.wrapper_intrinsic_names(:mma_b1))
     @test _MMA_SP_SWEPT == Set(PTX.wrapper_intrinsic_names(:mma_sp))
@@ -876,10 +877,7 @@ end
     @test isempty(PTX.wrapper_missing_intrinsics(:mma_sp, :mma_sp_ordered))
     # the asm-tier residues really lack intrinsics (why the fallbacks exist)
     @test !isempty(PTX.wrapper_asm_forms(:mma))
-    @test (:sync, :aligned, Symbol("kind::mxf4nvf4"), :block_scale,
-           Symbol("scale_vec::4X"), :m16n8k64, :row, :col,
-           :f32, :e2m1, :e2m1, :f32, :ue8m0) in
-          PTX.wrapper_asm_forms(:mma_scaled)
+    @test isempty(PTX.wrapper_asm_forms(:mma_scaled))
     # every per-class mma probe is one of the names the family stands on
     mma_probes = filter(p -> startswith(p[1], "llvm.nvvm.mma."), PROBES)
     @test all(p -> p[1] in _MMA_SWEPT || p[1] in _MMA_SP_SWEPT ||
@@ -889,7 +887,7 @@ end
 end
 
 # The emission-side convergent overlay (NVVM.CONVERGENT_OVERLAY_PREFIXES):
-# upstream 22.1.7 marks the whole `llvm.nvvm.mma.` surface IntrNoMem but NOT
+# upstream 23.1.1 marks the whole `llvm.nvvm.mma.` surface IntrNoMem but NOT
 # IntrConvergent, though mma.sync.aligned is warp-collective by ISA contract.
 # Pin the complete generated namespace, not merely the subset selected by
 # current wrappers. The !(:convergent in props) leg flips when a regenerated
@@ -898,7 +896,7 @@ end
 @testset "convergent overlay covers the mma upstream-props gap" begin
     names = NVVM.matching("llvm.nvvm.mma.")
     observed = Dict{Symbol,Int}()
-    @test length(names) == 390
+    @test length(names) == 392
     for n in names
         i = NVVM.intrinsic(n)
         family = Symbol(split(n, '.'; limit=5)[4])
@@ -909,15 +907,15 @@ end
         @test occursin("convergent nomerge", NVVM.fnattrs(i))
     end
     @test observed == Dict(
-        :and => 3, :block => 54,
+        :and => 3, :block => 55,
         :m16n8k16 => 20, :m16n8k32 => 74, :m16n8k4 => 2,
         :m16n8k64 => 8, :m16n8k8 => 5,
         :m8n8k16 => 8, :m8n8k32 => 8, :m8n8k4 => 13,
-        :sp => 192, :xor => 3,
+        :sp => 193, :xor => 3,
     )
     wrapped = Set(PTX.wrapper_intrinsic_names(
         :mma, :mma_sp, :mma_sp_ordered, :mma_scaled, :mma_b1))
-    @test length(wrapped) == 231
+    @test length(wrapped) == 232
     @test wrapped ⊆ Set(names)
     # the overlay must not leak beyond mma.*
     @test !NVVM.is_convergent(NVVM.intrinsic("llvm.nvvm.fence.proxy.async"))
@@ -925,7 +923,7 @@ end
 end
 
 # PTX 9.3 §9.7.15.4.3–.5 makes every WMMA load, mma, and store a
-# mandatory `.sync.aligned` warp collective. LLVM 22.1.7 omits
+# mandatory `.sync.aligned` warp collective. LLVM 23.1.1 omits
 # IntrConvergent from all of them, so the emitter overlays the missing
 # property. This inventory is intentionally stricter than a prefix count: it
 # forces review if regeneration adds a shape or a different helper under the
@@ -971,17 +969,13 @@ end
     @test NVVM.callsiteattrs(NVVM.intrinsic("llvm.nvvm.tcgen05.mma.shared")) == ""
 end
 
-@testset "selection probes through the artifact llc" begin
-    exe = llc().exec[1]
+@testset "selection probes through the backend library" begin
     for (name, argtypes, mcpu, mattr, expect) in sort(PROBES; by=first)
         s = synthesize(name, argtypes)
         ll = "target triple = \"nvptx64-nvidia-cuda\"\n" * s.ir
-        out = IOBuffer(); err = IOBuffer()
-        ok = success(pipeline(`$exe -mcpu=$mcpu -mattr=$mattr -o -`;
-                              stdin = IOBuffer(ll), stdout = out, stderr = err))
-        ptx = String(take!(out))
+        (; ok, ptx, diagnostics) = compile_nvvm_ir(ll, mcpu, mattr)
         if !(ok && occursin(expect, ptx))
-            @info "probe failed" name mcpu llc_error=String(take!(err)) ptx
+            @info "probe failed" name mcpu diagnostics ptx
         end
         @test ok
         @test occursin(expect, ptx)
@@ -993,7 +987,6 @@ end
 # accepting one of these, that's a silent-downgrade hazard (the fence
 # migration's cluster-scope check generalized), and this turns red.
 @testset "arch gates fail loudly below floor" begin
-    exe = llc().exec[1]
     cases = [
         # cluster barriers: sm_90 floor
         ("llvm.nvvm.barrier.cluster.arrive", (), "sm_80", "+ptx70"),
@@ -1032,9 +1025,9 @@ end
     for (name, argtypes, mcpu, mattr) in cases
         s = synthesize(name, argtypes)
         ll = "target triple = \"nvptx64-nvidia-cuda\"\n" * s.ir
-        ok = success(pipeline(`$exe -mcpu=$mcpu -mattr=$mattr -o /dev/null`;
-                              stdin = IOBuffer(ll), stderr = devnull))
-        @test !ok
+        result = compile_nvvm_ir(ll, mcpu, mattr)
+        @test !result.ok
+        @test occursin("Cannot select", result.diagnostics)
     end
 end
 
@@ -1044,10 +1037,10 @@ end
 # selects. They say nothing about the per-intrinsic attribute tuple — and that
 # tuple can't be checked the way names are. Two facts force a different test:
 #
-#   - The artifact llc IGNORES the attributes we attach. Verified directly:
+#   - The backend library IGNORES the attributes we attach. Verified directly:
 #     declaring `read.ptx.sreg.tid.x` as `memory(write)` (a lie that should
-#     suppress CSE) still lets llc fold two reads into one — it re-derives
-#     attributes from its own compiled-in table. So no llc probe can validate
+#     suppress CSE) still lets the backend fold two reads into one — it re-derives
+#     attributes from its own compiled-in table. So no backend probe can validate
 #     an attribute; a trial-compile matrix would be blind to this dimension.
 #   - The attributes are therefore load-bearing ONLY for the in-process LLVM
 #     (Julia's, which knows nothing of these names and is constrained solely by
@@ -1058,7 +1051,7 @@ end
 # The realistic rot vector is an extraction-map regression in gen/ (PROPS / the
 # jq filter) on a future JLL re-gen, silently changing a tuple while names stay
 # clean. This pins a representative per attribute archetype so that turns red.
-# Each anchor's expected tuple was checked against the 22.1.7 IntrinsicsNVVM.td
+# Each anchor's expected tuple was checked against the 23.1.1 IntrinsicsNVVM.td
 # source where marked [td]; the rest pin the current extracted value (still a
 # regression tripwire, just not independently source-verified here).
 const ATTR_ANCHORS = Pair{String, Tuple{Vararg{Symbol}}}[
@@ -1069,11 +1062,15 @@ const ATTR_ANCHORS = Pair{String, Tuple{Vararg{Symbol}}}[
     "llvm.nvvm.barrier.cluster.arrive.aligned" => (:convergent, :nocallback),                  # [td]
     "llvm.nvvm.shfl.sync.idx.i32"              => (:inaccessiblememonly, :convergent, :nocallback),
     "llvm.nvvm.activemask"                     => (:inaccessiblememonly, :convergent, :nocallback, :sideeffects),
+    # Legacy shuffles read inaccessible state; the opaque barrier-state
+    # query is a pure token operation and does not synchronize threads.
+    "llvm.nvvm.shfl.bfly.i32" => (:inaccessiblememonly, :convergent, :nocallback, :readmem, :willreturn),
+    "llvm.nvvm.mbarrier.pending.count" => (:nomem, :speculatable),
     # memory-effect archetypes — wrong-permissive here lets the optimizer
     # hoist/CSE/DCE a call that actually touches memory
     "llvm.nvvm.read.ptx.sreg.tid.x"            => (:nomem, :speculatable),                      # [td] NVVMPureIntrinsic
-    "llvm.nvvm.add.rn.f"                        => (:nomem, :speculatable, :commutative),        # [td]
-    "llvm.nvvm.atomic.add.gen.f.cta"           => (:argmemonly, :nocallback),                   # [td]
+    "llvm.nvvm.add.rn.f"                        => (:nomem, :speculatable, :commutative, :nocreateundefpoison), # [td]
+    "llvm.nvvm.cp.async.ca.shared.global.4"   => (:argmemonly, :nocallback),                   # [td]
     # a fence proxy — deliberately NOT convergent (idempotent ordering op);
     # pins the distinction the fence migration turned on
     "llvm.nvvm.fence.proxy.async"              => (:nocallback,),                               # [td]
@@ -1090,7 +1087,7 @@ const ATTR_ANCHORS = Pair{String, Tuple{Vararg{Symbol}}}[
     "llvm.nvvm.tcgen05.fence.before.thread.sync" => (:nomem, :sideeffects),
     "llvm.nvvm.tcgen05.fence.after.thread.sync"  => (:nomem, :sideeffects),
     # the upstream gap the emission overlay corrects (see the overlay
-    # testset): mma.sync is IntrNoMem but NOT IntrConvergent at 22.1.7
+    # testset): mma.sync is IntrNoMem but NOT IntrConvergent at 23.1.1
     "llvm.nvvm.mma.m16n8k16.row.col.bf16"      => (:nomem, :nocallback),                        # [td]
 ]
 
@@ -1104,25 +1101,18 @@ end
 #
 # The selection probes compile only intrinsics the wrappers use, so a bug in a
 # type-token → IR mapping (NVVM.llvmtype / the generator's VTS set) is caught
-# only for tokens that surface there. Auditing the table, the wide-vector
-# tokens (v16/32/64/128i32) are already exercised by the tcgen05 ld/st probes;
-# the ONLY tokens unique to never-used intrinsics are `i128` (4
-# clusterlaunchcontrol.query_cancel.* entries) and `Metadata` (1 legacy
-# texsurf.handle). Compile-pin the i128 token here so its mapping isn't taken
-# on faith. `Metadata` is left uncompiled — it has no normal SSA callsite
+# only for tokens that surface there. Wide integer vectors are exercised by
+# tcgen05 ld/st; float vectors by host/nvptx_backend.jl's ld.red probes.
+# Compile-pin `i128` (clusterlaunchcontrol.query_cancel.*) here as well. `Metadata` is left uncompiled — it has no normal SSA callsite
 # (texsurf.handle takes a metadata operand) and no wrapper will ever use it;
 # this is the registry's sole known-uncompiled token, logged rather than
 # silently skipped.
 @testset "type tokens outside the wrapper surface lower (i128)" begin
-    exe = llc().exec[1]
     name = "llvm.nvvm.clusterlaunchcontrol.query_cancel.get_first_ctaid.x"
     s = synthesize(name, (UInt128,))   # i128 param
     ll = "target triple = \"nvptx64-nvidia-cuda\"\n" * s.ir
-    out = IOBuffer(); err = IOBuffer()
-    ok = success(pipeline(`$exe -mcpu=sm_100a -mattr=+ptx86 -o -`;
-                          stdin = IOBuffer(ll), stdout = out, stderr = err))
-    ptx = String(take!(out))
-    ok || @info "i128 token probe failed" llc_error=String(take!(err)) ptx
+    (; ok, ptx, diagnostics) = compile_nvvm_ir(ll, "sm_100a", "+ptx86")
+    ok || @info "i128 token probe failed" diagnostics ptx
     @test ok
     @test occursin("clusterlaunchcontrol.query_cancel.get_first_ctaid::x.b32.b128", ptx)
 

@@ -9,7 +9,7 @@
 #     compat entries, per-intrinsic selection probes) and no optimization;
 #   - the PTX 9.3 layout/phase_type/report forms and the cluster-space
 #     forms were already asm (no intrinsics / `ptr addrspace(7)` ABI
-#     mismatch at 22.1.7), and the PTX 9.4 multicast::cluster::32b forms
+#     mismatch at 23.1.1), and the PTX 9.4 multicast::cluster::32b forms
 #     have no upstream intrinsic either — one route instead of three.
 # Emitted-PTX delta vs the intrinsic route, reviewed at demotion: the
 # standalone expect_tx spells legacy `mbarrier.expect_tx.shared.b64` (ISel
@@ -135,7 +135,7 @@ end
 end
 
 # --- PTX 9.3 extensions (layout / phase_type / report), asm tier ------------
-# No NVVM intrinsics exist for any of these at 22.1.7 — asm tier by
+# No NVVM intrinsics exist for any of these at 23.1.1 — asm tier by
 # necessity, same as the cluster-space forms above.
 
 # `mbarrier.init.layout::{v0,v1}.shared.b64 [mbar], count;` — explicit layout

@@ -1,6 +1,6 @@
 # Offline SASS comparison: both paths compile with the same Julia, LLVM,
 # CUDA toolkit and sm_100a target. Kernel instruction encodings are compared,
-# excluding cubin metadata and debug information.
+# excluding cubin metadata, with debug information stripped before codegen.
 module _WRBoundAttention
 using PTX
 include("../gpu/blackwell/flash_attention_defs.jl")
@@ -24,6 +24,9 @@ end
 function _wr_instruction_encodings(f, tt)
     job = _explicit_target_job(f, tt; cap=v"10.0", feature_set=:arch,
                                 minthreads=512)
+    # Debug metadata can perturb instruction scheduling even when only code
+    # bytes are compared. Strip it before the backend sees either kernel.
+    job = CompilerJob(job.source, CompilerConfig(job.config; strip=true))
     image, _ = CUDACore.invoke_frozen(CUDACore.compile, job)
     mktemp() do path, io
         write(io, image)

@@ -156,7 +156,7 @@ function _mma_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
     name = _mma_intrinsic_name(shape, a_ty, b_ty, c_ty, kind)
     full = "llvm.nvvm." * name
     if !NVVM.isintrinsic(full)
-        # No intrinsic at 22.1.7 (e.g. kind::f8f6f4 at m16n8k16) — asm tier.
+        # No intrinsic at 23.1.1 (e.g. kind::f8f6f4 at m16n8k16) — asm tier.
         return _mma_register_asm(mods, shape, a_ty, b_ty, c_ty, kind,
                                  n_a, n_b, n_cd, cd_J)
     end
@@ -223,7 +223,7 @@ function _mma_int_register(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
     nothing
 end
 
-# Asm-tier residue: forms LLVM 22.1.7 has no intrinsic for. Identical body
+# Asm-tier residue: forms LLVM 23.1.1 has no intrinsic for. Identical body
 # to the pre-migration generator (UInt32 fragments, =f/f/r constraints).
 function _mma_register_asm(mods, shape, a_ty, b_ty, c_ty, kind,
                            n_a, n_b, n_cd, cd_J)
@@ -347,7 +347,7 @@ end
 
 function _mma_b1_register(shape::Symbol, bitop::Symbol)
     n_a, n_b, n_cd = MMA_SYNC_FRAGS[(shape, :b1, :s32)]
-    # LLVM 22.1.7 carries the m8n8k128.xor intrinsic but its ISel predicate
+    # LLVM 23.1.1 carries the m8n8k128.xor intrinsic but its ISel predicate
     # incorrectly rejects the ISA-legal sm_75 floor (it first selects at
     # sm_80). Keep the public ISA floor with one typed convergent asm fallback;
     # the other five forms use their existing intrinsics.

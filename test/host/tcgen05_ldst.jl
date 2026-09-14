@@ -43,7 +43,7 @@ _t5_mods(op, shape, c; repack = false) =
             @test :convergent in record.props
             if op === :ld
                 @test record.ret ===
-                      (n == 1 ? (:i32,) : (Symbol("v$(n)i32"),))
+                      (Symbol("v$(n)i32"),)
                 @test record.immargs == (split ? (2, 3) : (2,))
             else
                 @test record.ret === ()
@@ -53,10 +53,11 @@ _t5_mods(op, shape, c; repack = false) =
     end
 
     # Closed world: the reviewed Table-52 grid is exactly the registry's
-    # ld/st inventory — a registry addition (e.g. ld.red records at a
-    # backend bump) must force a review here.
+    # ordinary ld/st inventory. The separate ld.red namespace is pinned
+    # in host/nvptx_backend.jl.
     registry = Set(name for name in keys(PTX.NVVM.TABLE)
-                   if startswith(name, "llvm.nvvm.tcgen05.ld.") ||
+                   if (startswith(name, "llvm.nvvm.tcgen05.ld.") &&
+                       !startswith(name, "llvm.nvvm.tcgen05.ld.red.")) ||
                       startswith(name, "llvm.nvvm.tcgen05.st."))
     @test reviewed == registry
     @test length(reviewed) == 74
@@ -86,8 +87,8 @@ end
         # Data tuple width is pinned by shape×count.
         (_t5_mods(:st, Symbol("16x128b"), 2), (UInt32, NTuple{2, UInt32})),
         (_t5_mods(:st, b2, 2), (UInt32, Val{8}, NTuple{4, UInt32})),
-        # Load-with-reduction (PTX 9.1+) has no NVVM records at the pinned
-        # backend and stays deliberately outside the wrapper surface.
+        # Load-with-reduction returns its scalar reduction alongside the
+        # loaded registers; it does not take a scalar accumulator input.
         ((:ld, :red, :sync, :aligned, Symbol("32x32b"), :x2, :min, :f32),
          (Float32, UInt32)),
     )

@@ -17,7 +17,7 @@
 #     conservative clobber left the FA/GEMM/b128 instruction streams
 #     byte-identical at sm_100a;
 #   - the `shared::cta` × `cta_group::2` residue was already asm (no NVVM
-#     intrinsic carries both qualifiers at 22.1.7) — one route instead of
+#     intrinsic carries both qualifiers at 23.1.1) — one route instead of
 #     two.
 # Emitted-PTX deltas vs the intrinsic route, reviewed at demotion:
 #   - the notation is WYSIWYG again in the one spot it wasn't: the
@@ -233,7 +233,7 @@ end
 
 # --- shared::cta × cta_group::2 ------------------------------------------------
 # Predates the demotion as the family's asm residue (no NVVM intrinsic
-# carried both qualifiers at 22.1.7: `g2s.cta` has no cta_group operand and
+# carried both qualifiers at 23.1.1: `g2s.cta` has no cta_group operand and
 # `g2s` renders `shared::cluster`). Asm strings keep the pyptx modifier
 # order (cta_group after `.<N>d`) — now the family-wide spelling.
 
