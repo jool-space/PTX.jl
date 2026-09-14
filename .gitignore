@@ -14,3 +14,6 @@ Manifest*.toml
 
 # Claude Code worktrees and local session state
 /.claude/
+
+# Local toolchain selection (see test/runtests.jl); never commit.
+LocalPreferences.toml

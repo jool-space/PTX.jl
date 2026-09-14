@@ -9,8 +9,12 @@
 #     1 lane 0 (tid 32) dispatches tcgen05.mma; all 128 threads run the
 #     TMEM→regs→st.global.v4 epilogue.
 #   * STAGES-deep SMEM ring: bar_load[s] (producer→MMA, "tile ready"),
-#     bar_consumed[s] (MMA→producer, "slot free"). Single bar_mma commit
-#     after the last K-tile.
+#     bar_consumed[s] (MMA→producer, "slot free"). The slot is released
+#     by a per-K-tile tcgen05.commit onto bar_consumed[s], which arrives
+#     only once the MMAs issued so far have finished reading SMEM; a
+#     plain mbarrier.arrive would let the producer overwrite a slot the
+#     tensor core is still reading. One more bar_mma commit after the
+#     last K-tile signals accumulator completion to the epilogue.
 #   * Accumulate predicate false only on the very first MMA (ki==0 &&
 #     kk==0); the whole K accumulates into one TMEM tile.
 #
@@ -35,7 +39,7 @@
 using PTX: smem_addr_u32, tcgen05_descriptor, tcgen05_instr_desc_f16bf16_f32,
            BlackwellLayout, tensor_map_tile_2d, tmem_lane_addr,
            tmem_warp_band_lane
-using PTX.MBarriers: BarrierArray, barrier_init, barrier_arrive,
+using PTX.MBarriers: BarrierArray, barrier_init,
                      barrier_arrive_expect_tx, barrier_try_wait
 using CUDACore
 # barrier.cluster via PTX tier-2 wrappers (CUDACore's cluster_arrive/wait
@@ -154,7 +158,13 @@ function _ghb_gemm_kernel!(
                 ptx"tcgen05.mma.cta_group::1.kind::f16"(tmem, da, db, idesc,
                                                         !is_first)
             end
-            barrier_arrive(bc[slot])
+            # Completion-backed slot release: the commit arrives on
+            # bc[slot] once every MMA issued so far has finished reading
+            # its SMEM sources. A plain mbarrier.arrive here would free the
+            # slot while the async MMAs may still be reading it (§9.7.18.6:
+            # SMEM reads are outside the TMEM pipeline guarantees).
+            ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64"(
+                smem_addr_u32(bc[slot]))
             ki += UInt32(1)
         end
         ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64"(
@@ -201,7 +211,10 @@ end
     @test occursin("mbarrier.arrive.expect_tx.shared.b64", ptx)
     @test occursin("mbarrier.try_wait.parity.shared.b64", ptx)
     @test occursin("tcgen05.mma.cta_group::1.kind::f16", ptx)
-    @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64", ptx)
+    # Two commit sites: the per-K-tile slot release and the final bar_mma
+    # commit. No plain arrive remains on the MMA side.
+    @test count("tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64", ptx) == 2
+    @test !occursin("mbarrier.arrive.shared.b64", ptx)
     @test occursin("tcgen05.ld.sync.aligned.32x32b.x128.b32", ptx)
     @test occursin("st.global.v4.b32", ptx)
 end
@@ -410,7 +423,14 @@ function _ghb_persistent_kernel!(
                     ptx"tcgen05.mma.cta_group::1.kind::f16"(tmem, da, db, idesc,
                                                             !is_first)
                 end
-                barrier_arrive(bc[slot])
+                # Completion-backed slot release: the commit arrives on
+                # bc[slot] once every MMA issued so far has finished
+                # reading its SMEM sources. A plain mbarrier.arrive here
+                # would free the slot while the async MMAs may still be
+                # reading it (§9.7.18.6: SMEM reads are outside the TMEM
+                # pipeline guarantees).
+                ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64"(
+                    smem_addr_u32(bc[slot]))
                 ki += UInt32(1)
             end
             ptx"tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64"(
@@ -459,7 +479,8 @@ end
     @test occursin("cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes", ptx)
     @test occursin("mbarrier.try_wait.parity.shared.b64", ptx)
     @test occursin("tcgen05.mma.cta_group::1.kind::f16", ptx)
-    @test occursin("tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64", ptx)
+    @test count("tcgen05.commit.cta_group::1.mbarrier::arrive::one.shared::cluster.b64", ptx) == 2
+    @test !occursin("mbarrier.arrive.shared.b64", ptx)
     @test occursin("tcgen05.ld.sync.aligned.32x32b.x128.b32", ptx)
     @test occursin("%nctaid.x", ptx)             # persistent grid stride
 end

@@ -113,6 +113,8 @@ const STRUCTURED_ADDRESS_FALLBACK_RULES = (
         "tcgen05 has instruction-specific address, vector, sink, and descriptor schemas"),
     StructuredAddressFallbackRule(:fabric, (), nothing,
         "fabric operations use multi-register CFT handles inside one address operand"),
+    StructuredAddressFallbackRule(:applypriority, (:async, :bulk, :tensor), nothing,
+        "tensor eviction hints have a composite tensor-map address and coordinates"),
 )
 
 function _address_mods_start_with(mods::Tuple{Vararg{Symbol}}, prefix::Tuple)

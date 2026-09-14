@@ -57,6 +57,7 @@ const EXPECTED_STRUCTURED_ADDRESS_FALLBACK_RULES = Set([
     (:cp, (:async, :bulk, :prefetch, :tensor), nothing),
     (:cp, (:reduce, :async, :bulk, :tensor), nothing),
     (:tcgen05, (), nothing), (:fabric, (), nothing),
+    (:applypriority, (:async, :bulk, :tensor), nothing),
 ])
 
 function _expected_tcgen05_integer_address_forms()
@@ -96,6 +97,16 @@ function _expected_tcgen05_integer_address_forms()
                                  ((), :u32), ((), :s32))
         push!(forms, (:ld, :red, :sync, :aligned, shape, Symbol("x", count),
                       redop, variant..., dtype))
+    end
+    # ld.spcompress (PTX 9.4, sm_107a): the 32x32b shape only, num ≥ x4,
+    # f32 rows with .b2 indices; .NaN belongs to the .red grammar alone.
+    for red in (false, true), count in (4, 8, 16, 32, 64, 128),
+            rowop in (:min, :max),
+            variant in (red ? ((), (:abs,), (Symbol("NaN"),),
+                               (:abs, Symbol("NaN"))) : ((), (:abs,)))
+        push!(forms, (:ld, (red ? (:red,) : ())..., :spcompress, :sync,
+                      :aligned, Symbol("32x32b"), Symbol("x", count), rowop,
+                      Symbol("sp::2:4"), variant..., :f32, :b2))
     end
     for cg in 1:2
         cta = Symbol("cta_group::", cg)
@@ -149,6 +160,54 @@ function _expected_tcgen05_integer_address_forms()
                           (coll === nothing ? () : (coll,))...))
         end
     end
+    # PTX ISA 9.4 (sm_107f) mma additions: .kind::ti16 (dense/sp with an
+    # optional B collector, ws/ws.sp with the addressed collector), the B
+    # collector on the float and block-scale family kinds, and
+    # .decompress::lut::b on f8f6f4 / mxf8f6f4.block32.
+    opt(x) = x === nothing ? () : (x,)
+    coll_a = (nothing, Symbol("collector::a::lastuse"),
+              Symbol("collector::a::fill"), Symbol("collector::a::use"))
+    coll_b = (nothing, Symbol("collector::b::fill"),
+              Symbol("collector::b::use"), Symbol("collector::b::lastuse"))
+    ti16 = Symbol("kind::ti16")
+    for cg in 1:2, sp in ((), (:sp,)), ashift in (false, true),
+            a in (ashift ? coll_a[1:2] : coll_a), b in coll_b
+        push!(forms, (:mma, sp..., Symbol("cta_group::", cg), ti16,
+                      (ashift ? (:ashift,) : ())..., opt(a)..., opt(b)...))
+    end
+    for sp in ((), (:sp,))
+        colls = Any[nothing]
+        for buf in 0:3, op in (:discard, :lastuse, :fill, :use)
+            buf == 0 && op === :discard && continue
+            push!(colls, Symbol("collector::b$buf::$op"))
+        end
+        for coll in colls
+            push!(forms, (:mma, :ws, sp..., Symbol("cta_group::1"), ti16,
+                          opt(coll)...))
+        end
+    end
+    for kind in (:f16, :tf32, :f8f6f4), cg in 1:2, sp in ((), (:sp,)),
+            ashift in (false, true), a in (ashift ? coll_a[1:2] : coll_a),
+            b in coll_b[2:end]
+        push!(forms, (:mma, sp..., Symbol("cta_group::", cg),
+                      Symbol("kind::", kind), (ashift ? (:ashift,) : ())...,
+                      opt(a)..., b))
+    end
+    for (kind, block) in ((:mxf8f6f4, :block32), (:mxf4, :block32),
+                          (:mxf4nvf4, :block32), (:mxf4nvf4, :block16)),
+            cg in 1:2, sp in ((), (:sp,)), a in coll_a, b in coll_b[2:end]
+        push!(forms, (:mma, sp..., Symbol("cta_group::", cg),
+                      Symbol("kind::", kind), :block_scale, block,
+                      opt(a)..., b))
+    end
+    lut = Symbol("decompress::lut::b")
+    for cg in 1:2, a in coll_a, b in coll_b
+        push!(forms, (:mma, Symbol("cta_group::", cg), Symbol("kind::f8f6f4"),
+                      lut, opt(a)..., opt(b)...))
+        push!(forms, (:mma, Symbol("cta_group::", cg),
+                      Symbol("kind::mxf8f6f4"), :block_scale, lut, :block32,
+                      opt(a)..., opt(b)...))
+    end
     Set(forms)
 end
 
@@ -165,6 +224,24 @@ function _expected_tcgen05_integer_address_adapters()
                 push!(specs, (mods, (A32, aT, UInt64, meta..., UInt32, Bool)))
                 push!(specs, (mods,
                     (A32, aT, UInt64, meta..., UInt32, Bool, UInt64)))
+            end
+            continue
+        end
+        if first(mods) === :mma && Symbol("decompress::lut::b") in mods
+            # lut::b: the LUT's TMEM address after B; dense only, so the
+            # non-block-scale form has {base, +mask} and the block-scale
+            # form the two scale addresses.
+            cg = mods[2] === Symbol("cta_group::1") ? 1 : 2
+            maskT = NTuple{cg == 1 ? 4 : 8, UInt32}
+            for aT in (UInt64, A32)
+                if :block_scale in mods
+                    push!(specs, (mods,
+                        (A32, aT, UInt64, A32, UInt32, A32, A32, Bool)))
+                else
+                    push!(specs, (mods, (A32, aT, UInt64, A32, UInt32, Bool)))
+                    push!(specs,
+                          (mods, (A32, aT, UInt64, A32, UInt32, maskT, Bool)))
+                end
             end
             continue
         end
@@ -195,6 +272,10 @@ function _expected_tcgen05_integer_address_adapters()
             continue
         end
         argtypes = if first(mods) === :shift
+            (A32,)
+        elseif first(mods) === :ld && :spcompress in mods
+            # mdata/cdata (and redval) are destinations; only taddr is an
+            # operand.
             (A32,)
         elseif first(mods) === :ld && mods[2] === :red
             # redval is a second DESTINATION, not an operand: the adapter
@@ -298,7 +379,7 @@ end
     actual = Set((r.op, r.prefix, r.marker)
                  for r in PTX.STRUCTURED_ADDRESS_FALLBACK_RULES)
     @test actual == EXPECTED_STRUCTURED_ADDRESS_FALLBACK_RULES
-    @test length(actual) == 25
+    @test length(actual) == 26
 
     A32, A64 = Address{UInt32}, Address{UInt64}
     cases = (
@@ -314,6 +395,8 @@ end
          (A32, A64, Int32, A32)),
         (ptx"fabric.try_get.async.shared::cta.mbarrier::complete_tx::bytes.mbarrier::report::fabric.relaxed.sys.b128",
          (A32, UInt32, UInt64, UInt32, A32)),
+        (ptx"applypriority.async.bulk.tensor.1d.global.bulk_group.tile.L2::evict_normal",
+         (A64, Int32)),
     )
     for (op, argtypes) in cases
         op_sym, mods = typeof(op).parameters
@@ -352,12 +435,12 @@ end
 @testset "closed tcgen05 integer-address adapters" begin
     expected_forms = _expected_tcgen05_integer_address_forms()
     @test Set(PTX.TCGEN05_INTEGER_ADDRESS_FORMS) == expected_forms
-    @test length(expected_forms) == 714
+    @test length(expected_forms) == 1386
     expected = _expected_tcgen05_integer_address_adapters()
     actual = Set((s.mods, s.argtypes)
                  for s in PTX.TCGEN05_INTEGER_ADDRESS_ADAPTERS)
     @test actual == expected
-    @test length(actual) == 1610
+    @test length(actual) == 3906
     for (mods, signature) in actual
         # Immediate specs are the abstract `Val` (dispatch admits any
         # immediate); lowering probes need a concrete instance, as every

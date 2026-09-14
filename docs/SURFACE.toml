@@ -204,10 +204,24 @@ notes = "Uniform-cache prefetch; raw renders the correct no-result bracketed for
 [[family]]
 section = "9.7.10.17"
 title = "Data Movement and Conversion Instructions: applypriority"
-status = "generic"
+status = "strict"
 opcodes = ["applypriority"]
-notes = "Bracketed eviction-priority hint."
-owner = ["src/ledgers/forms.jl"]
+notes = "Bracketed eviction-priority hint; the scalar form and the PTX ISA 9.4 applypriority.async.bulk form are chain-renderable under a sink override (the eviction priority is the terminal token, not a dtype). applypriority.async.bulk.tensor (§9.7.10.19) is typed-wrapper-only in the TMA wrappers."
+owner = ["src/ledgers/forms.jl", "src/wrappers/tma.jl"]
+
+[[family]]
+section = "9.7.10.18"
+title = "Data Movement and Conversion Instructions: applypriority.async.bulk"
+status = "generic"
+opcodes = []
+notes = "No distinct opcode head: `applypriority.async.bulk{.global}.bulk_group.L2::evict_normal [a], size` (PTX ISA 9.4, sm_107f family) renders through the §9.7.10.17 entry's sink override; assembled at sm_107f when the managed compiler supports ISA 9.4."
+
+[[family]]
+section = "9.7.10.19"
+title = "Data Movement and Conversion Instructions: applypriority.async.bulk.tensor"
+status = "strict"
+opcodes = []
+notes = "No distinct opcode head: the tensor eviction hint (PTX ISA 9.4, sm_107f family) is typed-wrapper-only under the §9.7.10.17 entry. Wrapped: tile ranks 1d-5d, base im2col ranks 3d-5d with N-2 offsets, and tile ranks with the global-address and attribute overrides. Not wrapped: tile::gather4 and the im2col::w modes."
 
 [[family]]
 section = "9.7.10.20"
@@ -245,7 +259,7 @@ section = "9.7.10.24"
 title = "Data Movement and Conversion Instructions: cvt"
 status = "generic"
 opcodes = ["cvt"]
-notes = "Destination is the penultimate type token (audited in infer_rettype); source carriers for ordinary cvt and cvt.pack (§9.7.10.25) come from the closed cvt ledger, with exact wrappers for the microfloat/stochastic forms. PTX ISA 9.4 additions (ue5m3x2, scaled::n1::ue8m0, .pzo/.rz widenings; sm_107f) have source-carrier coverage but still need dedicated assembly and numeric coverage. Stochastic .rs rejects .pzo; the n1 scale factor is physically b8, carried as b16 (no i8 constraint) — exact b8-bridging wrappers are deferred to hardware validation."
+notes = "Destination is the penultimate type token (audited in infer_rettype); source carriers for ordinary cvt and cvt.pack (§9.7.10.25) come from the closed cvt ledger, with exact wrappers for the microfloat/stochastic forms. PTX ISA 9.4 additions (ue5m3x2, scaled::n1::ue8m0, .pzo/.rz widenings; sm_107f) have source-carrier coverage and sm_107f assembly coverage (test/ptxas/ptx94_bindings.jl); numeric validation needs CC 10.7 hardware. Stochastic .rs rejects .pzo. The n1 scale factor and the e2m1x2 destination/source are physically b8: the chain render bridges the UInt16 carrier through a block-local .b8 register."
 owner = ["src/ledgers/forms.jl", "src/ledgers/cvt_forms.jl", "src/wrappers/cvt.jl"]
 
 [[family]]
@@ -269,7 +283,7 @@ section = "9.7.10.28"
 title = "Data Movement and Conversion Instructions: Asynchronous copy (cp.async, cp.async.bulk, TMA)"
 status = "strict"
 opcodes = ["cp"]
-notes = "cp.async and the bulk/tensor forms are chain-renderable under sink overrides (the terminal type token is an operand descriptor), cp.async.bulk.prefetch.tensor is typed-wrapper-only (rank-dependent coordinate vectors plus a paired cache-hint operand), and the TMA wrappers own the tensor-copy API. The whole cp.async.bulk.tensor/prefetch wrapper family is single-route asm — the former tier-2 intrinsic route was demoted (observable async effects; the argmem-widen A/B on B200 showed the conservative clobber is codegen-free) — making the notation WYSIWYG: cluster cta_group::2 renders after the rank like the pre-existing shared::cta residue (ptxas accepts both orders)."
+notes = "cp.async and the bulk/tensor forms are chain-renderable under sink overrides (the terminal type token is an operand descriptor), cp.async.bulk.prefetch.tensor is typed-wrapper-only (rank-dependent coordinate vectors plus a paired cache-hint operand), and the TMA wrappers own the tensor-copy API. The whole cp.async.bulk.tensor/prefetch wrapper family is single-route asm — the former tier-2 intrinsic route was demoted (observable async effects; the argmem-widen A/B on B200 showed the conservative clobber is codegen-free) — making the notation WYSIWYG: cluster cta_group::2 renders after the rank like the pre-existing shared::cta residue (ptxas accepts both orders). PTX ISA 9.4 (sm_107f family) wrapped inventory: .multicast::cluster::{16b,32b} on the cluster loads (with and without cta_group::2); the six .report_mechanism spellings on both load directions (no multicast or ::32b); .override::global_address alone and with the rank-determined .override_attribute on both load directions (no multicast or ::32b), the tile store, the tile reduce (all eight redOps), the tile prefetch, and the tile eviction hint; .im2col_no_offs and .im2col_no_offs::w on the store and reduce directions (3d-5d); .L2::evict_last on the tile and base-im2col prefetches; plus the pre-9.4 cp.reduce.async.bulk.tensor tile forms. Not wrapped: report×override crosses, report/override with cta_group::2, .L2::cache_hint on copies or with overrides/evict_last, tile::gather4 and im2col::w modes. Assembly evidence at sm_107f/sm_107a only; no runtime evidence. The chain cp.async.bulk ::16b/::32b/report and cp.async.bulk.prefetch .L2::evict_last spellings render under the sink override."
 owner = ["src/ledgers/forms.jl", "src/wrappers/cp_async.jl", "src/wrappers/tma.jl"]
 
 [[family]]
@@ -279,6 +293,22 @@ status = "generic"
 opcodes = ["tensormap"]
 notes = "Sink (the type tail names the replaced field); the head also covers tensormap.cp_fenceproxy (§9.7.14.17); the tensormap PROXY FENCES live under the fence head and are typed-wrapper-only."
 owner = ["src/ledgers/forms.jl", "src/lib/tensor_map.jl"]
+
+[[family]]
+section = "9.7.10.30"
+title = "Data Movement and Conversion Instructions: spcompress"
+status = "strict"
+opcodes = ["spcompress"]
+notes = "Typed-wrapper-only (PTX 9.4, sm_107a): the dense input, kept-element, and index vectors are qualifier-dependent b32 register groups with two leading grouped destinations, so the chain cannot render them. The closed 28-form grid ({b8,b16} x {b2,b4} x x1..x64) is asm-tier without a sideeffect marker (register-only, :pure) and early-clobber outputs; spcompress_desc packs the Table 38 descriptor. Assembled at sm_107a and rejected at sm_107f/sm_100a; no runtime evidence (needs sm_107a hardware)."
+owner = ["src/wrappers/spcompress.jl", "src/lib/sparsity_descriptor.jl"]
+
+[[family]]
+section = "9.7.10.31"
+title = "Data Movement and Conversion Instructions: spdecompress"
+status = "strict"
+opcodes = ["spdecompress"]
+notes = "Typed-wrapper-only (PTX 9.4, sm_107a): the index, compressed, and dense vectors are qualifier-dependent b32 register groups with a leading grouped destination. The 143 admitted (elemsize, idxsize, sp::S:T, num) tuples follow the five ISA validity conditions (S·elemsize <= 32, .b2 indexes T <= 4, output 32..4096 bits, register cap); asm-tier without a sideeffect marker (register-only, :pure) and early-clobber outputs. Assembled at sm_107a and rejected at sm_107f/sm_100a; no runtime evidence (needs sm_107a hardware)."
+owner = ["src/wrappers/spcompress.jl"]
 
 # ── §9.7.11 Fabric ────────────────────────────────────────────────────────────
 
@@ -453,7 +483,7 @@ section = "9.7.16.5.15"
 title = "Warp-level matrix load instruction: ldmatrix"
 status = "strict"
 opcodes = ["ldmatrix"]
-notes = "Typed-wrapper-only: shape/count-dependent grouped results (two registers per matrix for m16n16) and format-specific arity. The PTX ISA 9.4 sign-extending .s8.s4 m8n16 forms (sm_90a + 100f/110f/120f families) are asm-tier and still need dedicated PTX 9.4 assembly and runtime coverage."
+notes = "Typed-wrapper-only: shape/count-dependent grouped results (two registers per matrix for m16n16) and format-specific arity. The PTX ISA 9.4 sign-extending .s8.s4 m8n16 forms (sm_90a + 100f/110f/120f families) are asm-tier, assembled at sm_90a/sm_100f/sm_120f/sm_121a and executed on GB10 (test/ptxas/ptx94_bindings.jl, test/gpu/ptx94_bindings.jl)."
 owner = ["src/wrappers/ldmatrix.jl"]
 
 [[family]]
@@ -489,7 +519,7 @@ section = "9.7.18"
 title = "TensorCore 5th Generation Family Instructions"
 status = "strict"
 opcodes = ["tcgen05"]
-notes = "Typed-wrapper-only: one head spans address destinations, register vectors, sinks, fences, and matrix descriptors (alloc/dealloc, ld/st grids, cp, mma dense/sp/ws/mx, commit, fences). The management verbs (alloc/dealloc/relinquish_alloc_permit/commit/cp), the waits, and the PTX ISA 9.4 additions (.exclusive alloc/dealloc, commit multicast::cluster::{16b,32b} and sync_restrict::shared::read::mma::a — dedicated PTX 9.4 assembly/runtime coverage remains pending) are single-route asm, as are ld.red (no upstream intrinsics; ISA target floor sm_103f/sm_110a — no sm_100 support) and the block-scale mma family, dense and sp (sp with the mxf4 kinds is a-variant-exclusive per the §9.7.18.10 support list); ld/st, shift, and non-block-scale dense/sp/ws mma lower via tier-2 intrinsics. Not wrapped: the ISA 9.4 sm_107f additions ti16, collector::b outside the ws family, and decompress::lut::b (the GA specification retains unresolved descriptor/syntax contradictions) — the pre-9.4 surface is complete up to the deliberately out-of-scope generic-AS forms."
+notes = "Typed-wrapper-only: one head spans address destinations, register vectors, sinks, fences, and matrix descriptors (alloc/dealloc, ld/st grids, cp, mma dense/sp/ws/mx, commit, fences). The management verbs (alloc/dealloc/relinquish_alloc_permit/commit/cp), the waits, and the PTX ISA 9.4 additions (.exclusive alloc/dealloc, commit multicast::cluster::{16b,32b} and sync_restrict::shared::read::mma::a, assembled at their target floors in test/ptxas/ptx94_bindings.jl; runtime evidence needs sm_107 hardware) are single-route asm, as are ld.red (no upstream intrinsics; ISA target floor sm_103f/sm_110a — no sm_100 support) and the block-scale mma family, dense and sp (sp with the mxf4 kinds is a-variant-exclusive per the §9.7.18.10 support list); ld/st, shift, and non-block-scale dense/sp/ws mma lower via tier-2 intrinsics. The sm_107a ld{.red}.spcompress family (72 asm forms, 2:4 row compression on 32x32b loads; test/host/tcgen05_ldspc.jl) is single-route asm. The ISA 9.4 sm_107f mma additions — .kind::ti16 (dense/sp/ws), .collector::b::* on the float and block-scale family kinds, and .decompress::lut::b on f8f6f4/mxf8f6f4.block32 — are single-route asm (no upstream intrinsics), assembled at sm_107f/sm_107a in test/ptxas/ptx94_ga.jl; the descriptor builders expose the sm_107f wide-K, scale-layout, 15-bit field, and lut segment encodings behind explicit keywords and pin ti16 transpose to zero where the ISA tables contradict each other. The pre-9.4 surface is complete up to the deliberately out-of-scope generic-AS forms."
 owner = ["src/wrappers/tcgen05.jl", "src/lib/tcgen05_descriptor.jl",
          "src/lib/tcgen05_layout.jl"]
 

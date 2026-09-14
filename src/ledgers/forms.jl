@@ -138,6 +138,12 @@ const TYPED_WRAPPER_ONLY_RULES = (
      detail = "the ISA defines only the tensormap::generic proxy direction, with direction-specific acquire/release ABIs"),
     (op = :shfl,     prefix = (),            marker = :pred,
      detail = ":pred is an internal selector for PTX's d|p destination"),
+    (op = :spcompress, prefix = (),          marker = nothing,
+     detail = "spcompress has num/elemsize/idxsize-dependent grouped register vectors with two leading grouped destinations"),
+    (op = :spdecompress, prefix = (),        marker = nothing,
+     detail = "spdecompress has spfactor/num/elemsize/idxsize-dependent grouped register vectors with a leading grouped destination"),
+    (op = :applypriority, prefix = (:async, :bulk, :tensor), marker = nothing,
+     detail = "applypriority.async.bulk.tensor has rank-dependent coordinate vectors and override operand groups inside the tensor-map bracket"),
 )
 
 function _mods_start_with(mods::Tuple{Vararg{Symbol}}, prefix::Tuple)
@@ -238,7 +244,11 @@ const FORMS = Dict{Symbol, FormFamily}(
     :fence    => FormFamily(_MEM),              # brackets vacuous (no ptr args); kept as-was
     :tensormap => FormFamily(_MEMSINK),
     :discard  => FormFamily(_MEM),
-    :applypriority => FormFamily(_MEM),
+    :applypriority => FormFamily(_MEM, [
+        # `applypriority.async.bulk{.tensor}` (PTX ISA 9.4) ends in an
+        # eviction priority, not a dtype; weak memory operation, no result.
+        (:async, :bulk) => _MEMSINK,
+    ]),
     :cp       => FormFamily(_MEM, [
         # `.b64` tail is the mbarrier address width, not a return.
         (:async, :mbarrier, :arrive) => _MEMSINK,
@@ -278,6 +288,14 @@ const FORMS = Dict{Symbol, FormFamily}(
     :mma        => FormFamily(FormContract(effects = :pure,
                                            convergent = true)),
     :setmaxnreg => FormFamily(FormContract(convergent = true, returns = false)),
+    # `spcompress`/`spdecompress` (PTX 9.4 §9.7.10.30–31) are per-thread
+    # register-only data movement: no memory operand or effect and no
+    # cross-lane participation, so :pure. The `.xN` tail is a repeat factor
+    # and the grouped destinations lead the operand list. Unreachable from
+    # the chain tier (typed-wrapper-only); the contract is the ceiling for
+    # the asm wrappers' non-sideeffect render.
+    :spcompress   => FormFamily(FormContract(effects = :pure, returns = false)),
+    :spdecompress => FormFamily(FormContract(effects = :pure, returns = false)),
     :ldmatrix   => FormFamily(_COLLMEM),
     :stmatrix   => FormFamily(FormContract(convergent = true, brackets = true,
                                            returns = false)),

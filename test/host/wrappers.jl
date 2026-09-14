@@ -1323,7 +1323,8 @@ end
     end
 
     # PTX ISA 9.4 alloc/dealloc/commit forms (sm_100f+/sm_107f,
-    # spelled-only): asm tier by necessity, convergent, full clobber.
+    # assembled in test/ptxas/ptx94_bindings.jl): asm tier by necessity,
+    # convergent, full clobber.
     pS32 = Core.LLVMPtr{UInt32, PTX.AS.Shared}
     syncres = Symbol("sync_restrict::shared::read::mma::a")
     mc16 = Symbol("multicast::cluster::16b")
@@ -1801,7 +1802,7 @@ end
                       (UInt16, UInt16))
     @test spec.rettype === UInt32
 
-    # PTX ISA 9.4 (sm_107f, spelled-only until a CUDA 13.4+ ptxas ships):
+    # PTX ISA 9.4 (sm_107f; assembled in test/ptxas/ptx94_bindings.jl):
     # ue5m3x2 destination/source, single-scale n1 with its b16-carried b8
     # scale factor, and .pzo/.rz as structural prefix pass-throughs.
     @test format_call(ptx"cvt.rp.satfinite.ue5m3x2.f32",
@@ -1813,10 +1814,18 @@ end
     @test spec94.constraints == "=h,f,f"
     @test format_call(ptx"cvt.rn.f16x2.ue5m3x2", Tuple{UInt16}) ==
           "cvt.rn.f16x2.ue5m3x2 \$0, \$1;"
+    # The n1 scale factor is a `.b8` register: the UInt16 carrier's low byte
+    # is bridged through a block-local .b8 register (ptxas rejects a .b16
+    # scale operand).
     @test format_call(
         ptx"cvt.rz.satfinite.pzo.scaled::n1::ue8m0.e4m3x2.f32",
         Tuple{Float32, Float32, UInt16}) ==
-        "cvt.rz.satfinite.pzo.scaled::n1::ue8m0.e4m3x2.f32 \$0, \$1, \$2, \$3;"
+        "{ .reg .b8 cvt_scale; cvt.u8.u16 cvt_scale, \$3; " *
+        "cvt.rz.satfinite.pzo.scaled::n1::ue8m0.e4m3x2.f32 \$0, \$1, \$2, cvt_scale; }"
+    spec_n1 = build_call(:cvt, (:rn, :satfinite, :scaled__n1__ue8m0,
+                                :ue5m3x2, :bf16x2), (UInt32, UInt16))
+    @test spec_n1.constraints == "=h,r,h"
+    @test spec_n1.rettype === UInt16
     @test format_call(ptx"cvt.rn.scaled::n2::ue8m0.bf16x2.ue5m3x2",
                       Tuple{UInt16, UInt16}) ==
           "cvt.rn.scaled::n2::ue8m0.bf16x2.ue5m3x2 \$0, \$1, \$2;"
@@ -1956,7 +1965,7 @@ end
                 (UInt32, UInt32, UInt32, UInt32)).module == PTX
 end
 
-@testset "PTX ISA 9.4 chain pass-throughs (sm_90+, spelled-only)" begin
+@testset "PTX ISA 9.4 chain pass-throughs (sm_90+)" begin
     # These 9.4 qualifiers need zero ledger work by design — they are
     # prefix modifiers under opcodes whose FORMS contracts already carry
     # the right effects — but the coverage is pinned so a future grammar

@@ -168,6 +168,14 @@ _tcgen_mx_mods(kind, scale, cg; sp = false, coll = nothing) =
 const _TCGEN_MX_COLLECTORS = (nothing, Symbol("collector::a::lastuse"),
                               Symbol("collector::a::fill"),
                               Symbol("collector::a::use"))
+# PTX ISA 9.4 B-side collector: family `.block*` spellings only (the
+# `.scale_vec::*` spellings are sm_100a/sm_110a; the B collector is sm_107f).
+const _TCGEN_MX_COLLECTORS_B = (Symbol("collector::b::fill"),
+                                Symbol("collector::b::use"),
+                                Symbol("collector::b::lastuse"))
+
+_tcgen_mx_mods_b(kind, scale, cg, coll_b; sp = false, coll = nothing) =
+    (_tcgen_mx_mods(kind, scale, cg; sp, coll)..., coll_b)
 
 @testset "tcgen05 MX: complete block-scale schema inventory" begin
     @test PTX._TCGEN05_MX_SCALE_VARIANTS == EXPECTED_TCGEN05_MX_ALIAS_ROWS
@@ -214,6 +222,42 @@ const _TCGEN_MX_COLLECTORS = (nothing, Symbol("collector::a::lastuse"),
                      (UInt32, UInt64, UInt64, UInt32, UInt32, UInt32,
                       UInt32, Bool)
         @test PTX.lowering(op, other).tier === :forbidden
+    end
+
+    # The B-side collector (PTX ISA 9.4) rides the same schema on the four
+    # family spellings, after the A collector; it is not a method on the
+    # `.scale_vec::*` spellings.
+    for (kind, scale) in EXPECTED_TCGEN05_MX_KIND_SCALES, cg in (1, 2),
+            sp in (false, true), coll in _TCGEN_MX_COLLECTORS,
+            coll_b in _TCGEN_MX_COLLECTORS_B
+        mods = _tcgen_mx_mods_b(kind, scale, cg, coll_b; sp, coll)
+        op = Operation{:tcgen05, mods}()
+        meta = sp ? (UInt32,) : ()
+        ss = (UInt32, UInt64, UInt64, meta..., UInt32, UInt32, UInt32, Bool)
+        ts = (UInt32, UInt32, UInt64, meta..., UInt32, UInt32, UInt32, Bool)
+        if scale in (:block32, :block16)
+            for (argts, a_operand) in ((ss, "\$1"), (ts, "[\$1]"))
+                @test which(op, argts).module === PTX
+                info = PTX.lowering(op, argts)
+                @test info.tier === :asm
+                @test info.rettype === Nothing
+                ci, _ = first(Base.code_typed(op, argts))
+                unescaped = replace(string(ci), "\\\$" => "\$")
+                @test occursin("tcgen05.mma" * (sp ? ".sp" : "") *
+                               ".cta_group::$cg.kind::$kind" *
+                               ".block_scale.$scale" *
+                               (coll === nothing ? "" : ".$coll") *
+                               ".$coll_b ", unescaped)
+                schema = sp ?
+                    "[\$0], $a_operand, \$2, [\$3], \$4, [\$5], [\$6], \$7;" :
+                    "[\$0], $a_operand, \$2, \$3, [\$4], [\$5], \$6;"
+                @test occursin(schema, unescaped)
+                @test occursin("~{memory}", unescaped)
+            end
+        else
+            @test PTX.lowering(op, ss).tier === :forbidden
+            @test PTX.lowering(op, ts).tier === :forbidden
+        end
     end
 end
 

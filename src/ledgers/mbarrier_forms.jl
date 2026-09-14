@@ -217,7 +217,7 @@ const MBARRIER_FORM_SCHEMAS = let schemas = MBarrierFormSchema[]
     # mask; the 32-bit width is what admits >16-CTA clusters). The syntax
     # block places .multicast after the state space, only .shared::cluster
     # admits it, and the mask is a mandatory trailing b32 operand (carried
-    # u32). Spelled-only until a CUDA 13.4+ ptxas ships.
+    # u32). Assembled at sm_107f in test/ptxas/ptx94_bindings.jl.
     let multicast = Symbol("multicast::cluster::32b"),
         cluster = Symbol("shared::cluster")
         for subop in (:expect_tx, :complete_tx),

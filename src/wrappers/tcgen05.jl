@@ -106,7 +106,7 @@
 # site calls `_tcgen05_adapter!` with the exact signature it reviewed, and
 # `TCGEN05_INTEGER_ADDRESS_ADAPTERS` at the bottom of this file is the
 # collected result. The independent double-entry copy of this grid lives in
-# test/host/address_roles.jl and pins both the 434 form set and the 1218
+# test/host/address_roles.jl, which pins both the form set and the
 # signature set.
 struct TCGen05IntegerAddressAdapter
     mods::Tuple{Vararg{Symbol}}
@@ -328,6 +328,65 @@ for shape in (Symbol("32x32b"), Symbol("16x32bx2")),
                              ((:abs, Symbol("NaN")), :f32),
                              ((), :u32), ((), :s32))
     _tcgen05_ldred_register(shape, count, redop, variant, dtype)
+end
+
+# --- ld.spcompress (load with 2:4 compression, generated asm family) ---------
+#
+# `tcgen05.ld{.red}.spcompress` (PTX 9.4 §9.7.18.8, sm_107a only) loads the
+# 32x32b shape and compresses each lane's row 2:4 in flight: the two kept
+# elements of every group of four land in `cdata` (num/2 b32 registers) and
+# their 2-bit indices in `mdata` (ceil(num/32) b32 registers); `.red`
+# additionally reduces the row into `redval` (f32). Same warp-collective
+# sideeffect + ~{memory} + convergent nomerge contract as ld.red. ptxas 13.4
+# admits the family at sm_107a and rejects `.sp::2:4` at sm_107f.
+#
+# Grid: num {x4..x128} × rowop {min, max} × {∅, .abs}, further × {∅, .NaN}
+# for `.ld.red` = 72 forms. Calls return the grouped tuple
+# (mdata, cdata[, redval]); the indices and the kept data keep their ISA
+# operand order.
+
+function _tcgen05_ldspc_ir(mods::Tuple{Vararg{Symbol}}, red::Bool, n::Int)
+    head = "tcgen05." * join(String.(mods), ".")
+    nm = cld(n, 32)
+    nc = n ÷ 2
+    total = nm + nc
+    mregs = join(("\$$(k - 1)" for k in 1:nm), ", ")
+    cregs = join(("\$$(k - 1)" for k in nm + 1:total), ", ")
+    redval = red ? ", \$$total" : ""
+    addr = red ? total + 1 : total
+    asm = "$head {$mregs}, {$cregs}$redval, [\$$addr];"
+    constraints = join(fill("=r", total), ",") * (red ? ",=f" : "") *
+                  ",r,~{memory}"
+    flat = Tuple{fill(UInt32, total)..., (red ? (Float32,) : ())...}
+    convergent_asm_ir(asm, constraints, flat, (UInt32,)), flat, nm, nc
+end
+
+function _tcgen05_ldspc_register(red::Bool, count::Int, rowop::Symbol,
+                                 variant::Tuple{Vararg{Symbol}})
+    mods = (:ld, (red ? (:red,) : ())..., :spcompress, :sync, :aligned,
+            Symbol("32x32b"), Symbol("x", count), rowop, Symbol("sp::2:4"),
+            variant..., :f32, :b2)
+    register_wrapper!(:tcgen05_ldspc, :tcgen05, mods, :asm)
+    ir, flat, nm, nc = _tcgen05_ldspc_ir(mods, red, count)
+    mvals = [:(r[$i]) for i in 1:nm]
+    cvals = [:(r[$i]) for i in nm + 1:nm + nc]
+    tail = red ? (:(r[$(nm + nc + 1)]),) : ()
+    rt = Tuple{NTuple{nm, UInt32}, NTuple{nc, UInt32},
+               (red ? (Float32,) : ())...}
+    @eval @inline function (::Operation{:tcgen05, $mods})(taddr::UInt32)
+        r = Base.llvmcall(($ir, "entry"), $flat, Tuple{UInt32}, taddr)
+        (($(mvals...),), ($(cvals...),), $(tail...))::$rt
+    end
+    _tcgen05_adapter!(mods, Address{UInt32})
+    nothing
+end
+
+for red in (false, true), count in (4, 8, 16, 32, 64, 128),
+        rowop in (:min, :max),
+        variant in (red ? ((), (:abs,), (Symbol("NaN"),),
+                           (:abs, Symbol("NaN"))) :
+                          ((), (:abs,)))
+    _tcgen05_ldspc_register(red, count, rowop, variant)
 end
 
 # --- alloc / relinquish / wait / commit ----------------------------------------
@@ -898,17 +957,20 @@ const _TCGEN05_MX_SCALE_VARIANTS = (
 )
 
 function _tcgen05_mx_register(kind::Symbol, scale::Symbol, cta_group::Int,
-                              sp::Bool, coll::Union{Nothing, Symbol})
+                              sp::Bool, coll::Union{Nothing, Symbol};
+                              coll_b::Union{Nothing, Symbol} = nothing,
+                              family::Symbol = :tcgen05_mx)
     cta_group in (1, 2) || throw(ArgumentError("invalid tcgen05 cta_group: $cta_group"))
     cg = Symbol("cta_group::", cta_group)
     kmod = Symbol("kind::", kind)
     spmods = sp ? (:sp,) : ()
-    collmods = coll === nothing ? () : (coll,)
+    collmods = ((coll === nothing ? () : (coll,))...,
+                (coll_b === nothing ? () : (coll_b,))...)
     mods = (:mma, spmods..., cg, kmod, :block_scale, scale, collmods...)
-    register_wrapper!(:tcgen05_mx, :tcgen05, mods, :asm)
+    register_wrapper!(family, :tcgen05, mods, :asm)
     head = "tcgen05.mma" * (sp ? ".sp" : "") *
            ".$cg.$kmod.block_scale.$scale" *
-           (coll === nothing ? "" : ".$coll")
+           join(("." * String(c) for c in collmods))
 
     # Integer-address adapters: the scale descriptors — and for `.sp` the
     # sparsity-metadata operand — are bracketed TMEM addresses, and the A
@@ -961,8 +1023,9 @@ end
 # owns target policy, as with dense .kind::i8.
 #
 # collector::a mirrors the dense/sp intrinsic-tier convention: an absent
-# collector is the ISA-default discard (never spelled explicitly), and
-# collector::b / decompress::lut::b stay deferred.
+# collector is the ISA-default discard (never spelled explicitly). The
+# sm_107f B-side collector on this family is registered further below with
+# the other PTX ISA 9.4 mma additions.
 for (kind, scale_vec, block) in _TCGEN05_MX_SCALE_VARIANTS,
         scale in (scale_vec, block), cta_group in (1, 2),
         sp in (false, true),
@@ -971,10 +1034,291 @@ for (kind, scale_vec, block) in _TCGEN05_MX_SCALE_VARIANTS,
     _tcgen05_mx_register(kind, scale, cta_group, sp, coll)
 end
 
+# --- PTX ISA 9.4 mma additions (sm_107f, asm tier) ---------------------------
+#
+# `.kind::ti16` (§9.7.18.10 syntax blocks 5/6 and the ws integer block),
+# `.collector::b::*` on the non-ws kinds (blocks 3/4), and
+# `.decompress::lut::b` (block 7) have no upstream intrinsics at 23.1.1:
+# the pinned table's kind immarg stops at i8 and every non-ws record
+# carries a single A-side collector. They are single-route inline asm.
+# tcgen05.mma is a non-convergent FORMS entry, so the IR comes from
+# `plain_asm_ir` (sideeffect, `~{memory}`) — the contract the MX family's
+# `@asmcall` bodies already carry — never from `convergent_asm_ir`.
+#
+# Operand schema (§9.7.18.10.10.1–.4):
+#   [d], a-desc|[a-tmem], b-desc{, [sp-meta]|[lut-meta]}, idesc
+#      {, [scale-A], [scale-B]}{, {disable-output-lane}}, enable-input-d
+#      {, scale-input-d}{, zero-column-mask-desc}
+# The sparsity metadata and the LUT metadata occupy the same slot (no form
+# takes both: lut is dense-only). An absent collector renders as no
+# qualifier — the ISA default is discard and ptxas accepts the bare
+# spelling — matching the collector::a convention of the other families.
+# `.collector::b::*` never pairs with `.kind::i8`: the ISA gives the
+# integer blocks a B collector only on `.kind::ti16`. `.ashift` keeps its
+# "no fill/use on the A collector" rule; lut admits neither `.sp` nor
+# `.ashift` nor scale-input-d; the block-scale lut and collector::b forms
+# use the family `.block*` spellings only, since `.scale_vec::*` is the
+# sm_100a/sm_110a spelling and these qualifiers are sm_107f.
+#
+# Grid sizes: ti16 128 forms (dense 48, sp 48, ws/ws.sp 32); collector::b
+# 408 forms (216 on f16/tf32/f8f6f4 dense+sp, 192 on the four block-scale
+# family spellings); lut 64 forms (32 f8f6f4, 32 mxf8f6f4.block32).
+const _TCGEN05_COLL_A = (nothing, Symbol("collector::a::lastuse"),
+                         Symbol("collector::a::fill"),
+                         Symbol("collector::a::use"))
+const _TCGEN05_COLL_B = (nothing, Symbol("collector::b::fill"),
+                         Symbol("collector::b::use"),
+                         Symbol("collector::b::lastuse"))
+
+# Render one operand shape: the asm text, its constraints, and the flat
+# llvmcall argument types (mask words are passed individually).
+function _tcgen05_mma94_spec(head::String, a_tmem::Bool, meta::Bool,
+                             mx::Bool, maskN::Int, zero_col::Bool,
+                             scale::Union{Nothing, Int})
+    slots = String["[\$0]", a_tmem ? "[\$1]" : "\$1", "\$2"]
+    cons = String["r", a_tmem ? "r" : "l", "l"]
+    argts = Type[UInt32, a_tmem ? UInt32 : UInt64, UInt64]
+    k = 3
+    if meta
+        push!(slots, "[\$$k]"); push!(cons, "r"); push!(argts, UInt32)
+        k += 1
+    end
+    push!(slots, "\$$k"); push!(cons, "r"); push!(argts, UInt32)   # idesc
+    k += 1
+    if mx
+        push!(slots, "[\$$k]", "[\$$(k + 1)]"); push!(cons, "r", "r")
+        push!(argts, UInt32, UInt32)
+        k += 2
+    end
+    if maskN > 0
+        push!(slots, "{" * join(("\$$(k + i)" for i in 0:maskN - 1), ", ") * "}")
+        append!(cons, fill("r", maskN)); append!(argts, fill(UInt32, maskN))
+        k += maskN
+    end
+    push!(slots, "\$$k"); push!(cons, "b"); push!(argts, Bool)      # enable
+    k += 1
+    if zero_col
+        push!(slots, "\$$k"); push!(cons, "l"); push!(argts, UInt64)
+        k += 1
+    end
+    scale === nothing || push!(slots, string(scale))
+    asm = head * " " * join(slots, ", ") * ";"
+    constraints = join(cons, ",") * ",~{memory}"
+    plain_asm_ir(asm, constraints, Nothing, Tuple(argts)), Tuple(argts)
+end
+
+_tcgen05_mma94_head(mods) = "tcgen05." * join(String.(mods), ".")
+
+# scale-input-d is a PTX immediate baked into the asm text, so the IR for
+# those shapes is generated per Val (helper above — the generator-world
+# rule). Four signatures: {no meta, sp-meta} × {no mask, mask}.
+_tcgen05_mma94_scale_error() =
+    :(throw(ArgumentError("scale-input-d must be an integer Val in 0:15")))
+
+@generated function _tcgen05_mma94_scaled(::Operation{:tcgen05, mods},
+        d::UInt32, a::A, b_desc::UInt64, idesc::UInt32,
+        enable_input_d::Bool, ::Val{s}) where {mods, A, s}
+    s isa Integer && 0 <= s <= 15 || return _tcgen05_mma94_scale_error()
+    ir, argts = _tcgen05_mma94_spec(_tcgen05_mma94_head(mods), A === UInt32,
+                                    false, false, 0, false, Int(s))
+    :(Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                    d, a, b_desc, idesc, enable_input_d))
+end
+
+@generated function _tcgen05_mma94_scaled(::Operation{:tcgen05, mods},
+        d::UInt32, a::A, b_desc::UInt64, sp_meta::UInt32, idesc::UInt32,
+        enable_input_d::Bool, ::Val{s}) where {mods, A, s}
+    s isa Integer && 0 <= s <= 15 || return _tcgen05_mma94_scale_error()
+    ir, argts = _tcgen05_mma94_spec(_tcgen05_mma94_head(mods), A === UInt32,
+                                    true, false, 0, false, Int(s))
+    :(Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                    d, a, b_desc, sp_meta, idesc, enable_input_d))
+end
+
+@generated function _tcgen05_mma94_scaled(::Operation{:tcgen05, mods},
+        d::UInt32, a::A, b_desc::UInt64, idesc::UInt32,
+        mask::NTuple{N, UInt32}, enable_input_d::Bool,
+        ::Val{s}) where {mods, A, N, s}
+    s isa Integer && 0 <= s <= 15 || return _tcgen05_mma94_scale_error()
+    ir, argts = _tcgen05_mma94_spec(_tcgen05_mma94_head(mods), A === UInt32,
+                                    false, false, N, false, Int(s))
+    words = [:(mask[$i]) for i in 1:N]
+    :(Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                    d, a, b_desc, idesc, $(words...), enable_input_d))
+end
+
+@generated function _tcgen05_mma94_scaled(::Operation{:tcgen05, mods},
+        d::UInt32, a::A, b_desc::UInt64, sp_meta::UInt32, idesc::UInt32,
+        mask::NTuple{N, UInt32}, enable_input_d::Bool,
+        ::Val{s}) where {mods, A, N, s}
+    s isa Integer && 0 <= s <= 15 || return _tcgen05_mma94_scale_error()
+    ir, argts = _tcgen05_mma94_spec(_tcgen05_mma94_head(mods), A === UInt32,
+                                    true, false, N, false, Int(s))
+    words = [:(mask[$i]) for i in 1:N]
+    :(Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                    d, a, b_desc, sp_meta, idesc, $(words...), enable_input_d))
+end
+
+# Register every method shape of one modifier spelling: `meta` adds the
+# bracketed sp/lut metadata operand after B; `mx` selects the block-scale
+# schema (two scale addresses, no mask/scale-input-d); `ws` selects the
+# weight-stationary schema (trailing zero-column-mask form); `ashift`
+# restricts A to the TMEM species; `scale_ok` adds the scale-input-d
+# shapes. Integer-address adapters are emitted for every signature.
+function _tcgen05_mma94_register(family::Symbol, mods::Tuple{Vararg{Symbol}};
+                                 cg::Int, meta::Bool = false,
+                                 mx::Bool = false, ws::Bool = false,
+                                 ashift::Bool = false,
+                                 scale_ok::Bool = false)
+    register_wrapper!(family, :tcgen05, mods, :asm)
+    head = _tcgen05_mma94_head(mods)
+    A32 = Address{UInt32}
+    metadecl = meta ? (:(meta::UInt32),) : ()
+    metaarg = meta ? (:meta,) : ()
+    metaA = meta ? (A32,) : ()
+    maskN = cg == 1 ? 4 : 8
+    for a_tmem in (ashift ? (true,) : (false, true))
+        aT = a_tmem ? UInt32 : UInt64
+        aA = a_tmem ? A32 : UInt64
+        if mx
+            ir, argts = _tcgen05_mma94_spec(head, a_tmem, meta, true, 0,
+                                            false, nothing)
+            @eval @inline function (::Operation{:tcgen05, $mods})(
+                    d::UInt32, a::$aT, b_desc::UInt64, $(metadecl...),
+                    idesc::UInt32, scale_a::UInt32, scale_b::UInt32,
+                    enable_input_d::Bool)
+                Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                              d, a, b_desc, $(metaarg...), idesc,
+                              scale_a, scale_b, enable_input_d)
+            end
+            _tcgen05_adapter!(mods, A32, aA, UInt64, metaA..., UInt32, A32,
+                              A32, Bool)
+            continue
+        end
+
+        # [d], a, b{, [meta]}, idesc, enable
+        ir, argts = _tcgen05_mma94_spec(head, a_tmem, meta, false, 0,
+                                        false, nothing)
+        @eval @inline function (::Operation{:tcgen05, $mods})(
+                d::UInt32, a::$aT, b_desc::UInt64, $(metadecl...),
+                idesc::UInt32, enable_input_d::Bool)
+            Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                          d, a, b_desc, $(metaarg...), idesc, enable_input_d)
+        end
+        _tcgen05_adapter!(mods, A32, aA, UInt64, metaA..., UInt32, Bool)
+
+        if ws
+            # [d], a, b{, [meta]}, idesc, enable, zero-column-mask-desc
+            ir, argts = _tcgen05_mma94_spec(head, a_tmem, meta, false, 0,
+                                            true, nothing)
+            @eval @inline function (::Operation{:tcgen05, $mods})(
+                    d::UInt32, a::$aT, b_desc::UInt64, $(metadecl...),
+                    idesc::UInt32, enable_input_d::Bool,
+                    zero_col_mask::UInt64)
+                Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                              d, a, b_desc, $(metaarg...), idesc,
+                              enable_input_d, zero_col_mask)
+            end
+            _tcgen05_adapter!(mods, A32, aA, UInt64, metaA..., UInt32, Bool,
+                              UInt64)
+            continue
+        end
+
+        # [d], a, b{, [meta]}, idesc, {disable-output-lane}, enable
+        ir, argts = _tcgen05_mma94_spec(head, a_tmem, meta, false, maskN,
+                                        false, nothing)
+        words = [:(mask[$i]) for i in 1:maskN]
+        @eval @inline function (::Operation{:tcgen05, $mods})(
+                d::UInt32, a::$aT, b_desc::UInt64, $(metadecl...),
+                idesc::UInt32, mask::NTuple{$maskN, UInt32},
+                enable_input_d::Bool)
+            Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
+                          d, a, b_desc, $(metaarg...), idesc, $(words...),
+                          enable_input_d)
+        end
+        maskT = NTuple{maskN, UInt32}
+        _tcgen05_adapter!(mods, A32, aA, UInt64, metaA..., UInt32, maskT, Bool)
+
+        scale_ok || continue
+        @eval @inline (op::Operation{:tcgen05, $mods})(
+                d::UInt32, a::$aT, b_desc::UInt64, $(metadecl...),
+                idesc::UInt32, enable_input_d::Bool, scale::Val) =
+            _tcgen05_mma94_scaled(op, d, a, b_desc, $(metaarg...), idesc,
+                                  enable_input_d, scale)
+        @eval @inline (op::Operation{:tcgen05, $mods})(
+                d::UInt32, a::$aT, b_desc::UInt64, $(metadecl...),
+                idesc::UInt32, mask::NTuple{$maskN, UInt32},
+                enable_input_d::Bool, scale::Val) =
+            _tcgen05_mma94_scaled(op, d, a, b_desc, $(metaarg...), idesc,
+                                  mask, enable_input_d, scale)
+        _tcgen05_adapter!(mods, A32, aA, UInt64, metaA..., UInt32, Bool, Val)
+        _tcgen05_adapter!(mods, A32, aA, UInt64, metaA..., UInt32, maskT, Bool,
+                          Val)
+    end
+    nothing
+end
+
+_tcgen05_opt(mod) = mod === nothing ? () : (mod,)
+
+# `.kind::ti16`: the integer schema (no scale-input-d) with the B-side
+# collector on dense/sp; ws/ws.sp take the addressed `collector::bN::op`.
+let ti16 = Symbol("kind::ti16")
+    for cg in 1:2, sp in (false, true), ashift in (false, true),
+            coll_a in (ashift ? _TCGEN05_COLL_A[1:2] : _TCGEN05_COLL_A),
+            coll_b in _TCGEN05_COLL_B
+        mods = (:mma, (sp ? (:sp,) : ())..., Symbol("cta_group::", cg), ti16,
+                (ashift ? (:ashift,) : ())..., _tcgen05_opt(coll_a)...,
+                _tcgen05_opt(coll_b)...)
+        _tcgen05_mma94_register(:tcgen05_mma_ti16, mods; cg, meta = sp, ashift)
+    end
+    for sp in (false, true), (coll, _, _) in _TCGEN05_WS_COLLECTORS
+        mods = (:mma, :ws, (sp ? (:sp,) : ())..., Symbol("cta_group::1"), ti16,
+                _tcgen05_opt(coll)...)
+        _tcgen05_mma94_register(:tcgen05_mma_ti16, mods; cg = 1, meta = sp,
+                                ws = true)
+    end
+end
+
+# `.collector::b::*` on the float kinds, dense and sp, with every A-side
+# collector, and on the four block-scale family spellings.
+for kind in (:f16, :tf32, :f8f6f4), cg in 1:2, sp in (false, true),
+        ashift in (false, true),
+        coll_a in (ashift ? _TCGEN05_COLL_A[1:2] : _TCGEN05_COLL_A),
+        coll_b in _TCGEN05_COLL_B[2:end]
+    mods = (:mma, (sp ? (:sp,) : ())..., Symbol("cta_group::", cg),
+            Symbol("kind::", kind), (ashift ? (:ashift,) : ())...,
+            _tcgen05_opt(coll_a)..., coll_b)
+    _tcgen05_mma94_register(:tcgen05_mma_collb, mods; cg, meta = sp, ashift,
+                            scale_ok = kind in (:f16, :tf32))
+end
+for (kind, _, block) in _TCGEN05_MX_SCALE_VARIANTS, cta_group in 1:2,
+        sp in (false, true), coll_a in _TCGEN05_COLL_A,
+        coll_b in _TCGEN05_COLL_B[2:end]
+    _tcgen05_mx_register(kind, block, cta_group, sp, coll_a;
+                         coll_b, family = :tcgen05_mma_collb)
+end
+
+# `.decompress::lut::b`: dense only, both collectors optional, the LUT's
+# TMEM address after the compressed B descriptor. B is E4M3 and K-major
+# by ISA rule (§9.7.18.10, Table 62); the descriptor builders enforce it.
+let lut = Symbol("decompress::lut::b")
+    for cg in 1:2, coll_a in _TCGEN05_COLL_A, coll_b in _TCGEN05_COLL_B
+        mods = (:mma, Symbol("cta_group::", cg), Symbol("kind::f8f6f4"), lut,
+                _tcgen05_opt(coll_a)..., _tcgen05_opt(coll_b)...)
+        _tcgen05_mma94_register(:tcgen05_mma_lut, mods; cg, meta = true)
+        mods = (:mma, Symbol("cta_group::", cg), Symbol("kind::mxf8f6f4"),
+                :block_scale, lut, :block32, _tcgen05_opt(coll_a)...,
+                _tcgen05_opt(coll_b)...)
+        _tcgen05_mma94_register(:tcgen05_mma_lut, mods; cg, meta = true,
+                                mx = true)
+    end
+end
+
 # Seal the derived adapter inventory. Every signature above was emitted by
 # the same enumeration that registered (or accompanies) its primary method,
 # so this closed set cannot drift from the typed surface; the independent
-# oracle in test/host/address_roles.jl pins its 434 forms / 1218 signatures.
+# oracle in test/host/address_roles.jl pins both the form set and the
+# signature set.
 const TCGEN05_INTEGER_ADDRESS_ADAPTERS = let specs = _TCGEN05_ADAPTER_SPECS
     keys = ((s.mods, s.argtypes) for s in specs)
     allunique(keys) ||
