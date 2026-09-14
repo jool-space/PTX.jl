@@ -67,11 +67,11 @@ retain that distinction.
 | Mixed packed arithmetic | All 36 forms; complete target-positive/negative assembly tests; CC 10.7 runtime pending. |
 | Alternate FP8/FP6/FP4 x4 arithmetic | 896 canonical plus seven documented compatibility forms; assembly on `sm_100a/sm_103a`; runtime pending. |
 | Packed integer `set` | All 32 forms plus 3,112 scalar/half forms; assembly covered by #158; packed runtime pending. |
-| `cvt.pzo`, x2 `.rz`, `ue5m3x2`, n1 scaling | Carrier/schema coverage exists. The complete 9.4 legality and assembly matrix, b8 scale bridges, and numeric validation remain open. Stochastic `.pzo` is rejected. |
-| Mbarrier multicast `::32b` | 26 schemas and exact wrappers exist; dedicated 9.4 target assembly/runtime evidence remains to be added. |
+| `cvt.pzo`, x2 `.rz`, `ue5m3x2`, n1 scaling | Carrier/schema coverage plus sm_107f/sm_107a assembly of 49 forms (`test/ptxas/ptx94_bindings.jl`), rejected at sm_100f/sm_120f. The n1 scale factor and e2m1x2 operands are bridged through `.b8` registers by the chain render. Numeric validation needs CC 10.7 hardware. Stochastic `.pzo` is rejected. |
+| Mbarrier multicast `::32b` | 26 schemas (36 operand arities) and exact wrappers; all assemble at sm_107f and are rejected at sm_100f. Runtime evidence needs CC 10.7 hardware. |
 | Mbarrier layout, phase types, report operands, check-layout | Already implemented and tested. Although §1.3 lists them under 9.4, individual instruction notes identify 9.3; the existing 9.3 metadata is correct. |
 | Bulk/TMA multicast `::16b/::32b` | `tcgen05.commit` bindings exist; copy-family additions remain open. |
-| `tcgen05.alloc/dealloc.exclusive` and early A-read commit | Bindings exist; dedicated 9.4 assembly and runtime tests remain open. |
+| `tcgen05.alloc/dealloc.exclusive` and early A-read commit | Bindings assemble: `.exclusive` at sm_100f, sm_107f (576 and 544 columns) and sm_107a; commit `::16b` at sm_100f; `::32b` and `.sync_restrict::shared::read::mma::a` at sm_107f/sm_107a, rejected at sm_100f. Runtime evidence needs hardware. |
 | `tcgen05.kind::ti16`, non-ws B collectors, LUT decompression | New instruction families remain unimplemented; unresolved specification defects below still apply. |
 | UE5M3 / UE4M3 block32 / 128-lane scales | `mxf4nvf4` already exposes UE5M3 bits; complete target-aware shape/layout support and execution tests remain open. |
 | Instruction and SMEM descriptors | Base packers and explicit sparsity-version bit exist. Widened address fields, extended K, scale-layout bit, and LUT offset support remain open. |
@@ -79,14 +79,14 @@ retain that distinction.
 | `applypriority.async.bulk{.tensor}` | Unimplemented. |
 | TMA report mechanism, overrides, im2col-no-offset W, eviction priority | New forms remain open. Overrides and the W load mode also apply to `cp.reduce.async.bulk.tensor`; do not restrict the inventory to loads. |
 | TMA sub-byte/swizzle/scatter restrictions | Constraint audit and negative coverage remain open; existing tensor-map upload support does not establish these restrictions. |
-| Atom/red `.noftz.f32`, bulk f32 semantics | Scalar chain and vector forms exist; #150 enables the two vector assembly forms. Bulk default preserves subnormals; numeric conformance remains open. |
+| Atom/red `.noftz.f32`, bulk f32 semantics | Scalar chain and vector forms assemble at sm_90 and are rejected at sm_80. GB10 runtime confirms the scalar `.noftz` atomics preserve subnormal inputs and results while the plain `atom.add.f32` flushes them. Bulk-reduce numeric conformance is covered by the same runtime file. |
 | Readonly loads | Canonical scalar binding and numeric regression fixed here; transpiler promotion remains open. |
-| Prefetch `.valid_addr/.L1::32B`, ldmatrix `.s8.s4` | Bindings exist; dedicated new-form target assembly/runtime evidence remains open. |
+| Prefetch `.valid_addr/.L1::32B`, ldmatrix `.s8.s4` | Prefetch assembles at sm_90 and is rejected at sm_80; ldmatrix `.s8.s4` assembles at sm_90a, sm_100f, sm_120f and sm_121a and is rejected at baseline sm_90 and sm_80. GB10 runtime confirms sign extension of every nibble. |
 | GA alias fences / cluster-read proxy fence | Existing chain bindings, now explicit host and target assembly tests; concurrent runtime ordering evidence pending. |
-| GA fabric tensor get/put/red | Unimplemented; `sm_107f` family. Requires composite tensor/handle operands, overrides, and completion accounting. |
-| GA `fabric.try_atom` | Unimplemented; baseline `sm_100+`, not Rubin-only. Includes shared-memory result/source operands and special CAS alignment. |
-| GA `createpolicy.range.fabric` | Unimplemented composite handle binding; baseline `sm_100+`. The ordinary raw scalar policy path is not this API. |
-| GA fabric get/put/red cache hints | Unimplemented modifier plus 64-bit policy operand; baseline `sm_100+`. |
+| GA fabric tensor get/put/red | Deferred: the installed ptx-isa snapshot carries no syntax for these forms (only the live NVIDIA page's release notes list them). A snapshot refresh is the prerequisite; `sm_107f` family. |
+| GA `fabric.try_atom` | Deferred with the same snapshot prerequisite; baseline `sm_100+`, not Rubin-only. Includes shared-memory result/source operands and special CAS alignment. |
+| GA `createpolicy.range.fabric` | Deferred with the same snapshot prerequisite; composite handle binding, baseline `sm_100+`. The ordinary raw scalar policy path is not this API. |
+| GA fabric get/put/red cache hints | Deferred with the same snapshot prerequisite; modifier plus 64-bit policy operand, baseline `sm_100+`. |
 | Fabric full-warp mask / TF32 layout correction | Reviewed above; mask is a requirement on the still-deferred pull-reduction wrapper. |
 
 ## GA recheck does not resolve the four preview defects
@@ -98,7 +98,9 @@ All four remain in the installed GA specification:
    Table 62's transpose support.
 3. The ti16 sparse MMA B-collector syntax still omits `[sp-meta-tmem]`.
 4. The `.exclusive` target list still omits `sm_107f`, despite the explicitly
-   described 576-column range.
+   described 576-column range. ptxas 13.4 assembles `.exclusive` with 576 and
+   544 columns at sm_107f (and does not enforce the 512 ceiling at sm_100f),
+   so the bindings treat sm_107f as admitted.
 
 The GA recheck is complete. These are now unresolved GA documentation
 contradictions, not a reason to wait for the GA release again. Apply local
@@ -113,18 +115,17 @@ GA §9.7.18.6 limits implicit pipelines to particular tensor-memory accesses
 issued within the same warp. Different warps are non-pipelined. Shared-memory
 reads are explicitly outside those tensor-memory pipeline guarantees.
 
-This needs a separate kernel-level correctness pass. In
-`test/gpu/blackwell/gemm_highperf_blackwell.jl`, both dispatch loops return
-a source slot with `barrier_arrive(bc[slot])` immediately after issuing
-asynchronous MMAs, while `tcgen05.commit` occurs after the loop. That sequence
-does not establish that the MMA has finished reading the source slot before
-the producer may overwrite it. Completion-backed slot release and a fresh
-B200/B300 numeric/stress run are required. Prior successful runs are not a
-proof that this race is impossible.
-
-The TMEM roundtrip also consumes `tcgen05.ld` results without an explicit
-`wait::ld`; include it in that pass. This audit does not claim a reproduced
-wrong-result failure or fresh hardware evidence for these kernels.
+Both dispatch loops in `test/gpu/blackwell/gemm_highperf_blackwell.jl`
+previously returned a source slot with `barrier_arrive(bc[slot])` immediately
+after issuing asynchronous MMAs, with a single `tcgen05.commit` after the
+loop; nothing established that the MMA had finished reading the slot before
+the producer overwrote it. The slot is now released by a per-K-tile
+`tcgen05.commit` onto the consumed barrier, the completion-backed idiom the
+FlashAttention kernel already used. The TMEM roundtrip consumed `tcgen05.ld`
+results without `wait::ld`; it now waits through `PTX.wait_registers` before
+the stores and the deallocation. Both compile at sm_100a; the B300 runtime
+record in `test/EVIDENCE.toml` states which tree executed them. No
+wrong-result failure was reproduced before the change.
 
 ## PR #150
 
