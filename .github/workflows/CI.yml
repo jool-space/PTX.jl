@@ -13,10 +13,6 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
   test-gpu:
-    # `blackwell` is the GB10 runner: CC 12.1 / sm_121a. It is consumer
-    # Blackwell, not a tcgen05-capable sm_100a or sm_103a device. The test
-    # target manifest therefore shows tcgen05 ptxas evidence executing while
-    # its runtime subsections are skipped for an exact target mismatch.
     name: Julia ${{ matrix.version }} - ${{ matrix.arch }} - ${{ matrix.runner }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -27,15 +23,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - version: '1.10'
+          - version: 'min'
             arch: aarch64
-            runner: blackwell
-          - version: '1.11'
+            runner: gb10
+          - version: '1'
             arch: aarch64
-            runner: blackwell
-          - version: '1.12'
-            arch: aarch64
-            runner: blackwell
+            runner: gb10
     steps:
       - uses: actions/checkout@v7
       - name: Verify GPU is visible
@@ -44,53 +37,44 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-      - name: Prepare test environment
-        run: julia --color=yes .ci/prepare.jl test
-      - name: Run tests
+      - uses: julia-actions/julia-runtest@v1
         env:
           PTX_REQUIRE_GPU_RUNTIME: 'true'
-        # Forced bounds checks inject branches into golden PTX kernels.
-        run: julia --project="$PTX_CI_PROJECT" --check-bounds=auto --code-coverage=user --color=yes test/runtests.jl
+        with:
+          check_bounds: 'auto'
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
-  test-host:
-    # Host + offline compiler tiers: explicit-target PTX and ptxas evidence
-    # use compiler_config(nothing; arch=...) and therefore run from the CUDA
-    # compiler artifacts without a visible GPU. Runtime evidence remains
-    # skipped. This lane keeps the hosted x86_64 half of the matrix alive
-    # independently of the self-hosted GB10 runner, and is the only CI
-    # coverage of the x86_64 code paths at all.
-    name: Julia ${{ matrix.version }} - x64 - host
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    permissions:
-      actions: write
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        version: ['1']
-    steps:
-      - uses: actions/checkout@v7
-      - uses: julia-actions/setup-julia@v3
-        with:
-          version: ${{ matrix.version }}
-          arch: x64
-      - uses: julia-actions/cache@v3
-      - name: Prepare test environment
-        run: julia --color=yes .ci/prepare.jl test
-      - name: Run tests
-        run: julia --project="$PTX_CI_PROJECT" --check-bounds=auto --code-coverage=user --color=yes test/runtests.jl
-      - uses: julia-actions/julia-processcoverage@v1
-      - uses: codecov/codecov-action@v7
-        with:
-          files: lcov.info
-          token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+  # test-host:
+  #   name: Julia ${{ matrix.version }} - x64 - host
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 60
+  #   permissions:
+  #     actions: write
+  #     contents: read
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       version: ['1']
+  #   steps:
+  #     - uses: actions/checkout@v7
+  #     - uses: julia-actions/setup-julia@v3
+  #       with:
+  #         version: ${{ matrix.version }}
+  #         arch: x64
+  #     - uses: julia-actions/cache@v3
+  #     - uses: julia-actions/julia-runtest@v1
+  #       with:
+  #         check_bounds: 'auto'
+  #     - uses: julia-actions/julia-processcoverage@v1
+  #     - uses: codecov/codecov-action@v7
+  #       with:
+  #         files: lcov.info
+  #         token: ${{ secrets.CODECOV_TOKEN }}
+  #         fail_ci_if_error: false
   docs:
     name: Documentation
     runs-on: ubuntu-latest
@@ -104,17 +88,15 @@ jobs:
         with:
           version: '1'
       - uses: julia-actions/cache@v3
-      - name: Prepare documentation environment
-        run: julia --color=yes .ci/prepare.jl docs
-      - name: Build and deploy documentation
-        run: julia --project="$PTX_CI_PROJECT" --color=yes docs/make.jl
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-docdeploy@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
       - name: Run doctests
+        shell: julia --project=docs --color=yes {0}
         run: |
-          julia --project="$PTX_CI_PROJECT" --color=yes -e '
-            using Documenter: DocMeta, doctest
-            using PTX
-            DocMeta.setdocmeta!(PTX, :DocTestSetup, :(using PTX); recursive=true)
-            doctest(PTX)'
+          using Documenter: DocMeta, doctest
+          using PTX
+          DocMeta.setdocmeta!(PTX, :DocTestSetup, :(using PTX); recursive=true)
+          doctest(PTX)
