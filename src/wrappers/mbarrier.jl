@@ -106,7 +106,7 @@ end
                           mbar, UInt32(tx_count))
 end
 
-# --- PTX 9.4 cluster multicast (sm_107f), spelled-only until 13.4 ptxas ----
+# --- PTX 9.4 cluster multicast (sm_107f) -------------------------------------
 # `.multicast::cluster::32b` runs the operation on the mbarrier at the same
 # CTA-relative offset in every cluster CTA selected by `cta_mask` (bit i =
 # %cluster_ctarank i). The mask is the mandatory trailing operand.

@@ -68,7 +68,8 @@ const _CVT_SCALED_N2_PAIRS = Set{Tuple{Symbol, Symbol}}((
 
 # `.scaled::n1::ue8m0` (PTX ISA 9.4, sm_107f) — ONE ue8m0 scale factor in a
 # b8 register, dividing the inputs before the down-convert. Physically b8;
-# carried as b16 for the same i8-constraint reason as the e2m1x2 bridge.
+# carried as b16 for the same i8-constraint reason as the e2m1x2 bridge, and
+# moved into a block-local .b8 register by the chain render (build_call).
 const _CVT_SCALED_N1_PAIRS = Set{Tuple{Symbol, Symbol}}(
     (dst, src)
     for dst in (:e4m3x2, :e5m2x2, :e2m1x2, :e2m3x2, :e3m2x2, :ue5m3x2),

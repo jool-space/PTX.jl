@@ -463,6 +463,41 @@ function build_call(op::Symbol, mods::Tuple{Vararg{Symbol}}, @nospecialize(argty
               "and.b32 set_mask, set_mask, 15360; cvt.u16.u32 \$0, set_mask; }"
     end
 
+    if op === :cvt && length(mods) >= 2 && !isempty(operand_strs)
+        # Three cvt operands are physically `.b8` registers, which NVPTX's
+        # smallest (`h`) inline-asm class cannot name: an e2m1x2 destination,
+        # an e2m1x2 source, and the `.scaled::n1::ue8m0` scale factor. The
+        # public carrier stays UInt16 and each is bridged through a
+        # block-local .b8 register, mirroring the hand-written e2m1x2
+        # wrappers in src/wrappers/cvt.jl.
+        decls = String[]
+        prologue = String[]
+        epilogue = String[]
+        bridged = copy(full_operands)
+        first_input = rettype === Nothing ? 1 : 2
+        if mods[end - 1] === :e2m1x2 && rettype !== Nothing
+            push!(decls, "cvt_dst")
+            bridged[1] = "cvt_dst"
+            push!(epilogue, "mov.b16 \$0, {cvt_dst, 0};")
+        end
+        if mods[end] === :e2m1x2 && length(bridged) >= first_input
+            push!(decls, "cvt_src", "cvt_src_hi")
+            push!(prologue,
+                  "mov.b16 {cvt_src, cvt_src_hi}, $(bridged[first_input]);")
+            bridged[first_input] = "cvt_src"
+        end
+        if any(m -> _cvt_scaled_kind(m) === :n1, mods)
+            push!(decls, "cvt_scale")
+            push!(prologue, "cvt.u8.u16 cvt_scale, $(bridged[end]);")
+            bridged[end] = "cvt_scale"
+        end
+        if !isempty(decls)
+            asm = "{ .reg .b8 " * join(decls, ", ") * "; " *
+                  join([prologue; "$head " * join(bridged, ", ") * ";";
+                        epilogue], " ") * " }"
+        end
+    end
+
     cparts = String[]
     rettype === Nothing || push!(cparts, "=" * constraint_letter(rettype))
     append!(cparts, input_letters)

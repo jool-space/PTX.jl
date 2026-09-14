@@ -112,8 +112,7 @@ const VECTOR_RESULT_CORE_FORMS = let forms = VectorResultCoreForm[]
                              v"8.1", _TARGET_SM90, _VECTOR_ATOM_SECTION)
         # PTX ISA 9.4 extends `.noftz` to `.f32`: subnormal inputs and
         # results are preserved instead of the global-memory flush. Plain
-        # sm_90 floor (not family-gated); spelled-only until a CUDA 13.4+
-        # ptxas ships.
+        # sm_90 floor (not family-gated).
         _vector_result_core!(forms, :atom, (:add, :noftz, vec, :f32), lanes,
                              :f32, v"9.4", _TARGET_SM90,
                              _VECTOR_ATOM_SECTION)

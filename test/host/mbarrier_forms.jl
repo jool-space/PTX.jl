@@ -377,7 +377,7 @@ end
         (:try_wait, :report, :parity, primary, :shared, :b64),
         (:test_wait, :parity, conditional, :shared, :b64),
         (:try_wait, :parity, conditional, :shared, :b64),
-        # PTX ISA 9.4 cluster multicast (sm_107f, spelled-only).
+        # PTX ISA 9.4 cluster multicast (sm_107f).
         (:arrive, cluster, multicast32, :b64),
         (:arrive, :expect_tx, cluster, multicast32, :b64),
         (:expect_tx, cluster, multicast32, :b64),
