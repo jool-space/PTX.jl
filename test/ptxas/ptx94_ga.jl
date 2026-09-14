@@ -97,6 +97,9 @@ end
         ptx = emit_ptx(_ga_spdecompress!, types; cap = v"10.7", feature_set = :arch)
         @test occursin(r"spdecompress\.b8\.b2\.sp::2:4\.x32 \{(%r\d+, ){31}%r\d+\}, \{%r\d+, %r\d+, %r\d+, %r\d+\}, \{(%r\d+, ){15}%r\d+\};",
                        ptx)
+    end
+end
+
 @testset "tcgen05 ti16, collector::b, and lut::b mma assemble on sm_107" begin
     if _ptxas_isa() < v"9.4"
         @test_skip "PTX 9.4 assembler required"
