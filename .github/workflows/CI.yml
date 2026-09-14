@@ -44,7 +44,7 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-      - name: Prepare CUDA main test environment
+      - name: Prepare test environment
         run: julia --color=yes .ci/prepare.jl test
       - name: Run tests
         env:
@@ -81,7 +81,7 @@ jobs:
           version: ${{ matrix.version }}
           arch: x64
       - uses: julia-actions/cache@v3
-      - name: Prepare CUDA main test environment
+      - name: Prepare test environment
         run: julia --color=yes .ci/prepare.jl test
       - name: Run tests
         run: julia --project="$PTX_CI_PROJECT" --check-bounds=auto --code-coverage=user --color=yes test/runtests.jl

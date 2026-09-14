@@ -18,9 +18,9 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
 Aqua = "0.8"
-CUDACore = "6.3"
+CUDACore = "6.4"
 ExplicitImports = "1.15"
-CUDATools = "6.3"
+CUDATools = "6.4"
 JSON = "1.6"
 KernelAbstractions = "0.9"
 LLVM = "9.7.1"

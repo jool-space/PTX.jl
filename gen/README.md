@@ -71,10 +71,9 @@ entry in the root `Project.toml` is the trigger — see the comment there):
    Direct probes use the installed library's C API, accept textual LLVM IR,
    and check diagnostics and instruction selection without CUDA artifacts.
 
-The backend 23 environment requires GPUCompiler 2.7 and a CUDACore version
-supporting that backend. While registered CUDACore releases constrain the
-backend to 22, run `julia .ci/prepare.jl test` to create an isolated environment
-using the pinned CUDA.jl main sources. The script prints the environment
-path; pass it to `julia --project=<path> test/runtests.jl ...`. CI uses this
-same setup on Julia 1.10 and later. The root package keeps CUDA and the
-backend as weak dependencies, so host-only use does not require either.
+The backend 23 environment requires GPUCompiler 2.7 and CUDACore 6.4 or
+later. Run `julia .ci/prepare.jl test` to create an isolated environment
+using registered releases. The script prints the environment path; pass
+it to `julia --project=<path> test/runtests.jl ...`. CI uses this same setup
+on Julia 1.10 and later. The root package keeps CUDA and the backend as
+weak dependencies, so host-only use does not require either.
