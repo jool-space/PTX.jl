@@ -420,6 +420,24 @@ PTX.upload_tma_descriptor
 PTX.TMADescriptorPtr
 ```
 
+## Pitfalls in warp-specialized kernels
+
+Things ptxas and LLVM do silently that cost hours to rediscover:
+
+- `setmaxnreg` is ignored by ptxas unless the kernel declares `.reqntid`;
+  pass `minthreads=N` through `@cuda` or the compiler config, and check
+  `EIATTR_REG_COUNT` in the cubin.
+- `@inbounds CuDynamicSharedArray(...)`: the `@boundscheck` emits a
+  `gpu_report_exception` call in the entry region.
+- Indexing an `NTuple` with a runtime index demotes the tuple to local
+  memory; make the index a `Val` type parameter. Large `ntuple(...) do`
+  closures become real device calls; write explicit tuples or check
+  `code_llvm` for `call .*julia_`.
+- `UInt32(x)` on a loop-carried `Int` leaves live `InexactError` branches;
+  use `% UInt32` when the value is exact by construction.
+- Debug loop: `code_llvm` and grep `call .*julia_|report_exception|alloca`;
+  `nvdisasm -c` and grep `LDL|STL|CALL`; `ptxas -v` for spill counts.
+
 ## When to extend
 
 Most chain-default coverage is sufficient. Reach for a wrapper when:

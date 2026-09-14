@@ -240,3 +240,28 @@ Anything that changes emitted PTX for the pinned kernels shows up in
 and review the `test/golden/*.ptx` git diff — the diff **is** the review
 artifact. A missing golden is a failure by design; never make absence
 regenerate silently.
+
+## Running the tests
+
+`julia --project=test test/runtests.jl [names...]` runs the suite through
+ParallelTestRunner; naming tests (`host/inst ptxas/golden`) forces just
+those, bypassing default routing. Three tiers live side by side: `host/`
+needs nothing, `ptxas/` needs only the offline CUDA compiler artifacts (it
+assembles cubins but never loads one), and `gpu/` files carry a
+`# TEST_TARGET:` banner whose `runtime=` predicate (`cc>=X.Y` floor,
+`cc==X.Y` exact, integer `cc==X` hardware family) decides whether the live
+device runs them. Runtime policy never spells PTX `sm_*` targets; those
+belong to explicit compilation calls only.
+
+Plain `Pkg.test("PTX")` forces `--check-bounds=yes`, which injects
+bounds-check branches into device code and invalidates the byte-exact
+golden comparison, so default routing then *skips* the goldens (a manifest
+`SKIP` line, not a failure). Use
+`Pkg.test("PTX"; julia_args=["--check-bounds=auto"])` when going through
+Pkg, or the direct invocation above. Naming `ptxas/golden` explicitly in
+that mode hits a loud refusal instead.
+
+On Julia 1.10, GPUCompiler's overlay method table does not concretely
+evaluate ccall-based type tests such as `T in (...)`, so kernel-path
+validation must be dispatch-based (methods), not runtime type membership;
+1.11 and later fold both.
