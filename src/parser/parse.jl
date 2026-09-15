@@ -634,6 +634,11 @@ function _parse_address_operand!(s::ParserState)
                 depth += 1
             elseif tt.kind == TokenKind.RBRACE
                 depth -= 1
+            elseif tt.kind == TokenKind.COMMA && depth == 0
+                # Multi-field brackets (texture `[a, b, c]`) have no structural
+                # model; fail so the line falls back to a lossless RawLine
+                # instead of hiding operands inside the offset text.
+                throw(_err(s, "Unsupported multi-field address operand"))
             end
             push!(parts, tt.leading_whitespace, tt.text)
             _advance!(s)
@@ -841,7 +846,9 @@ const _FUNCTION_DIRECTIVE_NAMES = Set{String}((
     ".minnctapersm", ".maxnctapersm",
     ".minperctamemory",
     ".noreturn", ".pragma",
+    ".abi_preserve", ".abi_preserve_control",
     ".explicitcluster", ".reqnctapercluster", ".cluster_dim",
+    ".maxclusterrank", ".blocksareclusters",
     # Source-language provenance (PTX ISA 9.3); tileiras-emitted PTX carries
     # `.language 7` ("tile ir") between the param list and the body. Values
     # are integers or quoted strings.
@@ -904,6 +911,13 @@ function _parse_function!(s::ParserState, linking::Union{LinkingDirective.T, Not
         push!(func_directives, _parse_function_directive!(s))
         _skip_newlines_and_comments!(s)
     end
+
+    # A directive still on the header line is an unrecognized function
+    # directive. Stopping here would yield an empty-bodied Function followed by
+    # the real body as RawLines; failing keeps the header a lossless fallback.
+    header_line = s.tokens[s.pos - 1].line
+    _peek_kind(s) == TokenKind.DIRECTIVE && _peek(s).line == header_line &&
+        throw(_err(s, "Unrecognized function directive $(repr(_peek(s).text))"))
 
     body = if _peek_kind(s) == TokenKind.LBRACE
         _parse_function_body!(s)

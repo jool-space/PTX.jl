@@ -788,6 +788,13 @@ end
     # ...and so is a changed operand role (register identity, not name)
     d = replace(b, "st.global.b32 [%rd0], %r5;" => "st.global.b32 [%rd0], %r1;")
     @test canon(a) != canon(d)
+
+    # Registers inside a compound offset are renamed with the rest of the
+    # function, so offset register identity survives canonicalization.
+    offset(src, base, off) = replace(src, "st.global.b32 [$base], " =>
+                                          "st.global.b32 [$base+$off], ")
+    @test canon(offset(a, "%rd3", "%r7+4")) == canon(offset(b, "%rd0", "%r1+4"))
+    @test canon(offset(a, "%rd3", "%r7+4")) != canon(offset(b, "%rd0", "%r5+4"))
 end
 
 @testset "PTX 9.4 special-register ledger and canonicalization" begin

@@ -89,9 +89,16 @@ _canon_op(rn::_Renamer, op::VectorOperand) =
     VectorOperand(Tuple(_canon_op(rn, o) for o in op.elements))
 _canon_op(rn::_Renamer, op::ParenthesizedOperand) =
     ParenthesizedOperand(Tuple(_canon_op(rn, o) for o in op.elements))
+# An offset is raw text (`8`, `-8`, `%rd8+4`); every register inside it is
+# renamed, not only an offset that is a single register.
+const _OFFSET_REGISTER = r"%[A-Za-z_][A-Za-z0-9_]*(?:\.[xyzwrgba])?"
+
+_canon_offset(rn::_Renamer, offset::String) =
+    replace(offset, _OFFSET_REGISTER => m -> _sym(rn, String(m)))
+
 _canon_op(rn::_Renamer, op::AddressOperand) =
     AddressOperand(_sym(rn, op.base),
-                   op.offset === nothing ? nothing : _sym(rn, op.offset),
+                   op.offset === nothing ? nothing : _canon_offset(rn, op.offset),
                    op.coords === nothing ? nothing :
                        Tuple(_canon_op(rn, o) for o in op.coords))
 

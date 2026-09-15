@@ -747,6 +747,57 @@ end
           format(parse_ptx(format(PTX.IR.unraw(parse_ptx(mixed)))))
 end
 
+@testset "parser: cluster and ABI function directives" begin
+    header(directives) = """.version 9.4
+.target sm_121a
+.address_size 64
+.visible .func f(.param .u64 a) $directives
+{
+\tret;
+}
+"""
+    src = header(".noreturn .abi_preserve 3 .abi_preserve_control 1")
+    f = only(filter(d -> d isa Function, collect(parse_ptx(src).directives)))
+    @test f.directives == (FunctionDirective("noreturn", ()),
+                           FunctionDirective("abi_preserve", (3,)),
+                           FunctionDirective("abi_preserve_control", (1,)))
+    @test any(s -> s isa Instruction && s.opcode == "ret", f.body)
+    @test format(PTX.IR.unraw(parse_ptx(src))) ==
+          format(parse_ptx(format(PTX.IR.unraw(parse_ptx(src)))))
+
+    entry = replace(header(".reqntid 32, 32, 1 .explicitcluster .maxclusterrank 8 .blocksareclusters"),
+                    ".func" => ".entry")
+    e = only(filter(d -> d isa Function, collect(parse_ptx(entry).directives)))
+    @test [d.name for d in e.directives] ==
+          ["reqntid", "explicitcluster", "maxclusterrank", "blocksareclusters"]
+    @test !isempty(e.body)
+
+    # An unrecognized header directive must not leave an empty-bodied
+    # Function with the real body stranded as RawLines.
+    unknown = parse_ptx(header(".noreturn .unknown_directive 2"))
+    @test !any(d -> d isa Function, unknown.directives)
+    @test any(d -> d isa RawLine, unknown.directives)
+    @test format(unknown) == header(".noreturn .unknown_directive 2")
+end
+
+@testset "parser: multi-field brackets fall back to RawLine" begin
+    src = """.version 8.5
+.target sm_90a
+.address_size 64
+.visible .entry k()
+{
+\t.reg .b64 %rd<9>;
+\t.reg .v4 .f32 %r<9>;
+\ttex.2d.v4.f32.f32 %r1, [%rd4, %rd5, %r2];
+\tret;
+}
+"""
+    f = only(filter(d -> d isa Function, collect(parse_ptx(src).directives)))
+    @test count(s -> s isa RawLine, f.body) == 1
+    @test !any(s -> s isa Instruction && s.opcode == "tex", f.body)
+    @test format(PTX.IR.unraw(parse_ptx(src))) == src
+end
+
 @testset "parser: module-level .section debug block" begin
     src = """.version 8.5
 .target sm_90a
