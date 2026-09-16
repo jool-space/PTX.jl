@@ -30,7 +30,7 @@ LLVM = "9.7.1"
 Microfloats = "0.2"
 NVPTX_LLVM_Backend_jll = "23"
 ParallelTestRunner = "2.6.0"
-TOML = "1.0.3"
+TOML = "1.0.3, < 0.0.1, 1"
 
 [extras]
 CUDA_Compiler_jll = "d1e2174e-dfdc-576e-b43e-73b79eb1aca8"
