@@ -149,7 +149,7 @@ section = "9.7.10.3"
 title = "Data Movement and Conversion Instructions: mov"
 status = "generic"
 opcodes = ["mov"]
-notes = "Generic scalar mov plus special-register reads (sreg\"...\"); mov.b128 pack/unpack is the audited B128 carrier bridge."
+notes = "Generic scalar mov plus special-register reads (sreg\"...\"); mov.b128 is audited in the B128 ledger (UInt128 carrier on the q constraint)."
 owner = ["src/ledgers/forms.jl", "src/ledgers/b128_forms.jl", "src/dsl/sregs.jl"]
 
 [[family]]

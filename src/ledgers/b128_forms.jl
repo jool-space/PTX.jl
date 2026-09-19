@@ -1,9 +1,10 @@
 # Audited scalar `.b128` register grammar and Julia carrier policy.
 #
-# PTX has a real 128-bit bit register, but LLVM's NVPTX inline-assembly
-# constraints expose only predicate, 16-, 32-, and 64-bit register classes.
-# Use the ISA's own `mov.b128` pack/unpack operation to bridge every `.b128`
-# register through one stable Julia carrier: two low-to-high UInt64 words.
+# PTX has a real 128-bit bit register, and LLVM's NVPTX inline-assembly `q`
+# constraint allocates one for an `i128` operand (sm_70 and later, which every
+# `.b128` form requires anyway). Every `.b128` register therefore crosses the
+# asm boundary as one `UInt128`, low bits first in the ISA's `mov.b128`
+# pack order.
 # See PTX ISA 9.3:
 #   ptx/9-instruction-set/9.7.10.4-data-movement-and-conversion-instructions-mov.md
 #   ptx/9-instruction-set/9.7.10.8-data-movement-and-conversion-instructions-ld.md
@@ -16,20 +17,24 @@
 """
     B128
 
-PTX.jl's Julia carrier for one PTX `.b128` register: `NTuple{2,UInt64}`,
-low word first. LLVM's NVPTX inline-assembly constraints expose no 128-bit
-register class, so every `.b128` value crosses the asm boundary as two
-64-bit words bridged by the ISA's own `mov.b128` pack/unpack. Construct
-with [`b128`](@ref).
+PTX.jl's Julia carrier for one PTX `.b128` register: an alias for `UInt128`.
+LLVM's NVPTX `q` inline-assembly constraint places it directly in a PTX
+`.b128` register (sm_70 and later). Construct one from narrower words with
+[`b128`](@ref).
 """
-const B128 = NTuple{2,UInt64}
+const B128 = UInt128
 
-"""Construct PTX.jl's low-word-first carrier for one PTX `.b128` register."""
-@inline b128(lo::UInt64, hi::UInt64)::B128 = (lo, hi)
+"""
+    b128(lo::UInt64, hi::UInt64)
+    b128(x0::UInt32, x1::UInt32, x2::UInt32, x3::UInt32)
+
+Pack words into a [`B128`](@ref), lowest word first — the lane order of PTX's
+`mov.b128 d, {lo, hi}` and `mov.b128 d, {x0, x1, x2, x3}`.
+"""
+@inline b128(lo::UInt64, hi::UInt64)::B128 = UInt128(lo) | (UInt128(hi) << 64)
 @inline b128(x::B128)::B128 = x
 @inline b128(x0::UInt32, x1::UInt32, x2::UInt32, x3::UInt32)::B128 =
-    (UInt64(x0) | (UInt64(x1) << 32),
-     UInt64(x2) | (UInt64(x3) << 32))
+    UInt128(x0) | (UInt128(x1) << 32) | (UInt128(x2) << 64) | (UInt128(x3) << 96)
 
 struct B128FormSchema
     op::Symbol
@@ -263,7 +268,7 @@ function validate_b128_form_args(schema::B128FormSchema, argtypes)
         valid && continue
         expected = kind === :address ? "a 32/64-bit address carrier" :
                    kind === :cache_policy ? "a 64-bit cache-policy carrier" :
-                   "PTX.B128 (NTuple{2,UInt64})"
+                   "PTX.B128 (UInt128)"
         throw(ArgumentError(
             "ptx\"$(schema.op).$(join(schema.mods, '.'))\" operand $i must " *
             "use $expected, got $T; see $(schema.section)"))

@@ -393,7 +393,7 @@ end
     }
     """
     julia = ptx_to_julia(source)
-    @test occursin("handle = ptx\"mov.b128\"((rd0, rd1))", julia)
+    @test occursin("handle = ptx\"mov.b128\"(b128(rd0, rd1))", julia)
     @test occursin("ptx\"clusterlaunchcontrol.query_cancel", julia)
     @test Meta.parseall(julia) isa Expr
 end

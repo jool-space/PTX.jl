@@ -133,9 +133,7 @@ function _emit_b128!(cg::CodeGenState, inst::Instruction, checked)
     if schema.kind === :mov
         lanes = [_render_b128_register(cg, lane)
                  for lane in checked.mov_source.elements]
-        carrier = length(lanes) == 2 ? "(" * join(lanes, ", ") * ")" :
-                  "b128(" * join(lanes, ", ") * ")"
-        push!(args, carrier)
+        push!(args, "b128(" * join(lanes, ", ") * ")")
     else
         for (kind, source) in zip(schema.operands, checked.sources)
             rendered = kind === :address ? render_operand(source, cg) :

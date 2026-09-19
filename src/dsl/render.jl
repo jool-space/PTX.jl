@@ -253,7 +253,6 @@ function build_ledger_call(::B128Ledger, schema::B128FormSchema,
                            @nospecialize(argtypes), contract::FormContract)
     validate_b128_form_args(schema, argtypes)
     output_types = schema.result === Nothing ? Type[] :
-                   schema.result === B128 ? Type[UInt64, UInt64] :
                    schema.result <: Tuple ? Type[schema.result.parameters...] :
                    Type[schema.result]
     output_letters = ["=" * constraint_letter(T) for T in output_types]
@@ -275,45 +274,20 @@ function build_ledger_call(::B128Ledger, schema::B128FormSchema,
         end
     end
 
+    # `.b128` operands and results are UInt128 on the `q` constraint, so they
+    # name PTX `.b128` registers directly.
     head = build_head(schema.op, schema.mods)
-    b128_inputs = findall(==(:b128), schema.operands)
-    local_name(i) = "b128_value" * string(i)
-    declarations = String[]
-    setup = String[]
-    for (n, index) in enumerate(b128_inputs)
-        push!(declarations, ".reg .b128 " * local_name(n) * ";")
-        push!(setup, "mov.b128 " * local_name(n) * ", " * operand_strs[index] * ";")
-    end
-
-    instruction = if schema.kind === :mov
-        "mov.b128 b128_result, " * local_name(1) * ";"
-    elseif schema.kind === :load
-        head * " b128_result, " * join(operand_strs, ", ") * ";"
-    elseif schema.kind === :store
-        args = copy(operand_strs)
-        args[findfirst(==(:b128), schema.operands)] = local_name(1)
-        head * " " * join(args, ", ") * ";"
-    elseif schema.kind in (:exch, :cas)
-        args = copy(operand_strs)
-        for (n, index) in enumerate(b128_inputs)
-            args[index] = local_name(n)
-        end
-        head * " b128_result, " * join(args, ", ") * ";"
-    elseif schema.kind === :query_pred || schema.kind === :query_dim
-        head * " \$0, " * local_name(1) * ";"
+    operands = join(operand_strs, ", ")
+    asm = if schema.kind === :store
+        head * " " * operands * ";"
     elseif schema.kind === :query_v4
-        head * " {\$0, \$1, \$2, \$3}, " * local_name(1) * ";"
+        head * " {\$0, \$1, \$2, \$3}, " * operands * ";"
+    elseif schema.kind in (:mov, :load, :exch, :cas, :query_pred, :query_dim)
+        head * " \$0, " * operands * ";"
     else
         error("unknown b128 form kind: ", schema.kind)
     end
 
-    teardown = String[]
-    if schema.result === B128
-        push!(declarations, ".reg .b128 b128_result;")
-        push!(teardown, "mov.b128 {\$0, \$1}, b128_result;")
-    end
-    asm = isempty(declarations) ? instruction :
-          "{ " * join([declarations; setup; instruction; teardown], " ") * " }"
     observable = contract.effects !== :pure || has_special_reg(argtypes)
     clobbers = contract.effects === :clobbers || has_special_reg(argtypes)
     constraints = [output_letters; input_letters]

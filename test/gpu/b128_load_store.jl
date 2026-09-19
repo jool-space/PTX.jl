@@ -1,6 +1,6 @@
 # TEST_TARGET: requires=toolkit evidence=mixed runtime=cc>=7.5
 #
-# Runtime proof of the common two-u64 carrier and low/high word order. Atom
+# Runtime proof of the UInt128 carrier and low/high word order. Atom
 # b128 starts at sm_90 and query-cancel needs a live cancellation response, so
 # those families retain offline ptxas evidence only.
 
@@ -8,11 +8,11 @@ function _b128_load_store_runtime!(out::CuDeviceVector{UInt64,1},
                                    scratch::CuDeviceVector{UInt64,1},
                                    lo::UInt64, hi::UInt64)
     ptr = reinterpret(Core.LLVMPtr{UInt64,PTX.AS.Global}, pointer(scratch))
-    ptx"st.global.b128"(ptr, (lo, hi))
-    loaded_lo, loaded_hi = ptx"ld.global.b128"(ptr)
+    ptx"st.global.b128"(ptr, b128(lo, hi))
+    loaded = ptx"ld.global.b128"(ptr)
     @inbounds begin
-        out[1] = loaded_lo
-        out[2] = loaded_hi
+        out[1] = loaded % UInt64
+        out[2] = (loaded >> 64) % UInt64
     end
     return nothing
 end
