@@ -477,11 +477,13 @@ const EXPECTED_B128_ACCEPTED = (
 )
 
 @testset "closed PTX 9.3 scalar-b128 grammar and carrier" begin
-    @test B128 === NTuple{2,UInt64}
-    @test b128(0x0123456789abcdef, 0xfedcba9876543210) ==
-          (0x0123456789abcdef, 0xfedcba9876543210)
-    @test b128(0x89abcdef, 0x01234567, 0x76543210, 0xfedcba98) ==
-          (0x0123456789abcdef, 0xfedcba9876543210)
+    @test B128 === UInt128
+    @test b128(0x0123456789abcdef, 0xfedcba9876543210) ===
+          0xfedcba98765432100123456789abcdef
+    @test b128(0x89abcdef, 0x01234567, 0x76543210, 0xfedcba98) ===
+          0xfedcba98765432100123456789abcdef
+    @test b128(0xfedcba98765432100123456789abcdef) ===
+          0xfedcba98765432100123456789abcdef
     for (op, mods, kind, result, operands) in EXPECTED_B128_ACCEPTED
         schema = PTX.schema(PTX.B128Ledger(), op, mods)
         @test schema !== nothing
@@ -523,27 +525,30 @@ end
     A = Address{UInt64}
     ld = build_call(:ld, (:global, :b128), (A,))
     @test ld.rettype === B128
-    @test ld.constraints == "=l,=l,l,~{memory}"
-    @test occursin(".reg .b128 b128_result", ld.asm)
-    @test occursin("ld.global.b128 b128_result, [\$2]", ld.asm)
-    @test occursin("mov.b128 {\$0, \$1}, b128_result", ld.asm)
+    @test ld.constraints == "=q,l,~{memory}"
+    @test ld.asm == "ld.global.b128 \$0, [\$1];"
 
     st = build_call(:st, (:global, :b128), (A, B128))
     @test st.rettype === Nothing
-    @test st.constraints == "l,l,l,~{memory}"
-    @test occursin("mov.b128 b128_value1, {\$1, \$2}", st.asm)
-    @test occursin("st.global.b128 [\$0], b128_value1", st.asm)
+    @test st.constraints == "l,q,~{memory}"
+    @test st.asm == "st.global.b128 [\$0], \$1;"
 
     atom = build_call(:atom, (:global, :cas, :b128), (A, B128, B128))
     @test atom.rettype === B128
-    @test atom.constraints == "=l,=l,l,l,l,l,l,~{memory}"
-    @test occursin("atom.global.cas.b128 b128_result, [\$2], b128_value1, b128_value2", atom.asm)
+    @test atom.constraints == "=q,l,q,q,~{memory}"
+    @test atom.asm == "atom.global.cas.b128 \$0, [\$1], \$2, \$3;"
+
+    mov = build_call(:mov, (:b128,), (B128,))
+    @test mov.rettype === B128
+    @test mov.constraints == "=q,q"
+    @test mov.asm == "mov.b128 \$0, \$1;"
 
     query = build_call(:clusterlaunchcontrol,
         (:query_cancel, :get_first_ctaid, :v4, :b32, :b128), (B128,))
     @test query.rettype === NTuple{4,UInt32}
-    @test query.constraints == "=r,=r,=r,=r,l,l,~{memory}"
-    @test occursin("{\$0, \$1, \$2, \$3}, b128_value1", query.asm)
+    @test query.constraints == "=r,=r,=r,=r,q,~{memory}"
+    @test query.asm == "clusterlaunchcontrol.query_cancel.get_first_ctaid.v4.b32.b128 " *
+                       "{\$0, \$1, \$2, \$3}, \$4;"
 
     for (op, mods, _, _, operands) in EXPECTED_B128_ACCEPTED
         argtypes = Tuple(kind === :address ? A :
@@ -593,7 +598,7 @@ end
     }
     """
     julia = PTX.ptx_to_julia(src)
-    @test occursin("handle = ptx\"mov.b128\"((rd0, rd1))", julia)
+    @test occursin("handle = ptx\"mov.b128\"(b128(rd0, rd1))", julia)
     @test occursin("p = ptx\"clusterlaunchcontrol.query_cancel.is_canceled.pred.b128\"(handle)", julia)
     @test occursin("(r0, r1, r2, r3) = ptx\"clusterlaunchcontrol.query_cancel.get_first_ctaid.v4.b32.b128\"(handle)", julia)
     @test Meta.parseall(julia) isa Expr

@@ -3,7 +3,7 @@
 
 function _b128_sm75!(ptr::Core.LLVMPtr{UInt64,PTX.AS.Global},
                      lo::UInt64, hi::UInt64)
-    value = ptx"mov.b128"((lo, hi))
+    value = ptx"mov.b128"(b128(lo, hi))
     ptx"st.global.b128"(ptr, value)
     ptx"ld.global.b128"(ptr)
     ptx"ldu.global.b128"(ptr)
@@ -19,14 +19,14 @@ end
 
 function _b128_sm90!(ptr::Core.LLVMPtr{UInt64,PTX.AS.Global},
                      lo::UInt64, hi::UInt64)
-    value = (lo, hi)
+    value = b128(lo, hi)
     ptx"atom.global.exch.b128"(ptr, value)
     ptx"atom.acq_rel.sys.global.cas.b128"(ptr, value, value)
     return nothing
 end
 
 function _b128_sm100!(lo::UInt64, hi::UInt64)
-    value = (lo, hi)
+    value = b128(lo, hi)
     ptx"clusterlaunchcontrol.query_cancel.is_canceled.pred.b128"(value)
     ptx"clusterlaunchcontrol.query_cancel.get_first_ctaid.v4.b32.b128"(value)
     ptx"clusterlaunchcontrol.query_cancel.get_first_ctaid::x.b32.b128"(value)
@@ -52,8 +52,10 @@ end
         @test ptxas_compiles(kernel, types; cap, feature_set = :baseline)
         llvm = emit_llvm(kernel, types; cap, feature_set = :baseline)
         ptx = emit_ptx(kernel, types; cap, feature_set = :baseline)
-        @test occursin(".reg .b128", llvm)
-        @test occursin("mov.b128", llvm)
+        # Every b128 operand rides the `q` constraint, so LLVM allocates the
+        # `.b128` registers itself.
+        @test occursin(r"[\",]=?q[,\"]", llvm)
+        @test occursin(".reg .b128", ptx)
         for head in heads
             @test occursin(head, ptx)
         end

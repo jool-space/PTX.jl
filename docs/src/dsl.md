@@ -540,18 +540,18 @@ operands and are covered by hand-written wrappers — see
 
 ## Scalar `.b128` registers
 
-PTX.jl represents one PTX `.b128` register as `B128`, an alias for the
-low-word-first `NTuple{2,UInt64}` carrier. LLVM NVPTX has no 128-bit inline-asm
-register constraint, so the reviewed emitter bridges those two `l`-class
-operands through a block-local `.b128` register with the ISA's `mov.b128`
-pack/unpack operation. The closed surface covers scalar `ld`, `ld.global.nc`,
+PTX.jl represents one PTX `.b128` register as `B128`, an alias for
+`UInt128`. LLVM NVPTX's `q` inline-asm constraint allocates a `.b128` register
+for it directly, so the emitted instruction names its operands as written
+(`ld.global.b128 $0, [$1];`). The constraint requires sm_70 or later, which
+every `.b128` form already does. The closed surface covers scalar `ld`, `ld.global.nc`,
 `ldu`, `st`, `atom.{exch,cas}`, and the exact
 `clusterlaunchcontrol.query_cancel` result shapes. It rejects every nearby
 `.b128` spelling in direct, raw, lowering-introspection, and transpiler paths
 instead of treating `.b128` as a scalar Julia result type or a no-result tail.
 
-`mov.b128` pack is included as carrier glue (both two-`.b64` and four-`.b32`
-PTX sources transpile to the common carrier); it is not part of the original
+`mov.b128` is included as carrier glue: two-`.b64` and four-`.b32` pack
+sources transpile to [`b128`](@ref) calls; it is not part of the original
 memory/query coverage claim. The scalar-to-vector unpack direction remains
 fail-loud because the singleton chain API has no result-shape selector.
 

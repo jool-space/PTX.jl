@@ -16,6 +16,8 @@ constraint_letter(::Type{Int32})   = "r"
 constraint_letter(::Type{UInt32})  = "r"
 constraint_letter(::Type{Int64})   = "l"
 constraint_letter(::Type{UInt64})  = "l"
+# NVPTX's `q` class is the PTX `.b128` register; LLVM rejects it below sm_70.
+constraint_letter(::Type{UInt128}) = "q"
 # LLVM NVPTX's `b` constraint selects the predicate register class for an
 # LLVM `i1` operand/result; this is target-specific LLVM syntax, not CUDA C++
 # inline-asm syntax.
