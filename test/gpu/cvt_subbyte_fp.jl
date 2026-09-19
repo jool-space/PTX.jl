@@ -44,7 +44,7 @@ _mf8_e4m3_sat(x)     = reinterpret(UInt8, E4M3FN_SAT_X4(x))
 _mf8_e5m2_sat(x)     = reinterpret(UInt8, E5M2_SAT_X4(x))
 _mf8_ue8m0_rz(x)     = reinterpret(UInt8, E8M0_SAT(x, RoundToZero))
 
-# --- e2m1x2: hand-wrapped via wrappers/cvt.jl (NVPTX has no i8 constraint),
+# --- e2m1x2: hand-wrapped via wrappers/cvt.jl (no b8 asm register class),
 #     output is UInt16 with the packed nibbles in the low byte. ---
 function _cvt_e2m1x2!(out::AbstractArray{UInt16}, xs::AbstractArray{Float32})
     tid  = ptx"mov.u32"(sreg"tid.x")

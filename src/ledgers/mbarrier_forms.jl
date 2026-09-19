@@ -4,9 +4,10 @@
 # result type.  Depending on the exact form, the destination is absent, a sink
 # `_`, a u64 state token, a predicate, a u32 pending-arrival count, or the
 # two-field `waitComplete|reportPredicate` group, or that group plus the
-# optional 8-bit `reportValue`. NVPTX has no i8 inline-asm constraint, so the
-# full report ABI carries that byte in the low half of a `UInt16`. Consequently
-# no mbarrier spelling may use the generic terminal-modifier result heuristic.
+# optional 8-bit `reportValue`. NVPTX inline asm has no `.b8` register class,
+# so the full report ABI carries that byte in the low half of a `UInt16`.
+# Consequently no mbarrier spelling may use the generic terminal-modifier
+# result heuristic.
 #
 # Entries below are generated only from the finite cross-products printed in
 # the instruction subsection.  The map key is the complete *Julia* modifier

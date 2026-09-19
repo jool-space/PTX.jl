@@ -167,8 +167,8 @@ end
 # `.phase_type::primary` report forms (three outputs):
 # `mbarrier.{test,try}_wait[.parity].phase_type::primary.shared.b64
 #     waitComplete|reportPredicate, reportValue, [mbar], state-or-phase;`
-# PTX's opaque reportValue is a `.b8` register. NVPTX has no i8 inline-asm
-# constraint, so the wrapper returns its byte in the low half of a `UInt16`:
+# PTX's opaque reportValue is a `.b8` register. NVPTX inline asm has no `.b8`
+# register class, so the wrapper returns its byte in the low half of a `UInt16`:
 # `Tuple{Bool, Bool, UInt16}`. Report fields are undefined until waitComplete
 # is true. Once complete, a set reportPredicate indicates an asynchronous
 # operation reported an error or other condition; if it is clear, reportValue

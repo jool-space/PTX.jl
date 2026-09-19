@@ -448,6 +448,35 @@ end
     @test Array(out) == expected
 end
 
+# bar.red / barrier.red: four warps reduce per-thread predicates across the
+# CTA, and every thread must receive the same CTA-wide answer.
+function _exec_bar_red!(out)
+    tid = ptx"mov.u32"(sreg"tid.x")
+    odd = isodd(tid)
+    everyone = tid < UInt32(128)
+    nobody = tid >= UInt32(128)
+    r = (ptx"bar.red.popc.u32"(Val(0), odd),
+         UInt32(ptx"bar.red.and.pred"(Val(0), odd)),
+         UInt32(ptx"bar.red.or.pred"(Val(0), odd)),
+         UInt32(ptx"bar.red.and.pred"(Val(0), everyone)),
+         UInt32(ptx"bar.red.or.pred"(Val(0), nobody)),
+         ptx"barrier.red.popc.u32"(Val(1), Val(128), !odd),
+         ptx"barrier.red.popc.aligned.u32"(Val(1), tid < UInt32(10)),
+         UInt32(ptx"barrier.red.or.pred"(tid & UInt32(0), tid == UInt32(77))))
+    @inbounds for k in 1:8
+        out[k, tid + 1] = r[k]
+    end
+    return nothing
+end
+
+@testset "bar.red/barrier.red reduce across the CTA" begin
+    out = CUDACore.zeros(UInt32, 8, 128)
+    @cuda threads=128 _exec_bar_red!(out)
+    CUDACore.synchronize()
+    expected = UInt32[64, 0, 1, 1, 0, 64, 10, 1]
+    @test all(==(expected), eachcol(Array(out)))
+end
+
 # --- setp single-pred -------------------------------------------------------
 #
 # Verifies the i1↔i8 bridge end-to-end: setp's `=b` constraint produces a

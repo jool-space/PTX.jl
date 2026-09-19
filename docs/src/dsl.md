@@ -60,9 +60,10 @@ Only the emitted instruction head drops these selectors. The two
 space-before-sem/scope `arrive_drop` heads printed by the ISA are accepted as
 provenance-marked aliases and normalized to canonical emitted PTX. Ordinary
 mbarrier addresses accept base-plus-constant-offset syntax, but reject TMA
-coordinate lists. PTX's opaque report value is one byte. Because NVPTX has no
-i8 inline-asm constraint, the full-result call carries it in the low byte of a
-zero-extended `UInt16`. The family is single-route: every form lowers through
+coordinate lists. PTX's opaque report value is one byte. Because NVPTX inline
+asm has no `.b8` register class (even an `i8` operand is allocated a 16-bit
+register), the full-result call carries it in the low byte of a zero-extended
+`UInt16`. The family is single-route: every form lowers through
 the schema to convergent inline asm, and every call site carries the same
 `convergent nomerge` barrier (matching what LLVM's own mbarrier intrinsic
 surface declares).

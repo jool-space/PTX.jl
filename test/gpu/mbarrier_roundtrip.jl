@@ -85,8 +85,8 @@ end
         complete = false
         report_pred = true
         # Public carrier is UInt16; PTX writes the opaque reportValue as b8
-        # and the wrapper zero-extends that byte because NVPTX has no i8
-        # inline-asm constraint.
+        # and the wrapper zero-extends that byte because NVPTX inline asm has
+        # no b8 register class.
         report_value = typemax(UInt16)
         for _ in 1:1_000_000
             complete, report_pred, report_value =

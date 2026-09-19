@@ -234,7 +234,7 @@ end
 # e2m3x2,e2m1x2}` (PTX 9.2) — the unpack mirror of the sub-byte FP packing
 # wrappers in src/wrappers/cvt.jl. The .b16-source forms (e2m3x2 / e3m2x2)
 # go through the chain default; e2m1x2 needs the hand-written wrapper
-# because the source carrier is `.b8` (no NVPTX i8 constraint).
+# because the source carrier is `.b8` (no NVPTX b8 asm register class).
 
 function _bw_cvt_fp6_unpack!(out::CuDeviceVector{UInt32, 1}, x::UInt16)
     tid = ptx"mov.u32"(sreg"tid.x")
