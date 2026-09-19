@@ -158,8 +158,9 @@ function build_ledger_call(::MBarrierLedger, schema::MBarrierFormSchema,
     asm = isempty(operands) ? head * ";" :
           head * " " * join(operands, ", ") * ";"
     # PTX 9.3's opaque reportValue is a `.b8` destination (the CUDA API
-    # describes mbarrier.layout::v1 status as 1-byte wide). NVPTX has no i8
-    # inline-asm constraint, so bridge it through the low byte of a UInt16.
+    # describes mbarrier.layout::v1 status as 1-byte wide). NVPTX inline asm
+    # has no `.b8` register class, so bridge it through the low byte of a
+    # UInt16.
     schema.destination === :report &&
         (asm = "{ .reg .b8 report_value; " * asm *
                " mov.b16 \$2, {report_value, 0}; }")

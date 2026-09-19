@@ -67,10 +67,10 @@ end
 end
 
 @testset "bar/barrier wrapper (tier-2 intrinsic lowering)" begin
-    # Migrated family (the fence recipe): bar.{sync,arrive}, bar.warp.sync
-    # and the barrier.{sync,arrive}{.aligned} spellings lower through
+    # Migrated family (the fence recipe): bar.{sync,arrive,red}, bar.warp.sync
+    # and the barrier.{sync,arrive,red}{.aligned} spellings lower through
     # llvm.nvvm.barrier.cta.* / llvm.nvvm.bar.warp.sync for Val and
-    # UInt32/Int32 operands (golden: test/golden/barrier@sm75.ptx).
+    # UInt32/Int32 operands (goldens: test/golden/barrier{,_red}@sm75.ptx).
     # bar.* rides the .aligned intrinsics — PTX §9.7.12.1 defines
     # bar ≡ barrier.aligned.
     cases = [
@@ -99,7 +99,48 @@ end
         (:barrier, (:arrive, :aligned), (Val{8}, Val{128}),
             "llvm.nvvm.barrier.cta.arrive.aligned.count"),
     ]
-    for (opsym, mods, argts, intr) in cases
+    # Reductions: the trailing Bool is the `{!}c` predicate; `.popc` returns
+    # the UInt32 count, `.and`/`.or` a Bool.
+    red_cases = [
+        (:bar, (:red, :popc, :u32), (Val{0}, Bool), UInt32,
+            "llvm.nvvm.barrier.cta.red.popc.aligned.all"),
+        (:bar, (:red, :popc, :u32), (UInt32, UInt32, Bool), UInt32,
+            "llvm.nvvm.barrier.cta.red.popc.aligned.count"),
+        (:bar, (:red, :and, :pred), (Int32, Bool), Bool,
+            "llvm.nvvm.barrier.cta.red.and.aligned.all"),
+        (:bar, (:red, :and, :pred), (Val{1}, Val{128}, Bool), Bool,
+            "llvm.nvvm.barrier.cta.red.and.aligned.count"),
+        (:bar, (:red, :or, :pred), (Val{2}, Bool), Bool,
+            "llvm.nvvm.barrier.cta.red.or.aligned.all"),
+        (:bar, (:red, :or, :pred), (Val{3}, Val{128}, Bool), Bool,
+            "llvm.nvvm.barrier.cta.red.or.aligned.count"),
+        (:barrier, (:red, :popc, :u32), (Val{4}, Bool), UInt32,
+            "llvm.nvvm.barrier.cta.red.popc.all"),
+        (:barrier, (:red, :popc, :u32), (Val{5}, Val{128}, Bool), UInt32,
+            "llvm.nvvm.barrier.cta.red.popc.count"),
+        (:barrier, (:red, :and, :pred), (Val{6}, Bool), Bool,
+            "llvm.nvvm.barrier.cta.red.and.all"),
+        (:barrier, (:red, :and, :pred), (Val{7}, Val{128}, Bool), Bool,
+            "llvm.nvvm.barrier.cta.red.and.count"),
+        (:barrier, (:red, :or, :pred), (Val{8}, Bool), Bool,
+            "llvm.nvvm.barrier.cta.red.or.all"),
+        (:barrier, (:red, :or, :pred), (Val{9}, Val{128}, Bool), Bool,
+            "llvm.nvvm.barrier.cta.red.or.count"),
+        (:barrier, (:red, :popc, :aligned, :u32), (Val{10}, Bool), UInt32,
+            "llvm.nvvm.barrier.cta.red.popc.aligned.all"),
+        (:barrier, (:red, :popc, :aligned, :u32), (Val{11}, Val{128}, Bool), UInt32,
+            "llvm.nvvm.barrier.cta.red.popc.aligned.count"),
+        (:barrier, (:red, :and, :aligned, :pred), (Val{12}, Bool), Bool,
+            "llvm.nvvm.barrier.cta.red.and.aligned.all"),
+        (:barrier, (:red, :and, :aligned, :pred), (Val{13}, Val{128}, Bool), Bool,
+            "llvm.nvvm.barrier.cta.red.and.aligned.count"),
+        (:barrier, (:red, :or, :aligned, :pred), (Val{14}, Bool), Bool,
+            "llvm.nvvm.barrier.cta.red.or.aligned.all"),
+        (:barrier, (:red, :or, :aligned, :pred), (Val{15}, Val{128}, Bool), Bool,
+            "llvm.nvvm.barrier.cta.red.or.aligned.count"),
+    ]
+    for (opsym, mods, argts, ret, intr) in vcat(
+            [(c[1], c[2], c[3], Nothing, c[4]) for c in cases], red_cases)
         # the intrinsic is registered and convergent
         @test PTX.NVVM.isintrinsic(intr)
         @test :convergent in PTX.NVVM.intrinsic(intr).props
@@ -107,7 +148,7 @@ end
         op = Operation{opsym, mods}()
         @test which(op, argts).module == PTX
         ci, rt = first(Base.code_typed(op, argts))
-        @test rt === Nothing
+        @test rt === ret
         @test occursin(intr, string(ci))
     end
 
@@ -118,6 +159,14 @@ end
     s = string(ci)
     @test occursin("bar.sync", s)
     @test occursin("convergent nomerge", s)
+
+    # A wider integer barrier id misses the reduction wrappers too and keeps
+    # the chain rendering, with the predicate on the `b` constraint.
+    @test PTX.lowering(ptx"bar.red.popc.u32", (Int64, Bool)).tier === :chain_asm
+    @test format_call(ptx"bar.red.popc.u32", Tuple{Val{0}, Bool}) ==
+        "bar.red.popc.u32 \$0, 0, \$1;"
+    @test occursin("=b,", build_call(:bar, (:red, :and, :pred),
+                                     (Int64, Bool)).constraints)
 
     # Renderer + registry contract for the fallback path, unchanged:
     @test format_call(ptx"bar.sync", Tuple{Val{0}})  == "bar.sync 0;"

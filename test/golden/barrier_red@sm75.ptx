@@ -1,0 +1,67 @@
+.version 9.3
+.target sm_75
+.address_size 64
+.visible .entry entry0(.param .align 8 .b8 param0[16], .param .align 8 .b8 param1[32])
+{
+ld.param.b64 %rd0, [param1];
+mov.u32 %r0, %tid.x;
+and.b32 %r1, %r0, 1;
+setp.eq.b32 %p0, %r1, 0;
+setp.ne.b32 %p1, %r1, 0;
+and.b32 %r2, %r0, 7;
+bar.red.popc.u32 %r3, 0, %p1;
+st.global.b32 [%rd0], %r3;
+bar.red.popc.u32 %r4, 1, 128, %p1;
+st.global.b32 [%rd0+4], %r4;
+bar.red.and.pred %p2, 2, %p1;
+selp.b32 %r5, 1, 0, %p2;
+st.global.b32 [%rd0+8], %r5;
+bar.red.and.pred %p3, 3, 128, %p1;
+selp.b32 %r6, 1, 0, %p3;
+st.global.b32 [%rd0+12], %r6;
+bar.red.or.pred %p4, 4, %p1;
+selp.b32 %r7, 1, 0, %p4;
+st.global.b32 [%rd0+16], %r7;
+bar.red.or.pred %p5, 5, 128, %p1;
+selp.b32 %r8, 1, 0, %p5;
+st.global.b32 [%rd0+20], %r8;
+barrier.red.popc.u32 %r9, 6, %p1;
+st.global.b32 [%rd0+24], %r9;
+barrier.red.popc.u32 %r10, 7, 128, %p1;
+st.global.b32 [%rd0+28], %r10;
+barrier.red.and.pred %p6, 8, %p1;
+selp.b32 %r11, 1, 0, %p6;
+st.global.b32 [%rd0+32], %r11;
+barrier.red.and.pred %p7, 9, 128, %p1;
+selp.b32 %r12, 1, 0, %p7;
+st.global.b32 [%rd0+36], %r12;
+barrier.red.or.pred %p8, 10, %p1;
+selp.b32 %r13, 1, 0, %p8;
+st.global.b32 [%rd0+40], %r13;
+barrier.red.or.pred %p9, 11, 128, %p1;
+selp.b32 %r14, 1, 0, %p9;
+st.global.b32 [%rd0+44], %r14;
+bar.red.popc.u32 %r15, 12, %p1;
+st.global.b32 [%rd0+48], %r15;
+bar.red.popc.u32 %r16, 13, 128, %p1;
+st.global.b32 [%rd0+52], %r16;
+bar.red.and.pred %p10, 14, %p1;
+selp.b32 %r17, 1, 0, %p10;
+st.global.b32 [%rd0+56], %r17;
+bar.red.and.pred %p11, 15, 128, %p1;
+selp.b32 %r18, 1, 0, %p11;
+st.global.b32 [%rd0+60], %r18;
+bar.red.or.pred %p12, 0, %p1;
+selp.b32 %r19, 1, 0, %p12;
+st.global.b32 [%rd0+64], %r19;
+bar.red.or.pred %p13, 1, 128, %p1;
+selp.b32 %r20, 1, 0, %p13;
+st.global.b32 [%rd0+68], %r20;
+bar.red.popc.u32 %r21, %r2, %p1;
+st.global.b32 [%rd0+72], %r21;
+bar.red.popc.u32 %r22, %r2, 128, %p1;
+st.global.b32 [%rd0+76], %r22;
+bar.red.popc.u32 %r23, 2, %p0;
+st.global.b32 [%rd0+80], %r23;
+ret;
+}

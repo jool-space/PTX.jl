@@ -10,7 +10,7 @@ const _EXPECTED_CVT_SOURCE_CARRIERS = Dict(
     :f16x2 => :b32, :bf16x2 => :b32,
     :e4m3x2 => :b16, :e5m2x2 => :b16,
     # PTX's e2m1x2 source is b8. PTX.jl bridges it through b16 because
-    # LLVM NVPTX has no i8 inline-assembly constraint.
+    # LLVM NVPTX inline assembly has no b8 register class.
     :e2m1x2 => :b16,
     :e2m3x2 => :b16, :e3m2x2 => :b16,
     :ue8m0x2 => :b16, :s2f6x2 => :b16,
@@ -100,7 +100,7 @@ function _expected_ordinary_cvt_source_schemas()
 
     # Single-scale .scaled::n1::ue8m0 (PTX ISA 9.4, sm_107f): every narrow
     # down-convert destination from f32 or either packed 16-bit float. The
-    # scale factor is physically b8, carried as b16 (no i8 constraint).
+    # scale factor is physically b8, carried as b16 (no b8 asm register).
     for destination in narrow_x2
         add!(destination, :f32, (:f32, :f32, :b16); scaled = :n1)
         for source in (:f16x2, :bf16x2)

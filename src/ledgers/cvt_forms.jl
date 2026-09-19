@@ -29,8 +29,9 @@ end
 # PTX ISA 9.4 §9.7.10.24 has twelve fundamental source types.  Alternate
 # floating-point formats live in bit-size registers (§5.2.3), so their Julia
 # carrier is a bit type rather than a numerically similar fundamental float.
-# e2m1x2 is physically b8, but NVPTX has no i8 inline-asm constraint; PTX.jl's
-# exact cvt wrappers bridge it through UInt16, hence the reviewed b16 carrier.
+# e2m1x2 is physically b8, but NVPTX inline asm has no b8 register class;
+# PTX.jl's exact cvt wrappers bridge it through UInt16, hence the reviewed b16
+# carrier.
 # ue5m3x2 (PTX ISA 9.4, sm_107f) packs two ue5m3 into b16.
 const ORDINARY_CVT_SOURCE_CARRIERS = (
     :u8 => :u8, :u16 => :u16, :u32 => :u32, :u64 => :u64,

@@ -593,8 +593,8 @@ end
 
 # PTX declaration carriers are not the same thing as PTX.jl's LLVM inline-asm
 # bridge. In particular, e2m1x2 is physically .b8 even though the wrapper uses
-# UInt16 because NVPTX has no i8 asm constraint. Keep destination storage
-# explicit instead of reversing DTYPE_RETTYPE.
+# UInt16 because NVPTX inline asm has no .b8 register class. Keep destination
+# storage explicit instead of reversing DTYPE_RETTYPE.
 const _TRANSPILE_CVT_DEST_DECL_TYPES = Dict{Symbol, Tuple}(
     :bf16 => (ScalarType.B16,),
     :tf32 => (ScalarType.B32,),
