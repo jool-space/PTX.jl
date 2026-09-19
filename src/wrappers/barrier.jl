@@ -11,9 +11,10 @@
 # "r" constraints had to materialize through registers.
 #
 # Operands: `Val{N}` (the chain surface's immediate spelling) and runtime
-# UInt32/Int32. Wider integers stay on the asm-tier chain fallback
-# unchanged — the frozen transpiler emits `ptx"bar.sync"(0)` with Int
-# literals, and that path must keep byte-identical behavior.
+# UInt32/Int32, matching the ISA's `.u32` operands. Wider integers (a bare
+# `0` literal is Int64) miss these methods and fall through to the generic
+# chain, whose 64-bit register ptxas rejects for `bar`; spell immediates
+# `Val(0)`. The transpiler emits UInt32 operands.
 #
 # Reductions take the predicate `c` as a `Bool` (an `i1`, allocated to a
 # `.pred` register); the `{!}c` complement is spelled `!c` in Julia. `.popc`

@@ -170,7 +170,8 @@ const FAB_BAR_BYTES = barrier_bytes(BarrierSet{FAB_BARS})
 const FAB_BARS_SP = (; FAB_BARS..., p_q = ((2, 2), 128))
 
 # Dispatch-based table selection (kernel-path validation must be
-# dispatch, not runtime membership — see CLAUDE.md's 1.10 note).
+# dispatch, not runtime membership — see the Julia 1.10 note under
+# "Running the tests" in docs/src/extending.md).
 @inline fab_barset(::Val{false}, base) = BarrierSet{FAB_BARS}(base)
 @inline fab_barset(::Val{true},  base) = BarrierSet{FAB_BARS_SP}(base)
 

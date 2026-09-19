@@ -152,9 +152,9 @@ end
         @test occursin(intr, string(ci))
     end
 
-    # Wider integers stay on the asm-tier chain fallback unchanged — the
-    # frozen transpiler emits `ptx"bar.sync"(0)` with Int literals, and
-    # that path keeps its rendering and its convergent nomerge asm.
+    # Wider integers miss the wrappers and fall through to the generic chain,
+    # which renders the form with convergent nomerge asm (ptxas then rejects
+    # its 64-bit register; see src/wrappers/barrier.jl).
     ci, _ = first(Base.code_typed(Operation{:bar, (:sync,)}(), (Int64,)))
     s = string(ci)
     @test occursin("bar.sync", s)
