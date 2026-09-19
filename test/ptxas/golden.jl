@@ -480,8 +480,7 @@ end
 # (form, arity) pair in the migration scope — bar.sync with immediate and
 # register operands, bar.warp.sync, bar.arrive, and the barrier.* spellings
 # in both aligned flavors. Stores between barriers keep each form's program
-# position observable. bar.red/barrier.red are absent deliberately: the asm
-# tier never could express predicate operands, so there is nothing to lock.
+# position observable. The reductions have their own golden below.
 
 function _golden_barrier!(out::CuDeviceVector{UInt32, 1})
     tid = ptx"mov.u32"(sreg"tid.x")
@@ -518,6 +517,46 @@ end
 
 @testset "golden: bar/barrier family at sm_75" begin
     @test golden_test("barrier@sm75", _golden_barrier!,
+                      Tuple{CuDeviceVector{UInt32, 1}}; cap = v"7.5")
+end
+
+# bar.red / barrier.red: every (spelling, reduction, arity) triple with an
+# immediate barrier id, plus register ids and a complemented predicate. Each
+# result is stored so no reduction is dead. PTX forbids mixing `.red` with
+# `.sync`/`.arrive` on one active barrier; this kernel only compiles.
+
+function _golden_barrier_red!(out::CuDeviceVector{UInt32, 1})
+    tid = ptx"mov.u32"(sreg"tid.x")
+    odd = (tid & UInt32(1)) == UInt32(1)
+    rid = tid & UInt32(0x7)
+    @inbounds begin
+        out[1]  = ptx"bar.red.popc.u32"(Val(0), odd)
+        out[2]  = ptx"bar.red.popc.u32"(Val(1), Val(128), odd)
+        out[3]  = UInt32(ptx"bar.red.and.pred"(Val(2), odd))
+        out[4]  = UInt32(ptx"bar.red.and.pred"(Val(3), Val(128), odd))
+        out[5]  = UInt32(ptx"bar.red.or.pred"(Val(4), odd))
+        out[6]  = UInt32(ptx"bar.red.or.pred"(Val(5), Val(128), odd))
+        out[7]  = ptx"barrier.red.popc.u32"(Val(6), odd)
+        out[8]  = ptx"barrier.red.popc.u32"(Val(7), Val(128), odd)
+        out[9]  = UInt32(ptx"barrier.red.and.pred"(Val(8), odd))
+        out[10] = UInt32(ptx"barrier.red.and.pred"(Val(9), Val(128), odd))
+        out[11] = UInt32(ptx"barrier.red.or.pred"(Val(10), odd))
+        out[12] = UInt32(ptx"barrier.red.or.pred"(Val(11), Val(128), odd))
+        out[13] = ptx"barrier.red.popc.aligned.u32"(Val(12), odd)
+        out[14] = ptx"barrier.red.popc.aligned.u32"(Val(13), Val(128), odd)
+        out[15] = UInt32(ptx"barrier.red.and.aligned.pred"(Val(14), odd))
+        out[16] = UInt32(ptx"barrier.red.and.aligned.pred"(Val(15), Val(128), odd))
+        out[17] = UInt32(ptx"barrier.red.or.aligned.pred"(Val(0), odd))
+        out[18] = UInt32(ptx"barrier.red.or.aligned.pred"(Val(1), Val(128), odd))
+        out[19] = ptx"bar.red.popc.u32"(rid, odd)
+        out[20] = ptx"bar.red.popc.u32"(rid, UInt32(128), odd)
+        out[21] = ptx"bar.red.popc.u32"(Val(2), !odd)
+    end
+    return nothing
+end
+
+@testset "golden: bar.red/barrier.red at sm_75" begin
+    @test golden_test("barrier_red@sm75", _golden_barrier_red!,
                       Tuple{CuDeviceVector{UInt32, 1}}; cap = v"7.5")
 end
 

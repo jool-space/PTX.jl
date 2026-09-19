@@ -1,0 +1,68 @@
+.version 9.3
+.target sm_75
+.address_size 64
+.visible .entry entry0(.param .align 8 .b8 param0[16], .param .align 8 .b8 param1[32])
+{
+ld.param.b64 %rd0, [param1];
+mov.u32 %r0, %tid.x;
+and.b32 %r1, %r0, 7;
+and.b32 %r2, %r0, 1;
+setp.ne.b32 %p0, %r2, 0;
+bar.red.popc.u32 %r3, 0, %p0;
+st.global.b32 [%rd0], %r3;
+bar.red.popc.u32 %r4, 1, 128, %p0;
+st.global.b32 [%rd0+4], %r4;
+bar.red.and.pred %p1, 2, %p0;
+selp.b32 %r5, 1, 0, %p1;
+st.global.b32 [%rd0+8], %r5;
+bar.red.and.pred %p2, 3, 128, %p0;
+selp.b32 %r6, 1, 0, %p2;
+st.global.b32 [%rd0+12], %r6;
+bar.red.or.pred %p3, 4, %p0;
+selp.b32 %r7, 1, 0, %p3;
+st.global.b32 [%rd0+16], %r7;
+bar.red.or.pred %p4, 5, 128, %p0;
+selp.b32 %r8, 1, 0, %p4;
+st.global.b32 [%rd0+20], %r8;
+barrier.red.popc.u32 %r9, 6, %p0;
+st.global.b32 [%rd0+24], %r9;
+barrier.red.popc.u32 %r10, 7, 128, %p0;
+st.global.b32 [%rd0+28], %r10;
+barrier.red.and.pred %p5, 8, %p0;
+selp.b32 %r11, 1, 0, %p5;
+st.global.b32 [%rd0+32], %r11;
+barrier.red.and.pred %p6, 9, 128, %p0;
+selp.b32 %r12, 1, 0, %p6;
+st.global.b32 [%rd0+36], %r12;
+barrier.red.or.pred %p7, 10, %p0;
+selp.b32 %r13, 1, 0, %p7;
+st.global.b32 [%rd0+40], %r13;
+barrier.red.or.pred %p8, 11, 128, %p0;
+selp.b32 %r14, 1, 0, %p8;
+st.global.b32 [%rd0+44], %r14;
+barrier.red.popc.aligned.u32 %r15, 12, %p0;
+st.global.b32 [%rd0+48], %r15;
+barrier.red.popc.aligned.u32 %r16, 13, 128, %p0;
+st.global.b32 [%rd0+52], %r16;
+barrier.red.and.aligned.pred %p9, 14, %p0;
+selp.b32 %r17, 1, 0, %p9;
+st.global.b32 [%rd0+56], %r17;
+barrier.red.and.aligned.pred %p10, 15, 128, %p0;
+selp.b32 %r18, 1, 0, %p10;
+st.global.b32 [%rd0+60], %r18;
+barrier.red.or.aligned.pred %p11, 0, %p0;
+selp.b32 %r19, 1, 0, %p11;
+st.global.b32 [%rd0+64], %r19;
+barrier.red.or.aligned.pred %p12, 1, 128, %p0;
+selp.b32 %r20, 1, 0, %p12;
+st.global.b32 [%rd0+68], %r20;
+bar.red.popc.u32 %r21, %r1, %p0;
+st.global.b32 [%rd0+72], %r21;
+mov.b32 %r22, 128;
+bar.red.popc.u32 %r23, %r1, %r22, %p0;
+st.global.b32 [%rd0+76], %r23;
+not.pred %p13, %p0;
+bar.red.popc.u32 %r24, 2, %p13;
+st.global.b32 [%rd0+80], %r24;
+ret;
+}
