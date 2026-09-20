@@ -2,7 +2,8 @@
 # wrapper family. Each `_*_register` generator records what it defined here
 # instead of maintaining its own module-level accumulator; the test-side
 # oracles (which deliberately re-derive the same inventories from the ISA —
-# see CLAUDE.md, "double-entry") read it back through the query helpers below.
+# see "Count pins and oracles" in docs/src/extending.md) read it back through
+# the query helpers below.
 #
 # One record per distinct (family, op, mods, tier, intrinsic) key. A family
 # may record several intrinsics under one mods tuple (the tcgen05 mma grids

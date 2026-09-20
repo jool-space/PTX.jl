@@ -6,8 +6,9 @@ CurrentModule = PTX
 
 Maintainer documentation: the recipes for adding coverage, and the
 obligations each one carries. Like [Internals](internals.md), nothing here
-is public API. Working-environment traps (test invocation, hardware
-matrix, rebase hazards) live in the repository-root `CLAUDE.md`.
+is public API. Working-environment traps (test invocation, the
+check-bounds golden trap, the Julia 1.10 overlay caveat) are under
+[Running the tests](#Running-the-tests).
 
 ## First: which tier?
 
@@ -46,7 +47,7 @@ the ceiling but a permissive-direction divergence fails at generation
 
 Every recipe ends the same way: run the affected suites with
 `julia --project=test test/runtests.jl <names...>` and update the
-test-side oracles (see [Count pins and oracles](#count-pins-and-oracles)).
+test-side oracles (see [Count pins and oracles](#Count-pins-and-oracles)).
 
 Whatever the recipe, adding coverage also means updating
 `docs/SURFACE.toml` — the machine-checked inventory that assigns every ISA
