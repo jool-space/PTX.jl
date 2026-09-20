@@ -5,4 +5,4 @@ TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [compat]
 Documenter = "1"
-TOML = "1"
+TOML = "1, < 0.0.1"
