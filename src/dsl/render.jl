@@ -31,10 +31,9 @@ function render_arg(::Type{Address{T}}, slot::Int, ::Bool) where {T}
 end
 
 function render_arg(::Type{SpecialReg{S}}, slot::Int, ::Bool) where {S}
-    # `SpecialReg` is intentionally not exported, but direct construction
-    # should not resurrect the obsolete `%warpsize` pseudo-register spelling.
-    String(S) == IR.LEGACY_WARP_SIZE_SREG &&
-        return string(IR.PREDEFINED_IMMEDIATES["WARP_SZ"]), InputSlot[], slot
+    # Interpolated `ptx"%..."` names and direct construction reach here
+    # unchecked.
+    _check_special_reg(String(S))
     return String(S), InputSlot[], slot
 end
 

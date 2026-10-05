@@ -61,8 +61,8 @@ function gemm_highperf_swizzled_kernel!(
     # Launch grid is widened on X by 2^LOG_GROUP and narrowed on Y by the same
     # factor. The bottom LOG_GROUP bits of ctaid.x become the within-group M
     # offset; the rest is the N tile.
-    ctaid_x = Int(ptx"mov.u32"(sreg"ctaid.x"))
-    ctaid_y = Int(ptx"mov.u32"(sreg"ctaid.y"))
+    ctaid_x = Int(ptx"mov.u32"(ptx"%ctaid.x"))
+    ctaid_y = Int(ptx"mov.u32"(ptx"%ctaid.y"))
     n_block = ctaid_x >> LOG_GROUP
     m_block = (ctaid_y << LOG_GROUP) + (ctaid_x & ((1 << LOG_GROUP) - 1))
 
@@ -70,7 +70,7 @@ function gemm_highperf_swizzled_kernel!(
     n_base = n_block * HPS_BN
 
     # Thread + warp identity (unchanged from highperf).
-    tid     = ptx"mov.u32"(sreg"tid.x")
+    tid     = ptx"mov.u32"(ptx"%tid.x")
     warp_id = Int(tid >> UInt32(5))
     lane    = Int(tid & UInt32(31))
     warp_m  = warp_id >> 1

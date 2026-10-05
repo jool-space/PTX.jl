@@ -8,14 +8,14 @@ using PTX.Warps: warp_reduce
 
 # ptx"..." ops are callable singletons — passed directly as `op`.
 function _wr_full_kernel!(out::CuDeviceVector{Float32, 1})
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     v = warp_reduce(ptx"max.f32", Float32(tid))
     @inbounds out[1] = v
     return nothing
 end
 
 function _wr_seg4_kernel!(out::CuDeviceVector{Float32, 1})
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     v = warp_reduce(ptx"add.f32", Float32(tid), Val(4))
     @inbounds out[1] = v
     return nothing
@@ -24,7 +24,7 @@ end
 # A closure wrapping the same op must lower identically to the direct
 # singleton — pinned below alongside the hand-ladder equivalence.
 function _wr_closure_kernel!(out::CuDeviceVector{Float32, 1})
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     v = warp_reduce((a, b) -> ptx"max.f32"(a, b), Float32(tid))
     @inbounds out[1] = v
     return nothing
@@ -44,7 +44,7 @@ end
     v
 end
 function _wr_hand_kernel!(out::CuDeviceVector{Float32, 1})
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     v = _wr_hand_ladder(Float32(tid))
     @inbounds out[1] = v
     return nothing

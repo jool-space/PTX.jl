@@ -5,9 +5,9 @@ using Random
 function _extended_addsub_runtime!(sum_out, diff_out, sum_in_out, diff_in_out,
                                    scalar_sum_out, scalar_diff_out,
                                    a_words, b_words, n::Int)
-    tid = Int(ptx"mov.u32"(sreg"tid.x"))
-    bid = Int(ptx"mov.u32"(sreg"ctaid.x"))
-    nt = Int(ptx"mov.u32"(sreg"ntid.x"))
+    tid = Int(ptx"mov.u32"(ptx"%tid.x"))
+    bid = Int(ptx"mov.u32"(ptx"%ctaid.x"))
+    nt = Int(ptx"mov.u32"(ptx"%ntid.x"))
     i = bid * nt + tid + 1
     i > n && return nothing
     off = 4 * (i - 1)
@@ -58,9 +58,9 @@ function _extended_addsub_runtime!(sum_out, diff_out, sum_in_out, diff_in_out,
 end
 
 function _extended_mul32_runtime!(fused_out, scalar_out, a_words, b_words, n::Int)
-    tid = Int(ptx"mov.u32"(sreg"tid.x"))
-    bid = Int(ptx"mov.u32"(sreg"ctaid.x"))
-    nt = Int(ptx"mov.u32"(sreg"ntid.x"))
+    tid = Int(ptx"mov.u32"(ptx"%tid.x"))
+    bid = Int(ptx"mov.u32"(ptx"%ctaid.x"))
+    nt = Int(ptx"mov.u32"(ptx"%ntid.x"))
     i = bid * nt + tid + 1
     i > n && return nothing
     off = 2 * (i - 1)
@@ -95,9 +95,9 @@ function _extended_mul32_runtime!(fused_out, scalar_out, a_words, b_words, n::In
 end
 
 function _extended_mul64_runtime!(out_words, a_words, b_words, n::Int)
-    tid = Int(ptx"mov.u32"(sreg"tid.x"))
-    bid = Int(ptx"mov.u32"(sreg"ctaid.x"))
-    nt = Int(ptx"mov.u32"(sreg"ntid.x"))
+    tid = Int(ptx"mov.u32"(ptx"%tid.x"))
+    bid = Int(ptx"mov.u32"(ptx"%ctaid.x"))
+    nt = Int(ptx"mov.u32"(ptx"%ntid.x"))
     i = bid * nt + tid + 1
     i > n && return nothing
     off = 2 * (i - 1)

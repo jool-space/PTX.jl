@@ -42,10 +42,10 @@ function gemm_fp8_kernel!(
         ::Val{M}, ::Val{N}, ::Val{K}) where {M, N, K}
     n_iters = K ÷ F8_BK
 
-    m_base = Int(ptx"mov.u32"(sreg"ctaid.y")) * F8_BM
-    n_base = Int(ptx"mov.u32"(sreg"ctaid.x")) * F8_BN
+    m_base = Int(ptx"mov.u32"(ptx"%ctaid.y")) * F8_BM
+    n_base = Int(ptx"mov.u32"(ptx"%ctaid.x")) * F8_BN
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     gid = Int(tid >> UInt32(2))
     tig = Int(tid & UInt32(0x3))
     kl  = 4 * tig                       # fragment k low: 0,4,8,12

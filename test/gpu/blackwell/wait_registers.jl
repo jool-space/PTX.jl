@@ -13,7 +13,7 @@ using PTX: wait_registers
         @inbounds values = tuple($(loads...))
         result = wait_registers(op, values)
         # Every lane participates in the wait; one lane writes the result.
-        if ptx"mov.u32"(sreg"tid.x") == UInt32(0)
+        if ptx"mov.u32"(ptx"%tid.x") == UInt32(0)
             @inbounds begin
                 $(stores...)
             end
@@ -25,7 +25,7 @@ end
 function _wr_scalar_kernel!(out, input, op)
     value = @inbounds input[1]
     result = wait_registers(op, value)
-    if ptx"mov.u32"(sreg"tid.x") == UInt32(0)
+    if ptx"mov.u32"(ptx"%tid.x") == UInt32(0)
         @inbounds out[1] = result
     end
     nothing
@@ -33,7 +33,7 @@ end
 
 function _wr_empty_tuple_kernel!(out, op)
     result = wait_registers(op, ())
-    lane = ptx"mov.u32"(sreg"tid.x")
+    lane = ptx"mov.u32"(ptx"%tid.x")
     @inbounds out[lane + UInt32(1)] = result === ()
     nothing
 end

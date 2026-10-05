@@ -34,7 +34,7 @@ function _exec_mma_e4m3_bitpacked!(out)
     b = (one4, one4)
     c = (0f0, 0f0, 0f0, 0f0)
     d = ptx"mma.sync.aligned.m16n8k32.row.col.f32.e4m3.e4m3.f32"(a, b, c)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     off = Int(tid) * 4
     @inbounds out[off + 1] = d[1]
     @inbounds out[off + 2] = d[2]
@@ -63,7 +63,7 @@ end
 end
 
 function _exec_mma_e4m3_from_f32!(D, A, B)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     g  = Int(tid >> UInt32(2))
     ig = Int(tid & UInt32(0x3))
 
@@ -149,7 +149,7 @@ function _exec_mma_e5m2_bitpacked!(out)
     b = (one4, one4)
     c = (0f0, 0f0, 0f0, 0f0)
     d = ptx"mma.sync.aligned.m16n8k32.row.col.f32.e5m2.e5m2.f32"(a, b, c)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     off = Int(tid) * 4
     @inbounds out[off + 1] = d[1]
     @inbounds out[off + 2] = d[2]
@@ -172,7 +172,7 @@ end
 end
 
 function _exec_mma_e5m2_from_f32!(D, A, B)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     g  = Int(tid >> UInt32(2))
     ig = Int(tid & UInt32(0x3))
 
@@ -268,7 +268,7 @@ function _exec_mma_fp8_mixed_bitpacked!(outf, outh)
     h3 = ptx"mma.sync.aligned.m16n8k16.row.col.f16.e5m2.e4m3.f16"(
         (one_e5, one_e5), (one_e4,), ch)
 
-    tid = Int(ptx"mov.u32"(sreg"tid.x"))
+    tid = Int(ptx"mov.u32"(ptx"%tid.x"))
     offf = tid * 12
     @inbounds begin
         outf[offf + 1]  = d1[1]; outf[offf + 2]  = d1[2]
@@ -305,7 +305,7 @@ end
 # product and partial sum is an integer ≤ 8192, exact in f32.
 
 function _exec_mma_mixed_from_f32!(D, A, B)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     g  = Int(tid >> UInt32(2))
     ig = Int(tid & UInt32(0x3))
 
@@ -365,7 +365,7 @@ end
 # reduced-precision accumulator changes nothing and equality is exact.
 
 function _exec_mma_e4m3_f16acc_from_f32!(H, A, B)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     g  = Int(tid >> UInt32(2))
     ig = Int(tid & UInt32(0x3))
 

@@ -13,7 +13,7 @@ using PTX.NVVM
 # --- shfl + vote at sm_75 ---------------------------------------------------
 
 function _nvvm_shfl_vote!(out::CuDeviceVector{UInt32, 1})
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     v = nvvm"shfl.sync.idx.i32"(0xffffffff, tid, UInt32(5), UInt32(0x1f))
     vp, ok = nvvm"shfl.sync.idx.i32p"(0xffffffff, tid, UInt32(5), UInt32(0x1f))
     all31 = nvvm"vote.all.sync"(0xffffffff, tid < UInt32(31))
@@ -39,7 +39,7 @@ end
 # hardware.
 
 function _nvvm_divergent_mask!(out::CuDeviceVector{UInt32, 1})
-    i = ptx"mov.u32"(sreg"tid.x")
+    i = ptx"mov.u32"(ptx"%tid.x")
     if i < UInt32(16)
         @inbounds out[i + 1] = nvvm"activemask"()
     else
@@ -76,7 +76,7 @@ end
 
 function _nvvm_ldmatrix!(out::CuDeviceMatrix{UInt32, 1})
     smem = CuStaticSharedArray(UInt16, 256)
-    t = ptx"mov.u32"(sreg"tid.x")
+    t = ptx"mov.u32"(ptx"%tid.x")
     r = nvvm"ldmatrix.sync.aligned.m8n8.x4.b16"(pointer(smem) + t * UInt32(16))
     @inbounds for m in 1:4
         out[t + 1, m] = r[m]
@@ -124,13 +124,13 @@ end
 # survive (guards against the op vanishing for an unrelated reason).
 
 function _nvvm_sreg_range_fold!(out::Core.LLVMPtr{UInt32, 1})
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     ptx"st.global.b32"(out, tid & UInt32(1023))
     return nothing
 end
 
 function _nvvm_sreg_range_ctrl!(out::Core.LLVMPtr{UInt32, 1})
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     ptx"st.global.b32"(out, tid & UInt32(511))
     return nothing
 end

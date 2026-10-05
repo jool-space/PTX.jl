@@ -25,7 +25,7 @@ function _tcgen05_ldred_kernel!(O::CuDeviceVector{Float32, 1},
     tmem_slot = CuStaticSharedArray(UInt32, 1)
     slot_addr = smem_addr_u32(pointer(tmem_slot))
 
-    tid  = ptx"mov.u32"(sreg"tid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
     lane = tid & UInt32(31)
 
     if tid < UInt32(32)

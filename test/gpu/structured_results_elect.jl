@@ -5,7 +5,7 @@
 # not a particular lane: assert the specified cross-lane invariants only.
 
 function _structured_elect_runtime!(leaders, selected)
-    lane = ptx"mov.u32"(sreg"tid.x")
+    lane = ptx"mov.u32"(ptx"%tid.x")
     leader, is_leader = ptx"elect.sync"(UInt32(0x0000ffff))
     @inbounds begin
         leaders[lane + UInt32(1)] = leader

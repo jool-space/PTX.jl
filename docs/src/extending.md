@@ -88,8 +88,8 @@ Then:
 Files touched, in order:
 
 1. `src/wrappers/<family>.jl` — a typed method on the operation
-   singleton. A compile-time literal spelling uses the
-   `optype"opcode.mods"` definition macro (never a hand-transcribed
+   singleton. A compile-time literal spelling is defined on
+   `(::typeof(ptx"opcode.mods"))` (never a hand-transcribed
    `(::Operation{:op, (...)})` tuple — the string form is dispatchable by
    the `ptx""` call spelling by construction); only generator loops that
    build the mods tuple programmatically define methods on the

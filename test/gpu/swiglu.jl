@@ -43,8 +43,8 @@ function _swiglu_v4_kernel!(
         up::CuDeviceVector{Float32},
         ::Val{F}, ::Val{block}) where {F, block}
     v4_iters     = F ÷ (block * 4)
-    row_base     = ptx"mov.u32"(sreg"ctaid.x")
-    tid          = ptx"mov.u32"(sreg"tid.x")
+    row_base     = ptx"mov.u32"(ptx"%ctaid.x")
+    tid          = ptx"mov.u32"(ptx"%tid.x")
     row_byte_off = Int(row_base) * (F * 4)
     pg = pointer(gate) + row_byte_off
     pu = pointer(up)   + row_byte_off

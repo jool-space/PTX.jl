@@ -24,8 +24,8 @@ function _cluster_arrive_mapa_kernel!(out::CuDeviceVector{UInt32, 1})
     mbar = CuStaticSharedArray(UInt64, 1)
     mb_ptr = pointer(mbar)
 
-    tid = ptx"mov.u32"(sreg"tid.x")
-    cta_rank = ptx"mov.u32"(sreg"cluster_ctarank")
+    tid = ptx"mov.u32"(ptx"%tid.x")
+    cta_rank = ptx"mov.u32"(ptx"%cluster_ctarank")
 
     # Each CTA inits its own local mbarrier expecting 2 arrives (one from
     # itself, one from the other CTA in the cluster).

@@ -46,7 +46,7 @@ end
 # --- mov.u32 (special register) --------------------------------------------
 
 function _kernel_mov_tid_x(out)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     @inbounds out[tid + 1] = tid
     return nothing
 end
@@ -345,7 +345,7 @@ end
 # --- shfl.sync family ------------------------------------------------------
 
 function _kernel_shfl_idx(out)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     src = tid + UInt32(100)
     @inbounds out[Int(tid) + 1] =
         ptx"shfl.sync.idx.b32"(src, UInt32(5), UInt32(0x1F), UInt32(0xFFFFFFFF))
@@ -358,7 +358,7 @@ end
 end
 
 function _kernel_shfl_bfly(out)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     @inbounds out[Int(tid) + 1] =
         ptx"shfl.sync.bfly.b32"(tid, UInt32(0x10), UInt32(0x1F), UInt32(0xFFFFFFFF))
     return nothing

@@ -48,8 +48,8 @@ function _tcgen05_mma_probe_kernel!(O::CuDeviceVector{Float32, 1})
     bar_addr  = smem_addr_u32(mb_ptr)
     slot_addr = smem_addr_u32(pointer(tmem_slot))
 
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    nthr = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    nthr = ptx"mov.u32"(ptx"%ntid.x")
     lane = tid & UInt32(31)
 
     if tid == UInt32(0)

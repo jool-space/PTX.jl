@@ -97,7 +97,7 @@ test_runtime_supported(file::AbstractString) =
     TestTargets.runtime_supported(file, _test_device_capability())
 
 # Explicit CUDA toolkit target, with no driver/device discovery. Compiled with
-# kernel ABI so `kernel_state` intrinsics (e.g. ptx"mov.u32"(sreg"%tid.x"))
+# kernel ABI so `kernel_state` intrinsics (e.g. ptx"mov.u32"(ptx"%tid.x"))
 # resolve correctly.
 #
 # Since CUDACore 6.2 the feature set is part of the target (`SMVersion`),

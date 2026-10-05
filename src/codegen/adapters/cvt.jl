@@ -27,9 +27,7 @@ function _render_cvt_source(op::Operand, cg::CodeGenState, kind::Symbol,
                    !(schema.stochastic && index == length(schema.operands))
     predefined = op isa LabelOperand &&
                  _predefined_immediate_expr(op.name) !== nothing
-    legacy_warp_size = op isa RegisterOperand &&
-                       op.name == IR.LEGACY_WARP_SIZE_SREG
-    is_immediate = op isa ImmediateOperand || predefined || legacy_warp_size
+    is_immediate = op isa ImmediateOperand || predefined
 
     if data_operand && is_immediate &&
             !(schema.source in _CVT_IMMEDIATE_DATA_SOURCES)

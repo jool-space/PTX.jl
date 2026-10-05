@@ -370,7 +370,6 @@ end
 
 function _validate_register_source!(state::_TranspileContractState,
                                     op::RegisterOperand, path::String)
-    op.name == IR.LEGACY_WARP_SIZE_SREG && return
     op.name in SPECIAL_REGS && return
     op.name in IR.V4_SPECIAL_REG_ROOTS &&
         _transpile_reject(path, "vector-valued special-register roots require component selection")
@@ -501,13 +500,6 @@ function _validate_typed_source!(state::_TranspileContractState, op::Operand,
     elseif op isa ImmediateOperand
         return _validate_immediate_source!(op, path, kind)
     elseif op isa RegisterOperand
-        if op.name == IR.LEGACY_WARP_SIZE_SREG
-            (kind in _TRANSPILE_INTEGER_SOURCE_ROLES || kind === :pred) ||
-                _transpile_reject(path,
-                "%warpsize/WARP_SZ is an integer predefined immediate and " *
-                "cannot carry .$kind semantics")
-            return
-        end
         if op.name in SPECIAL_REGS
             # Only the ubiquitous thread-index components are admitted in the
             # finite generic ledger. Other special-register carrier types are
@@ -628,9 +620,7 @@ function _validate_cvt_source!(state::_TranspileContractState, op::Operand,
                                role::Symbol, schema, index::Int, path::String)
     predefined = op isa LabelOperand &&
                  _predefined_immediate_expr(op.name) !== nothing
-    legacy_warp = op isa RegisterOperand &&
-                  op.name == IR.LEGACY_WARP_SIZE_SREG
-    if op isa ImmediateOperand || predefined || legacy_warp
+    if op isa ImmediateOperand || predefined
         # Ordinary cvt is an exact constant-expression consumer. Exercise its
         # non-evaluating PTX integer/float conversion now so invalid constants
         # fail during preflight, while valid expressions do not get mistaken
@@ -772,8 +762,6 @@ function _render_transpile_role(cg::CodeGenState, op::Operand, role::Symbol)
             return _ptx_predicate_constant(op.text) ? "true" : "false"
         elseif op isa LabelOperand && _predefined_immediate_expr(op.name) !== nothing
             return _ptx_predicate_constant(op.name) ? "true" : "false"
-        elseif op isa RegisterOperand && op.name == IR.LEGACY_WARP_SIZE_SREG
-            return _ptx_predicate_constant("WARP_SZ") ? "true" : "false"
         end
     end
     if role === :u64_or_shared_symbol

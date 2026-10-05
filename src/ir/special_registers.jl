@@ -13,15 +13,10 @@
 # This is a classification/provenance ledger, not a global parser validator:
 # target/version enforcement remains a separate frontend responsibility.
 #
-# %warpsize is intentionally absent: PTX 9.3 specifies WARP_SZ as an
-# immediate constant, not a % special register. The user-facing and codegen
-# paths normalize the historical pseudo-register spelling to that immediate.
-
-# PTX 9.3 §4.5.1 says every current target has a 32-thread warp. Keep the
-# standard spelling and the legacy pseudo-register spelling separate: only
-# WARP_SZ belongs to the PTX source language.
+# PTX has no %warpsize register (LLVM's `llvm.nvvm.read.ptx.sreg.warpsize`
+# notwithstanding): the warp size is the predefined immediate WARP_SZ, and
+# PTX 9.3 §4.5.1 says every current target has a 32-thread warp.
 const PREDEFINED_IMMEDIATES = Dict{String, Int}("WARP_SZ" => 32)
-const LEGACY_WARP_SIZE_SREG = "%warpsize"
 
 struct SpecialRegisterFamily
     section::String

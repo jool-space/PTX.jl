@@ -19,7 +19,7 @@
 function _sm121a_mma_kind_f8f6f4!(out::CuDeviceVector{Float32, 1},
                                    a1::UInt32, a2::UInt32, a3::UInt32, a4::UInt32,
                                    b1::UInt32, b2::UInt32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         a = (a1, a2, a3, a4)
         b = (b1, b2)
@@ -54,7 +54,7 @@ end
 function _sm121a_mma_kind_f8f6f4_mixed!(out::CuDeviceVector{Float32, 1},
                                          a1::UInt32, a2::UInt32, a3::UInt32, a4::UInt32,
                                          b1::UInt32, b2::UInt32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         a = (a1, a2, a3, a4)
         b = (b1, b2)
@@ -86,7 +86,7 @@ end
 
 function _sm121a_mma_kind_f8f6f4_k16!(out::CuDeviceVector{Float32, 1},
                                        a1::UInt32, a2::UInt32, b1::UInt32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         a = (a1, a2)
         b = (b1,)
@@ -120,7 +120,7 @@ function _sm121a_mma_kind_mxf8f6f4!(out::CuDeviceVector{Float32, 1},
                                      a1::UInt32, a2::UInt32, a3::UInt32, a4::UInt32,
                                      b1::UInt32, b2::UInt32,
                                      sa::UInt32, sb::UInt32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         a = (a1, a2, a3, a4)
         b = (b1, b2)
@@ -157,7 +157,7 @@ function _sm121a_mma_kind_mxf4!(out::CuDeviceVector{Float32, 1},
                                  a1::UInt32, a2::UInt32, a3::UInt32, a4::UInt32,
                                  b1::UInt32, b2::UInt32,
                                  sa::UInt32, sb::UInt32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         a = (a1, a2, a3, a4)
         b = (b1, b2)
@@ -194,7 +194,7 @@ function _sm121a_mma_kind_mxf4nvf4!(out::CuDeviceVector{Float32, 1},
                                      a1::UInt32, a2::UInt32, a3::UInt32, a4::UInt32,
                                      b1::UInt32, b2::UInt32,
                                      sa::UInt32, sb::UInt32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         a = (a1, a2, a3, a4)
         b = (b1, b2)

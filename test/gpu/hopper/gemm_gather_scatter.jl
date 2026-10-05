@@ -74,7 +74,7 @@ function _gs_gemm_kernel!(
     a_addr = smem_addr_u32(a_ptr)
     b_addr = smem_addr_u32(b_ptr)
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     # Thread 0: init the mbarrier + issue B's TMA (gemm_warpgroup.jl issue
     # block, minus A).

@@ -213,9 +213,9 @@ function _ghh_gemm_kernel!(
     full  = BarrierArray{GHH_N_STAGES}(pointer(mbar_full))
     empty = BarrierArray{GHH_N_STAGES}(pointer(mbar_empty))
 
-    tid       = ptx"mov.u32"(sreg"tid.x")
-    cta_rank  = ptx"mov.u32"(sreg"cluster_ctarank")
-    clusterid = ptx"mov.u32"(sreg"clusterid.x")
+    tid       = ptx"mov.u32"(ptx"%tid.x")
+    cta_rank  = ptx"mov.u32"(ptx"%cluster_ctarank")
+    clusterid = ptx"mov.u32"(ptx"%clusterid.x")
     wg_id     = tid >> UInt32(7)
     lane128   = tid & UInt32(127)
 

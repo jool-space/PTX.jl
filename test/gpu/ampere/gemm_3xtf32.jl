@@ -42,10 +42,10 @@ function gemm_3xtf32_kernel!(
         ::Val{M}, ::Val{N}, ::Val{K}, ::Val{THREEX}) where {M, N, K, THREEX}
     n_iters = K ÷ X3_BK
 
-    m_base = Int(ptx"mov.u32"(sreg"ctaid.y")) * X3_BM
-    n_base = Int(ptx"mov.u32"(sreg"ctaid.x")) * X3_BN
+    m_base = Int(ptx"mov.u32"(ptx"%ctaid.y")) * X3_BM
+    n_base = Int(ptx"mov.u32"(ptx"%ctaid.x")) * X3_BN
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     gid = Int(tid >> UInt32(2))
     tig = Int(tid & UInt32(0x3))
 

@@ -81,7 +81,7 @@ function _swp_dump_kernel!(
     aligned = (raw + UInt32(SWP_PAD - 1)) & ~UInt32(SWP_PAD - 1)
     dst     = base + Int(aligned - raw) + Int(dst_off)
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         ptx"mbarrier.init.shared.b64"(mb, UInt32(1))
         ptx"fence.proxy.async.shared::cta"()

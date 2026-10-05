@@ -39,10 +39,10 @@ function gemm_fp64_kernel!(
         ::Val{M}, ::Val{N}, ::Val{K}) where {M, N, K}
     n_iters = K ÷ F64_BK
 
-    m_base = Int(ptx"mov.u32"(sreg"ctaid.y")) * F64_BM
-    n_base = Int(ptx"mov.u32"(sreg"ctaid.x")) * F64_BN
+    m_base = Int(ptx"mov.u32"(ptx"%ctaid.y")) * F64_BM
+    n_base = Int(ptx"mov.u32"(ptx"%ctaid.x")) * F64_BN
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     gid = Int(tid >> UInt32(2))
     tig = Int(tid & UInt32(0x3))
 

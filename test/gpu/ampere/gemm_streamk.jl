@@ -47,11 +47,11 @@ function gemm_streamk_kernel!(
     TN    = N ÷ SK_BN
     total = (M ÷ SK_BM) * TN * L       # global iteration count
 
-    cta      = Int(ptx"mov.u32"(sreg"ctaid.x"))
+    cta      = Int(ptx"mov.u32"(ptx"%ctaid.x"))
     it       = (cta * total) ÷ G
     it_end   = ((cta + 1) * total) ÷ G
 
-    tid    = ptx"mov.u32"(sreg"tid.x")
+    tid    = ptx"mov.u32"(ptx"%tid.x")
     lane   = Int(tid)
     gid    = lane >> 2
     tig    = lane & 0x3

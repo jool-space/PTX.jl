@@ -99,7 +99,7 @@ end
 # vector-valued PTX operands have structured parsing and lowering support.
 const SPECIAL_REGS = IR.SCALAR_SPECIAL_REGS
 
-sreg_val_expr(name::AbstractString) = "sreg\"" * name * "\""
+sreg_val_expr(name::AbstractString) = "ptx\"" * name * "\""
 
 const SCALAR_TO_JULIA = Dict{ScalarType.T, Symbol}(
     ScalarType.F64  => :Float64, ScalarType.F32  => :Float32, ScalarType.F16  => :Float16,

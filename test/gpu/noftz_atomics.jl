@@ -76,7 +76,7 @@ end
         base = pointer(smem)
         off = (16 - smem_addr_u32(base) % UInt32(16)) % UInt32(16)
         src = base + Int(off)
-        tid = ptx"mov.u32"(sreg"tid.x")
+        tid = ptx"mov.u32"(ptx"%tid.x")
         if tid < UInt32(4)
             unsafe_store!(src, value, Int(tid) + 1)
         end

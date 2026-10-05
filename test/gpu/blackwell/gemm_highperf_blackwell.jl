@@ -87,9 +87,9 @@ function _ghb_gemm_kernel!(
     bm_addr   = smem_addr_u32(bm_ptr)
     slot_addr = smem_addr_u32(pointer(tmem_slot))
 
-    tid    = ptx"mov.u32"(sreg"tid.x")
-    tile_n = ptx"mov.u32"(sreg"ctaid.x")     # v0: no serpentine swizzle
-    tile_m = ptx"mov.u32"(sreg"ctaid.y")
+    tid    = ptx"mov.u32"(ptx"%tid.x")
+    tile_n = ptx"mov.u32"(ptx"%ctaid.x")     # v0: no serpentine swizzle
+    tile_m = ptx"mov.u32"(ptx"%ctaid.y")
     m_base = tile_m << UInt32(7)             # * BM (128)
     n_base = tile_n << UInt32(8)             # * BN (256)
 
@@ -335,9 +335,9 @@ function _ghb_persistent_kernel!(
     bm_addr   = smem_addr_u32(bm_ptr)
     slot_addr = smem_addr_u32(pointer(tmem_slot))
 
-    tid    = ptx"mov.u32"(sreg"tid.x")
-    cta_x  = ptx"mov.u32"(sreg"ctaid.x")
-    nctas  = ptx"mov.u32"(sreg"nctaid.x")
+    tid    = ptx"mov.u32"(ptx"%tid.x")
+    cta_x  = ptx"mov.u32"(ptx"%ctaid.x")
+    nctas  = ptx"mov.u32"(ptx"%nctaid.x")
     is_tma = tid == UInt32(0)
     is_mma = tid == UInt32(32)
 

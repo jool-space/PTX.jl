@@ -23,9 +23,9 @@ using Microfloats: NanOnlyAllOnes, SAT, OVF
 # of xs[i]). The packed form is the only one available on sm_89; sm_120+
 # may add a true scalar form.
 function _cvt_e4m3_satfinite!(out::AbstractArray{UInt8}, xs::AbstractArray{Float32})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]
@@ -35,9 +35,9 @@ function _cvt_e4m3_satfinite!(out::AbstractArray{UInt8}, xs::AbstractArray{Float
 end
 
 function _cvt_e5m2_satfinite!(out::AbstractArray{UInt8}, xs::AbstractArray{Float32})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]
@@ -121,9 +121,9 @@ end
 # Float16(Float8_E4M3FN(x)) — Microfloats handles the f8→f16 promotion.
 
 function _cvt_e4m3_roundtrip!(out::AbstractArray{UInt32}, xs::AbstractArray{Float32})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]
@@ -134,9 +134,9 @@ function _cvt_e4m3_roundtrip!(out::AbstractArray{UInt32}, xs::AbstractArray{Floa
 end
 
 function _cvt_e5m2_roundtrip!(out::AbstractArray{UInt32}, xs::AbstractArray{Float32})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]

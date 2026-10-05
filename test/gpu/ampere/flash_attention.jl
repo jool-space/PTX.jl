@@ -75,10 +75,10 @@ function fam_kernel!(
                                         fam_q_bytes(HD) + 2 * fam_k_bytes(HD))
     vt_ptr = pointer(vt)
 
-    qb = ptx"mov.u32"(sreg"ctaid.x")    # query block within the sequence
-    bh = ptx"mov.u32"(sreg"ctaid.y")    # batch*head slice
+    qb = ptx"mov.u32"(ptx"%ctaid.x")    # query block within the sequence
+    bh = ptx"mov.u32"(ptx"%ctaid.y")    # batch*head slice
 
-    tid    = ptx"mov.u32"(sreg"tid.x")
+    tid    = ptx"mov.u32"(ptx"%tid.x")
     warp   = Int(tid >> UInt32(5))
     lane   = Int(tid & UInt32(31))
     gid    = lane >> 2

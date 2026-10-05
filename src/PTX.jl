@@ -43,7 +43,7 @@ include("dsl/entries.jl")
 include("dsl/sregs.jl")
 include("dsl/show.jl")
 include("dsl/reflection.jl")
-export @ptx_str, @optype_str, @sreg_str
+export @ptx_str
 export vector_load
 
 include("wrappers/registry.jl")

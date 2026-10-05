@@ -73,7 +73,7 @@ function _eps_gemm_kernel!(
     a_addr = smem_addr_u32(a_ptr)
     b_addr = smem_addr_u32(b_ptr)
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     if tid == UInt32(0)
         ptx"mbarrier.init.shared.b64"(mb_ptr, UInt32(1))

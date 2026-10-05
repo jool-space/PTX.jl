@@ -80,11 +80,11 @@ function gemm_highperf_kernel!(
     n_iters = K ÷ HP_BK
 
     # CTA bases.
-    m_base = Int(ptx"mov.u32"(sreg"ctaid.y")) * HP_BM
-    n_base = Int(ptx"mov.u32"(sreg"ctaid.x")) * HP_BN
+    m_base = Int(ptx"mov.u32"(ptx"%ctaid.y")) * HP_BM
+    n_base = Int(ptx"mov.u32"(ptx"%ctaid.x")) * HP_BN
 
     # Thread + warp identity.
-    tid     = ptx"mov.u32"(sreg"tid.x")
+    tid     = ptx"mov.u32"(ptx"%tid.x")
     warp_id = Int(tid >> UInt32(5))    # 0..3
     lane    = Int(tid & UInt32(31))    # 0..31
     warp_m  = warp_id >> 1             # 0..1 (warps 0,1 → M=0; 2,3 → M=1)

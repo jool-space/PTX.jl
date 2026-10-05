@@ -187,7 +187,7 @@ end
 function _hopper_pipeline_kernel!(D, A_bits, B_bits)
     smem_A = CuStaticSharedArray(BFloat16, 1024)        # 64×16 bf16 (m64k16)
     smem_B = CuStaticSharedArray(BFloat16, 128)        # 16×8 bf16 (k16n8)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     # 1. cp.async load (cooperative, 16-byte chunks).
     src_A = pointer(A_bits) + Int(tid) * 16
@@ -468,7 +468,7 @@ end
 
 function _hopper_wgmma_divergent!(out::CuDeviceVector{Float32, 1},
                                   a_desc::UInt64, b_desc::UInt64)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     zero4 = (0f0, 0f0, 0f0, 0f0)
     d = if tid < UInt32(64)
         ptx"wgmma.mma_async.sync.aligned.m64n8k16.f32.bf16.bf16"(
@@ -684,7 +684,7 @@ function _pipe_smoke_cta!(C::CuDeviceVector{UInt64, 1}, K::Int32)
     full  = BarrierArray{2}(pointer(mbar_full))
     empty = BarrierArray{2}(pointer(mbar_empty))
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         pipeline_init!(full, empty, Val(1), Val(false))
     end
@@ -723,7 +723,7 @@ function _pipe_smoke_cluster!(C::CuDeviceVector{UInt64, 1})
     full  = BarrierArray{2}(pointer(mbar_full))
     empty = BarrierArray{2}(pointer(mbar_empty))
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         # 2 consumers × 2 clusters = 4 pre-arrives per stage.
         pipeline_init!(full, empty, Val(4), Val(true))
@@ -785,7 +785,7 @@ const _BSET_RING = (full = ((2,), 1), stats = ((2, 2), 128), done = ((), 1))
 function _bset_smoke!(C::CuDeviceVector{UInt64, 1})
     smem = CuStaticSharedArray(UInt64, 7)
     bars = BarrierSet{_BSET_RING}(pointer(smem))
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         barrierset_init!(bars)
     end
@@ -802,7 +802,7 @@ end
 function _bset_smoke_hand!(C::CuDeviceVector{UInt64, 1})
     smem = CuStaticSharedArray(UInt64, 7)
     mb = pointer(smem)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         barrier_init(mb + 0,  UInt32(1))
         barrier_init(mb + 8,  UInt32(1))

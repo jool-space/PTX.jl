@@ -65,10 +65,10 @@ function gemm_ampere_kernel!(
         ::Val{M}, ::Val{N}, ::Val{K}) where {M, N, K}
     n_iters = K ÷ BK
 
-    m_base = Int(ptx"mov.u32"(sreg"ctaid.y")) * BM
-    n_base = Int(ptx"mov.u32"(sreg"ctaid.x")) * BN
+    m_base = Int(ptx"mov.u32"(ptx"%ctaid.y")) * BM
+    n_base = Int(ptx"mov.u32"(ptx"%ctaid.x")) * BN
 
-    tid    = ptx"mov.u32"(sreg"tid.x")
+    tid    = ptx"mov.u32"(ptx"%tid.x")
     gid    = Int(tid >> UInt32(2))      # group_id   in [0, 8)
     tig    = Int(tid & UInt32(0x3))     # in_group   in [0, 4)
     col_lo = tig << 1                   # 2*in_group → 0,2,4,6

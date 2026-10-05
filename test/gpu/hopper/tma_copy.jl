@@ -27,7 +27,7 @@ function _tma_copy_kernel!(out::CuDeviceVector{BFloat16, 1},
     mb_ptr = pointer(mbar)
     s_ptr  = pointer(smem)
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     # Thread 0 does the full TMA-issue sequence (init, fence, arrive, load);
     # bar.sync after makes the inited+armed state visible CTA-wide before

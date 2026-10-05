@@ -52,10 +52,10 @@ function gemm_tf32_kernel!(
         ::Val{M}, ::Val{N}, ::Val{K}) where {M, N, K}
     n_iters = K ÷ TF_BK
 
-    m_base = Int(ptx"mov.u32"(sreg"ctaid.y")) * TF_BM
-    n_base = Int(ptx"mov.u32"(sreg"ctaid.x")) * TF_BN
+    m_base = Int(ptx"mov.u32"(ptx"%ctaid.y")) * TF_BM
+    n_base = Int(ptx"mov.u32"(ptx"%ctaid.x")) * TF_BN
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     gid = Int(tid >> UInt32(2))         # 0..7
     tig = Int(tid & UInt32(0x3))        # 0..3
 

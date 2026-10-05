@@ -95,7 +95,7 @@ end
 
 function _bw_add_f32x2!(out::CuDeviceVector{UInt64, 1},
                         a::UInt64, b::UInt64)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = ptx"add.f32x2"(a, b)
     end
@@ -119,7 +119,7 @@ end
 # values into a sub-byte float pair. ptxas only accepts these on sm_100+.
 
 function _bw_cvt_e2m1x2!(out::CuDeviceVector{UInt16, 1}, x::Float32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = ptx"cvt.rn.satfinite.e2m1x2.f32"(x, x)
     end
@@ -127,7 +127,7 @@ function _bw_cvt_e2m1x2!(out::CuDeviceVector{UInt16, 1}, x::Float32)
 end
 
 function _bw_cvt_e2m3x2!(out::CuDeviceVector{UInt16, 1}, x::Float32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = ptx"cvt.rn.satfinite.e2m3x2.f32"(x, x)
     end
@@ -135,7 +135,7 @@ function _bw_cvt_e2m3x2!(out::CuDeviceVector{UInt16, 1}, x::Float32)
 end
 
 function _bw_cvt_e3m2x2!(out::CuDeviceVector{UInt16, 1}, x::Float32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = ptx"cvt.rn.satfinite.e3m2x2.f32"(x, x)
     end
@@ -143,7 +143,7 @@ function _bw_cvt_e3m2x2!(out::CuDeviceVector{UInt16, 1}, x::Float32)
 end
 
 function _bw_cvt_ue8m0x2!(out::CuDeviceVector{UInt16, 1}, x::Float32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = ptx"cvt.rz.satfinite.ue8m0x2.f32"(x, x)
     end
@@ -185,7 +185,7 @@ end
 
 function _bw_cvt_scaled!(out::CuDeviceVector{UInt32, 1},
                           x::UInt16, scale::UInt8)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = ptx"cvt.rn.scaled::n2::ue8m0.bf16x2.e4m3x2"(x, scale)
     end
@@ -209,7 +209,7 @@ end
 # Both go through the chain default — `.b16` source carrier.
 
 function _bw_cvt_fp8_to_bf16!(out::CuDeviceVector{UInt32, 1}, x::UInt16)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = ptx"cvt.rn.bf16x2.e4m3x2"(x)
         @inbounds out[2] = ptx"cvt.rn.bf16x2.e5m2x2"(x)
@@ -237,7 +237,7 @@ end
 # because the source carrier is `.b8` (no NVPTX b8 asm register class).
 
 function _bw_cvt_fp6_unpack!(out::CuDeviceVector{UInt32, 1}, x::UInt16)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = ptx"cvt.rn.f16x2.e2m3x2"(x)
         @inbounds out[2] = ptx"cvt.rn.f16x2.e3m2x2"(x)
@@ -264,7 +264,7 @@ end
 # .b8 reg before the cvt — see comment header in src/wrappers/cvt.jl.
 
 function _bw_cvt_fp4_unpack!(out::CuDeviceVector{UInt32, 1}, x::UInt16)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = ptx"cvt.rn.f16x2.e2m1x2"(x)
         @inbounds out[2] = ptx"cvt.rn.bf16x2.e2m1x2"(x)
@@ -290,7 +290,7 @@ end
 
 function _bw_cvt_fp4_pack_from_x2!(out::CuDeviceVector{UInt16, 1},
                                     x_f16x2::UInt32, x_bf16x2::UInt32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = ptx"cvt.rn.satfinite.e2m1x2.f16x2"(x_f16x2)
         @inbounds out[2] = ptx"cvt.rn.satfinite.e2m1x2.bf16x2"(x_bf16x2)
@@ -310,7 +310,7 @@ end
 
 # `cvt.rn.bf16x2.ue8m0x2` — block-scale dtype unpacked to BF16 (PTX 8.6).
 function _bw_cvt_ue8m0_unpack!(out::CuDeviceVector{UInt32, 1}, x::UInt16)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = ptx"cvt.rn.bf16x2.ue8m0x2"(x)
     end

@@ -11,7 +11,7 @@ directly in Julia through `ptx"..."(...)` syntax, composing naturally with [CUDA
 using PTX, CUDA
 
 function add_kernel!(c, a, b)
-    tid = ptx"mov.u32"(sreg"%tid.x") # access instructions and special registers,
+    tid = ptx"mov.u32"(ptx"%tid.x") # access instructions and special registers,
     i = tid + one(tid)               # while also writing familiar julia code.
     c[i] = ptx"add.f32"(a[i], b[i])  # same as a[i] + b[i], assuming Float32
     return

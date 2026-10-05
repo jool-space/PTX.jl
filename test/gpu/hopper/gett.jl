@@ -61,8 +61,8 @@ function _gett_kernel!(
     a_addr = smem_addr_u32(a_ptr)
     b_addr = smem_addr_u32(b_ptr)
 
-    tid    = ptx"mov.u32"(sreg"tid.x")
-    cta    = ptx"mov.u32"(sreg"ctaid.x")
+    tid    = ptx"mov.u32"(ptx"%tid.x")
+    cta    = ptx"mov.u32"(ptx"%ctaid.x")
     m1_off = Int32(cta) * Int32(GETT_M1_BOX)
 
     if tid == UInt32(0)

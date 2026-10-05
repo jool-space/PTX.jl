@@ -22,14 +22,14 @@ stack at all.
 ## First kernel
 
 Every PTX instruction is one [`@ptx_str`](@ref) call. Special registers
-(`%tid.x`, `%ctaid.y`, …) are read via [`@sreg_str`](@ref). Inputs flow in
+(`%tid.x`, `%ctaid.y`, …) are spelled the same way, `ptx"%tid.x"`. Inputs flow in
 as Julia arguments, the result is the call's return value:
 
 ```julia
 using PTX, CUDA
 
 function add_kernel!(c, a, b)
-    tid = ptx"mov.u32"(sreg"%tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     i = Int(tid) + 1
     c[i] = ptx"add.f32"(a[i], b[i])
     return

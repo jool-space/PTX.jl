@@ -47,9 +47,9 @@ _mf8_ue8m0_rz(x)     = reinterpret(UInt8, E8M0_SAT(x, RoundToZero))
 # --- e2m1x2: hand-wrapped via wrappers/cvt.jl (no b8 asm register class),
 #     output is UInt16 with the packed nibbles in the low byte. ---
 function _cvt_e2m1x2!(out::AbstractArray{UInt16}, xs::AbstractArray{Float32})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]
@@ -84,9 +84,9 @@ end
 
 # --- e2m3x2 / e3m2x2: chain default. .b16 dest, byte-aligned per lane. ---
 function _cvt_e2m3x2!(out::AbstractArray{UInt16}, xs::AbstractArray{Float32})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]
@@ -110,9 +110,9 @@ end
 end
 
 function _cvt_e3m2x2!(out::AbstractArray{UInt16}, xs::AbstractArray{Float32})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]
@@ -140,9 +140,9 @@ end
 
 # --- ue8m0x2: only .rz / .rp rounding are legal; .rn is rejected. ---
 function _cvt_ue8m0x2!(out::AbstractArray{UInt16}, xs::AbstractArray{Float32})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]
@@ -170,9 +170,9 @@ end
 # --- scaled::n2::ue8m0  e4m3x2 → bf16x2 with packed scale; scale=0x7F
 #     (= biased exp 127 → 2^0 = 1) must match the unscaled cvt path. ---
 function _cvt_scaled!(out::AbstractArray{UInt32}, xs::AbstractArray{UInt16}, scale::UInt16)
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]
@@ -182,9 +182,9 @@ function _cvt_scaled!(out::AbstractArray{UInt32}, xs::AbstractArray{UInt16}, sca
 end
 
 function _cvt_unscaled!(out::AbstractArray{UInt32}, xs::AbstractArray{UInt16})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]
@@ -219,9 +219,9 @@ end
 @inline _f16x2_hi(p::UInt32) = reinterpret(Float16, UInt16((p >> 16) & 0xFFFF))
 
 function _cvt_e2m3_unpack_roundtrip!(out::AbstractArray{UInt32}, xs::AbstractArray{Float32})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]
@@ -245,9 +245,9 @@ end
 end
 
 function _cvt_e3m2_unpack_roundtrip!(out::AbstractArray{UInt32}, xs::AbstractArray{Float32})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]
@@ -271,9 +271,9 @@ end
 end
 
 function _cvt_e2m1_unpack_roundtrip!(out::AbstractArray{UInt32}, xs::AbstractArray{Float32})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         x = @inbounds xs[i]

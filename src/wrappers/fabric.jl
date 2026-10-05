@@ -32,7 +32,7 @@
 # cross-GPU visibility, and LLVM must not reorder them around the mbarrier
 # submit/wait lifecycle.
 
-@generated function optype"fabric.submit"()
+@generated function (::typeof(ptx"fabric.submit"))()
     quote
         Base.@inline
         @asmcall("fabric.submit;",
@@ -42,7 +42,7 @@
     end
 end
 
-@generated function optype"fabric.submit.op_restrict::fetching"()
+@generated function (::typeof(ptx"fabric.submit.op_restrict::fetching"))()
     quote
         Base.@inline
         @asmcall("fabric.submit.op_restrict::fetching;",
@@ -52,7 +52,7 @@ end
     end
 end
 
-@generated function optype"fabric.wait.sync_restrict::reads"()
+@generated function (::typeof(ptx"fabric.wait.sync_restrict::reads"))()
     quote
         Base.@inline
         @asmcall("fabric.wait.sync_restrict::reads;",
@@ -83,7 +83,7 @@ const _FABRIC_TRY_GET_HEAD =
     ".mbarrier::complete_tx::bytes.mbarrier::report::fabric" *
     ".relaxed.sys.b128"
 
-@generated function optype"fabric.try_get.async.shared::cta.mbarrier::complete_tx::bytes.mbarrier::report::fabric.relaxed.sys.b128"(
+@generated function (::typeof(ptx"fabric.try_get.async.shared::cta.mbarrier::complete_tx::bytes.mbarrier::report::fabric.relaxed.sys.b128"))(
         dst::Core.LLVMPtr{T, AS.Shared},
         srcLeId::Integer,
         srcDataOff::Integer,
@@ -129,7 +129,7 @@ const _FABRIC_TRY_PUT_MULTIMEM_HEAD =
     ".mbarrier::complete_tx::16B.mbarrier::report::fabric" *
     ".relaxed.sys.b128"
 
-@generated function optype"fabric.try_put.async.shared::cta.mbarrier::complete_tx::16B.mbarrier::report::fabric.relaxed.sys.b128"(
+@generated function (::typeof(ptx"fabric.try_put.async.shared::cta.mbarrier::complete_tx::16B.mbarrier::report::fabric.relaxed.sys.b128"))(
         dstLeId::Integer,
         dstDataOff::Integer,
         src::Core.LLVMPtr{T, AS.Shared},
@@ -149,7 +149,7 @@ const _FABRIC_TRY_PUT_MULTIMEM_HEAD =
     end
 end
 
-@generated function optype"fabric.try_put.async.multimem.shared::cta.mbarrier::complete_tx::16B.mbarrier::report::fabric.relaxed.sys.b128"(
+@generated function (::typeof(ptx"fabric.try_put.async.multimem.shared::cta.mbarrier::complete_tx::16B.mbarrier::report::fabric.relaxed.sys.b128"))(
         dstLeId::Integer,
         dstDataOff::Integer,
         src::Core.LLVMPtr{T, AS.Shared},

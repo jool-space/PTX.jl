@@ -20,7 +20,7 @@
 # --- shfl: all four modes, data and data|pred forms -------------------------
 
 function _golden_shfl!(out::CuDeviceVector{UInt32, 1})
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     mask = UInt32(0xffffffff)
     @inbounds begin
         out[tid + 1] = ptx"shfl.sync.idx.b32"(tid, tid, UInt32(0x1f), mask)
@@ -483,7 +483,7 @@ end
 # position observable. The reductions have their own golden below.
 
 function _golden_barrier!(out::CuDeviceVector{UInt32, 1})
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     @inbounds begin
         out[1] = UInt32(1)
         ptx"bar.sync"(Val(0))
@@ -526,7 +526,7 @@ end
 # `.sync`/`.arrive` on one active barrier; this kernel only compiles.
 
 function _golden_barrier_red!(out::CuDeviceVector{UInt32, 1})
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     odd = (tid & UInt32(1)) == UInt32(1)
     rid = tid & UInt32(0x7)
     @inbounds begin
