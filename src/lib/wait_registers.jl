@@ -58,14 +58,14 @@ end
     constraints = join([("=" * constraint_letter(C) for C in carriers)...,
                         string.(0:n-1)..., "~{memory}"], ",")
     asm = "tcgen05." * join(W.parameters[2], ".") * ";"
-    rt = Tuple{carriers...}
-    ir = convergent_asm_ir(asm, constraints, rt, carriers)
+    call = convergent_asmcall(asm, constraints, Tuple{carriers...}, carriers,
+                              args...)
     outputs = paired ? [:(reinterpret($T, (result[$(cld(i, 2))] >> $(isodd(i) ? 0 : 32)) % UInt32))
                          for i in 1:2npairs] : [:(result[$i]) for i in 1:N]
     paired && isodd(N) && push!(outputs, :(result[$n]))
     quote
         Base.@inline
-        result = Base.llvmcall(($ir, "entry"), $rt, Tuple{$(carriers...)}, $(args...))
+        result = $call
         tuple($(outputs...))
     end
 end

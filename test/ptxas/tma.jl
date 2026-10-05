@@ -10,7 +10,7 @@ include(joinpath(@__DIR__, "..", "tma_defs.jl"))
 
 # Attribute groups of every inline-asm call site whose text matches
 # `needle`. Single-route asm since the demotion: the call sites are inline
-# asm (convergent_asm_ir), not llvm.nvvm.* intrinsic calls.
+# asm (convergent_asmcall), not llvm.nvvm.* intrinsic calls.
 function _tma_callsite_attrs(llvm::AbstractString, needle)
     groups = Dict{String, String}()
     for line in eachline(IOBuffer(llvm))

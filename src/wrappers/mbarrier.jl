@@ -23,7 +23,7 @@
 # Exact methods retain their integer-normalizing convenience signatures
 # (the ledger deliberately rejects Int64 at :u32 operand positions), but
 # delegate construction to the same closed schema as the generic and raw
-# paths. This routes every form through `convergent_asm_ir`, so the whole
+# paths. This routes every form through `convergent_asmcall`, so the whole
 # family carries one call-site `convergent nomerge` + `~{memory}` contract.
 @generated function _mbarrier_schema_call(
         ::Operation{:mbarrier, mods}, args::Vararg{Any,N}) where {mods,N}

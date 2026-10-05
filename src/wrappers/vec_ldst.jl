@@ -26,84 +26,55 @@ const _VEC_LDST_VARIANTS = (
     (4, :b16, UInt16),
 )
 
-# PTX vector dtype → LLVM element type.
-_vec_llvm_elt(dtype::Symbol) =
-    dtype === :f32 ? "float" :
-    dtype === :b32 ? "i32"   :
-    dtype === :b16 ? "i16"   :
-    error("unsupported vec ld/st dtype $dtype")
-
-# Body IR for `Base.llvmcall`: load `<N x ET>` from the global pointer (%0),
-# then repack into the `[N x ET]` Julia tuple representation.
-function vec_ld_ir(n::Int, dtype::Symbol, align::Int)
-    et  = _vec_llvm_elt(dtype)
-    vec = "<$n x $et>"
-    arr = "[$n x $et]"
-    # Typed pointer spelling + pointer-to-vector bitcast: required by the
-    # typed-pointer device context on Julia ≤ 1.11, folded away by the
-    # opaque upgrade on ≥ 1.12 (see NVVM.llvmtype).
-    lines = ["%vp = bitcast i8 addrspace(1)* %0 to $vec addrspace(1)*",
-             "%v = load $vec, $vec addrspace(1)* %vp, align $align"]
-    for i in 0:n-1
-        push!(lines, "%e$i = extractelement $vec %v, i32 $i")
+# Load `<N x T>` from the global pointer, then repack into the `[N x T]`
+# Julia tuple representation.
+@llvmgenerated builder function _vec_load(addr::Core.LLVMPtr{S, AS.Global},
+        ::Type{T}, ::Val{N})::NTuple{N, T} where {S, T, N}
+    vec = LLVM.VectorType(convert(LLVMType, T), N)
+    if supports_typed_pointers(LLVM.context())
+        addr = bitcast!(builder, addr, LLVM.PointerType(vec, AS.Global))
     end
-    prev = "undef"
-    for i in 0:n-1
-        push!(lines, "%r$i = insertvalue $arr $prev, $et %e$i, $i")
-        prev = "%r$i"
+    v = load!(builder, vec, addr; align = N * sizeof(T))
+    tup = LLVM.UndefValue(convert(LLVMType, NTuple{N, T}))
+    for i in 0:N-1
+        elem = extract_element!(builder, v, LLVM.ConstantInt(Int32(i)))
+        tup = insert_value!(builder, tup, elem, i)
     end
-    push!(lines, "ret $arr $prev")
-    join(lines, "\n")
+    tup
 end
 
-# Body IR for `Base.llvmcall`: unpack the `[N x ET]` tuple argument (%1) into
-# `<N x ET>` and store it to the global pointer (%0).
-function vec_st_ir(n::Int, dtype::Symbol, align::Int)
-    et  = _vec_llvm_elt(dtype)
-    vec = "<$n x $et>"
-    arr = "[$n x $et]"
-    lines = String[]
-    for i in 0:n-1
-        push!(lines, "%a$i = extractvalue $arr %1, $i")
+# Unpack the `[N x T]` tuple into `<N x T>` and store it to the global
+# pointer.
+@llvmgenerated builder function _vec_store(addr::Core.LLVMPtr{S, AS.Global},
+        vals::Tuple{T, Vararg{T, M}})::Nothing where {S, T, M}
+    N = M + 1
+    vec = LLVM.VectorType(convert(LLVMType, T), N)
+    v = LLVM.UndefValue(vec)
+    for i in 0:N-1
+        elem = extract_value!(builder, vals, i)
+        v = insert_element!(builder, v, elem, LLVM.ConstantInt(Int32(i)))
     end
-    prev = "undef"
-    for i in 0:n-1
-        push!(lines, "%v$i = insertelement $vec $prev, $et %a$i, i32 $i")
-        prev = "%v$i"
+    if supports_typed_pointers(LLVM.context())
+        addr = bitcast!(builder, addr, LLVM.PointerType(vec, AS.Global))
     end
-    # Same typed-spelling treatment as vec_ld_ir above.
-    push!(lines, "%sp = bitcast i8 addrspace(1)* %0 to $vec addrspace(1)*")
-    push!(lines, "store $vec $prev, $vec addrspace(1)* %sp, align $align")
-    push!(lines, "ret void")
-    join(lines, "\n")
+    store!(builder, v, addr; align = N * sizeof(T))
+    nothing
 end
 
 function _vec_ld_register(n::Int, dtype::Symbol, T)
     mods = (:global, Symbol("v", n), dtype)
     register_wrapper!(:vec_ldst, :ld, mods, :core_ir)
-    ir   = vec_ld_ir(n, dtype, n * sizeof(T))
-    @eval @generated function (::Operation{:ld, $mods})(
-            addr::Core.LLVMPtr{S, AS.Global}) where S
-        quote
-            Base.@inline
-            Base.llvmcall($($ir), NTuple{$($n), $($T)},
-                          Tuple{Core.LLVMPtr{$S, AS.Global}}, addr)
-        end
-    end
+    @eval @inline (::Operation{:ld, $mods})(addr::Core.LLVMPtr{S, AS.Global}) where S =
+        _vec_load(addr, $T, Val($n))
     nothing
 end
 
 function _vec_st_register(n::Int, dtype::Symbol, T)
     mods = (:global, Symbol("v", n), dtype)
     register_wrapper!(:vec_ldst, :st, mods, :core_ir)
-    ir   = vec_st_ir(n, dtype, n * sizeof(T))
-    @eval function (::Operation{:st, $mods})(
-            addr::Core.LLVMPtr{S, AS.Global},
-            vals::NTuple{$n, $T}) where S
-        Base.@inline
-        Base.llvmcall($ir, Nothing,
-                      Tuple{Core.LLVMPtr{S, AS.Global}, NTuple{$n, $T}},
-                      addr, vals)
+    @eval @inline function (::Operation{:st, $mods})(
+            addr::Core.LLVMPtr{S, AS.Global}, vals::NTuple{$n, $T}) where S
+        _vec_store(addr, vals)
         nothing
     end
     nothing

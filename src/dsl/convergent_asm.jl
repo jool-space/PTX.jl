@@ -13,99 +13,82 @@
 #
 # Mechanism validated by spikes/raw_asm_attrs.jl: a `convergent` attribute
 # group on an inline-asm call site parses through Base.llvmcall and survives
-# the optimized module. This helper builds the same shape `@asmcall` would —
+# the optimized module. The builder emits the same shape `@asmcall` does —
 # asm callee returns a scalar or literal struct, entry returns Julia's
-# homogeneous-tuple `[N x T]` via extract/insertvalue, Bool passes as i8 —
-# plus `#0 = { convergent nomerge nounwind }` on the call.
+# lowering of the return type — plus the call-site attributes. `nomerge`
+# accompanies `convergent`: LLVM ≤ 16 (Julia ≤ 1.11) hoists identical
+# convergent calls from both arms of a divergent branch into one site — the
+# collective-op miscompile. See NVVM.fnattrs.
 #
 # Keep the complete implementation above `_chain_call_expr`: Julia 1.12
 # requires every global called by a generated-function generator to exist in
 # the generator's definition world, not merely by the time it is invoked.
 
-_asm_lltype(T::Type) =
-    T === Float32 ? "float" :
-    T === UInt32  ? "i32"   :
-    T === Int32   ? "i32"   :
-    T === UInt64  ? "i64"   :
-    T === Int64   ? "i64"   :
-    T === Float64 ? "double" :
-    T === Float16 ? "half"  :
-    T === BFloat16 ? (isdefined(Core, :BFloat16) && T === Core.BFloat16 ? "bfloat" : "i16") :
-    T === UInt16  ? "i16"   :
-    T === Int16   ? "i16"   :
-    T === UInt8   ? "i8"    :
-    T === Int8    ? "i8"    :
-    T === Bool    ? "i8"    :
-    # Pointers pass straight into the asm operand (what @asmcall does via
-    # the builder API); `i8` pointee to match Julia's LLVMPtr lowering,
-    # typed spelling for the Julia ≤ 1.11 device context (NVVM.llvmtype).
-    T <: Core.LLVMPtr ? (T.parameters[2] == 0 ? "i8*" :
-                         "i8 addrspace($(T.parameters[2]))*") :
-    error("convergent_asm_ir: no LLVM mapping for $T")
+# Expression calling side-effecting inline `asm` on the argument expressions
+# `args` (of Julia types `argtypes`), returning `rettype`, with the call site
+# marked `convergent nomerge nounwind`.
+convergent_asmcall(asm::String, constraints::String, @nospecialize(rettype::Type),
+                   @nospecialize(argtypes), @nospecialize(args...)) =
+    _asmcall(asm, constraints, rettype, argtypes, args;
+             sideeffect = true, attrs = ("convergent", "nomerge", "nounwind"))
 
-convergent_asm_ir(asm::String, constraints::String, rettype::Type,
-                  argtypes)::String =
-    _asm_ir(asm, constraints, rettype, argtypes;
-            sideeffect = true, attrs = "convergent nomerge nounwind")
+# Same call without the convergence contract, for forms whose FORMS entry is
+# deliberately non-convergent (tcgen05.mma) or pure (register-only data
+# movement). `sideeffect = false` lets LLVM drop or merge the call like any
+# other pure computation; pass true for observable operations.
+plain_asmcall(asm::String, constraints::String, @nospecialize(rettype::Type),
+              @nospecialize(argtypes), @nospecialize(args...); sideeffect::Bool = true) =
+    _asmcall(asm, constraints, rettype, argtypes, args;
+             sideeffect, attrs = ("nounwind",))
 
-# Same call shape without the convergence contract, for forms whose
-# FORMS entry is deliberately non-convergent (tcgen05.mma) or pure
-# (register-only data movement). `sideeffect = false` lets LLVM drop or
-# merge the call like any other pure computation; pass true for
-# observable operations.
-plain_asm_ir(asm::String, constraints::String, rettype::Type, argtypes;
-             sideeffect::Bool = true)::String =
-    _asm_ir(asm, constraints, rettype, argtypes;
-            sideeffect, attrs = "nounwind")
+# Asm pointer operands have no pointee, so every LLVMPtr is retyped to a
+# UInt8 pointee in the same address space (a no-op bitcast). Wrappers that
+# are generic over the element type then share one IR per address space.
+_asm_operand(@nospecialize(T::Type), @nospecialize(ex)) =
+    T <: Core.LLVMPtr ?
+        (Core.LLVMPtr{UInt8, T.parameters[2]},
+         :(reinterpret(Core.LLVMPtr{UInt8, $(T.parameters[2])}, $ex))) :
+        (T, ex)
 
-function _asm_ir(asm::String, constraints::String, rettype::Type, argtypes;
-                 sideeffect::Bool, attrs::String)::String
-    params = ["$(_asm_lltype(T)) %a$(k - 1)" for (k, T) in enumerate(argtypes)]
-    callargs = join(("$(_asm_lltype(T)) %a$(k - 1)"
-                     for (k, T) in enumerate(argtypes)), ", ")
-    se = sideeffect ? " sideeffect" : ""
-    asmcall(ret) = "call $ret asm$se \"$asm\", \"$constraints\"($callargs) #0"
-    # `nomerge` alongside `convergent`: LLVM ≤ 16 (Julia ≤ 1.11) hoists
-    # identical convergent calls from both arms of a divergent branch into
-    # one site — the collective-op miscompile. See NVVM.fnattrs.
-
-    body = String[]
-    if rettype === Nothing
-        entryret = "void"
-        push!(body, "  " * asmcall("void"))
-        push!(body, "  ret void")
-    elseif rettype <: Tuple
-        comps = _asm_lltype.(collect(rettype.parameters))
-        # asm returns a scalar (1 output) or a literal struct (N>=2 outputs);
-        # Julia represents a homogeneous NTuple as [N x T] and a heterogeneous
-        # Tuple as a literal struct. The latter matters for exact-raw mbarrier
-        # report forms: (Bool, Bool, UInt16) under RAW_CONTRACT remains
-        # convergent without corrupting its return ABI.
-        callret = length(comps) == 1 ? comps[1] : "{ " * join(comps, ", ") * " }"
-        homogeneous = all(==(first(comps)), comps)
-        entryret = homogeneous ? "[$(length(comps)) x $(comps[1])]" :
-                   "{ " * join(comps, ", ") * " }"
-        push!(body, "  %r = " * asmcall(callret))
-        prev = "undef"
-        for k in 1:length(comps)
-            v = length(comps) == 1 ? "%r" : "%e$k"
-            length(comps) == 1 ||
-                push!(body, "  %e$k = extractvalue $callret %r, $(k - 1)")
-            push!(body, "  %t$k = insertvalue $entryret $prev, $(comps[k]) $v, $(k - 1)")
-            prev = "%t$k"
-        end
-        push!(body, "  ret $entryret $prev")
-    else
-        entryret = _asm_lltype(rettype)
-        push!(body, "  %r = " * asmcall(entryret))
-        push!(body, "  ret $entryret %r")
+function _asmcall(asm::String, constraints::String, @nospecialize(rettype::Type),
+                  @nospecialize(argtypes), @nospecialize(args); sideeffect::Bool,
+                  attrs::Tuple{Vararg{String}})
+    length(argtypes) == length(args) ||
+        error("asm call: $(length(args)) arguments for $(length(argtypes)) argument types")
+    # Index instead of `collect`ing: the call sites pass hundreds of distinct
+    # tuple types, each of which would compile its own specialization.
+    abitypes = Any[]
+    argexprs = Any[]
+    for i in 1:length(args)
+        T, ex = _asm_operand(argtypes[i], args[i])
+        push!(abitypes, T)
+        push!(argexprs, ex)
     end
-
-    """
-    define $entryret @entry($(join(params, ", "))) #1 {
-    $(join(body, "\n"))
-    }
-    attributes #0 = { $attrs }
-    attributes #1 = { alwaysinline }
-    """
+    generate_llvmcall(rettype, Tuple{abitypes...},
+                      argexprs...) do builder, @nospecialize(params...)
+        T_ret = convert(LLVMType, rettype)
+        # LLVM dictates the asm's return shape from the number of outputs:
+        # one returns the scalar, several a literal struct. Julia lowers a
+        # homogeneous tuple to an array instead, so that shape is repacked.
+        comps = rettype <: Tuple ? LLVMType[convert(LLVMType, T)
+                                            for T in rettype.parameters] : nothing
+        T_asm = rettype === Nothing ? LLVM.VoidType() :
+                comps === nothing ? T_ret :
+                length(comps) == 1 ? only(comps) : LLVM.StructType(comps)
+        values = Value[params[i] for i in 1:length(params)]
+        asm_ft = LLVM.FunctionType(T_asm, LLVMType[v.value_type for v in values])
+        call = call!(builder, asm_ft,
+                     InlineAsm(asm_ft, asm, constraints, sideeffect), values)
+        for attr in attrs
+            push!(call.function_attributes, EnumAttribute(attr))
+        end
+        rettype === Nothing && return nothing
+        T_asm == T_ret && return call
+        ret = LLVM.UndefValue(T_ret)
+        for i in 0:length(comps)-1
+            elem = length(comps) == 1 ? call : extract_value!(builder, call, i)
+            ret = insert_value!(builder, ret, elem, i)
+        end
+        ret
+    end
 end

@@ -2,7 +2,7 @@
 # level structured-sparsity compression and expansion. Both are per-thread
 # data movement over brace-enclosed b32 register vectors whose widths depend
 # on every qualifier, so they are typed-wrapper-only (TYPED_WRAPPER_ONLY_RULES)
-# and render through `plain_asm_ir` without a sideeffect marker: the FORMS
+# and render through `plain_asmcall` without a sideeffect marker: the FORMS
 # contract is :pure, and an unused result may be dropped like any other
 # computation. Every output is early-clobber (`=&r`): the ISA makes register
 # reuse among the vector operands undefined behaviour.
@@ -48,18 +48,16 @@ function _spcompress_register(elem::Symbol, idx::Symbol, num::Int)
     asm = "spcompress.$elem.$idx.sp::2:4.x$num {$mregs}, {$cregs}, " *
           "{$dregs}, \$$(nout + ndata);"
     constraints = join([fill("=&r", nout); fill("r", ndata + 1)], ",")
-    flat = Tuple{fill(UInt32, nout)...}
-    ir = plain_asm_ir(asm, constraints, flat,
-                      (fill(UInt32, ndata)..., UInt32); sideeffect = false)
-    argtypes = Tuple{fill(UInt32, ndata)..., UInt32}
     dvals = [:(data[$i]) for i in 1:ndata]
+    call = plain_asmcall(asm, constraints, NTuple{nout, UInt32},
+                         fill(UInt32, ndata + 1), dvals..., :spdesc;
+                         sideeffect = false)
     mvals = [:(r[$i]) for i in 1:nmdata]
     cvals = [:(r[$i]) for i in nmdata + 1:nout]
     register_wrapper!(:spcompress, :spcompress, mods, :asm)
     @eval @inline function (::Operation{:spcompress, $mods})(
             data::NTuple{$ndata, UInt32}, spdesc::UInt32)
-        r = Base.llvmcall(($ir, "entry"), $flat, $argtypes,
-                          $(dvals...), spdesc)
+        r = $call
         (($(mvals...),), ($(cvals...),))::Tuple{NTuple{$nmdata, UInt32},
                                                NTuple{$ncdata, UInt32}}
     end
@@ -91,17 +89,15 @@ function _spdecompress_register(elem::Symbol, idx::Symbol, s::Int, t::Int,
     asm = "spdecompress.$elem.$idx.sp::$s:$t.x$num {$dregs}, {$mregs}, " *
           "{$cregs};"
     constraints = join([fill("=&r", ndata); fill("r", nin)], ",")
-    rt = NTuple{ndata, UInt32}
-    ir = plain_asm_ir(asm, constraints, rt, Tuple(fill(UInt32, nin));
-                      sideeffect = false)
-    argtypes = Tuple{fill(UInt32, nin)...}
     mvals = [:(mdata[$i]) for i in 1:nmdata]
     cvals = [:(cdata[$i]) for i in 1:ncdata]
+    call = plain_asmcall(asm, constraints, NTuple{ndata, UInt32},
+                         fill(UInt32, nin), mvals..., cvals...;
+                         sideeffect = false)
     register_wrapper!(:spdecompress, :spdecompress, mods, :asm)
     @eval @inline function (::Operation{:spdecompress, $mods})(
             mdata::NTuple{$nmdata, UInt32}, cdata::NTuple{$ncdata, UInt32})
-        Base.llvmcall(($ir, "entry"), $rt, $argtypes,
-                      $(mvals...), $(cvals...))
+        $call
     end
     nothing
 end

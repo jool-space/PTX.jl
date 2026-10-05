@@ -1,8 +1,8 @@
 module PTX
 
-using LLVM
+using LLVM, LLVM.IR, LLVM.Build
 using BFloat16s: BFloat16
-using LLVM.Interop: @asmcall
+using LLVM.Interop: @asmcall, @llvmgenerated, generate_llvmcall
 
 include("ir/nodes.jl")
 using .IR

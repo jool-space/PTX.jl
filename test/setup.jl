@@ -170,6 +170,16 @@ emit_host_ptx(f, tt::Type{<:Tuple}; kwargs...) =
 emit_host_llvm(f, tt::Type{<:Tuple}; kwargs...) =
     emit_llvm(_host_target_job(f, tt; kwargs...))
 
+# The IR module a wrapper hands to `Base.llvmcall`, read from its inlined
+# typed code (the first one, for wrappers that emit several).
+function llvmcall_ir(f, argtypes)
+    ci, _ = first(Base.code_typed(f, argtypes))
+    for stmt in ci.code, arg in (stmt isa Expr ? stmt.args : ())
+        arg isa String && occursin("define ", arg) && return arg
+    end
+    error("no llvmcall IR in the typed code of $f$argtypes")
+end
+
 # Full LLVM → PTX → ptxas → cubin path; no `link`, so no device load.
 # Throws on ptxas rejection (stderr is in the error message).
 function ptxas_compiles(f, tt::Type{<:Tuple};

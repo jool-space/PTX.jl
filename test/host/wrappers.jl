@@ -493,7 +493,7 @@ end
     # and b8 forms
     # lower through llvm.nvvm.{ld,st}matrix.* (state space carried by the
     # pointer's address space); the explicit `shared::cta` spellings ride
-    # convergent_asm_ir. Goldens: test/golden/{ldmatrix@sm75,stmatrix@sm90,
+    # convergent_asmcall. Goldens: test/golden/{ldmatrix@sm75,stmatrix@sm90,
     # ldst_matrix_b8@sm100a}.ptx.
     pSh  = Core.LLVMPtr{UInt16, PTX.AS.Shared}
     pSh8 = Core.LLVMPtr{UInt8, PTX.AS.Shared}
@@ -832,7 +832,7 @@ end
     # collective: `sideeffect` alone permits jump-threading duplication of
     # the call site across a divergent branch — the active_mask miscompile
     # class. The wrappers emit llvmcall IR with a `convergent` call-site
-    # attribute group (src/dsl/convergent_asm.jl, convergent_asm_ir). This attribute binds in
+    # attribute group (src/dsl/convergent_asm.jl, convergent_asmcall). This attribute binds in
     # the *in-process* middle end only — llc ignores it — so no ptxas/golden
     # test can catch its loss; this IR-level pin is the tripwire.
     # (The optimizer-shape counterpart lives in test/ptxas/hopper.jl.)
@@ -1646,38 +1646,40 @@ end
     # `<N x T>` (what load/store want) and the array type `[N x T]` (how Julia
     # represents the homogeneous tuple).
 
-    # v4.f32 load: bitcast the i8 ABI pointer to pointer-to-vector (typed
-    # spelling — Julia ≤ 1.11 device context parses typed only; the ≥ 1.12
-    # opaque upgrade folds the cast away), load <4 x float>, unpack into
+    body(op, argts) = string(first(Base.code_typed(op, argts))[1])
+    pG(T) = Core.LLVMPtr{T, PTX.AS.Global}
+
+    # v4.f32 load: load <4 x float> with the vector's alignment, unpack into
     # the [4 x float] tuple.
-    ir = PTX.vec_ld_ir(4, :f32, 16)
-    @test occursin("bitcast i8 addrspace(1)* %0 to <4 x float> addrspace(1)*", ir)
-    @test occursin("load <4 x float>, <4 x float> addrspace(1)* %vp, align 16", ir)
-    @test occursin("extractelement <4 x float> %v, i32 3", ir)
+    ir = body(Operation{:ld, (:global, :v4, :f32)}(), (pG(Float32),))
+    @test occursin(r"load <4 x float>, .* align 16", ir)
+    @test occursin(r"extractelement <4 x float> %\d+, i32 3", ir)
     @test occursin("insertvalue [4 x float]", ir)
     @test occursin("ret [4 x float]", ir)
     @test !occursin("~{memory}", ir)   # no optimization barrier
 
     # v2.b32 → i32 elements, align 8.
-    ir = PTX.vec_ld_ir(2, :b32, 8)
-    @test occursin("load <2 x i32>, <2 x i32> addrspace(1)* %vp, align 8", ir)
+    ir = body(Operation{:ld, (:global, :v2, :b32)}(), (pG(UInt32),))
+    @test occursin(r"load <2 x i32>, .* align 8", ir)
 
     # v4.b16 → i16 elements, align 8.
-    ir = PTX.vec_ld_ir(4, :b16, 8)
-    @test occursin("load <4 x i16>, <4 x i16> addrspace(1)* %vp, align 8", ir)
+    ir = body(Operation{:ld, (:global, :v4, :b16)}(), (pG(UInt16),))
+    @test occursin(r"load <4 x i16>, .* align 8", ir)
 
-    # v4.f32 store: unpack the [4 x float] arg (%1), build <4 x float>, store
-    # to the pointer arg (%0, bitcast to pointer-to-vector).
-    ir = PTX.vec_st_ir(4, :f32, 16)
+    # v4.f32 store: unpack the [4 x float] argument, build <4 x float>, store
+    # to the pointer argument.
+    ir = body(Operation{:st, (:global, :v4, :f32)}(),
+              (pG(Float32), NTuple{4, Float32}))
     @test occursin("extractvalue [4 x float] %1, 3", ir)
     @test occursin("insertelement <4 x float>", ir)
-    @test occursin("bitcast i8 addrspace(1)* %0 to <4 x float> addrspace(1)*", ir)
-    @test occursin("store <4 x float> %v3, <4 x float> addrspace(1)* %sp, align 16", ir)
+    @test occursin(r"store <4 x float> %\d+, .* align 16", ir)
     @test occursin("ret void", ir)
+    @test !occursin("~{memory}", ir)
 
     # v2.b16 store, align 4.
-    ir = PTX.vec_st_ir(2, :b16, 4)
-    @test occursin("store <2 x i16> %v1, <2 x i16> addrspace(1)* %sp, align 4", ir)
+    ir = body(Operation{:st, (:global, :v2, :b16)}(),
+              (pG(UInt16), NTuple{2, UInt16}))
+    @test occursin(r"store <2 x i16> %\d+, .* align 4", ir)
 
     # Methods registered for representative variants.
     @test which(Operation{:ld, (:global, :v4, :f32)}(),

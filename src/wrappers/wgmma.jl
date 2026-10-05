@@ -157,7 +157,7 @@ function _wgmma_mma_async_register(
     register_wrapper!(:wgmma, :wgmma, mods, :asm)
 
     # wgmma.mma_async is warpgroup-collective: all 128 threads must execute
-    # the same call site. Emitted via convergent_asm_ir (not @asmcall) so the
+    # the same call site. Emitted via convergent_asmcall (not @asmcall) so the
     # call carries `convergent` — sideeffect alone permits jump-threading
     # duplication across divergent branches, the active_mask miscompile class
     # (see src/dsl/convergent_asm.jl, "convergent inline asm").
@@ -166,18 +166,17 @@ function _wgmma_mma_async_register(
     let spec = wgmma_mma_async_spec(dtype_d, dtype_a, dtype_b, n, k, has_trans)
         nd, asm, constraints = spec.nd, spec.asm, spec.constraints
         flat_argtypes = vcat([UInt64, UInt64, Bool], fill(d_J, nd))
-        ir = convergent_asm_ir(asm, constraints, NTuple{nd, d_J}, flat_argtypes)
         d_args = [:(d[$i]) for i in 1:nd]
+        call = convergent_asmcall(asm, constraints, NTuple{nd, d_J},
+                                  flat_argtypes, :a_desc, :b_desc, :scale_d,
+                                  d_args...)
         @eval function (::Operation{:wgmma, $mods})(
                 d::NTuple{$nd, $d_J},
                 a_desc::UInt64,
                 b_desc::UInt64,
                 scale_d::Bool)
             Base.@inline
-            Base.llvmcall(($ir, "entry"),
-                          NTuple{$nd, $d_J},
-                          Tuple{$(flat_argtypes...)},
-                          a_desc, b_desc, scale_d, $(d_args...))
+            $call
         end
     end
 
@@ -186,18 +185,16 @@ function _wgmma_mma_async_register(
                                      scale_d_imm = true)
         nd, asm, constraints = spec.nd, spec.asm, spec.constraints
         flat_argtypes = vcat([UInt64, UInt64], fill(d_J, nd))
-        ir = convergent_asm_ir(asm, constraints, NTuple{nd, d_J}, flat_argtypes)
         d_args = [:(d[$i]) for i in 1:nd]
+        call = convergent_asmcall(asm, constraints, NTuple{nd, d_J},
+                                  flat_argtypes, :a_desc, :b_desc, d_args...)
         @eval function (::Operation{:wgmma, $mods})(
                 d::NTuple{$nd, $d_J},
                 a_desc::UInt64,
                 b_desc::UInt64,
                 ::Val{true})
             Base.@inline
-            Base.llvmcall(($ir, "entry"),
-                          NTuple{$nd, $d_J},
-                          Tuple{$(flat_argtypes...)},
-                          a_desc, b_desc, $(d_args...))
+            $call
         end
     end
 
@@ -207,18 +204,15 @@ function _wgmma_mma_async_register(
     let spec = wgmma_mma_async_spec(dtype_d, dtype_a, dtype_b, n, k, has_trans;
                                      scale_d_imm = false)
         nd, asm, constraints = spec.nd, spec.asm, spec.constraints
-        ir = convergent_asm_ir(asm, constraints, NTuple{nd, d_J},
-                               [UInt64, UInt64])
+        call = convergent_asmcall(asm, constraints, NTuple{nd, d_J},
+                                  (UInt64, UInt64), :a_desc, :b_desc)
         @eval function (::Operation{:wgmma, $mods})(
                 _d::NTuple{$nd, $d_J},
                 a_desc::UInt64,
                 b_desc::UInt64,
                 ::Val{false})
             Base.@inline
-            Base.llvmcall(($ir, "entry"),
-                          NTuple{$nd, $d_J},
-                          Tuple{UInt64, UInt64},
-                          a_desc, b_desc)
+            $call
         end
     end
 
@@ -229,19 +223,17 @@ function _wgmma_mma_async_register(
                                        has_trans)
         nd, asm, constraints = spec.nd, spec.asm, spec.constraints
         flat_argtypes = vcat(fill(UInt32, 4), [UInt64, Bool], fill(d_J, nd))
-        ir = convergent_asm_ir(asm, constraints, NTuple{nd, d_J}, flat_argtypes)
         d_args = [:(d[$i]) for i in 1:nd]
+        call = convergent_asmcall(asm, constraints, NTuple{nd, d_J},
+                                  flat_argtypes, (:(a[$i]) for i in 1:4)...,
+                                  :b_desc, :scale_d, d_args...)
         @eval function (::Operation{:wgmma, $mods})(
                 d::NTuple{$nd, $d_J},
                 a::NTuple{4, UInt32},
                 b_desc::UInt64,
                 scale_d::Bool)
             Base.@inline
-            Base.llvmcall(($ir, "entry"),
-                          NTuple{$nd, $d_J},
-                          Tuple{$(flat_argtypes...)},
-                          a[1], a[2], a[3], a[4], b_desc, scale_d,
-                          $(d_args...))
+            $call
         end
     end
 
