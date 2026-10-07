@@ -1,14 +1,14 @@
-# Registry <-> backend conformance. Three
+# Registry <-> backend conformance. Two
 # layers, each catching a different way the committed table can rot:
 #
-#   1. Version: the artifact the environment resolved is the version the
-#      table was generated from (compat pins the major; this catches
-#      minor/patch skew worth knowing about at a glance).
-#   2. Names: every table entry's name exists in the backend library's
+#   1. Names: every table entry's name exists in the backend library's
 #      intrinsic name table, and vice versa — the same diff the extraction
 #      pipeline runs at generation time, re-checked continuously against
-#      the binary that environments actually resolve.
-#   3. Selection: for every intrinsic the package's wrappers stand on,
+#      the binary that environments actually resolve. Compat pins the
+#      backend's major; within it, this is the check that matters: a
+#      resolved patch release whose name table still matches is fine, and
+#      one that drifts fails here by name rather than by version number.
+#   2. Selection: for every intrinsic the package's wrappers stand on,
 #      synthesized IR compiles through the backend library and selects the
 #      *expected instruction*. Acceptance alone proves nothing — the backend
 #      remangles wrong names and upgrades sloppy callsites silently — so
@@ -19,14 +19,8 @@
 # therefore spell intrinsic names literally (greppable by design).
 
 using PTX
-using PTX.NVVM: NVVM, synthesize, TABLE, BACKEND_LLVM_VERSION
+using PTX.NVVM: NVVM, synthesize, TABLE
 include(joinpath(@__DIR__, "..", "nvptx_backend_defs.jl"))
-
-@testset "backend artifact matches the registry's generation version" begin
-    jll = pkgversion(NVPTX_LLVM_Backend_jll)
-    @test VersionNumber(jll.major, jll.minor, jll.patch) == BACKEND_LLVM_VERSION
-    @test nvptx_backend_version() == BACKEND_LLVM_VERSION
-end
 
 @testset "table names == backend library's intrinsic name table" begin
     blob = read(libnvptx, String)

@@ -59,8 +59,8 @@ entry in the root `Project.toml` is the trigger — see the comment there):
    property change (a gained/lost `IntrConvergent`, a memory-effect
    change) is an optimizer-contract change.
 5. **Update compat + pins**: the `NVPTX_LLVM_Backend_jll` compat entries
-   (root and `test/Project.toml`), `NVVM.BACKEND_LLVM_VERSION` consumers,
-   and the registry census pins in `test/host/nvvm.jl` (table length,
+   (root and `test/Project.toml`) and the registry census pins in
+   `test/host/nvvm.jl` (table length,
    return-range/noundef inventories, side-effecting-nomem set) and
    `test/host/conformance.jl` (per-namespace counts, the mma/wmma
    convergence-overlay boundary — designed to go red when upstream gains
