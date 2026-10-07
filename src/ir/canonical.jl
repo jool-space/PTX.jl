@@ -106,7 +106,9 @@ _canon_pred(::_Renamer, ::Nothing) = nothing
 _canon_pred(rn::_Renamer, p::Predicate) =
     Predicate(_sym(rn, p.register), p.negated)
 
-function _canon_body(rn::_Renamer, body::Tuple{Vararg{Statement}})
+# `@nospecialize`: a body's concrete tuple type is unique per body; walking it
+# at the declared type compiles this once (see `format._format_statements`).
+function _canon_body(rn::_Renamer, @nospecialize(body::Tuple{Vararg{Statement}}))
     out = Statement[]
     for s in body
         if s isa RegDecl

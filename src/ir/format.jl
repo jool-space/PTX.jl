@@ -99,8 +99,20 @@ format(s::Section)   = s.raw
 
 function format(b::Block)
     indent = _indent(b.formatting)
-    body = isempty(b.body) ? "" : "\n" * join(String[format(s) for s in b.body], "\n") * "\n" * indent
+    body = isempty(b.body) ? "" : "\n" * join(_format_statements(b.body), "\n") * "\n" * indent
     indent * "{" * body * "}"
+end
+
+# A body's concrete tuple type spells out every statement, so a comprehension
+# over it is compiled, and inferred element by element, once per distinct
+# body. Formatting at the declared type costs one dispatch per statement and
+# is compiled once.
+function _format_statements(@nospecialize(body::Tuple{Vararg{Statement}}))
+    lines = String[]
+    for s in body
+        push!(lines, format(s))
+    end
+    lines
 end
 
 # `IntrinsicScope` is construction-time IR rather than parser-produced PTX.
@@ -150,7 +162,7 @@ function format(f::Function)
     if f.formatting !== nothing && !isempty(f.formatting.preceding_comments)
         head = join(f.formatting.preceding_comments, "\n") * "\n" * head
     end
-    body = isempty(f.body) ? "" : "\n" * join(String[format(s) for s in f.body], "\n") * "\n"
+    body = isempty(f.body) ? "" : "\n" * join(_format_statements(f.body), "\n") * "\n"
     head * "\n{" * body * "}"
 end
 
