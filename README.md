@@ -18,8 +18,8 @@ function add_kernel!(c, a, b)
 end
 
 n = 128;
-a = cu(randn(n));
-b = cu(randn(n));
+a = CUDA.randn(n);
+b = CUDA.randn(n);
 c = similar(a);
 @cuda threads=n add_kernel!(c, a, b);
 @assert c == a + b
