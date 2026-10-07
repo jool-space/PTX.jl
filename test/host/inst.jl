@@ -64,8 +64,7 @@ end
     @test ptx"_optype_probe.f32.sat"(1.5) == 2.5
     @test hasmethod(ptx"_optype_probe.f32.sat", Tuple{Float64})
 
-    @test _optype_probe_generated(_OptypeProbe(21)) == 42
-    @test Base.return_types(_optype_probe_generated, (_OptypeProbe,))[1] === Int
+    @test (@inferred _optype_probe_generated(_OptypeProbe(21))) == 42
 
     # Special registers and interpolated spellings stay literal expansions.
     @test @macroexpand(ptx"%tid.x") == :($SpecialReg{$(QuoteNode(Symbol("%tid.x")))}())
