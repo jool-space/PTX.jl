@@ -261,7 +261,7 @@ end
 # type. The projection consequently fails loudly for a node without a normal
 # positional constructor, and automatically preserves a future IR field rather
 # than quietly weakening a structural oracle by omitting it.
-function _deep_unraw_field(name::Symbol, value)
+function _deep_unraw_field(name::Symbol, @nospecialize(value))
     name === :formatting && return _without_raw_line(value)
     (name === :raw_header || name === :raw_source) && return nothing
 
@@ -269,10 +269,20 @@ function _deep_unraw_field(name::Symbol, value)
     # Only actual statement containers are recursed into; operand/parameter
     # tuples and every other field retain their exact values.
     value isa PTX.IR.Statement && return _deep_unraw_stmt(value)
-    if value isa Tuple && all(item -> item isa PTX.IR.Statement, value)
-        return Tuple(_deep_unraw_stmt(item) for item in value)
-    end
+    value isa Tuple && _all_statements(value) && return _deep_unraw_statements(value)
     value
+end
+
+# Statement tuples are walked at their declared type: a body's concrete
+# tuple type is unique per body, and any generic iteration specialized on it
+# is compiled, and inferred element by element, once per body.
+_all_statements(@nospecialize(t::Tuple)) = all(item -> item isa PTX.IR.Statement, t)
+function _deep_unraw_statements(@nospecialize(stmts::Tuple))
+    out = PTX.IR.Statement[]
+    for item in stmts
+        push!(out, _deep_unraw_stmt(item))
+    end
+    Tuple(out)
 end
 
 function _deep_unraw_node(node::T) where {T}
@@ -286,9 +296,11 @@ _deep_unraw_stmt(stmt::PTX.IR.Statement) = _deep_unraw_node(stmt)
 _deep_unraw(m::PTX.IR.Module) = _deep_unraw_node(m)
 
 function _raw_snapshot_paths!(paths::Vector{Pair{String, String}},
-                              stmts::Tuple{Vararg{PTX.IR.Statement}},
+                              @nospecialize(stmts::Tuple{Vararg{PTX.IR.Statement}}),
                               prefix::String)
-    for (index, stmt) in enumerate(stmts)
+    index = 0
+    for stmt in stmts
+        index += 1
         path = "$prefix[$index]"
         if hasfield(typeof(stmt), :formatting)
             formatting = getfield(stmt, :formatting)
@@ -312,9 +324,11 @@ function _raw_snapshot_paths(m::PTX.IR.Module)
 end
 
 function _rawline_paths!(paths::Vector{Pair{String, String}},
-                         stmts::Tuple{Vararg{PTX.IR.Statement}},
+                         @nospecialize(stmts::Tuple{Vararg{PTX.IR.Statement}}),
                          prefix::String)
-    for (index, stmt) in enumerate(stmts)
+    index = 0
+    for stmt in stmts
+        index += 1
         path = "$prefix[$index]"
         if stmt isa PTX.IR.RawLine
             push!(paths, path => stmt.text)

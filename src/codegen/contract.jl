@@ -298,17 +298,29 @@ function _module_symbol_referenced(mod::Module, name::String)
         if stmt isa Instruction
             foreach(scan_operand, stmt.operands)
         elseif stmt isa Block || stmt isa IR.IntrinsicScope
-            foreach(scan_stmt, stmt.body)
+            _each_statement(scan_stmt, stmt.body)
         elseif stmt isa RawLine
             occursin(name, stmt.text) && (found = true)
         end
     end
     for d in mod.directives
         d isa Function || continue
-        foreach(scan_stmt, d.body)
+        _each_statement(scan_stmt, d.body)
         found && return true
     end
     false
+end
+
+# Bodies are tuples whose concrete type spells out every statement, so a
+# body of a few hundred statements is a type of its own and a generic
+# `foreach`/`for` over it is compiled, and inferred element by element, once
+# per distinct body. Walking it at the declared type instead costs one
+# dispatch per statement and is compiled once.
+function _each_statement(f, @nospecialize(body::Tuple{Vararg{Statement}}))
+    for stmt in body
+        f(stmt)
+    end
+    nothing
 end
 
 function _validate_param!(state::_TranspileContractState, p::Param,
@@ -339,9 +351,13 @@ function _validate_param!(state::_TranspileContractState, p::Param,
 end
 
 function _collect_labels!(state::_TranspileContractState,
-                          body::Tuple{Vararg{Statement}}, scope::String,
-                          path::String)
-    for (i, stmt) in enumerate(body)
+                          @nospecialize(body::Tuple{Vararg{Statement}}),
+                          scope::String, path::String)
+    # Counted by hand: `enumerate(body)` dispatches on the concrete tuple
+    # and is compiled once per distinct body (see `_each_statement`).
+    i = 0
+    for stmt in body
+        i += 1
         spath = _stmt_path(path, i, stmt)
         if stmt isa Label
             haskey(state.labels, stmt.name) &&
@@ -989,9 +1005,13 @@ function _validate_var_decl!(state::_TranspileContractState,
 end
 
 function _validate_body!(state::_TranspileContractState,
-                         body::Tuple{Vararg{Statement}}, scope::String,
-                         path::String)
-    for (i, stmt) in enumerate(body)
+                         @nospecialize(body::Tuple{Vararg{Statement}}),
+                         scope::String, path::String)
+    # Counted by hand: `enumerate(body)` dispatches on the concrete tuple
+    # and is compiled once per distinct body (see `_each_statement`).
+    i = 0
+    for stmt in body
+        i += 1
         spath = _stmt_path(path, i, stmt)
         if stmt isa Comment || stmt isa BlankLine || stmt isa Label
             continue
