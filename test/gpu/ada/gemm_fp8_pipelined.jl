@@ -102,10 +102,10 @@ function gemm_fp8_pipelined_kernel!(
     pa = pointer(A); pb = pointer(B_T); pd = pointer(D)
     n_iters = K ÷ FP8P_BK
 
-    m_base = Int(ptx"mov.u32"(sreg"ctaid.y")) * FP8P_BM
-    n_base = Int(ptx"mov.u32"(sreg"ctaid.x")) * FP8P_BN
+    m_base = Int(ptx"mov.u32"(ptx"%ctaid.y")) * FP8P_BM
+    n_base = Int(ptx"mov.u32"(ptx"%ctaid.x")) * FP8P_BN
 
-    tid     = ptx"mov.u32"(sreg"tid.x")
+    tid     = ptx"mov.u32"(ptx"%tid.x")
     warp_id = Int(tid >> UInt32(5))
     lane    = Int(tid & UInt32(31))
     warp_m_smem = (warp_id >> 1) << 6           # 0 or 64

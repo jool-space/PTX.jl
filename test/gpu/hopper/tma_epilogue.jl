@@ -24,7 +24,7 @@ const EPI_BN = 8
 function _tma_epilogue_kernel!(tma_D::PTX.TMADescriptorPtr)
     smem = CuStaticSharedArray(BFloat16, EPI_BM * EPI_BN)
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     # Every thread fills one cell with an exactly representable bf16 value.
     @inbounds smem[Int(tid) + 1] = BFloat16(1f0 + Float32(tid) / 128f0)

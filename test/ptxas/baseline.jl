@@ -91,7 +91,7 @@ end
 # CUDA 13 ptxas requires sm_75+; this still validates the wrapper.
 
 function _baseline_shfl_idx!(out)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     val = ptx"shfl.sync.idx.b32"(UInt32(0xFFFFFFFF), tid, UInt32(5), UInt32(0x1F))
     @inbounds out[tid + 1] = val
     return nothing
@@ -113,7 +113,7 @@ end
 function _baseline_cp_async!(dst::CuDeviceVector{UInt32, 1},
                               src::CuDeviceVector{UInt32, 1})
     smem = CuStaticSharedArray(UInt32, 32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     src_p = pointer(src) + Int(tid) * 4
     dst_p = pointer(smem) + Int(tid) * 4
     ptx"cp.async.ca.shared.global"(dst_p, src_p, Val(4))
@@ -145,7 +145,7 @@ function _baseline_mma_bf16!(out)
     b = (UInt32(0), UInt32(0))
     c = (0f0, 0f0, 0f0, 0f0)
     d = ptx"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(a, b, c)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = d[1]
     end
@@ -172,7 +172,7 @@ end
 # ptxas/blackwell.jl.
 
 function _baseline_cvt_fp8_unpack!(out::CuDeviceVector{UInt32, 1}, x::UInt16)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out[1] = ptx"cvt.rn.f16x2.e4m3x2"(x)
         @inbounds out[2] = ptx"cvt.rn.f16x2.e5m2x2"(x)
@@ -200,7 +200,7 @@ function _baseline_mbarrier_lifecycle!(out::CuDeviceVector{UInt64, 1},
                                         outp::CuDeviceVector{UInt32, 1})
     smem = CuStaticSharedArray(UInt64, 1)
     mbar = pointer(smem)
-    tid  = ptx"mov.u32"(sreg"tid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         ptx"mbarrier.init.shared.b64"(mbar, UInt32(2))
     end
@@ -246,7 +246,7 @@ end
 # mode. Pred form returns `(UInt32, Bool)` via the `\$0|\$1` operand.
 
 function _baseline_shfl_all_modes!(out::CuDeviceVector{UInt32, 1})
-    tid  = ptx"mov.u32"(sreg"tid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
     mask = UInt32(0xFFFFFFFF)
     v_up   = ptx"shfl.sync.up.b32"(  tid, UInt32(1), UInt32(0x00), mask)
     v_dn   = ptx"shfl.sync.down.b32"(tid, UInt32(1), UInt32(0x1F), mask)
@@ -337,7 +337,7 @@ end
 function _baseline_cp_async_n8!(dst::CuDeviceVector{UInt64, 1},
                                  src::CuDeviceVector{UInt64, 1})
     smem = CuStaticSharedArray(UInt64, 32)
-    tid  = ptx"mov.u32"(sreg"tid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
     src_p = pointer(src) + Int(tid) * 8
     dst_p = pointer(smem) + Int(tid) * 8
     ptx"cp.async.ca.shared.global"(dst_p, src_p, Val(8))
@@ -351,7 +351,7 @@ end
 function _baseline_cp_async_n16!(dst::CuDeviceVector{UInt32, 1},
                                   src::CuDeviceVector{UInt32, 1})
     smem = CuStaticSharedArray(UInt32, 128)
-    tid  = ptx"mov.u32"(sreg"tid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
     src_p = pointer(src) + Int(tid) * 16
     dst_p = pointer(smem) + Int(tid) * 16
     ptx"cp.async.ca.shared.global"(dst_p, src_p, Val(16))

@@ -32,8 +32,8 @@ function _tma_multicast_cluster_kernel!(out::CuDeviceVector{BFloat16, 1},
     mb_ptr = pointer(mbar)
     s_ptr  = pointer(smem)
 
-    tid = ptx"mov.u32"(sreg"tid.x")
-    cta_rank = ptx"mov.u32"(sreg"cluster_ctarank")
+    tid = ptx"mov.u32"(ptx"%tid.x")
+    cta_rank = ptx"mov.u32"(ptx"%cluster_ctarank")
 
     if tid == UInt32(0)
         ptx"mbarrier.init.shared.b64"(mb_ptr, UInt32(1))

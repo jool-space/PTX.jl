@@ -1,6 +1,6 @@
 # Host inspection must work with no selected CUDA compiler artifact.
 function _host_codegen_probe!(out::CuDeviceVector{UInt32,1})
-    @inbounds out[1] = ptx"mov.u32"(sreg"tid.x")
+    @inbounds out[1] = ptx"mov.u32"(ptx"%tid.x")
     nothing
 end
 

@@ -11,8 +11,6 @@ The full public API. Everything else under `PTX`, `PTX.IR`,
 
 ```@docs
 @ptx_str
-@optype_str
-@sreg_str
 PTX.@mod_str
 ```
 

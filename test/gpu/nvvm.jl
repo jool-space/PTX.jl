@@ -11,7 +11,7 @@ using PTX.NVVM
 
 @testset "shfl.sync.idx: rotate by one lane" begin
     function rotate!(out)
-        tid = ptx"mov.u32"(sreg"tid.x")
+        tid = ptx"mov.u32"(ptx"%tid.x")
         src = (tid + UInt32(1)) % UInt32(32)
         @inbounds out[tid + 1] =
             nvvm"shfl.sync.idx.i32"(0xffffffff, tid * tid, src, UInt32(0x1f))
@@ -24,7 +24,7 @@ end
 
 @testset "shfl.sync.idx.i32p: heterogeneous {i32,i1} return" begin
     function rotp!(vals, preds)
-        tid = ptx"mov.u32"(sreg"tid.x")
+        tid = ptx"mov.u32"(ptx"%tid.x")
         src = (tid + UInt32(1)) % UInt32(32)
         v, p = nvvm"shfl.sync.idx.i32p"(0xffffffff, tid, src, UInt32(0x1f))
         @inbounds vals[tid + 1] = v
@@ -40,7 +40,7 @@ end
 
 @testset "vote.all.sync through the Bool/i1 glue" begin
     function votes!(out)
-        tid = ptx"mov.u32"(sreg"tid.x")
+        tid = ptx"mov.u32"(ptx"%tid.x")
         @inbounds out[tid + 1, 1] = nvvm"vote.all.sync"(0xffffffff, true)
         @inbounds out[tid + 1, 2] =
             nvvm"vote.all.sync"(0xffffffff, tid < UInt32(31))
@@ -54,7 +54,7 @@ end
 
 @testset "activemask under divergence (the convergence-spike shape)" begin
     function masks!(out)
-        i = ptx"mov.u32"(sreg"tid.x")
+        i = ptx"mov.u32"(ptx"%tid.x")
         if i < UInt32(16)
             @inbounds out[i + 1] = nvvm"activemask"()
         else

@@ -19,15 +19,15 @@ using PTX: format_call, build_call, Operation
 end
 
 @testset "mov.u32 (special register)" begin
-    # `sreg"..."` bakes the verbatim PTX token into the asm, no input slot.
-    @test format_call(ptx"mov.u32", Tuple{typeof(sreg"%tid.x")})            == "mov.u32 \$0, %tid.x;"
-    @test format_call(ptx"mov.u32", Tuple{typeof(sreg"%ntid.y")})           == "mov.u32 \$0, %ntid.y;"
-    @test format_call(ptx"mov.u32", Tuple{typeof(sreg"%dynamic_smem_size")}) == "mov.u32 \$0, %dynamic_smem_size;"
+    # `ptx"%..."` bakes the verbatim PTX token into the asm, no input slot.
+    @test format_call(ptx"mov.u32", Tuple{typeof(ptx"%tid.x")})            == "mov.u32 \$0, %tid.x;"
+    @test format_call(ptx"mov.u32", Tuple{typeof(ptx"%ntid.y")})           == "mov.u32 \$0, %ntid.y;"
+    @test format_call(ptx"mov.u32", Tuple{typeof(ptx"%dynamic_smem_size")}) == "mov.u32 \$0, %dynamic_smem_size;"
     # Register-copy form: integer arg becomes \$1.
     @test format_call(ptx"mov.u32", Tuple{UInt32})                          == "mov.u32 \$0, \$1;"
 
     # Reading a special register is observable.
-    @test build_call(:mov, (:u32,), (typeof(sreg"%tid.x"),)).side_effects == true
+    @test build_call(:mov, (:u32,), (typeof(ptx"%tid.x"),)).side_effects == true
 end
 
 @testset "mov.u32 sreg NVVM whitelist" begin
@@ -38,12 +38,8 @@ end
     @test haskey(PTX.NVVM_SREG_U32, Symbol("%ctaid.z"))
     @test haskey(PTX.NVVM_SREG_U32, Symbol("%laneid"))
     # PTX 9.3 uses WARP_SZ (an immediate), not a %warpsize special register.
-    # The public sreg macro normalizes that legacy spelling to Val(32), so it
-    # must not leak into either PTX or NVVM-sreg inventories.
     @test !haskey(PTX.NVVM_SREG_U32, Symbol("%warpsize"))
     @test !("%warpsize" in PTX.IR.SPECIAL_REGS)
-    @test format_call(ptx"mov.u32", Tuple{typeof(sreg"%warpsize")}) ==
-        "mov.u32 \$0, 32;"
     @test haskey(PTX.NVVM_SREG_U32, Symbol("%cluster_ctarank"))
     @test haskey(PTX.NVVM_SREG_U32, Symbol("%lanemask_eq"))
 
@@ -62,7 +58,7 @@ end
 
     # `format_call` reflects the asm fallback unchanged — the NVVM path only
     # kicks in at runtime through the @generated dispatch.
-    @test format_call(ptx"mov.u32", Tuple{typeof(sreg"%tid.x")}) ==
+    @test format_call(ptx"mov.u32", Tuple{typeof(ptx"%tid.x")}) ==
         "mov.u32 \$0, %tid.x;"
 end
 

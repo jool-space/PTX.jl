@@ -71,7 +71,7 @@ function _fp8_ws_gemm_kernel!(
     full  = BarrierArray{FP8WS_N_STAGES}(pointer(mbar_full))
     empty = BarrierArray{FP8WS_N_STAGES}(pointer(mbar_empty))
 
-    tid     = ptx"mov.u32"(sreg"tid.x")
+    tid     = ptx"mov.u32"(ptx"%tid.x")
     wg_id   = tid >> UInt32(7)                  # 0 = producer, 1 = consumer
     lane128 = tid & UInt32(127)
 

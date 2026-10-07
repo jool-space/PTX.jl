@@ -53,8 +53,8 @@ function _pab_gemm_kernel!(
     a_addr = smem_addr_u32(a_ptr)
     b_addr = smem_addr_u32(b_ptr)
 
-    tid   = ptx"mov.u32"(sreg"tid.x")
-    batch = ptx"mov.u32"(sreg"ctaid.x")
+    tid   = ptx"mov.u32"(ptx"%tid.x")
+    batch = ptx"mov.u32"(ptx"%ctaid.x")
 
     # Ptr-array indirection: every thread loads its batch's descriptor
     # ADDRESSES from global memory, then treats them as TMA descriptor

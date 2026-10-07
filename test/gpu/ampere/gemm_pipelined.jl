@@ -72,10 +72,10 @@ function gemm_pipelined_kernel!(
     pa = pointer(A); pb = pointer(B_T); pd = pointer(D)
     n_iters = K ÷ PIPE_BK
 
-    m_base = Int(ptx"mov.u32"(sreg"ctaid.y")) * PIPE_BM
-    n_base = Int(ptx"mov.u32"(sreg"ctaid.x")) * PIPE_BN
+    m_base = Int(ptx"mov.u32"(ptx"%ctaid.y")) * PIPE_BM
+    n_base = Int(ptx"mov.u32"(ptx"%ctaid.x")) * PIPE_BN
 
-    tid     = ptx"mov.u32"(sreg"tid.x")
+    tid     = ptx"mov.u32"(ptx"%tid.x")
     warp_id = Int(tid >> UInt32(5))             # 0..3
     lane    = Int(tid & UInt32(31))             # 0..31
 

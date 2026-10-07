@@ -646,9 +646,9 @@ function fab_kernel!(
     kv_ptr = pointer(smem_kv)
     bars   = fab_barset(Val(CFG.splitp), pointer(bar_mem))
 
-    tid      = ptx"mov.u32"(sreg"tid.x")
-    cta_id   = ptx"mov.u32"(sreg"ctaid.x")
-    num_ctas = ptx"mov.u32"(sreg"nctaid.x")
+    tid      = ptx"mov.u32"(ptx"%tid.x")
+    cta_id   = ptx"mov.u32"(ptx"%ctaid.x")
+    num_ctas = ptx"mov.u32"(ptx"%nctaid.x")
     warp   = tid >> UInt32(5)
     wig    = warp & UInt32(3)                     # warp in group
     row128 = tid & UInt32(127)

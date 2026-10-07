@@ -49,10 +49,10 @@ function _grouped_gemm_multik_kernel!(
     a_addr = smem_addr_u32(a_ptr)
     b_addr = smem_addr_u32(b_ptr)
 
-    tid   = ptx"mov.u32"(sreg"tid.x")
-    cta_x = ptx"mov.u32"(sreg"ctaid.x")
-    cta_y = ptx"mov.u32"(sreg"ctaid.y")
-    cta_z = ptx"mov.u32"(sreg"ctaid.z")
+    tid   = ptx"mov.u32"(ptx"%tid.x")
+    cta_x = ptx"mov.u32"(ptx"%ctaid.x")
+    cta_y = ptx"mov.u32"(ptx"%ctaid.y")
+    cta_z = ptx"mov.u32"(ptx"%ctaid.z")
 
     m_outer = cta_y * UInt32(GGM_BM) + cta_z * UInt32(M)
     n_base  = cta_x * UInt32(GGM_BN)

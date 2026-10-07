@@ -31,26 +31,44 @@ end
 struct _OptypeProbe
     x::Int
 end
-@inline PTX.@optype_str("_optype_probe.f32.sat")(v::_OptypeProbe) = v.x + 1
-@inline optype"_optype_probe.wait::ld.pack::16b"(v::_OptypeProbe, w::_OptypeProbe) =
+@inline ptx"_optype_probe.f32.sat"(v::_OptypeProbe) = v.x + 1
+@inline ptx"_optype_probe.wait::ld.pack::16b"(v::_OptypeProbe, w::_OptypeProbe) =
     v.x + w.x
+# A second module adds a method to the same singleton through its own binding.
+module _OptypeProbeExt
+using PTX
+ptx"_optype_probe.f32.sat"(v::Float64) = v + 1
+end
+# A spelling quoted inside a generated body is expanded when the generator
+# runs, where no binding can be created; it must still fold to the singleton.
+@generated _optype_probe_generated(v::_OptypeProbe) =
+    :( ptx"_optype_probe_gen.f32"(v) )
+@inline ptx"_optype_probe_gen.f32"(v::_OptypeProbe) = v.x * 2
 
-@testset "optype\"...\" definition macro" begin
-    # Expands to the `::Operation{op, mods}` annotation for the same static
-    # spelling ptx"" produces — one shared parser.
-    @test (@macroexpand optype"add.f32") == :(::$(Operation{:add, (:f32,)}))
+@testset "ptx\"...\" method definitions" begin
+    @test typeof(ptx"add.f32") === Operation{:add, (:f32,)}
 
-    # A method defined via optype"" is dispatchable by the ptx"" spelling,
-    # including `::`-qualified segments.
+    # A static spelling expands to a const bound in the expanding module, so
+    # it is valid both as a value and as a method-definition head. The const
+    # folds to the singleton, so the call site compiles to a constant.
+    @test @macroexpand(ptx"add.f32") === Symbol("#ptx#add.f32")
+    @test isconst(@__MODULE__, Symbol("#ptx#add.f32"))
+    @test getglobal(@__MODULE__, Symbol("#ptx#add.f32")) === Operation{:add, (:f32,)}()
+    @test Base.return_types(() -> ptx"add.f32", ())[1] === Operation{:add, (:f32,)}
+
+    # A method defined with the spelling as head is dispatchable by the same
+    # spelling, including `::`-qualified segments, and from another module.
     @test ptx"_optype_probe.f32.sat"(_OptypeProbe(41)) == 42
     @test ptx"_optype_probe.wait::ld.pack::16b"(
         _OptypeProbe(20), _OptypeProbe(22)) == 42
+    @test ptx"_optype_probe.f32.sat"(1.5) == 2.5
+    @test hasmethod(ptx"_optype_probe.f32.sat", Tuple{Float64})
 
-    # Same malformed-chain diagnostics as ptx"", plus: definition-site only,
-    # so interpolation is rejected outright.
-    @test_throws LoadError @eval optype""
-    @test_throws LoadError @eval optype"add..f32"
-    @test_throws LoadError @eval optype"add.$x"
+    @test (@inferred _optype_probe_generated(_OptypeProbe(21))) == 42
+
+    # Special registers and interpolated spellings stay literal expansions.
+    @test @macroexpand(ptx"%tid.x") == :($SpecialReg{$(QuoteNode(Symbol("%tid.x")))}())
+    @test !isdefined(@__MODULE__, Symbol("#ptx#%tid.x"))
 end
 
 @testset "ptx\"...\" string macro: \$ interpolation" begin
@@ -195,41 +213,44 @@ end
     end
 end
 
-@testset "sreg\"...\" string macro + SpecialReg render" begin
-    # Macro produces SpecialReg{Symbol("%name")}() for both naked and
-    # %-prefixed PTX special-register input forms.
-    @test sreg"tid.x"  === SpecialReg{Symbol("%tid.x")}()
-    @test sreg"%tid.x" === SpecialReg{Symbol("%tid.x")}()
-    @test sreg"cluster_ctarank" === SpecialReg{Symbol("%cluster_ctarank")}()
-    @test sreg"lanemask_eq"     === SpecialReg{Symbol("%lanemask_eq")}()
-    # PTX 9.3 spells the warp-size value WARP_SZ (an immediate), not
-    # %warpsize. Preserve the legacy macro spelling by normalizing it.
-    @test sreg"warpsize" === Val(32)
-    @test sreg"%warpsize" === Val(32)
+@testset "ptx\"%...\" special registers + SpecialReg render" begin
+    @test ptx"%tid.x" === SpecialReg{Symbol("%tid.x")}()
+    @test ptx"%cluster_ctarank" === SpecialReg{Symbol("%cluster_ctarank")}()
+    @test ptx"%lanemask_eq"     === SpecialReg{Symbol("%lanemask_eq")}()
 
-    # Empty rejected at expansion.
-    @test_throws LoadError @eval sreg""
+    # Names outside the scalar inventory are rejected at expansion: typos,
+    # ordinary registers, vector roots, and %warpsize (PTX spells the warp
+    # size as the WARP_SZ immediate).
+    for bad in ("%", "%tid.q", "%r1", "%tid", "%warpsize")
+        @test_throws LoadError @eval @ptx_str($bad)
+    end
+    @test_throws LoadError @eval ptx"%tid.x"raw
+
+    # Interpolation folds to the literal singleton for constant pieces.
+    axis = :y
+    @test ptx"%ctaid.$axis" === ptx"%ctaid.y"
+    axis_name = "z"
+    @test ptx"%ctaid.$axis_name" === ptx"%ctaid.z"
+    ctaid(a::Symbol) = ptx"%ctaid.$a"
+    @test Base.return_types(() -> ctaid(:x), ())[1] === typeof(ptx"%ctaid.x")
 
     # Chain emits the symbol verbatim — preserves underscores in real names.
-    @test build_call(:mov, (:u32,), (typeof(sreg"%tid.x"),)).asm ==
+    @test build_call(:mov, (:u32,), (typeof(ptx"%tid.x"),)).asm ==
           "mov.u32 \$0, %tid.x;"
-    @test build_call(:mov, (:u32,), (typeof(sreg"%cluster_ctarank"),)).asm ==
+    @test build_call(:mov, (:u32,), (typeof(ptx"%cluster_ctarank"),)).asm ==
           "mov.u32 \$0, %cluster_ctarank;"
-    @test build_call(:mov, (:u32,), (typeof(sreg"%lanemask_eq"),)).asm ==
+    @test build_call(:mov, (:u32,), (typeof(ptx"%lanemask_eq"),)).asm ==
           "mov.u32 \$0, %lanemask_eq;"
     # Mixed (real underscore + real dot) — only verbatim path gets it right.
-    @test build_call(:mov, (:u32,), (typeof(sreg"%cluster_ctaid.x"),)).asm ==
+    @test build_call(:mov, (:u32,), (typeof(ptx"%cluster_ctaid.x"),)).asm ==
           "mov.u32 \$0, %cluster_ctaid.x;"
 
-    @test build_call(:mov, (:u32,), (typeof(sreg"%warpsize"),)).asm ==
-          "mov.u32 \$0, 32;"
-    # Direct construction is non-public, but it must honor the same legacy
-    # compatibility normalization as the macro boundary.
-    @test build_call(:mov, (:u32,), (SpecialReg{Symbol("%warpsize")},)).asm ==
-          "mov.u32 \$0, 32;"
+    # Interpolated names and direct construction are checked at render.
+    @test_throws ErrorException build_call(:mov, (:u32,), (SpecialReg{Symbol("%ctaid.q")},))
+    @test_throws ErrorException build_call(:mov, (:u32,), (SpecialReg{Symbol("%warpsize")},))
 
     # Reading any SpecialReg forces side_effects=true.
-    @test build_call(:mov, (:u32,), (typeof(sreg"%tid.x"),)).side_effects == true
+    @test build_call(:mov, (:u32,), (typeof(ptx"%tid.x"),)).side_effects == true
 end
 
 @testset "infer_rettype + registry returns gate" begin

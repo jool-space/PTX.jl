@@ -56,10 +56,10 @@ function _grouped_gemm_kernel!(
     a_addr = smem_addr_u32(a_ptr)
     b_addr = smem_addr_u32(b_ptr)
 
-    tid   = ptx"mov.u32"(sreg"tid.x")
-    cta_x = ptx"mov.u32"(sreg"ctaid.x")   # N tile
-    cta_y = ptx"mov.u32"(sreg"ctaid.y")   # M tile
-    cta_z = ptx"mov.u32"(sreg"ctaid.z")   # group
+    tid   = ptx"mov.u32"(ptx"%tid.x")
+    cta_x = ptx"mov.u32"(ptx"%ctaid.x")   # N tile
+    cta_y = ptx"mov.u32"(ptx"%ctaid.y")   # M tile
+    cta_z = ptx"mov.u32"(ptx"%ctaid.z")   # group
 
     # Element-coord bases. Both A and B are K-fast in memory; TMA descriptors
     # have K innermost, M-or-N outer with group offset baked in:

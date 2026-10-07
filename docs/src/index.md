@@ -12,7 +12,7 @@ owns launch, memory, and control flow; PTX.jl owns instruction emission.
 using PTX, CUDA
 
 function add_kernel!(c, a, b)
-    tid = ptx"mov.u32"(sreg"%tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     i = Int(tid) + 1
     c[i] = ptx"add.f32"(a[i], b[i])
     return
@@ -52,7 +52,7 @@ pipelines, cluster ops, or TMA. PTX.jl + CUDA.jl together close that gap.
 
 - [Getting started](getting_started.md) — install, first kernel, how
   PTX.jl composes with CUDA.jl.
-- [Chain DSL](dsl.md) — `@ptx_str` / `@sreg_str` semantics: return-type
+- [Chain DSL](dsl.md) — `@ptx_str` semantics: return-type
   inference, side-effect classification, operand conventions.
 - [Wrappers](wrappers.md) — hand-written wrapper families for ops whose
   operand shape breaks the chain default (mma, wgmma, ldmatrix, TMA,

@@ -14,7 +14,7 @@
 function _sm121a_mma_kind_f8f6f4_smoke!(out)
     a = (UInt32(0), UInt32(0), UInt32(0), UInt32(0))
     b = (UInt32(0), UInt32(0))
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     base = Float32(tid) * 4f0
     c = (base, base + 1f0, base + 2f0, base + 3f0)
     d = ptx"mma.sync.aligned.kind::f8f6f4.m16n8k32.row.col.f32.e4m3.e4m3.f32"(a, b, c)
@@ -46,7 +46,7 @@ function _sm121a_mma_kind_f8f6f4_correct!(out)
     b = (one4, one4)
     c = (0f0, 0f0, 0f0, 0f0)
     d = ptx"mma.sync.aligned.kind::f8f6f4.m16n8k32.row.col.f32.e4m3.e4m3.f32"(a, b, c)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     off = Int(tid) * 4
     @inbounds out[off + 1] = d[1]
     @inbounds out[off + 2] = d[2]
@@ -69,7 +69,7 @@ function _sm121a_mma_kind_f8f6f4_k16_correct!(out)
     b = (one4,)
     c = (0f0, 0f0, 0f0, 0f0)
     d = ptx"mma.sync.aligned.kind::f8f6f4.m16n8k16.row.col.f32.e4m3.e4m3.f32"(a, b, c)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     off = Int(tid) * 4
     @inbounds out[off + 1] = d[1]
     @inbounds out[off + 2] = d[2]
@@ -106,7 +106,7 @@ function _sm121a_mma_kind_mxf8f6f4_correct!(out)
     sb = UInt32(0x7F7F_7F7F)
     d = ptx"mma.sync.aligned.kind::mxf8f6f4.block_scale.scale_vec::1X.m16n8k32.row.col.f32.e4m3.e4m3.f32.ue8m0"(
         a, b, c, sa, UInt16(0), UInt16(0), sb, UInt16(0), UInt16(0))
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     off = Int(tid) * 4
     @inbounds out[off + 1] = d[1]
     @inbounds out[off + 2] = d[2]
@@ -131,7 +131,7 @@ function _sm121a_mma_kind_mxf4_correct!(out)
     sb = UInt32(0x7F7F_7F7F)
     d = ptx"mma.sync.aligned.kind::mxf4.block_scale.scale_vec::2X.m16n8k64.row.col.f32.e2m1.e2m1.f32.ue8m0"(
         a, b, c, sa, UInt16(0), UInt16(0), sb, UInt16(0), UInt16(0))
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     off = Int(tid) * 4
     @inbounds out[off + 1] = d[1]
     @inbounds out[off + 2] = d[2]
@@ -156,7 +156,7 @@ function _sm121a_mma_kind_mxf4nvf4_correct!(out)
     sb = UInt32(0x3838_3838)
     d = ptx"mma.sync.aligned.kind::mxf4nvf4.block_scale.scale_vec::4X.m16n8k64.row.col.f32.e2m1.e2m1.f32.ue4m3"(
         a, b, c, sa, UInt16(0), UInt16(0), sb, UInt16(0), UInt16(0))
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     off = Int(tid) * 4
     @inbounds out[off + 1] = d[1]
     @inbounds out[off + 2] = d[2]
@@ -180,7 +180,7 @@ function _sm121a_mma_mxf4nvf4_ue8m0!(out, sa::UInt32, sb::UInt32, bias::Float32)
     c = (bias, bias, bias, bias)
     d = ptx"mma.sync.aligned.kind::mxf4nvf4.block_scale.scale_vec::4X.m16n8k64.row.col.f32.e2m1.e2m1.f32.ue8m0"(
         a, b, c, sa, UInt16(0), UInt16(0), sb, UInt16(0), UInt16(0))
-    off = Int(ptx"mov.u32"(sreg"tid.x")) * 4
+    off = Int(ptx"mov.u32"(ptx"%tid.x")) * 4
     @inbounds out[off + 1] = d[1]
     @inbounds out[off + 2] = d[2]
     @inbounds out[off + 3] = d[3]

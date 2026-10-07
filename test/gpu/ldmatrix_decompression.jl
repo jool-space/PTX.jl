@@ -64,7 +64,7 @@ end
 function _ldmatrix_decompression_runtime!(out::CuDeviceVector{UInt32,1})
     packed4 = CuStaticSharedArray(UInt8, 512)
     packed6 = CuStaticSharedArray(UInt8, 512)
-    lane = Int(ptx"mov.u32"(sreg"tid.x"))
+    lane = Int(ptx"mov.u32"(ptx"%tid.x"))
     base = lane * 16
     @inbounds for i in 0:15
         # 16 packed elements followed by the format-named row padding:
@@ -106,7 +106,7 @@ end
 
 function _ldmatrix_s4_runtime!(out::CuDeviceVector{UInt32, 1}, fill::UInt8)
     buf = CuStaticSharedArray(UInt8, 512)
-    lane = Int(ptx"mov.u32"(sreg"tid.x"))
+    lane = Int(ptx"mov.u32"(ptx"%tid.x"))
     @inbounds for i in 0:15
         buf[lane * 16 + i + 1] = fill
     end

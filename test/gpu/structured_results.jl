@@ -8,7 +8,7 @@
 
 function _structured_results_runtime!(out, packed_a::UInt32,
                                       packed_b::UInt32)
-    lane = ptx"mov.u32"(sreg"tid.x")
+    lane = ptx"mov.u32"(ptx"%tid.x")
     i = lane + UInt32(1)
     c = lane < UInt32(24)
 

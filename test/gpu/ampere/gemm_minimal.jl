@@ -51,7 +51,7 @@ function gemm_tile_kernel!(D, A_bits, B_bits)
     smem_A = CuStaticSharedArray(BFloat16, 256)   # 16×16 bf16
     smem_B = CuStaticSharedArray(BFloat16, 128)   # 16×8 bf16
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     # --- Stage 1: cp.async A (256 bf16 = 512B) — 32 lanes × 16B each.
     src_A = pointer(A_bits) + Int(tid) * 16
@@ -190,7 +190,7 @@ function gemm_tile_ldmatrix_kernel!(D, A_bits, B_bits)
     smem_A = CuStaticSharedArray(BFloat16, 256)
     smem_B = CuStaticSharedArray(BFloat16, 128)
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     src_A = pointer(A_bits) + Int(tid) * 16
     dst_A = pointer(smem_A) + Int(tid) * 16
@@ -295,7 +295,7 @@ function gemm_tile_ldmatrix_full_kernel!(D, A_bits, B_bits)
     smem_A = CuStaticSharedArray(BFloat16, 256)
     smem_B = CuStaticSharedArray(BFloat16, 128)
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     src_A = pointer(A_bits) + Int(tid) * 16
     dst_A = pointer(smem_A) + Int(tid) * 16

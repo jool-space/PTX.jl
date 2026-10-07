@@ -91,7 +91,7 @@ function _tks_gemm_kernel!(
     a_addr = smem_addr_u32(a_ptr)
     b_addr = smem_addr_u32(b_ptr)
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     # TMA issue from lane 0, CTA-wide publish after (see gemm_warpgroup.jl
     # for why the bar.sync must come after the whole issue block).

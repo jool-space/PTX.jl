@@ -1,6 +1,6 @@
 # TEST_TARGET: requires=gpu evidence=runtime runtime=cc>=7.0
 #
-# Verifies PTX.jl's `ptx"..."` and `sreg"..."` macros survive
+# Verifies PTX.jl's `ptx"..."` macro survives
 # KernelAbstractions.jl's `@kernel` lowering on the CUDA backend.
 # KA wraps the body in its own launch shim, but on CUDABackend that shim
 # still goes through GPUCompiler → NVPTX → ptxas — the same pipeline
@@ -30,17 +30,17 @@ end
     @test Array(out) == Float32.(1:n) .+ Float32.(n:-1:1)
 end
 
-# --- sreg"%tid.x" inside @kernel (bypassing @index) -------------------------
+# --- ptx"%tid.x" inside @kernel (bypassing @index) -------------------------
 # Each thread reads its own hardware tid via the PTX special register and
-# writes it into the output slot. Confirms the sreg macro lowers cleanly
+# writes it into the output slot. Confirms the special-register read lowers cleanly
 # even when KA's @index machinery isn't in the picture.
 
 @kernel function _ka_tid_kernel!(out)
-    tid = ptx"mov.u32"(sreg"%tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     @inbounds out[tid + 1] = tid
 end
 
-@testset "KA @kernel + sreg\"%tid.x\" (raw hardware tid)" begin
+@testset "KA @kernel + ptx\"%tid.x\" (raw hardware tid)" begin
     n = 32
     out = CUDACore.zeros(UInt32, n)
 

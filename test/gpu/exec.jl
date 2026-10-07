@@ -45,7 +45,7 @@ end
 # --- mov.u32 (every thread reads its own tid.x) ----------------------------
 
 function _exec_mov_tid_x!(out)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     @inbounds out[tid + 1] = tid
     return nothing
 end
@@ -58,8 +58,8 @@ end
 end
 
 function _exec_mov_ntid_x!(out)
-    tid = ptx"mov.u32"(sreg"tid.x")
-    nt  = ptx"mov.u32"(sreg"ntid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
+    nt  = ptx"mov.u32"(ptx"%ntid.x")
     @inbounds out[tid + 1] = nt
     return nothing
 end
@@ -75,7 +75,7 @@ end
 
 function _exec_bar_sync!(out)
     smem = CuStaticSharedArray(Float32, 32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     @inbounds smem[tid + 1] = Float32(tid)
     ptx"bar.sync"(Val(0))
     # After the barrier every thread sees the writes from every other thread.
@@ -131,7 +131,7 @@ end
 
 function _exec_cp_async_ca!(dst, src)
     smem = CuStaticSharedArray(Float32, 4)
-    if ptx"mov.u32"(sreg"tid.x") == 0
+    if ptx"mov.u32"(ptx"%tid.x") == 0
         ptx"cp.async.ca.shared.global"(pointer(smem), pointer(src), Val(16))
         ptx"cp.async.commit_group"()
         ptx"cp.async.wait_group"(Val(0))
@@ -158,7 +158,7 @@ end
 function _exec_mma_bf16_smoke!(out)
     a = (UInt32(0), UInt32(0), UInt32(0), UInt32(0))
     b = (UInt32(0), UInt32(0))
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     base = Float32(tid) * 4f0
     c = (base, base + 1f0, base + 2f0, base + 3f0)
     d = ptx"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(a, b, c)
@@ -191,7 +191,7 @@ function _exec_mma_bf16_correct!(out)
     b = (one_packed, one_packed)
     c = (0f0, 0f0, 0f0, 0f0)
     d = ptx"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(a, b, c)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     off = Int(tid) * 4
     @inbounds out[off + 1] = d[1]
     @inbounds out[off + 2] = d[2]
@@ -214,7 +214,7 @@ function _exec_mma_bf16_k8!(out)
     b = (one_packed,)
     c = (0f0, 0f0, 0f0, 0f0)
     d = ptx"mma.sync.aligned.m16n8k8.row.col.f32.bf16.bf16.f32"(a, b, c)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     off = Int(tid) * 4
     @inbounds out[off + 1] = d[1]
     @inbounds out[off + 2] = d[2]
@@ -237,7 +237,7 @@ function _exec_mma_f16!(out)
     b = (one_packed, one_packed)
     c = (0f0, 0f0, 0f0, 0f0)
     d = ptx"mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32"(a, b, c)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     off = Int(tid) * 4
     @inbounds out[off + 1] = d[1]
     @inbounds out[off + 2] = d[2]
@@ -277,7 +277,7 @@ function _exec_gemm_pipeline!(D::CuDeviceArray{Float32},
     A_smem = CuStaticSharedArray(UInt32, 128)  # 256 bf16
     B_smem = CuStaticSharedArray(UInt32, 64)   # 128 bf16
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     # cp.async A: 32 lanes × 16B = 512B (the whole 256-bf16 A)
     a_dst = pointer(A_smem, Int(tid) * 4 + 1)
@@ -382,7 +382,7 @@ end
 # .idx with c = 0x1F: every lane reads from lane `b`. All 32 lanes that wrote
 # their tid should read back the value held by lane 5.
 function _exec_shfl_idx!(out)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     src = tid + UInt32(100)
     val = ptx"shfl.sync.idx.b32"(src, UInt32(5), UInt32(0x1F), UInt32(0xFFFFFFFF))
     @inbounds out[Int(tid) + 1] = val
@@ -398,7 +398,7 @@ end
 
 # .bfly with mask 0x10, c = 0x1F: lane T receives from lane (T XOR 16).
 function _exec_shfl_bfly!(out)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     val = ptx"shfl.sync.bfly.b32"(tid, UInt32(0x10), UInt32(0x1F), UInt32(0xFFFFFFFF))
     @inbounds out[Int(tid) + 1] = val
     return nothing
@@ -433,7 +433,7 @@ end
 # reads its neighbor's slot.
 function _exec_bar_warp_sync!(out)
     smem = CuStaticSharedArray(Float32, 32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     @inbounds smem[tid + 1] = Float32(tid)
     ptx"bar.warp.sync"(UInt32(0xFFFFFFFF))
     @inbounds out[tid + 1] = smem[((tid + 1) % 32) + 1]
@@ -451,7 +451,7 @@ end
 # bar.red / barrier.red: four warps reduce per-thread predicates across the
 # CTA, and every thread must receive the same CTA-wide answer.
 function _exec_bar_red!(out)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     odd = isodd(tid)
     everyone = tid < UInt32(128)
     nobody = tid >= UInt32(128)
@@ -503,7 +503,7 @@ end
 # Per-thread guard, exercising the predicated-control-flow pattern transpilers
 # emit. Each thread writes only when its tid passes the predicate.
 function _exec_setp_lt_threaded!(out, threshold::UInt32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     p = ptx"setp.lt.u32"(tid, threshold)
     if p
         @inbounds out[tid + 1] = tid
@@ -527,7 +527,7 @@ end
 # through a `.pred` register on both sides.
 
 function _exec_vote_ballot!(out, threshold::UInt32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     p = ptx"setp.lt.u32"(tid, threshold)
     mask = ptx"vote.sync.ballot.b32"(p, UInt32(0xFFFFFFFF))
     if tid == UInt32(0)
@@ -544,7 +544,7 @@ end
 end
 
 function _exec_vote_all!(out, threshold::UInt32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     p = ptx"setp.lt.u32"(tid, threshold)
     all_p = ptx"vote.sync.all.pred"(p, UInt32(0xFFFFFFFF))
     any_p = ptx"vote.sync.any.pred"(p, UInt32(0xFFFFFFFF))
@@ -619,7 +619,7 @@ end
 # undefined. Tests both the in-range and out-of-range cases.
 
 function _exec_shfl_idx_pred!(out_v, out_p, src_lane::UInt32)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     v, p = ptx"shfl.sync.idx.b32.pred"(tid, src_lane, UInt32(0x1f),
                                        UInt32(0x000000FF))   # only lanes 0..7 active
     @inbounds out_v[tid + 1] = v
@@ -656,7 +656,7 @@ function _exec_smem_addr!(out_lane0, out_diff)
     smem = CuStaticSharedArray(UInt32, 8)             # 32 bytes
     a = PTX.smem_addr_u32(pointer(smem))
     b = PTX.smem_addr_u32(pointer(smem) + 16)         # 16 bytes ahead
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         @inbounds out_lane0[1] = a
         @inbounds out_diff[1]  = b - a
@@ -710,7 +710,7 @@ function _exec_mbarrier_rendezvous!(out)
     bar_smem  = CuStaticSharedArray(UInt64, 1)
     data_smem = CuStaticSharedArray(Int32, 64)
     mbar = pointer(bar_smem)
-    tid  = ptx"mov.u32"(sreg"tid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
 
     if tid == UInt32(0)
         ptx"mbarrier.init.shared.b64"(mbar, UInt32(64))

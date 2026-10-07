@@ -104,7 +104,7 @@ function _md_gemm_kernel!(
     bcvt_addr     = (bcvt_addr_raw + UInt32(255)) & ~UInt32(255)
     pad_elems     = Int(bcvt_addr - bcvt_addr_raw) >> 1
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     # Thread → B element ownership: 8 N-rows × 16 K = 128 elements, one each.
     n_row = tid >> UInt32(4)                 # 0..7
@@ -305,7 +305,7 @@ function _md_rf_gemm_kernel!(
     mb_ptr   = pointer(mbar)
     b_addr   = smem_addr_u32(b_ptr)
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     if tid == UInt32(0)
         ptx"mbarrier.init.shared.b64"(mb_ptr, UInt32(1))

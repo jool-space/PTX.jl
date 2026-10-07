@@ -40,7 +40,7 @@ function _tcgen05_alloc_only_kernel!(O::CuDeviceVector{Float32, 1})
     tmem_slot = CuDynamicSharedArray(UInt32, 1, TCS_SLOT_OFF)
     slot_addr = smem_addr_u32(pointer(tmem_slot))
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid < UInt32(32)
         ptx"tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32"(
             slot_addr, UInt32(512))
@@ -77,8 +77,8 @@ function _tcgen05_mma_only_kernel!(O::CuDeviceVector{Float32, 1})
     bar_addr  = smem_addr_u32(mb_ptr)
     slot_addr = smem_addr_u32(pointer(tmem_slot))
 
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    nthr = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    nthr = ptx"mov.u32"(ptx"%ntid.x")
 
     if tid == UInt32(0)
         ptx"mbarrier.init.shared.b64"(mb_ptr, UInt32(1))
@@ -131,7 +131,7 @@ function _tcgen05_ld_only_kernel!(O::CuDeviceVector{Float32, 1})
     tmem_slot = CuDynamicSharedArray(UInt32, 1, TCS_SLOT_OFF)
     slot_addr = smem_addr_u32(pointer(tmem_slot))
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid < UInt32(32)
         ptx"tcgen05.alloc.cta_group::1.sync.aligned.shared::cta.b32"(
             slot_addr, UInt32(512))

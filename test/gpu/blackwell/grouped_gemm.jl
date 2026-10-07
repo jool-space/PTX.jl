@@ -60,10 +60,10 @@ function _grouped_gemm_bw_kernel!(
     b_addr    = smem_addr_u32(b_ptr)
     slot_addr = smem_addr_u32(pointer(tmem_slot))
 
-    tid    = ptx"mov.u32"(sreg"tid.x")
-    cta_n  = ptx"mov.u32"(sreg"ctaid.x")    # N tile (= 0, grid X = 1)
-    cta_m  = ptx"mov.u32"(sreg"ctaid.y")    # M tile
-    group  = ptx"mov.u32"(sreg"ctaid.z")    # which problem
+    tid    = ptx"mov.u32"(ptx"%tid.x")
+    cta_n  = ptx"mov.u32"(ptx"%ctaid.x")    # N tile (= 0, grid X = 1)
+    cta_m  = ptx"mov.u32"(ptx"%ctaid.y")    # M tile
+    group  = ptx"mov.u32"(ptx"%ctaid.z")    # which problem
 
     # Flattened-view bases. A:(G*M,K) row m_outer; B_T:(G*N,K) row n_outer;
     # C:(G*M,N) row-major, col base = cta_n*BN (N axis shared across groups).

@@ -245,7 +245,7 @@ Mechanical mapping rules (v2.0):
 
 Predicated assignments hoist a `local` declaration so the variable is
 visible after the `if`-block. Special registers are emitted as
-`sreg"%tid.x"` calls, not `threadIdx().x` — chain-faithful, and avoids
+`ptx"%tid.x"` calls, not `threadIdx().x` — chain-faithful, and avoids
 the 0-vs-1-based off-by-one trap. The scalar PTX 9.3 inventory includes
 vector-component aliases such as `%tid.w` and `%tid.r`; whole `.v4`
 special-register values such as `%tid` are rejected until vector-valued

@@ -31,7 +31,7 @@ end
 function _mbarrier_schema_sm80!(out64::CuDeviceVector{UInt64, 1},
                                  out32::CuDeviceVector{UInt32, 1},
                                  mbar::Core.LLVMPtr{UInt64, PTX.AS.Shared})
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     if tid == UInt32(0)
         # Both noComplete arrivals leave the phase open; the final ordinary
         # arrival is the only operation that completes it.

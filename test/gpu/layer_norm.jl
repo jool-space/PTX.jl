@@ -36,8 +36,8 @@ function _layer_norm_v4_kernel!(
     partials = CuStaticSharedArray(Float32, (16, 2))   # max 16 warps (block ≤ 512)
     stats    = CuStaticSharedArray(Float32, 2)         # [Σx, Σx²]
 
-    tid = ptx"mov.u32"(sreg"tid.x")
-    row = ptx"mov.u32"(sreg"ctaid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
+    row = ptx"mov.u32"(ptx"%ctaid.x")
     row_byte_off = Int(row) * (N * 4)
     px = pointer(X) + row_byte_off
     py = pointer(Y) + row_byte_off

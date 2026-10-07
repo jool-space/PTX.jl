@@ -50,11 +50,11 @@ function gemm_sparse_kernel!(
     n_iters = K ÷ SP_BK
     Kc      = K ÷ 2
 
-    tm     = Int(ptx"mov.u32"(sreg"ctaid.y"))
+    tm     = Int(ptx"mov.u32"(ptx"%ctaid.y"))
     m_base = tm * SP_BM
-    n_base = Int(ptx"mov.u32"(sreg"ctaid.x")) * SP_BN
+    n_base = Int(ptx"mov.u32"(ptx"%ctaid.x")) * SP_BN
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     gid = Int(tid >> UInt32(2))
     tig = Int(tid & UInt32(0x3))
     cl  = 2 * tig
@@ -185,11 +185,11 @@ function gemm_sparse_k16_kernel!(
     n_iters = K ÷ 16
     Kc      = K ÷ 2
 
-    tm     = Int(ptx"mov.u32"(sreg"ctaid.y"))
+    tm     = Int(ptx"mov.u32"(ptx"%ctaid.y"))
     m_base = tm * SP_BM
-    n_base = Int(ptx"mov.u32"(sreg"ctaid.x")) * SP_BN
+    n_base = Int(ptx"mov.u32"(ptx"%ctaid.x")) * SP_BN
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     gid = Int(tid >> UInt32(2))
     tig = Int(tid & UInt32(0x3))
     cl  = 2 * tig

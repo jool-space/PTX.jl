@@ -14,7 +14,6 @@ end
 # identifier boundaries (which include `$`) rather than a bare substring: a
 # user identifier such as `WARP_SZ_limit` must remain untouched.
 const _PTX_PREDEFINED_IDENTIFIER = r"^[A-Za-z][A-Za-z0-9_$]*$"
-const _LEGACY_WARP_SIZE_TOKEN = r"(?<![A-Za-z0-9_$])%warpsize(?![A-Za-z0-9_$])"
 
 function _predefined_immediate_token_regex(name::AbstractString)
     occursin(_PTX_PREDEFINED_IDENTIFIER, name) ||
@@ -29,19 +28,12 @@ function _replace_predefined_immediate_tokens(
     for (name, value) in immediates
         out = replace(out, _predefined_immediate_token_regex(name) => string(value))
     end
-    # `%warpsize` is the one legacy pseudo-register spelling. It maps to the
-    # standard WARP_SZ immediate rather than belonging in the generic table.
-    warp_size = string(get(immediates, "WARP_SZ", IR.PREDEFINED_IMMEDIATES["WARP_SZ"]))
-    replace(out, _LEGACY_WARP_SIZE_TOKEN => warp_size)
+    out
 end
 
 function render_operand(op::RegisterOperand, cg::CodeGenState;
                         type_hint::Union{Symbol, Nothing} = nothing)
     name = op.name
-    # Compatibility spelling from older NVVM-facing code. PTX itself spells
-    # this standard immediate WARP_SZ, so lower it as an immediate in every
-    # instruction position rather than emitting invalid %warpsize PTX.
-    name == IR.LEGACY_WARP_SIZE_SREG && return _predefined_immediate_expr("WARP_SZ")
     name in SPECIAL_REGS && return sreg_val_expr(name)
     name in IR.V4_SPECIAL_REG_ROOTS &&
         throw(ArgumentError(

@@ -26,7 +26,7 @@ ptx"add.f32"(a, b)                                 # Float32 → Float32
 ptx"fma.rn.f32"(a, b, c)
 ptx"atom.add.gpu.u32"(p, v)                        # *p += v atomically
 ptx"bar.sync"(Val(0))                              # immediate baked in
-ptx"mov.u32"(sreg"%tid.x")                         # special-register read
+ptx"mov.u32"(ptx"%tid.x")                          # special-register read
 ptx"cp.async.commit_group"()
 ptx"cp.async.wait_group"(Val(0))
 ptx"fence.acq_rel.gpu"()
@@ -504,24 +504,25 @@ ptx"shl.b32"(x, Val(2))                    # shl.b32 r, x, 2
 
 ### `SpecialReg{name}` — verbatim PTX token
 
-Renders the name verbatim (always with `%` prefix). Constructed via
-[`@sreg_str`](@ref):
+A [`@ptx_str`](@ref) spelling that starts with `%` is a special register,
+not an instruction (no PTX opcode begins with `%`). It renders as the
+verbatim PTX token:
 
 ```julia
-sreg"%tid.x"                               # → "%tid.x"
-sreg"tid.x"                                # ≡ sreg"%tid.x" (auto-prefixed)
-sreg"cluster_ctarank"                      # → "%cluster_ctarank"
-ptx"mov.u32"(sreg"%tid.x")                 # → "mov.u32 r, %tid.x;"
+ptx"%tid.x"                                # → "%tid.x"
+ptx"%cluster_ctarank"                      # → "%cluster_ctarank"
+ptx"mov.u32"(ptx"%tid.x")                  # → "mov.u32 r, %tid.x;"
+ptx"%ctaid.$axis"                          # axis = :y → "%ctaid.y"
 ```
 
 Underscore-bearing names (`%cluster_ctarank`, `%lanemask_eq`,
 `%total_smem_size`) round-trip losslessly because the macro bakes the
-exact PTX token.
-
-PTX 9.3 spells the warp-size operand as the immediate `WARP_SZ`, not a
-special register. For compatibility, standalone `sreg"%warpsize"` lowers
-to `Val(32)`; when the transpiler encounters either spelling inside a parsed
-PTX constant expression, it substitutes the literal `32`.
+exact PTX token. The name must be a scalar special register from the PTX
+inventory, checked at expansion (or, for an interpolated name, when the
+instruction renders): `ptx"%tid.q"`, `ptx"%r1"`, and the vector root
+`ptx"%tid"` are errors. Ordinary registers are Julia variables, and the
+warp size is the predefined immediate `WARP_SZ` (32), not a `%warpsize`
+register.
 
 ### Homogeneous tuple → braced register-vector
 
@@ -603,5 +604,4 @@ The transpiler inserts it for every simple bracketed PTX address, including
 after shared-symbol alias substitution and byte-offset reconstruction.
 
 See the [Reference](reference.md) page for full docstrings of
-[`Address`](@ref), [`address`](@ref), [`@ptx_str`](@ref), and
-[`@sreg_str`](@ref).
+[`Address`](@ref), [`address`](@ref), and [`@ptx_str`](@ref).

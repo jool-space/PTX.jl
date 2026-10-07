@@ -54,10 +54,10 @@ function conv2d_fprop_kernel!(
     RSC = d.R * d.S * d.C
     PQ  = d.P * d.Q
 
-    m_base = Int(ptx"mov.u32"(sreg"ctaid.y")) * 16
-    k_base = Int(ptx"mov.u32"(sreg"ctaid.x")) * 8
+    m_base = Int(ptx"mov.u32"(ptx"%ctaid.y")) * 16
+    k_base = Int(ptx"mov.u32"(ptx"%ctaid.x")) * 8
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     gid = Int(tid >> UInt32(2))         # 0..7
     tig = Int(tid & UInt32(0x3))        # 0..3
     cl  = 2 * tig                       # fragment column low: 0,2,4,6

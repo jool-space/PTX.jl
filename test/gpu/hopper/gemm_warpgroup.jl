@@ -48,7 +48,7 @@ function _hopper_warpgroup_gemm_kernel!(
     a_addr = smem_addr_u32(a_ptr)
     b_addr = smem_addr_u32(b_ptr)
 
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
 
     # 1. Lane 0 does the entire TMA-issue sequence (init, fence, arrive,
     #    bulk loads). pyptx's tests (_test_tma_fence.py etc.) keep these in

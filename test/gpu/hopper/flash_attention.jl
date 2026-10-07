@@ -127,8 +127,8 @@ function _fa_kernel!(
     v_addr = smem_addr_u32(v_ptr)
     p_addr = smem_addr_u32(p_ptr)
 
-    tid     = ptx"mov.u32"(sreg"tid.x")
-    cta_x   = ptx"mov.u32"(sreg"ctaid.x")
+    tid     = ptx"mov.u32"(ptx"%tid.x")
+    cta_x   = ptx"mov.u32"(ptx"%ctaid.x")
     q_row_base = cta_x * UInt32(FA_BM)
 
     # --- 1. Init mbarriers + load Q ---------------------------------------

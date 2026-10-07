@@ -132,13 +132,13 @@ end
 end
 
 @testset "sreg_val_expr" begin
-    @test sreg_val_expr("%tid.x")     == "sreg\"%tid.x\""
-    @test sreg_val_expr("%ctaid.y")   == "sreg\"%ctaid.y\""
-    @test sreg_val_expr("%laneid")    == "sreg\"%laneid\""
-    # Underscore-bearing names — `sreg"..."` preserves them verbatim.
-    @test sreg_val_expr("%cluster_ctarank") == "sreg\"%cluster_ctarank\""
-    @test sreg_val_expr("%lanemask_eq")     == "sreg\"%lanemask_eq\""
-    @test sreg_val_expr("%cluster_ctaid.x") == "sreg\"%cluster_ctaid.x\""
+    @test sreg_val_expr("%tid.x")     == "ptx\"%tid.x\""
+    @test sreg_val_expr("%ctaid.y")   == "ptx\"%ctaid.y\""
+    @test sreg_val_expr("%laneid")    == "ptx\"%laneid\""
+    # Underscore-bearing names — `ptx"%..."` preserves them verbatim.
+    @test sreg_val_expr("%cluster_ctarank") == "ptx\"%cluster_ctarank\""
+    @test sreg_val_expr("%lanemask_eq")     == "ptx\"%lanemask_eq\""
+    @test sreg_val_expr("%cluster_ctaid.x") == "ptx\"%cluster_ctaid.x\""
 end
 
 @testset "PTX 9.4 scalar special-register lowering" begin
@@ -149,12 +149,10 @@ end
     @test !("%warpsize" in PTX.Codegen.SPECIAL_REGS)
     cg = CodeGenState()
     for reg in PTX.IR.SCALAR_SPECIAL_REGS
-        @test render_operand(IR.RegisterOperand(reg), cg) == "sreg\"$reg\""
+        @test render_operand(IR.RegisterOperand(reg), cg) == "ptx\"$reg\""
     end
-    # PTX 9.3 spells the standard immediate WARP_SZ. Keep older parsed
-    # %warpsize input working by lowering both spellings to the same literal.
+    # PTX 9.3 spells the warp size as the predefined immediate WARP_SZ.
     @test render_operand(IR.LabelOperand("WARP_SZ"), cg) == "Val(32)"
-    @test render_operand(IR.RegisterOperand("%warpsize"), cg) == "Val(32)"
 
     # A whole v4 special-register value is legal PTX but not yet representable
     # by the scalar parser/lowering path. Reject it instead of emitting an
@@ -189,7 +187,7 @@ end
         }
         """
         out = ptx_to_julia(src)
-        @test occursin("sreg\"$reg\"", out)
+        @test occursin("ptx\"$reg\"", out)
         parsed = Meta.parseall(out)
         @test !any(arg -> arg isa Expr && arg.head == :error, parsed.args)
     end
@@ -219,8 +217,7 @@ end
         @test err.category == :operand
         @test occursin("has no reviewed", sprint(showerror, err))
     end
-    for spelling in ("WARP_SZ", "%warpsize")
-        src = """.version 8.1
+    warp_size_probe(spelling) = """.version 8.1
         .target sm_90
         .address_size 64
         .visible .entry warp_size_probe()
@@ -230,15 +227,16 @@ end
         ret;
         }
         """
-        out = ptx_to_julia(src)
-        @test occursin("Val(32)", out)
-        parsed = Meta.parseall(out)
-        @test !any(arg -> arg isa Expr && arg.head == :error, parsed.args)
-    end
+    out = ptx_to_julia(warp_size_probe("WARP_SZ"))
+    @test occursin("Val(32)", out)
+    parsed = Meta.parseall(out)
+    @test !any(arg -> arg isa Expr && arg.head == :error, parsed.args)
+    # %warpsize is not PTX: it is an undeclared register like any other.
+    @test_throws PTX.Codegen.TranspilerError ptx_to_julia(warp_size_probe("%warpsize"))
     # Parenthesized expressions are opaque parser text. Token substitution is
     # still unit-tested above, but the closed generic operand contract rejects
     # the expression instead of copying PTX expression semantics into Julia.
-    for spelling in ("WARP_SZ", "%warpsize")
+    let spelling = "WARP_SZ"
         src = """.version 8.1
         .target sm_90
         .address_size 64
@@ -258,7 +256,7 @@ end
 @testset "render_operand: 8 kinds" begin
     cg = CodeGenState()
     @test render_operand(IR.RegisterOperand("%r5"), cg) == "r5"
-    @test render_operand(IR.RegisterOperand("%tid.x"), cg) == "sreg\"%tid.x\""
+    @test render_operand(IR.RegisterOperand("%tid.x"), cg) == "ptx\"%tid.x\""
     @test render_operand(IR.ImmediateOperand("42"), cg) == "42"
     @test render_operand(IR.ImmediateOperand("0xFF"), cg) == "0xFF"
     # PTX hex floats decode to bit-exact `reinterpret` calls.
@@ -272,8 +270,6 @@ end
     @test render_operand(IR.ImmediateOperand("0xFF"), cg; type_hint = :b32) ==
           "UInt32(0xFF)"
     @test render_operand(IR.ImmediateOperand("(WARP_SZ >> 1)"), cg;
-                         type_hint = :u32) == "UInt32((32 >> 1))"
-    @test render_operand(IR.ImmediateOperand("(%warpsize >> 1)"), cg;
                          type_hint = :u32) == "UInt32((32 >> 1))"
     # Every current/future predefined immediate in the ledger participates in
     # constant-expression substitution; this test uses a synthetic second
@@ -429,9 +425,9 @@ function vector_add(param0, param1, param2, param3)
     rd1 = param1
     rd2 = param2
     r0 = param3
-    r1 = ptx"mov.u32"(sreg"%tid.x")
-    r2 = ptx"mov.u32"(sreg"%ctaid.x")
-    r3 = ptx"mov.u32"(sreg"%ntid.x")
+    r1 = ptx"mov.u32"(ptx"%tid.x")
+    r2 = ptx"mov.u32"(ptx"%ctaid.x")
+    r3 = ptx"mov.u32"(ptx"%ntid.x")
     r4 = ptx"mad.lo.s32"(r2, r3, r1)
     p0 = ptx"setp.ge.u32"(r4, r0)
     if p0; @goto DONE; end
@@ -541,7 +537,7 @@ end
     # `ld.param.b64` into a matching-width register stays a plain rebind.
     @test occursin("rd7 = vadd_param_0", out)
     # %clusterid.x is an admitted u32 special-register carrier.
-    @test occursin("ptx\"mov.u32\"(sreg\"%clusterid.x\")", out)
+    @test occursin("ptx\"mov.u32\"(ptx\"%clusterid.x\")", out)
     # The unreferenced metadata global and the debug section are omitted.
     @test !occursin("NV_TILE_LAUNCH_META_DATA", out)
     @test !occursin("debug_str", out)

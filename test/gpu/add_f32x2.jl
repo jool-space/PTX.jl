@@ -11,9 +11,9 @@ unpack_hi(p::UInt64) = reinterpret(Float32, UInt32(p >> 32))
 function _add_f32x2!(out::AbstractArray{UInt64},
                      xs::AbstractArray{UInt64},
                      ys::AbstractArray{UInt64})
-    tid  = ptx"mov.u32"(sreg"tid.x")
-    bid  = ptx"mov.u32"(sreg"ctaid.x")
-    ntid = ptx"mov.u32"(sreg"ntid.x")
+    tid  = ptx"mov.u32"(ptx"%tid.x")
+    bid  = ptx"mov.u32"(ptx"%ctaid.x")
+    ntid = ptx"mov.u32"(ptx"%ntid.x")
     i = Int(bid) * Int(ntid) + Int(tid) + 1
     if i <= length(xs)
         a = @inbounds xs[i]

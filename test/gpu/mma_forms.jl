@@ -30,7 +30,7 @@ let
                 :s32, :b1, :b1, :s32, row.bitop, :popc)
         op = Operation{:mma, mods}()
         @eval function $kernel(out, a_words, b_words, c_words)
-            lane = Int(ptx"mov.u32"(sreg"tid.x"))
+            lane = Int(ptx"mov.u32"(ptx"%tid.x"))
             a = ntuple(j -> @inbounds(a_words[lane * $(row.n_a) + j]),
                        Val($(row.n_a)))
             b = ntuple(j -> @inbounds(b_words[lane * $(row.n_b) + j]),
@@ -152,7 +152,7 @@ let calls = Expr(:block)
         push!(calls.args, :($helper(out, tid)))
     end
     @eval function _runtime_integer_mma_all!(out)
-        tid = ptx"mov.u32"(sreg"tid.x")
+        tid = ptx"mov.u32"(ptx"%tid.x")
         $calls
         nothing
     end
@@ -167,7 +167,7 @@ function _runtime_integer_mma_overflow!(sat_out, wrap_out)
         a, b, c)
     wrap = ptx"mma.sync.aligned.m16n8k64.row.col.s32.s4.s4.s32"(
         a, b, c)
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     base = Int(tid) * 4
     @inbounds for i in 1:4
         sat_out[base + i] = sat[i]
@@ -244,7 +244,7 @@ let calls = Expr(:block)
         push!(calls.args, :($helper(out, tid)))
     end
     @eval function _runtime_integer_sp_all!(out)
-        tid = ptx"mov.u32"(sreg"tid.x")
+        tid = ptx"mov.u32"(ptx"%tid.x")
         $calls
         nothing
     end
@@ -258,7 +258,7 @@ function _runtime_integer_sp_overflow!(sat_out, wrap_out)
         a, b, c, UInt32(0x44444444), Val(0))
     wrap = ptx"mma.sp::ordered_metadata.sync.aligned.m16n8k128.row.col.s32.s4.s4.s32"(
         a, b, c, UInt32(0x44444444), Val(0))
-    tid = ptx"mov.u32"(sreg"tid.x")
+    tid = ptx"mov.u32"(ptx"%tid.x")
     base = Int(tid) * 4
     @inbounds for i in 1:4
         sat_out[base + i] = sat[i]

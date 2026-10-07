@@ -35,6 +35,7 @@ Base.:*(::RawOperation{op, M},  s::Symbol) where {op, M} =
 
 """
     ptx"opcode.mod1.mod2..."
+    ptx"%name"
 
 Construct an `Operation{op, mods}` singleton — `op::Symbol` is the opcode
 (first segment), `mods::Tuple{Vararg{Symbol}}` is the modifier chain. Splits
@@ -66,7 +67,7 @@ Examples:
     ptx"mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32"(a, b, c)
     ptx"cp.async.bulk.tensor.3d.shared::cta.global.tile.mbarrier::complete_tx::bytes"(...)
     ptx"bar.sync"(Val(0))
-    ptx"mov.u32"(sreg"%tid.x")
+    ptx"mov.u32"(ptx"%tid.x")
 
     dt = "u32"
     ptx"mov.\$dt"(x)              # ≡ ptx"mov.u32"(x)
@@ -79,20 +80,61 @@ Examples:
 Empty literal parts (consecutive `.`, leading/trailing `.`, or empty string)
 error at expansion for the static path, and at runtime for the interp path.
 
+A spelling that starts with `%` is a special register rather than an
+instruction: `ptx"%tid.x"` constructs the `SpecialReg{Symbol("%tid.x")}`
+operand, which renders as the verbatim PTX token. The name must be a scalar
+special register of the PTX inventory (`%tid` alone is a vector; read
+`%tid.x`). Interpolation folds the same way as a glued modifier:
+
+    @inline block_index(axis::Symbol) = ptx"mov.u32"(ptx"%ctaid.\$axis")
+
+A static spelling is also a method-definition head. The same `ptx""` that
+calls a wrapper defines it, so the method is dispatchable by its spelling by
+construction:
+
+    @inline ptx"add.f32"(a::Float32, b::Float32) = ...
+
+Interpolated spellings are call-only.
+
 See also: [`@mod_str`](@ref) for modifier-only chains usable on the right
 side of `*`.
 """
 macro ptx_str(s::String)
+    startswith(s, '%') && return _special_reg_expr(s)
     if !occursin('$', s)
         op, mods = _static_head("ptx", s)
-        return :( $Operation{$(QuoteNode(op)), $mods}() )
+        return esc(_operation_binding!(__module__, s, op, mods))
     end
     isempty(s) && error("ptx\"\": empty modifier chain")
     return _ptx_build_interp(s)
 end
 
-# Shared static-spelling parser for `ptx""`, `ptx""raw`, and `optype""`:
-# one splitter so a spelling means the same `(op, mods)` everywhere.
+# A static `ptx"..."` expands to a name, not to `Operation{op, mods}()`,
+# because a name is the one form Julia accepts both as a value and as the
+# head of `f(args) = body`. The name is a `const` in the expanding module
+# bound to the singleton; a definition whose head is a const singleton
+# instance adds the method to the singleton's type, so `ptx"X"(a) = ...`
+# defines the method that `ptx"X"(a)` calls. The binding is created on first
+# expansion of a spelling. It has to live in the expanding module: during
+# precompilation that is the only module open for evaluation, so a fixed
+# home such as a `PTX.Ops` submodule would need every spelling bound ahead
+# of time. Accessing the const folds to the singleton exactly like the
+# literal, so a call site compiles to the same code either way.
+#
+# A `ptx"..."` quoted inside a `@generated` body is expanded when the
+# generator runs, under inference, where `eval` is forbidden and a new
+# binding would land in a newer world than the one the body compiles in.
+# That context can only call, never define, so it gets the literal.
+function _operation_binding!(mod::Module, spelling::String, op::Symbol, mods::Tuple)
+    literal = :( $Operation{$(QuoteNode(op)), $mods}() )
+    ccall(:jl_is_in_pure_context, Bool, ()) && return literal
+    name = Symbol("#ptx#", spelling)
+    isdefined(mod, name) || Core.eval(mod, :(const $name = $literal))
+    name
+end
+
+# Shared static-spelling parser for `ptx""` and `ptx""raw`: one splitter so a
+# spelling means the same `(op, mods)` everywhere.
 function _static_head(macroname::String, s::String)
     isempty(s) && error(macroname * "\"\": empty modifier chain")
     raw = split(s, '.')
@@ -111,38 +153,10 @@ macro ptx_str(s::String, flag::String)
         error("ptx\"...\"$flag: unknown flag (only `raw` is supported)")
     occursin('$', s) &&
         error("ptx\"...\"raw: interpolation is not supported on the raw tier")
+    startswith(s, '%') &&
+        error("ptx\"" * s * "\"raw: special registers have no raw tier")
     op, mods = _static_head("ptx", s)
     :( $RawOperation{$(QuoteNode(op)), $mods}() )
-end
-
-"""
-    optype"opcode.mod1.mod2..."
-
-The method-definition companion of [`@ptx_str`](@ref): expands to the
-*annotation* `::Operation{op, mods}` for the same static spelling, so a
-typed wrapper is defined in ISA text instead of a hand-transcribed mods
-tuple:
-
-    @inline optype"add.f32"(a::Float32, b::Float32) = ...
-
-is exactly
-
-    @inline (::Operation{:add, (:f32,)})(a::Float32, b::Float32) = ...
-
-Both string macros share one parser, so the definition is dispatchable by
-the `ptx""` spelling that reads back out of it, by construction — modifier
-transcription typos (which produce unreachable methods that only a count
-pin can catch) become impossible.
-
-Definition-site only; no `\$` interpolation (a generated family should use
-an explicit `@eval` loop over its spec, which builds mods tuples directly).
-"""
-macro optype_str(s::String)
-    occursin('$', s) && error(
-        "optype\"...\": interpolation is not supported (generated families " *
-        "belong in an explicit @eval loop over their spec)")
-    op, mods = _static_head("optype", s)
-    :( ::$(Operation{op, mods}) )
 end
 
 """
@@ -323,28 +337,24 @@ function _ptx_op_from_string(s::AbstractString)
     Operation{op, mods}()
 end
 
-"""
-    sreg"name"
+# `ptx"%name"` is a special-register operand: no PTX opcode begins with `%`.
+# A static name is checked here; an interpolated one folds to its
+# `SpecialReg` when the pieces are constants and is checked where the operand
+# renders.
+function _special_reg_expr(s::String)
+    if occursin('$', s)
+        pieces = _ptx_parse_interp(s).args
+        return :( $_special_reg($((p isa String ? p : esc(p) for p in pieces)...)) )
+    end
+    _check_special_reg(s)
+    :( $SpecialReg{$(QuoteNode(Symbol(s)))}() )
+end
 
-Construct a `SpecialReg{Symbol("%name")}` singleton — a compile-time
-literal for a PTX special register. Bakes the verbatim asm token, so
-underscore-bearing names (`%cluster_ctarank`, `%lanemask_eq`,
-`%total_smem_size`) round-trip losslessly. The legacy spelling
-`%warpsize` is the exception: PTX 9.3 defines `WARP_SZ` as an immediate,
-so it returns `Val(32)`. Other names accept either form:
+@inline _special_reg(args...) = SpecialReg{_ptx_sym(args...)}()
 
-    sreg"tid.x"            ≡ sreg"%tid.x"            → "%tid.x"
-    sreg"cluster_ctarank"  ≡ sreg"%cluster_ctarank"  → "%cluster_ctarank"
-    sreg"warpsize"         ≡ sreg"%warpsize"         → Val(32)
-"""
-macro sreg_str(s::String)
-    isempty(s) && error("sreg\"\": empty register name")
-    name = startswith(s, '%') ? s : '%' * s
-    # PTX 9.3 has WARP_SZ (an immediate constant), not %warpsize. Preserve
-    # legacy spelling at the public macro boundary while making it valid in
-    # every immediate-accepting instruction position.
-    name == IR.LEGACY_WARP_SIZE_SREG &&
-        return :( Base.Val($(IR.PREDEFINED_IMMEDIATES["WARP_SZ"])) )
-    sym = Symbol(name)
-    :( $SpecialReg{$(QuoteNode(sym))}() )
+function _check_special_reg(name::AbstractString)
+    name in IR.SCALAR_SPECIAL_REGS && return
+    hint = name in IR.V4_SPECIAL_REG_ROOTS ?
+        " (read one component, e.g. ptx\"$name.x\")" : ""
+    error("ptx\"" * name * "\": not a scalar PTX special register" * hint)
 end
