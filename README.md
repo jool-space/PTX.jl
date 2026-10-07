@@ -5,7 +5,7 @@
 [![Coverage](https://codecov.io/gh/jool-space/PTX.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/jool-space/PTX.jl)
 
 The [NVIDIA PTX ISA](https://docs.nvidia.com/cuda/parallel-thread-execution/) exposed
-directly in Julia through `ptx"..."(...)` syntax, composing naturally with [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl).
+directly in Julia through the `ptx` string macro, composing with [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl).
 
 ```julia
 using PTX, CUDA
@@ -39,9 +39,9 @@ time instructions are emitted.
 
 The missing piece is the instruction surface: LLVM emits only what its
 backend knows how to select, and CUDA.jl wraps only what it chooses to
-support; it does not — and should not — expose every hardware instruction.
-When you need one it doesn't (tensor core MMA shapes, `ldmatrix`, TMA,
-mbarriers, cluster ops), the traditional escape hatches are:
+support; it does not (and should not) expose every hardware instruction.
+When you need one it doesn't (tensor core MMA shapes, TMA,
+cluster ops), the traditional escape hatches are:
 
 - `Base.llvmcall` with handwritten LLVM IR, calling an `llvm.nvvm.*`
   intrinsic when one exists;
