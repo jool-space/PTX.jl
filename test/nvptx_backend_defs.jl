@@ -18,13 +18,6 @@ function _nvptx_probe_diagnostic(::Cint, message::Cstring, context::Ptr{Cvoid})
     nothing
 end
 
-function nvptx_backend_version()
-    major, minor, patch = Ref{Cuint}(), Ref{Cuint}(), Ref{Cuint}()
-    ccall((:NVPTXGetLLVMVersion, libnvptx), Cvoid,
-          (Ref{Cuint}, Ref{Cuint}, Ref{Cuint}), major, minor, patch)
-    VersionNumber(major[], minor[], patch[])
-end
-
 function compile_nvvm_ir(ir::String, cpu::String, feature::String;
                          fma_contraction::Bool = true)
     ptx = match(r"^\+ptx(\d+)(\d)$", feature)

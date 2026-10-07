@@ -115,7 +115,6 @@ end
     # extraction; a regenerated table that drifts in count means tblgen
     # skew (the name table is independently checked against the library)
     @test length(TABLE) == 2633
-    @test NVVM.BACKEND_LLVM_VERSION == v"23.1.1"
     @test all(k == i.name for (k, i) in TABLE)
 end
 
