@@ -133,10 +133,10 @@ end
 
 # --- shift / dealloc / cp -----------------------------------------------------
 
-@inline (::typeof(ptx"tcgen05.shift.cta_group::1.down"))(taddr::UInt32) =
+@inline ptx"tcgen05.shift.cta_group::1.down"(taddr::UInt32) =
     ceiled(nvvm"tcgen05.shift.down.cg1", ptx"tcgen05.shift.cta_group::1.down")(
         _tmem(taddr))
-@inline (::typeof(ptx"tcgen05.shift.cta_group::2.down"))(taddr::UInt32) =
+@inline ptx"tcgen05.shift.cta_group::2.down"(taddr::UInt32) =
     ceiled(nvvm"tcgen05.shift.down.cg2", ptx"tcgen05.shift.cta_group::2.down")(
         _tmem(taddr))
 
@@ -434,12 +434,12 @@ end
 # against subsequent ordinary loads/stores, hence the full clobber.
 let ir = convergent_asm_ir("tcgen05.wait::ld.sync.aligned;", "~{memory}",
                            Nothing, ())
-    @eval @inline (::typeof(ptx"tcgen05.wait::ld.sync.aligned"))() =
+    @eval @inline ptx"tcgen05.wait::ld.sync.aligned"() =
         Base.llvmcall(($ir, "entry"), Nothing, Tuple{})
 end
 let ir = convergent_asm_ir("tcgen05.wait::st.sync.aligned;", "~{memory}",
                            Nothing, ())
-    @eval @inline (::typeof(ptx"tcgen05.wait::st.sync.aligned"))() =
+    @eval @inline ptx"tcgen05.wait::st.sync.aligned"() =
         Base.llvmcall(($ir, "entry"), Nothing, Tuple{})
 end
 
@@ -451,10 +451,10 @@ end
 # retains each fence and `~{memory}` prevents tcgen05 and execution-ordering
 # operations from moving across it. Exact methods still prevent an accidental
 # operand from becoming a literal extra PTX operand through the generic chain.
-@inline (::typeof(ptx"tcgen05.fence::before_thread_sync"))() =
+@inline ptx"tcgen05.fence::before_thread_sync"() =
     @asmcall("tcgen05.fence::before_thread_sync;", "~{memory}", true,
              Nothing, Tuple{})
-@inline (::typeof(ptx"tcgen05.fence::after_thread_sync"))() =
+@inline ptx"tcgen05.fence::after_thread_sync"() =
     @asmcall("tcgen05.fence::after_thread_sync;", "~{memory}", true,
              Nothing, Tuple{})
 
@@ -621,44 +621,44 @@ end
 # --- dense mma (A from SMEM descriptor) ----------------------------------------
 # kind immarg: 0=f16, 1=tf32, 2=f8f6f4, 3=i8; collector_usage 0 = discard
 # (the ISA default, now spelled explicitly in the output).
-@inline (::typeof(ptx"tcgen05.mma.cta_group::1.kind::f16"))(
+@inline ptx"tcgen05.mma.cta_group::1.kind::f16"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     ceiled(nvvm"tcgen05.mma.shared", ptx"tcgen05.mma.cta_group::1.kind::f16")(
         _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(0), Val(1), Val(0))
-@inline (::typeof(ptx"tcgen05.mma.cta_group::2.kind::f16"))(
+@inline ptx"tcgen05.mma.cta_group::2.kind::f16"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     ceiled(nvvm"tcgen05.mma.shared", ptx"tcgen05.mma.cta_group::2.kind::f16")(
         _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(0), Val(2), Val(0))
-@inline (::typeof(ptx"tcgen05.mma.cta_group::1.kind::tf32"))(
+@inline ptx"tcgen05.mma.cta_group::1.kind::tf32"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     ceiled(nvvm"tcgen05.mma.shared", ptx"tcgen05.mma.cta_group::1.kind::tf32")(
         _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(1), Val(1), Val(0))
-@inline (::typeof(ptx"tcgen05.mma.cta_group::2.kind::tf32"))(
+@inline ptx"tcgen05.mma.cta_group::2.kind::tf32"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     ceiled(nvvm"tcgen05.mma.shared", ptx"tcgen05.mma.cta_group::2.kind::tf32")(
         _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(1), Val(2), Val(0))
-@inline (::typeof(ptx"tcgen05.mma.cta_group::1.kind::f8f6f4"))(
+@inline ptx"tcgen05.mma.cta_group::1.kind::f8f6f4"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     ceiled(nvvm"tcgen05.mma.shared",
            ptx"tcgen05.mma.cta_group::1.kind::f8f6f4")(
         _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(2), Val(1), Val(0))
-@inline (::typeof(ptx"tcgen05.mma.cta_group::2.kind::f8f6f4"))(
+@inline ptx"tcgen05.mma.cta_group::2.kind::f8f6f4"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     ceiled(nvvm"tcgen05.mma.shared",
            ptx"tcgen05.mma.cta_group::2.kind::f8f6f4")(
         _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(2), Val(2), Val(0))
-@inline (::typeof(ptx"tcgen05.mma.cta_group::1.kind::i8"))(
+@inline ptx"tcgen05.mma.cta_group::1.kind::i8"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     ceiled(nvvm"tcgen05.mma.shared", ptx"tcgen05.mma.cta_group::1.kind::i8")(
         _tmem(d), a_desc, b_desc, idesc, enable_input_d, Val(3), Val(1), Val(0))
-@inline (::typeof(ptx"tcgen05.mma.cta_group::2.kind::i8"))(
+@inline ptx"tcgen05.mma.cta_group::2.kind::i8"(
         d::UInt32, a_desc::UInt64, b_desc::UInt64,
         idesc::UInt32, enable_input_d::Bool) =
     ceiled(nvvm"tcgen05.mma.shared", ptx"tcgen05.mma.cta_group::2.kind::i8")(

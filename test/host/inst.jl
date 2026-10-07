@@ -31,18 +31,45 @@ end
 struct _OptypeProbe
     x::Int
 end
-@inline (::typeof(ptx"_optype_probe.f32.sat"))(v::_OptypeProbe) = v.x + 1
-@inline (::typeof(ptx"_optype_probe.wait::ld.pack::16b"))(v::_OptypeProbe, w::_OptypeProbe) =
+@inline ptx"_optype_probe.f32.sat"(v::_OptypeProbe) = v.x + 1
+@inline ptx"_optype_probe.wait::ld.pack::16b"(v::_OptypeProbe, w::_OptypeProbe) =
     v.x + w.x
+# A second module adds a method to the same singleton through its own binding.
+module _OptypeProbeExt
+using PTX
+ptx"_optype_probe.f32.sat"(v::Float64) = v + 1
+end
+# A spelling quoted inside a generated body is expanded when the generator
+# runs, where no binding can be created; it must still fold to the singleton.
+@generated _optype_probe_generated(v::_OptypeProbe) =
+    :( ptx"_optype_probe_gen.f32"(v) )
+@inline ptx"_optype_probe_gen.f32"(v::_OptypeProbe) = v.x * 2
 
-@testset "typeof(ptx\"...\") method definitions" begin
+@testset "ptx\"...\" method definitions" begin
     @test typeof(ptx"add.f32") === Operation{:add, (:f32,)}
 
-    # A method defined on typeof(ptx"...") is dispatchable by the same
-    # spelling, including `::`-qualified segments.
+    # A static spelling expands to a const bound in the expanding module, so
+    # it is valid both as a value and as a method-definition head. The const
+    # folds to the singleton, so the call site compiles to a constant.
+    @test @macroexpand(ptx"add.f32") === Symbol("#ptx#add.f32")
+    @test isconst(@__MODULE__, Symbol("#ptx#add.f32"))
+    @test getglobal(@__MODULE__, Symbol("#ptx#add.f32")) === Operation{:add, (:f32,)}()
+    @test Base.return_types(() -> ptx"add.f32", ())[1] === Operation{:add, (:f32,)}
+
+    # A method defined with the spelling as head is dispatchable by the same
+    # spelling, including `::`-qualified segments, and from another module.
     @test ptx"_optype_probe.f32.sat"(_OptypeProbe(41)) == 42
     @test ptx"_optype_probe.wait::ld.pack::16b"(
         _OptypeProbe(20), _OptypeProbe(22)) == 42
+    @test ptx"_optype_probe.f32.sat"(1.5) == 2.5
+    @test hasmethod(ptx"_optype_probe.f32.sat", Tuple{Float64})
+
+    @test _optype_probe_generated(_OptypeProbe(21)) == 42
+    @test Base.return_types(_optype_probe_generated, (_OptypeProbe,))[1] === Int
+
+    # Special registers and interpolated spellings stay literal expansions.
+    @test @macroexpand(ptx"%tid.x") == :($SpecialReg{$(QuoteNode(Symbol("%tid.x")))}())
+    @test !isdefined(@__MODULE__, Symbol("#ptx#%tid.x"))
 end
 
 @testset "ptx\"...\" string macro: \$ interpolation" begin

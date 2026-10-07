@@ -88,10 +88,13 @@ special register of the PTX inventory (`%tid` alone is a vector; read
 
     @inline block_index(axis::Symbol) = ptx"mov.u32"(ptx"%ctaid.\$axis")
 
-A typed wrapper is defined on the singleton's type, so the method is
-dispatchable by the same spelling:
+A static spelling is also a method-definition head. The same `ptx""` that
+calls a wrapper defines it, so the method is dispatchable by its spelling by
+construction:
 
-    @inline (::typeof(ptx"add.f32"))(a::Float32, b::Float32) = ...
+    @inline ptx"add.f32"(a::Float32, b::Float32) = ...
+
+Interpolated spellings are call-only.
 
 See also: [`@mod_str`](@ref) for modifier-only chains usable on the right
 side of `*`.
@@ -100,10 +103,34 @@ macro ptx_str(s::String)
     startswith(s, '%') && return _special_reg_expr(s)
     if !occursin('$', s)
         op, mods = _static_head("ptx", s)
-        return :( $Operation{$(QuoteNode(op)), $mods}() )
+        return esc(_operation_binding!(__module__, s, op, mods))
     end
     isempty(s) && error("ptx\"\": empty modifier chain")
     return _ptx_build_interp(s)
+end
+
+# A static `ptx"..."` expands to a name, not to `Operation{op, mods}()`,
+# because a name is the one form Julia accepts both as a value and as the
+# head of `f(args) = body`. The name is a `const` in the expanding module
+# bound to the singleton; a definition whose head is a const singleton
+# instance adds the method to the singleton's type, so `ptx"X"(a) = ...`
+# defines the method that `ptx"X"(a)` calls. The binding is created on first
+# expansion of a spelling. It has to live in the expanding module: during
+# precompilation that is the only module open for evaluation, so a fixed
+# home such as a `PTX.Ops` submodule would need every spelling bound ahead
+# of time. Accessing the const folds to the singleton exactly like the
+# literal, so a call site compiles to the same code either way.
+#
+# A `ptx"..."` quoted inside a `@generated` body is expanded when the
+# generator runs, under inference, where `eval` is forbidden and a new
+# binding would land in a newer world than the one the body compiles in.
+# That context can only call, never define, so it gets the literal.
+function _operation_binding!(mod::Module, spelling::String, op::Symbol, mods::Tuple)
+    literal = :( $Operation{$(QuoteNode(op)), $mods}() )
+    ccall(:jl_is_in_pure_context, Bool, ()) && return literal
+    name = Symbol("#ptx#", spelling)
+    isdefined(mod, name) || Core.eval(mod, :(const $name = $literal))
+    name
 end
 
 # Shared static-spelling parser for `ptx""` and `ptx""raw`: one splitter so a

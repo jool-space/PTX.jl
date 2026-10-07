@@ -34,20 +34,20 @@
 # async proxy is the memory proxy used by TMA (cp.async.bulk*) and tcgen05;
 # generic-proxy ops (regular load/store, mma) need this fence to observe
 # async-proxy writes (and vice versa). sm_90+ only.
-@inline (::typeof(ptx"fence.proxy.async"))() =
+@inline ptx"fence.proxy.async"() =
     ceiled(nvvm"fence.proxy.async", ptx"fence.proxy.async")()
 
 # `fence.proxy.async.shared::cta;` — the shared-CTA-scoped async proxy fence
 # the producer/consumer GEMM pipelines emit after staging into shared memory
 # (used across the Hopper/Blackwell kernels). Intrinsic spells the space
 # with an underscore (shared_cta); the emitted PTX is `shared::cta`.
-@inline (::typeof(ptx"fence.proxy.async.shared::cta"))() =
+@inline ptx"fence.proxy.async.shared::cta"() =
     ceiled(nvvm"fence.proxy.async.shared_cta", ptx"fence.proxy.async.shared::cta")()
 
 # `fence.mbarrier_init.release.cluster;` — release-fence after
 # `mbarrier.init` so other CTAs in the cluster observe the initialized
 # mbarrier state before reading/arriving on it. sm_90+ (cluster scope).
-@inline (::typeof(ptx"fence.mbarrier_init.release.cluster"))() =
+@inline ptx"fence.mbarrier_init.release.cluster"() =
     ceiled(nvvm"fence.mbarrier_init.release.cluster",
            ptx"fence.mbarrier_init.release.cluster")()
 
@@ -73,43 +73,43 @@
 # release intrinsics deliberately carry no permissive memory attribute, so
 # optimized LLVM retains every fence and cannot move memory through it.
 
-@inline function (::typeof(ptx"fence.proxy.tensormap::generic.acquire.cta"))(
+@inline function ptx"fence.proxy.tensormap::generic.acquire.cta"(
         addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
     ceiled(nvvm"fence.proxy.tensormap_generic.acquire.cta",
            ptx"fence.proxy.tensormap::generic.acquire.cta")(addr, Val(128))
 end
 
-@inline function (::typeof(ptx"fence.proxy.tensormap::generic.acquire.cluster"))(
+@inline function ptx"fence.proxy.tensormap::generic.acquire.cluster"(
         addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
     ceiled(nvvm"fence.proxy.tensormap_generic.acquire.cluster",
            ptx"fence.proxy.tensormap::generic.acquire.cluster")(addr, Val(128))
 end
 
-@inline function (::typeof(ptx"fence.proxy.tensormap::generic.acquire.gpu"))(
+@inline function ptx"fence.proxy.tensormap::generic.acquire.gpu"(
         addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
     ceiled(nvvm"fence.proxy.tensormap_generic.acquire.gpu",
            ptx"fence.proxy.tensormap::generic.acquire.gpu")(addr, Val(128))
 end
 
-@inline function (::typeof(ptx"fence.proxy.tensormap::generic.acquire.sys"))(
+@inline function ptx"fence.proxy.tensormap::generic.acquire.sys"(
         addr::Core.LLVMPtr{T, AS.Generic}, ::Val{128}) where {T}
     ceiled(nvvm"fence.proxy.tensormap_generic.acquire.sys",
            ptx"fence.proxy.tensormap::generic.acquire.sys")(addr, Val(128))
 end
 
-@inline (::typeof(ptx"fence.proxy.tensormap::generic.release.cta"))() =
+@inline ptx"fence.proxy.tensormap::generic.release.cta"() =
     ceiled(nvvm"fence.proxy.tensormap_generic.release.cta",
            ptx"fence.proxy.tensormap::generic.release.cta")()
 
-@inline (::typeof(ptx"fence.proxy.tensormap::generic.release.cluster"))() =
+@inline ptx"fence.proxy.tensormap::generic.release.cluster"() =
     ceiled(nvvm"fence.proxy.tensormap_generic.release.cluster",
            ptx"fence.proxy.tensormap::generic.release.cluster")()
 
-@inline (::typeof(ptx"fence.proxy.tensormap::generic.release.gpu"))() =
+@inline ptx"fence.proxy.tensormap::generic.release.gpu"() =
     ceiled(nvvm"fence.proxy.tensormap_generic.release.gpu",
            ptx"fence.proxy.tensormap::generic.release.gpu")()
 
-@inline (::typeof(ptx"fence.proxy.tensormap::generic.release.sys"))() =
+@inline ptx"fence.proxy.tensormap::generic.release.sys"() =
     ceiled(nvvm"fence.proxy.tensormap_generic.release.sys",
            ptx"fence.proxy.tensormap::generic.release.sys")()
 

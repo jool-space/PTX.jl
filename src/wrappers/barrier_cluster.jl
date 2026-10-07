@@ -22,20 +22,20 @@
 # intrinsic this file stands on is greppable — test/host/conformance.jl
 # scans for `nvvm"..."` literals and requires a probe for each.
 
-@inline (::typeof(ptx"barrier.cluster.arrive"))() =
+@inline ptx"barrier.cluster.arrive"() =
     ceiled(nvvm"barrier.cluster.arrive", ptx"barrier.cluster.arrive")()
-@inline (::typeof(ptx"barrier.cluster.arrive.relaxed"))() =
+@inline ptx"barrier.cluster.arrive.relaxed"() =
     ceiled(nvvm"barrier.cluster.arrive.relaxed",
            ptx"barrier.cluster.arrive.relaxed")()
-@inline (::typeof(ptx"barrier.cluster.wait"))() =
+@inline ptx"barrier.cluster.wait"() =
     ceiled(nvvm"barrier.cluster.wait", ptx"barrier.cluster.wait")()
 
-@inline (::typeof(ptx"barrier.cluster.arrive.aligned"))() =
+@inline ptx"barrier.cluster.arrive.aligned"() =
     ceiled(nvvm"barrier.cluster.arrive.aligned",
            ptx"barrier.cluster.arrive.aligned")()
-@inline (::typeof(ptx"barrier.cluster.arrive.relaxed.aligned"))() =
+@inline ptx"barrier.cluster.arrive.relaxed.aligned"() =
     ceiled(nvvm"barrier.cluster.arrive.relaxed.aligned",
            ptx"barrier.cluster.arrive.relaxed.aligned")()
-@inline (::typeof(ptx"barrier.cluster.wait.aligned"))() =
+@inline ptx"barrier.cluster.wait.aligned"() =
     ceiled(nvvm"barrier.cluster.wait.aligned",
            ptx"barrier.cluster.wait.aligned")()

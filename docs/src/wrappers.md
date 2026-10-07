@@ -42,9 +42,9 @@ test-side oracles read the inventories back through `wrapper_records` /
 `wrapper_intrinsic_names` / `wrapper_asm_forms` /
 `wrapper_missing_intrinsics`.
 
-Literal spellings are declared on the type of the [`@ptx_str`](@ref)
-singleton
-(`@inline (::typeof(ptx"tcgen05.alloc.cta_group::1.sync.aligned.b32"))(...) = ...`);
+Literal spellings are declared with the [`@ptx_str`](@ref) spelling as the
+method head
+(`@inline ptx"tcgen05.alloc.cta_group::1.sync.aligned.b32"(...) = ...`);
 only generator loops that build the mods tuple programmatically define
 methods on the `Operation{op, mods}` singleton directly.
 
@@ -453,7 +453,7 @@ Most chain-default coverage is sufficient. Reach for a wrapper when:
 
 The pattern: copy the closest existing wrapper file, adjust the table
 and asm template, add a `for` loop that emits one typed method per
-combination — spelling literal forms with `typeof(ptx"...")` and routing the
+combination — spelling literal forms as `ptx"..."(...) = ...` heads and routing the
 generator's bookkeeping through `register_wrapper!` /
 `wrapper_intrinsic_call` (see `src/wrappers/registry.jl`). ~80 LOC for a
 new family in most cases.

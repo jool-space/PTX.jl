@@ -244,7 +244,7 @@ end
 # `g2s` renders `shared::cluster`). Asm strings keep the pyptx modifier
 # order (cta_group after `.<N>d`) — now the family-wide spelling.
 
-@generated function (::typeof(ptx"cp.async.bulk.tensor.1d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"))(
+@generated function ptx"cp.async.bulk.tensor.1d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
     quote
@@ -258,7 +258,7 @@ end
     end
 end
 
-@generated function (::typeof(ptx"cp.async.bulk.tensor.2d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"))(
+@generated function ptx"cp.async.bulk.tensor.2d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
@@ -273,7 +273,7 @@ end
     end
 end
 
-@generated function (::typeof(ptx"cp.async.bulk.tensor.3d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"))(
+@generated function ptx"cp.async.bulk.tensor.3d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
@@ -288,7 +288,7 @@ end
     end
 end
 
-@generated function (::typeof(ptx"cp.async.bulk.tensor.4d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"))(
+@generated function ptx"cp.async.bulk.tensor.4d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer, c4::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
@@ -303,7 +303,7 @@ end
     end
 end
 
-@generated function (::typeof(ptx"cp.async.bulk.tensor.5d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"))(
+@generated function ptx"cp.async.bulk.tensor.5d.cta_group::2.shared::cta.global.tile.mbarrier::complete_tx::bytes"(
         dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
         c1::Integer, c2::Integer, c3::Integer, c4::Integer, c5::Integer,
         mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
