@@ -372,7 +372,11 @@ function _mbarrier_operand_accepts(schema::MBarrierFormSchema,
         # Val immediates, so the accept-set difference is semantic.
         if T <: Core.LLVMPtr
             as = T.parameters[2]
-            return schema.space === :generic ? as == 0 : as == 3
+            schema.space === :generic && return as == 0
+            # `shared::cta` addresses are valid `shared::cluster` addresses,
+            # so cluster forms take the local pointer (AS 3) as well as a
+            # cluster-mapped one (AS 7); cta forms reject the latter.
+            return schema.space === :cluster ? as in (3, 7) : as == 3
         end
         if T <: Address
             # `Address` is the explicit bracket-role carrier used by direct
@@ -394,9 +398,10 @@ end
 # The schema-carrying method: mbarrier's address description depends on the
 # form's state space.
 function operand_description(schema::MBarrierFormSchema, kind::Symbol)
-    kind === :address && return schema.space === :generic ?
-        "an address-space-0 LLVMPtr, PTX.Address, or a 32/64-bit integer address carrier" :
-        "an address-space-3 LLVMPtr, PTX.Address, or a 32/64-bit integer address carrier"
+    kind === :address && return "an address-space-" *
+        (schema.space === :generic ? "0" :
+         schema.space === :cluster ? "3 or 7" : "3") *
+        " LLVMPtr, PTX.Address, or a 32/64-bit integer address carrier"
     kind === :u32 && return "a 32-bit integer or integer Val immediate"
     kind === :u64 && return "a 64-bit integer or integer Val immediate"
     string(kind)
