@@ -368,7 +368,7 @@ end
 end
 
 @testset "collective chain forms carry convergent nomerge (registry)" begin
-    # Registered convergent families route through convergent_asm_ir — the
+    # Registered convergent families route through convergent_asmcall — the
     # IR-level tripwire (llc ignores the attribute; goldens can't observe
     # its loss). This retires the pre-registry residual where chain-default
     # collectives got sideeffect but NOT convergent.
@@ -491,7 +491,7 @@ end
     @test L(ptx"st.global.v4.f32",
             (Core.LLVMPtr{Float32, PTX.AS.Global}, NTuple{4, Float32})).tier === :core
 
-    # asm tier: hand-written wrapper, both @asmcall and convergent_asm_ir shapes
+    # asm tier: hand-written wrapper, both @asmcall and convergent_asmcall shapes
     @test L(ptx"fabric.submit", ()).tier === :asm
     @test L(ptx"mbarrier.arrive.shared::cluster.b64", (pS,)).tier === :asm
     @test L(ptx"fence.proxy.generic::fabric.alias.acquire.sys", ()).tier === :asm

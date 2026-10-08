@@ -96,8 +96,10 @@ function _wgmma_sp_register(dtype_d::Symbol, dtype_a::Symbol, dtype_b::Symbol,
         spec = wgmma_sp_spec(dtype_d, dtype_a, dtype_b, n, k, has_trans, sel)
         nd, asm, constraints = spec.nd, spec.asm, spec.constraints
         flat_argtypes = vcat([UInt64, UInt64, UInt32, Bool], fill(d_J, nd))
-        ir = convergent_asm_ir(asm, constraints, NTuple{nd, d_J}, flat_argtypes)
         d_args = [:(d[$i]) for i in 1:nd]
+        call = convergent_asmcall(asm, constraints, NTuple{nd, d_J},
+                                  flat_argtypes, :a_desc, :b_desc, :sp_meta,
+                                  :scale_d, d_args...)
         @eval function (::Operation{:wgmma, $mods})(
                 d::NTuple{$nd, $d_J},
                 a_desc::UInt64,
@@ -106,10 +108,7 @@ function _wgmma_sp_register(dtype_d::Symbol, dtype_a::Symbol, dtype_b::Symbol,
                 ::Val{$sel},
                 scale_d::Bool)
             Base.@inline
-            Base.llvmcall(($ir, "entry"),
-                          NTuple{$nd, $d_J},
-                          Tuple{$(flat_argtypes...)},
-                          a_desc, b_desc, sp_meta, scale_d, $(d_args...))
+            $call
         end
     end
     nothing

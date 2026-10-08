@@ -23,7 +23,7 @@
 #                  :clobbers   full memory barrier (asm: `sideeffect` +
 #                              `~{memory}`); the only safe default
 #   convergent — NOT safe to duplicate or merge across divergent branches:
-#                warp-/warpgroup-collective (emitted via convergent_asm_ir
+#                warp-/warpgroup-collective (emitted via convergent_asmcall
 #                so the call carries `convergent nomerge`; the renderer
 #                clamps rendered effects to ≥ :observable because that
 #                route structurally always sets `sideeffect`)
@@ -53,7 +53,7 @@ struct FormContract
             error("FormContract: effects must be :pure, :observable, or " *
                   ":clobbers, got $(repr(effects))")
         # convergent && effects === :pure is a legal *contract* (mma is
-        # register-only compute yet warp-collective); the convergent_asm_ir
+        # register-only compute yet warp-collective); the convergent_asmcall
         # route structurally renders it as observable (it always sets
         # `sideeffect`), so a convergent call can never be DCE'd regardless
         # of its effects class.

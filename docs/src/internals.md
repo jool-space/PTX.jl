@@ -117,6 +117,6 @@ with `git show ccdfb8a~1:spikes/`. The load-bearing ones:
   miscompile class that motivates `convergent` on collective ops.
 - `spikes/raw_asm_attrs.jl` — proves a `convergent` attribute group on an
   inline-asm call site parses through `Base.llvmcall` and survives the
-  optimized module (the `convergent_asm_ir` mechanism).
+  optimized module (the `convergent_asmcall` mechanism).
 - `spikes/aggregate_return.jl` — hardware validation of the ldmatrix
   aggregate-return repack and mangled overloaded-callsite names.

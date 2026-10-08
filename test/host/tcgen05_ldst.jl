@@ -262,21 +262,23 @@ end
     # Golden-style pin of one complete rendering: operand order (data
     # destinations, redval destination, bracketed taddr), the f32 redval's
     # float register class, and the callsite attribute group.
-    ir, rt = PTX._tcgen05_ldred_ir(
-        (:ld, :red, :sync, :aligned, Symbol("32x32b"), :x2, :min, :f32),
-        2, Float32, nothing)
-    @test rt === Tuple{UInt32, UInt32, Float32}
+    op = Operation{:tcgen05, (:ld, :red, :sync, :aligned, Symbol("32x32b"),
+                              :x2, :min, :f32)}()
+    @test only(Base.return_types(op, (UInt32,))) ===
+          Tuple{UInt32, UInt32, Float32}
+    ir = llvmcall_ir(op, (UInt32,))
     @test occursin("call { i32, i32, float } asm sideeffect " *
                    "\"tcgen05.ld.red.sync.aligned.32x32b.x2.min.f32 " *
                    "{\$0, \$1}, \$2, [\$3];\", " *
-                   "\"=r,=r,=f,r,~{memory}\"(i32 %a0) #0", ir)
-    @test occursin("attributes #0 = { convergent nomerge nounwind }", ir)
+                   "\"=r,=r,=f,r,~{memory}\"(i32 %0) #1", ir)
+    @test occursin("attributes #1 = { convergent nomerge nounwind }", ir)
 
     # Split shape: the immediate is part of the asm text, after the address.
-    irs, rts = PTX._tcgen05_ldred_ir(
-        (:ld, :red, :sync, :aligned, Symbol("16x32bx2"), :x2, :max, :u32),
-        2, UInt32, 8)
-    @test rts === Tuple{UInt32, UInt32, UInt32}
+    ops = Operation{:tcgen05, (:ld, :red, :sync, :aligned, Symbol("16x32bx2"),
+                               :x2, :max, :u32)}()
+    @test only(Base.return_types(ops, (UInt32, Val{8}))) ===
+          Tuple{UInt32, UInt32, UInt32}
+    irs = llvmcall_ir(ops, (UInt32, Val{8}))
     @test occursin("{\$0, \$1}, \$2, [\$3], 8;", irs)
     @test occursin("\"=r,=r,=r,r,~{memory}\"", irs)
 end
@@ -367,22 +369,24 @@ end
     # register classes like ld.red.
     mods = (:ld, :red, :spcompress, :sync, :aligned, Symbol("32x32b"), :x4,
             :max, Symbol("sp::2:4"), :abs, Symbol("NaN"), :f32, :b2)
-    ir, flat, nm, nc = PTX._tcgen05_ldspc_ir(mods, true, 4)
-    @test (nm, nc) == (1, 2)
-    @test flat === Tuple{UInt32, UInt32, UInt32, Float32}
+    op = Operation{:tcgen05, mods}()
+    @test only(Base.return_types(op, (UInt32,))) ===
+          Tuple{NTuple{1, UInt32}, NTuple{2, UInt32}, Float32}
+    ir = llvmcall_ir(op, (UInt32,))
     @test occursin("call { i32, i32, i32, float } asm sideeffect " *
                    "\"tcgen05.ld.red.spcompress.sync.aligned.32x32b.x4.max" *
                    ".sp::2:4.abs.NaN.f32.b2 {\$0}, {\$1, \$2}, \$3, [\$4];\", " *
-                   "\"=r,=r,=r,=f,r,~{memory}\"(i32 %a0) #0", ir)
-    @test occursin("attributes #0 = { convergent nomerge nounwind }", ir)
+                   "\"=r,=r,=r,=f,r,~{memory}\"(i32 %0) #1", ir)
+    @test occursin("attributes #1 = { convergent nomerge nounwind }", ir)
 
     # Without .red the address follows the data group directly, and x128
     # spreads its 128 indices over four registers.
     mods = (:ld, :spcompress, :sync, :aligned, Symbol("32x32b"), :x128,
             :min, Symbol("sp::2:4"), :f32, :b2)
-    ir, flat, nm, nc = PTX._tcgen05_ldspc_ir(mods, false, 128)
-    @test (nm, nc) == (4, 64)
-    @test flat === Tuple{fill(UInt32, 68)...}
+    op = Operation{:tcgen05, mods}()
+    @test only(Base.return_types(op, (UInt32,))) ===
+          Tuple{NTuple{4, UInt32}, NTuple{64, UInt32}}
+    ir = llvmcall_ir(op, (UInt32,))
     @test occursin("{\$0, \$1, \$2, \$3}, {\$4, ", ir)
     @test occursin("\$67}, [\$68];", ir)
 end

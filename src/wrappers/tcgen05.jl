@@ -152,13 +152,13 @@ for cg in 1:2
     cta = Symbol("cta_group::", cg)
 
     mods = (:dealloc, cta, :sync, :aligned, :b32)
-    ir = convergent_asm_ir(
+    call = convergent_asmcall(
         "tcgen05.dealloc.cta_group::$cg.sync.aligned.b32 \$0, \$1;",
-        "r,r,~{memory}", Nothing, (UInt32, UInt32))
+        "r,r,~{memory}", Nothing, (UInt32, UInt32),
+        :taddr, :ncols)
     @eval @inline function (::Operation{:tcgen05, $mods})(
             taddr::UInt32, ncols::UInt32)
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt32},
-                      taddr, ncols)
+        $call
     end
 
     for shapemods in ((Symbol("128x256b"),), (Symbol("4x256b"),),
@@ -170,12 +170,12 @@ for cg in 1:2
         mods = (:cp, cta, shapemods..., fmt...)
         spell = join(("tcgen05", "cp", String(cta),
                       String.(shapemods)..., String.(fmt)...), ".")
-        ir = convergent_asm_ir("$spell [\$0], \$1;", "r,l,~{memory}",
-                               Nothing, (UInt32, UInt64))
+        call = convergent_asmcall("$spell [\$0], \$1;", "r,l,~{memory}",
+                                  Nothing, (UInt32, UInt64),
+                                  :taddr, :s_desc)
         @eval @inline function (::Operation{:tcgen05, $mods})(
                 taddr::UInt32, s_desc::UInt64)
-            Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt64},
-                          taddr, s_desc)
+            $call
         end
     end
 end
@@ -274,16 +274,16 @@ end
 
 const _TCGEN05_LDRED_REDT = (f32 = Float32, u32 = UInt32, s32 = Int32)
 
-function _tcgen05_ldred_ir(mods::Tuple{Vararg{Symbol}}, n::Int,
-                           redT::Type, off)
+function _tcgen05_ldred_call(mods::Tuple{Vararg{Symbol}}, n::Int,
+                             redT::Type, off)
     head = "tcgen05." * join(String.(mods), ".")
     regs = join(("\$$(k - 1)" for k in 1:n), ", ")
     tail = off === nothing ? "" : ", $off"
     asm = "$head {$regs}, \$$n, [\$$(n + 1)]$tail;"
     constraints = join(fill("=r", n), ",") * "," *
                   (redT === Float32 ? "=f" : "=r") * ",r,~{memory}"
-    rt = Tuple{fill(UInt32, n)..., redT}
-    convergent_asm_ir(asm, constraints, rt, (UInt32,)), rt
+    convergent_asmcall(asm, constraints, Tuple{fill(UInt32, n)..., redT},
+                       (UInt32,), :taddr)
 end
 
 # The split-shape offset must be a PTX immediate, so its IR is generated
@@ -295,9 +295,7 @@ end
         return :(throw(ArgumentError(
             "halfsplitoff must be a non-negative integer Val")))
     n = parse(Int, String(mods[6])[2:end])
-    ir, rt = _tcgen05_ldred_ir(mods, n, _TCGEN05_LDRED_REDT[mods[end]],
-                               Int(off))
-    :(Base.llvmcall(($ir, "entry"), $rt, Tuple{UInt32}, taddr))
+    _tcgen05_ldred_call(mods, n, _TCGEN05_LDRED_REDT[mods[end]], Int(off))
 end
 
 function _tcgen05_ldred_register(shape::Symbol, count::Int, redop::Symbol,
@@ -312,10 +310,9 @@ function _tcgen05_ldred_register(shape::Symbol, count::Int, redop::Symbol,
             _tcgen05_ldred_split(op, taddr, halfsplitoff)
         _tcgen05_adapter!(mods, Address{UInt32}, Val)
     else
-        ir, rt = _tcgen05_ldred_ir(mods, count,
-                                   _TCGEN05_LDRED_REDT[dtype], nothing)
-        @eval @inline (::Operation{:tcgen05, $mods})(taddr::UInt32) =
-            Base.llvmcall(($ir, "entry"), $rt, Tuple{UInt32}, taddr)
+        call = _tcgen05_ldred_call(mods, count, _TCGEN05_LDRED_REDT[dtype],
+                                   nothing)
+        @eval @inline (::Operation{:tcgen05, $mods})(taddr::UInt32) = $call
         _tcgen05_adapter!(mods, Address{UInt32})
     end
     nothing
@@ -345,7 +342,7 @@ end
 # (mdata, cdata[, redval]); the indices and the kept data keep their ISA
 # operand order.
 
-function _tcgen05_ldspc_ir(mods::Tuple{Vararg{Symbol}}, red::Bool, n::Int)
+function _tcgen05_ldspc_call(mods::Tuple{Vararg{Symbol}}, red::Bool, n::Int)
     head = "tcgen05." * join(String.(mods), ".")
     nm = cld(n, 32)
     nc = n ÷ 2
@@ -358,7 +355,7 @@ function _tcgen05_ldspc_ir(mods::Tuple{Vararg{Symbol}}, red::Bool, n::Int)
     constraints = join(fill("=r", total), ",") * (red ? ",=f" : "") *
                   ",r,~{memory}"
     flat = Tuple{fill(UInt32, total)..., (red ? (Float32,) : ())...}
-    convergent_asm_ir(asm, constraints, flat, (UInt32,)), flat, nm, nc
+    convergent_asmcall(asm, constraints, flat, (UInt32,), :taddr), nm, nc
 end
 
 function _tcgen05_ldspc_register(red::Bool, count::Int, rowop::Symbol,
@@ -367,14 +364,14 @@ function _tcgen05_ldspc_register(red::Bool, count::Int, rowop::Symbol,
             Symbol("32x32b"), Symbol("x", count), rowop, Symbol("sp::2:4"),
             variant..., :f32, :b2)
     register_wrapper!(:tcgen05_ldspc, :tcgen05, mods, :asm)
-    ir, flat, nm, nc = _tcgen05_ldspc_ir(mods, red, count)
+    call, nm, nc = _tcgen05_ldspc_call(mods, red, count)
     mvals = [:(r[$i]) for i in 1:nm]
     cvals = [:(r[$i]) for i in nm + 1:nm + nc]
     tail = red ? (:(r[$(nm + nc + 1)]),) : ()
     rt = Tuple{NTuple{nm, UInt32}, NTuple{nc, UInt32},
                (red ? (Float32,) : ())...}
     @eval @inline function (::Operation{:tcgen05, $mods})(taddr::UInt32)
-        r = Base.llvmcall(($ir, "entry"), $flat, Tuple{UInt32}, taddr)
+        r = $call
         (($(mvals...),), ($(cvals...),), $(tail...))::$rt
     end
     _tcgen05_adapter!(mods, Address{UInt32})
@@ -401,30 +398,28 @@ for cg in 1:2
     head = "tcgen05.alloc.cta_group::$cg.sync.aligned"
 
     mods = (:alloc, cta, :sync, :aligned, :b32)
-    ir = convergent_asm_ir("$head.b32 [\$0], \$1;", "r,r,~{memory}",
-                           Nothing, (Core.LLVMPtr{UInt32, AS.Shared}, UInt32))
+    call = convergent_asmcall("$head.b32 [\$0], \$1;", "r,r,~{memory}",
+                              Nothing, (Core.LLVMPtr{UInt32, AS.Shared}, UInt32),
+                              :dst, :ncols)
     @eval @inline function (::Operation{:tcgen05, $mods})(
             dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32)
-        Base.llvmcall(($ir, "entry"), Nothing,
-                      Tuple{Core.LLVMPtr{UInt32, AS.Shared}, UInt32},
-                      dst, ncols)
+        $call
     end
 
     mods = (:alloc, cta, :sync, :aligned, Symbol("shared::cta"), :b32)
-    ir = convergent_asm_ir("$head.shared::cta.b32 [\$0], \$1;",
-                           "r,r,~{memory}", Nothing, (UInt32, UInt32))
+    call = convergent_asmcall("$head.shared::cta.b32 [\$0], \$1;",
+                              "r,r,~{memory}", Nothing, (UInt32, UInt32),
+                              :dst, :ncols)
     @eval @inline function (::Operation{:tcgen05, $mods})(
             dst::UInt32, ncols::UInt32)
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt32},
-                      dst, ncols)
+        $call
     end
 
     mods = (:relinquish_alloc_permit, cta, :sync, :aligned)
-    ir = convergent_asm_ir(
+    call = convergent_asmcall(
         "tcgen05.relinquish_alloc_permit.cta_group::$cg.sync.aligned;",
         "~{memory}", Nothing, ())
-    @eval @inline (::Operation{:tcgen05, $mods})() =
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{})
+    @eval @inline (::Operation{:tcgen05, $mods})() = $call
 end
 
 # Single-route asm: under the MEMORY_WIDEN_OVERLAY the wait intrinsics
@@ -432,15 +427,13 @@ end
 # as `sideeffect + ~{memory}` — so an intrinsic route would buy only its
 # two selection probes. The waits order ALL prior tcgen05.ld/st results
 # against subsequent ordinary loads/stores, hence the full clobber.
-let ir = convergent_asm_ir("tcgen05.wait::ld.sync.aligned;", "~{memory}",
-                           Nothing, ())
-    @eval @inline ptx"tcgen05.wait::ld.sync.aligned"() =
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{})
+let call = convergent_asmcall("tcgen05.wait::ld.sync.aligned;", "~{memory}",
+                              Nothing, ())
+    @eval @inline ptx"tcgen05.wait::ld.sync.aligned"() = $call
 end
-let ir = convergent_asm_ir("tcgen05.wait::st.sync.aligned;", "~{memory}",
-                           Nothing, ())
-    @eval @inline ptx"tcgen05.wait::st.sync.aligned"() =
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{})
+let call = convergent_asmcall("tcgen05.wait::st.sync.aligned;", "~{memory}",
+                              Nothing, ())
+    @eval @inline ptx"tcgen05.wait::st.sync.aligned"() = $call
 end
 
 # Specialized thread-synchronization fences are side-effecting, no-argument
@@ -473,41 +466,41 @@ for cg in 1:2
 
     # Pointer form (shared::cluster notation, AS 3 mbar).
     mods = (:commit, cta, arrive, Symbol("shared::cluster"), :b64)
-    ir = convergent_asm_ir("$chead.shared::cluster.b64 [\$0];",
-                           "r,~{memory}", Nothing,
-                           (Core.LLVMPtr{UInt64, AS.Shared},))
+    call = convergent_asmcall("$chead.shared::cluster.b64 [\$0];",
+                              "r,~{memory}", Nothing,
+                              (Core.LLVMPtr{UInt64, AS.Shared},),
+                              :mbar)
     @eval @inline function (::Operation{:tcgen05, $mods})(
             mbar::Core.LLVMPtr{UInt64, AS.Shared})
-        Base.llvmcall(($ir, "entry"), Nothing,
-                      Tuple{Core.LLVMPtr{UInt64, AS.Shared}}, mbar)
+        $call
     end
 
     # SMEM-offset forms for both state-space notations; one shared
     # `.shared::cluster` render per the section comment above.
     for space in (Symbol("shared::cta"), Symbol("shared::cluster"))
         mods = (:commit, cta, arrive, space, :b64)
-        ir = convergent_asm_ir("$chead.shared::cluster.b64 [\$0];",
-                               "r,~{memory}", Nothing, (UInt32,))
-        @eval @inline (::Operation{:tcgen05, $mods})(mbar::UInt32) =
-            Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32}, mbar)
+        call = convergent_asmcall("$chead.shared::cluster.b64 [\$0];",
+                                  "r,~{memory}", Nothing, (UInt32,),
+                                  :mbar)
+        @eval @inline (::Operation{:tcgen05, $mods})(mbar::UInt32) = $call
     end
 
     mods = (:commit, cta, arrive, Symbol("multicast::cluster"),
             Symbol("shared::cluster"), :b64)
-    ir = convergent_asm_ir(
+    call = convergent_asmcall(
         "$chead.multicast::cluster.shared::cluster.b64 [\$0], \$1;",
-        "r,h,~{memory}", Nothing, (UInt32, UInt16))
+        "r,h,~{memory}", Nothing, (UInt32, UInt16),
+        :mbar, :(UInt16(mask)))
     @eval @inline function (::Operation{:tcgen05, $mods})(
             mbar::UInt32, mask::Integer)
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt16},
-                      mbar, UInt16(mask))
+        $call
     end
 end
 
 # --- PTX ISA 9.4 alloc/dealloc/commit forms, asm tier -------------------------
 # No NVVM intrinsics exist for these at the pinned backend; assembly requires
 # a PTX 9.4-capable ptxas. All are convergent per their form contracts, so
-# they go through convergent_asm_ir like the other tcgen05 asm forms; the
+# they go through convergent_asmcall like the other tcgen05 asm forms; the
 # conservative ~{memory} clobber matches the family's asm tier today.
 #
 # `.exclusive` (sm_100f/sm_110f families; nCols up to 576 on sm_107f) claims
@@ -528,33 +521,32 @@ for cg in 1:2
     head = "tcgen05.alloc.exclusive.cta_group::$cg.sync.aligned"
 
     mods = (:alloc, :exclusive, cta, :sync, :aligned, :b32)
-    ir = convergent_asm_ir("$head.b32 [\$0], \$1;", "r,r,~{memory}",
-                           Nothing, (Core.LLVMPtr{UInt32, AS.Shared}, UInt32))
+    call = convergent_asmcall("$head.b32 [\$0], \$1;", "r,r,~{memory}",
+                              Nothing, (Core.LLVMPtr{UInt32, AS.Shared}, UInt32),
+                              :dst, :ncols)
     @eval @inline function (::Operation{:tcgen05, $mods})(
             dst::Core.LLVMPtr{UInt32, AS.Shared}, ncols::UInt32)
-        Base.llvmcall(($ir, "entry"), Nothing,
-                      Tuple{Core.LLVMPtr{UInt32, AS.Shared}, UInt32},
-                      dst, ncols)
+        $call
     end
 
     mods = (:alloc, :exclusive, cta, :sync, :aligned,
             Symbol("shared::cta"), :b32)
-    ir = convergent_asm_ir("$head.shared::cta.b32 [\$0], \$1;",
-                           "r,r,~{memory}", Nothing, (UInt32, UInt32))
+    call = convergent_asmcall("$head.shared::cta.b32 [\$0], \$1;",
+                              "r,r,~{memory}", Nothing, (UInt32, UInt32),
+                              :dst, :ncols)
     @eval @inline function (::Operation{:tcgen05, $mods})(
             dst::UInt32, ncols::UInt32)
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt32},
-                      dst, ncols)
+        $call
     end
 
     mods = (:dealloc, :exclusive, cta, :sync, :aligned, :b32)
-    ir = convergent_asm_ir(
+    call = convergent_asmcall(
         "tcgen05.dealloc.exclusive.cta_group::$cg.sync.aligned.b32 \$0, \$1;",
-        "r,r,~{memory}", Nothing, (UInt32, UInt32))
+        "r,r,~{memory}", Nothing, (UInt32, UInt32),
+        :taddr, :ncols)
     @eval @inline function (::Operation{:tcgen05, $mods})(
             taddr::UInt32, ncols::UInt32)
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt32},
-                      taddr, ncols)
+        $call
     end
 end
 
@@ -569,34 +561,35 @@ for cg in 1:2
             ((Symbol("multicast::cluster::16b"), UInt16, "h"),
              (Symbol("multicast::cluster::32b"), UInt32, "r"))
         mods = (:commit, cta, arrive, cluster, mc, :b64)
-        ir = convergent_asm_ir("$chead.shared::cluster.$mc.b64 [\$0], \$1;",
-                               "r,$letter,~{memory}", Nothing,
-                               (UInt32, maskT))
+        call = convergent_asmcall("$chead.shared::cluster.$mc.b64 [\$0], \$1;",
+                                  "r,$letter,~{memory}", Nothing,
+                                  (UInt32, maskT),
+                                  :mbar, :($maskT(mask)))
         @eval @inline function (::Operation{:tcgen05, $mods})(
                 mbar::UInt32, mask::Integer)
-            Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, $maskT},
-                          mbar, $maskT(mask))
+            $call
         end
     end
 
     mods = (:commit, cta, arrive, syncres, cluster, :b64)
-    ir = convergent_asm_ir(
+    call = convergent_asmcall(
         "$chead.sync_restrict::shared::read::mma::a.shared::cluster.b64 [\$0];",
-        "r,~{memory}", Nothing, (UInt32,))
+        "r,~{memory}", Nothing, (UInt32,),
+        :mbar)
     @eval @inline function (::Operation{:tcgen05, $mods})(mbar::UInt32)
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32}, mbar)
+        $call
     end
 
     mods = (:commit, cta, arrive, syncres, cluster,
             Symbol("multicast::cluster::32b"), :b64)
-    ir = convergent_asm_ir(
+    call = convergent_asmcall(
         "$chead.sync_restrict::shared::read::mma::a.shared::cluster" *
         ".multicast::cluster::32b.b64 [\$0], \$1;",
-        "r,r,~{memory}", Nothing, (UInt32, UInt32))
+        "r,r,~{memory}", Nothing, (UInt32, UInt32),
+        :mbar, :(UInt32(mask)))
     @eval @inline function (::Operation{:tcgen05, $mods})(
             mbar::UInt32, mask::Integer)
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{UInt32, UInt32},
-                      mbar, UInt32(mask))
+        $call
     end
 end
 
@@ -1042,8 +1035,8 @@ end
 # the pinned table's kind immarg stops at i8 and every non-ws record
 # carries a single A-side collector. They are single-route inline asm.
 # tcgen05.mma is a non-convergent FORMS entry, so the IR comes from
-# `plain_asm_ir` (sideeffect, `~{memory}`) — the contract the MX family's
-# `@asmcall` bodies already carry — never from `convergent_asm_ir`.
+# `plain_asmcall` (sideeffect, `~{memory}`) — the contract the MX family's
+# `@asmcall` bodies already carry — never from `convergent_asmcall`.
 #
 # Operand schema (§9.7.18.10.10.1–.4):
 #   [d], a-desc|[a-tmem], b-desc{, [sp-meta]|[lut-meta]}, idesc
@@ -1070,11 +1063,11 @@ const _TCGEN05_COLL_B = (nothing, Symbol("collector::b::fill"),
                          Symbol("collector::b::use"),
                          Symbol("collector::b::lastuse"))
 
-# Render one operand shape: the asm text, its constraints, and the flat
-# llvmcall argument types (mask words are passed individually).
-function _tcgen05_mma94_spec(head::String, a_tmem::Bool, meta::Bool,
+# Render one operand shape as the asm call on the flat argument
+# expressions `args` (mask words are passed individually).
+function _tcgen05_mma94_call(head::String, a_tmem::Bool, meta::Bool,
                              mx::Bool, maskN::Int, zero_col::Bool,
-                             scale::Union{Nothing, Int})
+                             scale::Union{Nothing, Int}, args...)
     slots = String["[\$0]", a_tmem ? "[\$1]" : "\$1", "\$2"]
     cons = String["r", a_tmem ? "r" : "l", "l"]
     argts = Type[UInt32, a_tmem ? UInt32 : UInt64, UInt64]
@@ -1104,7 +1097,7 @@ function _tcgen05_mma94_spec(head::String, a_tmem::Bool, meta::Bool,
     scale === nothing || push!(slots, string(scale))
     asm = head * " " * join(slots, ", ") * ";"
     constraints = join(cons, ",") * ",~{memory}"
-    plain_asm_ir(asm, constraints, Nothing, Tuple(argts)), Tuple(argts)
+    plain_asmcall(asm, constraints, Nothing, argts, args...)
 end
 
 _tcgen05_mma94_head(mods) = "tcgen05." * join(String.(mods), ".")
@@ -1119,20 +1112,18 @@ _tcgen05_mma94_scale_error() =
         d::UInt32, a::A, b_desc::UInt64, idesc::UInt32,
         enable_input_d::Bool, ::Val{s}) where {mods, A, s}
     s isa Integer && 0 <= s <= 15 || return _tcgen05_mma94_scale_error()
-    ir, argts = _tcgen05_mma94_spec(_tcgen05_mma94_head(mods), A === UInt32,
-                                    false, false, 0, false, Int(s))
-    :(Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                    d, a, b_desc, idesc, enable_input_d))
+    _tcgen05_mma94_call(_tcgen05_mma94_head(mods), A === UInt32,
+                        false, false, 0, false, Int(s),
+                        :d, :a, :b_desc, :idesc, :enable_input_d)
 end
 
 @generated function _tcgen05_mma94_scaled(::Operation{:tcgen05, mods},
         d::UInt32, a::A, b_desc::UInt64, sp_meta::UInt32, idesc::UInt32,
         enable_input_d::Bool, ::Val{s}) where {mods, A, s}
     s isa Integer && 0 <= s <= 15 || return _tcgen05_mma94_scale_error()
-    ir, argts = _tcgen05_mma94_spec(_tcgen05_mma94_head(mods), A === UInt32,
-                                    true, false, 0, false, Int(s))
-    :(Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                    d, a, b_desc, sp_meta, idesc, enable_input_d))
+    _tcgen05_mma94_call(_tcgen05_mma94_head(mods), A === UInt32,
+                        true, false, 0, false, Int(s),
+                        :d, :a, :b_desc, :sp_meta, :idesc, :enable_input_d)
 end
 
 @generated function _tcgen05_mma94_scaled(::Operation{:tcgen05, mods},
@@ -1140,11 +1131,10 @@ end
         mask::NTuple{N, UInt32}, enable_input_d::Bool,
         ::Val{s}) where {mods, A, N, s}
     s isa Integer && 0 <= s <= 15 || return _tcgen05_mma94_scale_error()
-    ir, argts = _tcgen05_mma94_spec(_tcgen05_mma94_head(mods), A === UInt32,
-                                    false, false, N, false, Int(s))
     words = [:(mask[$i]) for i in 1:N]
-    :(Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                    d, a, b_desc, idesc, $(words...), enable_input_d))
+    _tcgen05_mma94_call(_tcgen05_mma94_head(mods), A === UInt32,
+                        false, false, N, false, Int(s),
+                        :d, :a, :b_desc, :idesc, words..., :enable_input_d)
 end
 
 @generated function _tcgen05_mma94_scaled(::Operation{:tcgen05, mods},
@@ -1152,11 +1142,11 @@ end
         mask::NTuple{N, UInt32}, enable_input_d::Bool,
         ::Val{s}) where {mods, A, N, s}
     s isa Integer && 0 <= s <= 15 || return _tcgen05_mma94_scale_error()
-    ir, argts = _tcgen05_mma94_spec(_tcgen05_mma94_head(mods), A === UInt32,
-                                    true, false, N, false, Int(s))
     words = [:(mask[$i]) for i in 1:N]
-    :(Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                    d, a, b_desc, sp_meta, idesc, $(words...), enable_input_d))
+    _tcgen05_mma94_call(_tcgen05_mma94_head(mods), A === UInt32,
+                        true, false, N, false, Int(s),
+                        :d, :a, :b_desc, :sp_meta, :idesc, words...,
+                        :enable_input_d)
 end
 
 # Register every method shape of one modifier spelling: `meta` adds the
@@ -1181,15 +1171,15 @@ function _tcgen05_mma94_register(family::Symbol, mods::Tuple{Vararg{Symbol}};
         aT = a_tmem ? UInt32 : UInt64
         aA = a_tmem ? A32 : UInt64
         if mx
-            ir, argts = _tcgen05_mma94_spec(head, a_tmem, meta, true, 0,
-                                            false, nothing)
+            call = _tcgen05_mma94_call(head, a_tmem, meta, true, 0, false,
+                                       nothing, :d, :a, :b_desc, metaarg...,
+                                       :idesc, :scale_a, :scale_b,
+                                       :enable_input_d)
             @eval @inline function (::Operation{:tcgen05, $mods})(
                     d::UInt32, a::$aT, b_desc::UInt64, $(metadecl...),
                     idesc::UInt32, scale_a::UInt32, scale_b::UInt32,
                     enable_input_d::Bool)
-                Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                              d, a, b_desc, $(metaarg...), idesc,
-                              scale_a, scale_b, enable_input_d)
+                $call
             end
             _tcgen05_adapter!(mods, A32, aA, UInt64, metaA..., UInt32, A32,
                               A32, Bool)
@@ -1197,27 +1187,27 @@ function _tcgen05_mma94_register(family::Symbol, mods::Tuple{Vararg{Symbol}};
         end
 
         # [d], a, b{, [meta]}, idesc, enable
-        ir, argts = _tcgen05_mma94_spec(head, a_tmem, meta, false, 0,
-                                        false, nothing)
+        call = _tcgen05_mma94_call(head, a_tmem, meta, false, 0, false,
+                                   nothing, :d, :a, :b_desc, metaarg...,
+                                   :idesc, :enable_input_d)
         @eval @inline function (::Operation{:tcgen05, $mods})(
                 d::UInt32, a::$aT, b_desc::UInt64, $(metadecl...),
                 idesc::UInt32, enable_input_d::Bool)
-            Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                          d, a, b_desc, $(metaarg...), idesc, enable_input_d)
+            $call
         end
         _tcgen05_adapter!(mods, A32, aA, UInt64, metaA..., UInt32, Bool)
 
         if ws
             # [d], a, b{, [meta]}, idesc, enable, zero-column-mask-desc
-            ir, argts = _tcgen05_mma94_spec(head, a_tmem, meta, false, 0,
-                                            true, nothing)
+            call = _tcgen05_mma94_call(head, a_tmem, meta, false, 0, true,
+                                       nothing, :d, :a, :b_desc, metaarg...,
+                                       :idesc, :enable_input_d,
+                                       :zero_col_mask)
             @eval @inline function (::Operation{:tcgen05, $mods})(
                     d::UInt32, a::$aT, b_desc::UInt64, $(metadecl...),
                     idesc::UInt32, enable_input_d::Bool,
                     zero_col_mask::UInt64)
-                Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                              d, a, b_desc, $(metaarg...), idesc,
-                              enable_input_d, zero_col_mask)
+                $call
             end
             _tcgen05_adapter!(mods, A32, aA, UInt64, metaA..., UInt32, Bool,
                               UInt64)
@@ -1225,16 +1215,15 @@ function _tcgen05_mma94_register(family::Symbol, mods::Tuple{Vararg{Symbol}};
         end
 
         # [d], a, b{, [meta]}, idesc, {disable-output-lane}, enable
-        ir, argts = _tcgen05_mma94_spec(head, a_tmem, meta, false, maskN,
-                                        false, nothing)
         words = [:(mask[$i]) for i in 1:maskN]
+        call = _tcgen05_mma94_call(head, a_tmem, meta, false, maskN, false,
+                                   nothing, :d, :a, :b_desc, metaarg...,
+                                   :idesc, words..., :enable_input_d)
         @eval @inline function (::Operation{:tcgen05, $mods})(
                 d::UInt32, a::$aT, b_desc::UInt64, $(metadecl...),
                 idesc::UInt32, mask::NTuple{$maskN, UInt32},
                 enable_input_d::Bool)
-            Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                          d, a, b_desc, $(metaarg...), idesc, $(words...),
-                          enable_input_d)
+            $call
         end
         maskT = NTuple{maskN, UInt32}
         _tcgen05_adapter!(mods, A32, aA, UInt64, metaA..., UInt32, maskT, Bool)

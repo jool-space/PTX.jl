@@ -128,7 +128,7 @@ Files touched, in order:
 (`test/host/registry_generation.jl`) byte-compares it against
 regeneration from the committed JSON snapshot in `gen/`. If the
 intrinsic is missing from the registry, the wrapper is an asm-tier
-wrapper (same shape, but building `convergent_asm_ir`/`@asmcall`
+wrapper (same shape, but building `convergent_asmcall`/`@asmcall`
 bodies), and the registry gains it on the next backend bump — see
 `gen/README.md`.
 

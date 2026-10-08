@@ -52,28 +52,10 @@
 #     (`r`), and one packed nibble register of upper strides (`h`).
 #
 # Every form carries the `convergent nomerge` + `~{memory}` call-site
-# contract via convergent_asm_ir — the same conservative boundary the
+# contract via convergent_asmcall — the same conservative boundary the
 # NVVM intrinsic records imposed (they are all marked convergent even
 # though PTX imposes no collective participation rule; see the prefetch
 # note below).
-
-# Pointee-erasing retype at the asm boundary: the wrappers stay generic
-# over the element type, but `Base.llvmcall` requires the exact declared
-# argument types, and `_asm_lltype` spells every LLVMPtr as an i8 pointer
-# anyway. Same raw ptrtoint/inttoptr bit-preservation contract as
-# reinterpret_addrspace — the address space is untouched.
-@generated function _tma_addr(p::Core.LLVMPtr{T, A}) where {T, A}
-    spell = A == 0 ? "i8*" : "i8 addrspace($A)*"
-    ir = """
-        %i = ptrtoint $spell %0 to i64
-        %q = inttoptr i64 %i to $spell
-        ret $spell %q"""
-    quote
-        Base.@inline
-        Base.llvmcall($ir, Core.LLVMPtr{UInt8, $A},
-                      Tuple{Core.LLVMPtr{$T, $A}}, p)
-    end
-end
 
 # --- Loads: shared::cluster destination --------------------------------------
 # Plain, multicast::cluster (one global read lands in every CTA whose bit
@@ -99,18 +81,17 @@ for n in 1:5, cg2 in (false, true), mc in (false, true)
     argts = (Core.LLVMPtr{UInt8, AS.Shared}, Core.LLVMPtr{UInt8, AS.Const},
              ntuple(_ -> Int32, n)..., Core.LLVMPtr{UInt8, AS.Shared},
              (mc ? (UInt16,) : ())...)
-    ir = convergent_asm_ir(asm, constraints, Nothing, argts)
     coordsig = [:($c::Integer) for c in cs]
     coordvals = [:(Int32($c)) for c in cs]
     masksig = mc ? Any[:(mask::Integer)] : Any[]
     maskvals = mc ? Any[:(UInt16(mask))] : Any[]
+    call = convergent_asmcall(asm, constraints, Nothing, argts,
+                              :dst, :tmap, coordvals..., :mbar, maskvals...)
     @eval @inline function (::Operation{:cp, $mods})(
             dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
             $(coordsig...), mbar::Core.LLVMPtr{U, AS.Shared},
             $(masksig...)) where {T, S, U}
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                      _tma_addr(dst), _tma_addr(tmap), $(coordvals...),
-                      _tma_addr(mbar), $(maskvals...))
+        $call
     end
 end
 
@@ -127,15 +108,14 @@ for n in 1:5
     constraints = join(["r"; "l"; fill("r", n); "r"; "~{memory}"], ",")
     argts = (Core.LLVMPtr{UInt8, AS.Shared}, Core.LLVMPtr{UInt8, AS.Const},
              ntuple(_ -> Int32, n)..., Core.LLVMPtr{UInt8, AS.Shared})
-    ir = convergent_asm_ir(asm, constraints, Nothing, argts)
     coordsig = [:($c::Integer) for c in cs]
     coordvals = [:(Int32($c)) for c in cs]
+    call = convergent_asmcall(asm, constraints, Nothing, argts,
+                              :dst, :tmap, coordvals..., :mbar)
     @eval @inline function (::Operation{:cp, $mods})(
             dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
             $(coordsig...), mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                      _tma_addr(dst), _tma_addr(tmap), $(coordvals...),
-                      _tma_addr(mbar))
+        $call
     end
 end
 
@@ -154,14 +134,14 @@ for n in 1:5
     constraints = join(["l"; fill("r", n); "r"; "~{memory}"], ",")
     argts = (Core.LLVMPtr{UInt8, AS.Const}, ntuple(_ -> Int32, n)...,
              Core.LLVMPtr{UInt8, AS.Shared})
-    ir = convergent_asm_ir(asm, constraints, Nothing, argts)
     coordsig = [:($c::Integer) for c in cs]
     coordvals = [:(Int32($c)) for c in cs]
+    call = convergent_asmcall(asm, constraints, Nothing, argts,
+                              :tmap, coordvals..., :src)
     @eval @inline function (::Operation{:cp, $mods})(
             tmap::Core.LLVMPtr{S, AS.Const}, $(coordsig...),
             src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                      _tma_addr(tmap), $(coordvals...), _tma_addr(src))
+        $call
     end
 end
 
@@ -189,16 +169,16 @@ for n in 1:5, hint in (false, true)
                         "~{memory}"], ",")
     argts = (Core.LLVMPtr{UInt8, AS.Const}, ntuple(_ -> Int32, n)...,
              (hint ? (UInt64,) : ())...)
-    ir = convergent_asm_ir(asm, constraints, Nothing, argts)
     coordsig = [:($c::Integer) for c in cs]
     coordvals = [:(Int32($c)) for c in cs]
     hintsig = hint ? Any[:(cache_policy::UInt64)] : Any[]
     hintvals = hint ? Any[:cache_policy] : Any[]
+    call = convergent_asmcall(asm, constraints, Nothing, argts,
+                              :tmap, coordvals..., hintvals...)
     @eval @inline function (::Operation{:cp, $mods})(
             tmap::Core.LLVMPtr{S, AS.Const}, $(coordsig...),
             $(hintsig...)) where {S}
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                      _tma_addr(tmap), $(coordvals...), $(hintvals...))
+        $call
     end
 end
 
@@ -225,16 +205,16 @@ for n in 3:5, hint in (false, true)
                         (hint ? ["l"] : []); "~{memory}"], ",")
     argts = (Core.LLVMPtr{UInt8, AS.Const}, ntuple(_ -> Int32, n)...,
              ntuple(_ -> Int16, k)..., (hint ? (UInt64,) : ())...)
-    ir = convergent_asm_ir(asm, constraints, Nothing, argts)
     coordsig = [:($c::Int32) for c in cs]
     offsetsig = [:($o::Int16) for o in os]
     hintsig = hint ? Any[:(cache_policy::UInt64)] : Any[]
     hintvals = hint ? Any[:cache_policy] : Any[]
+    call = convergent_asmcall(asm, constraints, Nothing, argts,
+                              :tmap, cs..., os..., hintvals...)
     @eval @inline function (::Operation{:cp, $mods})(
             tmap::Core.LLVMPtr{UInt8, AS.Const}, $(coordsig...),
             $(offsetsig...), $(hintsig...))
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                      tmap, $(cs...), $(os...), $(hintvals...))
+        $call
     end
 end
 
@@ -381,7 +361,7 @@ function _tma_override_operands(n::Int, attr::Bool, slot::Int)
     push!(cons, "l")
     push!(argts, Core.LLVMPtr{UInt8, AS.Global})
     push!(sig, :(gaddr::Core.LLVMPtr{G, AS.Global}))
-    push!(vals, :(_tma_addr(gaddr)))
+    push!(vals, :gaddr)
     slot += 1
     if attr
         push!(frag, "{" * join(("\$$(slot + i - 1)" for i in 1:n), ", ") * "}")
@@ -429,19 +409,19 @@ function _tma_define_load(mods, n::Int; mask::Union{Nothing, Type} = nothing,
     argts = (Core.LLVMPtr{UInt8, AS.Shared}, Core.LLVMPtr{UInt8, AS.Const},
              oargts..., ntuple(_ -> Int32, n)..., Core.LLVMPtr{UInt8, AS.Shared},
              (mask === nothing ? () : (mask,))...)
-    ir = convergent_asm_ir(asm, constraints, Nothing, argts)
     coordsig = [:($c::Integer) for c in cs]
     coordvals = [:(Int32($c)) for c in cs]
     masksig = mask === nothing ? Any[] : Any[:(mask::Integer)]
     maskvals = mask === nothing ? Any[] : Any[:($mask(mask))]
     tvars = override ? (:T, :S, :U, :G) : (:T, :S, :U)
+    call = convergent_asmcall(asm, constraints, Nothing, argts,
+                              :dst, :tmap, ovals..., coordvals..., :mbar,
+                              maskvals...)
     @eval @inline function (::Operation{:cp, $mods})(
             dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
             $(osig...), $(coordsig...), mbar::Core.LLVMPtr{U, AS.Shared},
             $(masksig...)) where {$(tvars...)}
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                      _tma_addr(dst), _tma_addr(tmap), $(ovals...),
-                      $(coordvals...), _tma_addr(mbar), $(maskvals...))
+        $call
     end
 end
 
@@ -469,19 +449,18 @@ function _tma_define_tmap_first(op::Symbol, mods, n::Int; src::Bool = false,
     argts = (Core.LLVMPtr{UInt8, AS.Const}, oargts..., ntuple(_ -> Int32, n)...,
              (src ? (Core.LLVMPtr{UInt8, AS.Shared},) : ())...,
              ntuple(_ -> Int16, offsets)...)
-    ir = convergent_asm_ir(asm, constraints, Nothing, argts)
     coordsig = [:($c::Integer) for c in cs]
     coordvals = [:(Int32($c)) for c in cs]
     srcsig = src ? Any[:(src::Core.LLVMPtr{T, AS.Shared})] : Any[]
-    srcvals = src ? Any[:(_tma_addr(src))] : Any[]
+    srcvals = src ? Any[:src] : Any[]
     offsetsig = [:($o::Int16) for o in os]
     tvars = (:S, (src ? (:T,) : ())..., (override ? (:G,) : ())...)
+    call = convergent_asmcall(asm, constraints, Nothing, argts,
+                              :tmap, ovals..., coordvals..., srcvals..., os...)
     @eval @inline function (::Operation{$(QuoteNode(op)), $mods})(
             tmap::Core.LLVMPtr{S, AS.Const}, $(osig...), $(coordsig...),
             $(srcsig...), $(offsetsig...)) where {$(tvars...)}
-        Base.llvmcall(($ir, "entry"), Nothing, Tuple{$(argts...)},
-                      _tma_addr(tmap), $(ovals...), $(coordvals...),
-                      $(srcvals...), $(os...))
+        $call
     end
 end
 

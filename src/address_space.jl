@@ -41,34 +41,16 @@ raw retypes that tier-2 wrappers need:
   intrinsic requires the latter carrier even when the preceding descriptor
   update correctly uses an explicitly global operand.
 """
-@generated function reinterpret_addrspace(::Val{To},
-        p::Core.LLVMPtr{T, From}) where {To, T, From}
-    # Typed spelling — parses on Julia ≤ 1.11's typed-pointer device
-    # context and auto-upgrades to opaque on ≥ 1.12 (see NVVM.llvmtype).
-    spell(n) = n == 0 ? "i8*" : "i8 addrspace($n)*"
-    ir = """
-        %i = ptrtoint $(spell(From)) %0 to i64
-        %q = inttoptr i64 %i to $(spell(To))
-        ret $(spell(To)) %q"""
-    quote
-        Base.@inline
-        Base.llvmcall($ir, Core.LLVMPtr{$T, $To},
-                      Tuple{Core.LLVMPtr{$T, $From}}, p)
-    end
+@llvmgenerated builder function reinterpret_addrspace(::Val{To},
+        p::Core.LLVMPtr{T, From})::Core.LLVMPtr{T, To} where {To, T, From}
+    i = ptrtoint!(builder, p, LLVM.Int64Type())
+    inttoptr!(builder, i, convert(LLVMType, Core.LLVMPtr{T, To}))
 end
 
 # 32-bit raw-address form, for surfaces that carry addresses as UInt32
 # rather than pointers (TMEM taddr from tcgen05.alloc, 32-bit SMEM offsets
 # from smem_addr_u32). Same bit-preservation contract as above.
-@generated function reinterpret_addrspace(::Val{To}, addr::UInt32) where {To}
-    # Typed spelling — parses on Julia ≤ 1.11's typed-pointer device
-    # context and auto-upgrades to opaque on ≥ 1.12 (see NVVM.llvmtype).
-    spell(n) = n == 0 ? "i8*" : "i8 addrspace($n)*"
-    ir = """
-        %p = inttoptr i32 %0 to $(spell(To))
-        ret $(spell(To)) %p"""
-    quote
-        Base.@inline
-        Base.llvmcall($ir, Core.LLVMPtr{UInt8, $To}, Tuple{UInt32}, addr)
-    end
+@llvmgenerated builder function reinterpret_addrspace(::Val{To},
+        addr::UInt32)::Core.LLVMPtr{UInt8, To} where {To}
+    inttoptr!(builder, addr, convert(LLVMType, Core.LLVMPtr{UInt8, To}))
 end

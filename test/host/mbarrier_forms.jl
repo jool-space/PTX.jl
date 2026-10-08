@@ -484,10 +484,13 @@ end
     @test rawspec.convergent
     @test PTX.lowering(RawOperation{:mbarrier, reportmods}(),
                        (pS, UInt64)).tier === :chain_asm
-    ir = PTX.convergent_asm_ir(rawspec.asm, rawspec.constraints,
-                               rawspec.rettype, rawspec.passthrough_argtypes)
+    ci, rt = first(Base.code_typed(RawOperation{:mbarrier, reportmods}(),
+                                   (pS, UInt64)))
+    @test rt === Tuple{Bool, Bool, UInt16}
+    ir = string(ci)
     @test occursin("define { i8, i8, i16 } @entry", ir)
     @test occursin("call { i8, i8, i16 } asm sideeffect", ir)
+    @test occursin("convergent nomerge", ir)
 end
 
 @testset "mbarrier grammar and carrier misses fail loud" begin

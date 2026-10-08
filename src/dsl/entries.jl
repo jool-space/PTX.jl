@@ -1,5 +1,5 @@
 # Shared emission body for Operation (registry contract) and RawOperation
-# (RAW_CONTRACT). Convergent forms route through convergent_asm_ir so the
+# (RAW_CONTRACT). Convergent forms route through convergent_asmcall so the
 # call site carries `convergent nomerge` — @asmcall cannot attach call-site
 # attributes, and `sideeffect` alone permits duplicating a collective op
 # across a divergent branch (the activemask miscompile class).
@@ -11,24 +11,12 @@ function _chain_call_expr(spec)
         for ((i, lane), unwrap_address) in
             zip(spec.passthrough_indices, spec.passthrough_unwrap_address)
     )
-    if spec.convergent
-        ir = convergent_asm_ir(spec.asm, spec.constraints, spec.rettype,
-                               spec.passthrough_argtypes)
-        quote
-            Base.@inline
-            Base.llvmcall(($ir, "entry"), $(spec.rettype),
-                          Tuple{$(spec.passthrough_argtypes...)},
-                          $(arg_exprs...))
-        end
-    else
-        quote
-            Base.@inline $(LLVM.Interop).@asmcall(
-                $(spec.asm), $(spec.constraints), $(spec.side_effects),
-                $(spec.rettype),
-                Tuple{$(spec.passthrough_argtypes...)},
-                $(arg_exprs...))
-        end
-    end
+    spec.convergent ?
+        convergent_asmcall(spec.asm, spec.constraints, spec.rettype,
+                           spec.passthrough_argtypes, arg_exprs...) :
+        plain_asmcall(spec.asm, spec.constraints, spec.rettype,
+                      spec.passthrough_argtypes, arg_exprs...;
+                      sideeffect = spec.side_effects)
 end
 
 @generated function (::Operation{op, mods})(args::Vararg{Any,N}) where {op, mods, N}

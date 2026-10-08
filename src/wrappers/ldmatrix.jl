@@ -9,7 +9,7 @@
 # Surface:
 #   - m8n8[.trans].b16 × x1/x2/x4 — tier 2.
 #   - The explicit `shared::cta` chain forms keep their spelling via
-#     convergent_asm_ir below: the intrinsics cannot spell `::cta`, and
+#     convergent_asmcall below: the intrinsics cannot spell `::cta`, and
 #     the golden/text tests pin the qualified emission.
 #   - m16n16.trans.b8 × x1/x2 (sm_100a family; the old "Hopper" banner
 #     was wrong) — tier 2. Each 16×16×b8 tile is TWO regs per lane: x1
@@ -111,7 +111,7 @@
 
 # --- `shared::cta` spellings, asm tier ---------------------------------------
 # Same instruction as `.shared` (the ::cta sub-qualifier is the explicit
-# default); kept for callers that spell it. Emitted via convergent_asm_ir
+# default); kept for callers that spell it. Emitted via convergent_asmcall
 # so the calls carry `convergent nomerge` like the intrinsic forms.
 for (count, n) in ((:x1, 1), (:x2, 2), (:x4, 4)), trans in (false, true)
     mods = trans ?
@@ -122,13 +122,12 @@ for (count, n) in ((:x1, 1), (:x2, 2), (:x4, 4)), trans in (false, true)
     asm = "ldmatrix.sync.aligned.m8n8.$count$ttext.shared::cta.b16 $outs, [\$$n];"
     constraints = join(vcat(fill("=r", n), ["r", "~{memory}"]), ",")
     rettype = n == 1 ? UInt32 : NTuple{n, UInt32}
-    ir = convergent_asm_ir(asm, constraints, rettype,
-                           (Core.LLVMPtr{UInt16, AS.Shared},))
+    call = convergent_asmcall(asm, constraints, rettype,
+                              (Core.LLVMPtr{UInt16, AS.Shared},), :addr)
     @eval function (::Operation{:ldmatrix, $mods})(
             addr::Core.LLVMPtr{T, AS.Shared}) where T
         Base.@inline
-        Base.llvmcall(($ir, "entry"), $rettype,
-                      Tuple{Core.LLVMPtr{T, AS.Shared}}, addr)
+        $call
     end
 end
 
@@ -151,13 +150,12 @@ for (shape, count, nout, trans) in (
           "$outs, [\$$nout];"
     constraints = join(vcat(fill("=r", nout), ["r", "~{memory}"]), ",")
     rettype = nout == 1 ? UInt32 : NTuple{nout, UInt32}
-    ir = convergent_asm_ir(asm, constraints, rettype,
-                           (Core.LLVMPtr{UInt8, AS.Shared},))
+    call = convergent_asmcall(asm, constraints, rettype,
+                              (Core.LLVMPtr{UInt8, AS.Shared},), :addr)
     @eval function (::Operation{:ldmatrix, $mods})(
             addr::Core.LLVMPtr{T, AS.Shared}) where T
         Base.@inline
-        Base.llvmcall(($ir, "entry"), $rettype,
-                      Tuple{Core.LLVMPtr{T, AS.Shared}}, addr)
+        $call
     end
 end
 
@@ -175,12 +173,11 @@ for (count, nout) in ((:x1, 1), (:x2, 2), (:x4, 4)),
     asm = "ldmatrix.sync.aligned.m8n16.$count.$space.s8.s4 $outs, [\$$nout];"
     constraints = join(vcat(fill("=r", nout), ["r", "~{memory}"]), ",")
     rettype = nout == 1 ? UInt32 : NTuple{nout, UInt32}
-    ir = convergent_asm_ir(asm, constraints, rettype,
-                           (Core.LLVMPtr{UInt8, AS.Shared},))
+    call = convergent_asmcall(asm, constraints, rettype,
+                              (Core.LLVMPtr{UInt8, AS.Shared},), :addr)
     @eval function (::Operation{:ldmatrix, $mods})(
             addr::Core.LLVMPtr{T, AS.Shared}) where T
         Base.@inline
-        Base.llvmcall(($ir, "entry"), $rettype,
-                      Tuple{Core.LLVMPtr{T, AS.Shared}}, addr)
+        $call
     end
 end

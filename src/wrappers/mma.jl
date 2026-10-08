@@ -38,20 +38,10 @@
 # from tcgen05, which is datacenter-only). ISel enforces both floors.
 
 # Packed-UInt32 ⇄ <2 x half> bitcasts (free; the f16 fragment convention).
-@inline _mma_u32_v2h(x::UInt32) = Base.llvmcall(
-    ("""define <2 x half> @e(i32 %0) #0 {
-          %v = bitcast i32 %0 to <2 x half>
-          ret <2 x half> %v
-        }
-        attributes #0 = { alwaysinline }""", "e"),
-    NTuple{2, VecElement{Float16}}, Tuple{UInt32}, x)
-@inline _mma_v2h_u32(v::NTuple{2, VecElement{Float16}}) = Base.llvmcall(
-    ("""define i32 @e(<2 x half> %0) #0 {
-          %v = bitcast <2 x half> %0 to i32
-          ret i32 %v
-        }
-        attributes #0 = { alwaysinline }""", "e"),
-    UInt32, Tuple{NTuple{2, VecElement{Float16}}}, v)
+@llvmgenerated builder _mma_u32_v2h(x::UInt32)::NTuple{2, VecElement{Float16}} =
+    bitcast!(builder, x, LLVM.VectorType(LLVM.HalfType(), 2))
+@llvmgenerated builder _mma_v2h_u32(v::NTuple{2, VecElement{Float16}})::UInt32 =
+    bitcast!(builder, v, LLVM.Int32Type())
 
 # (shape, ab_dtype, cd_dtype) → (n_a_regs, n_b_regs, n_cd_regs) per lane.
 # A/B fragments pack two 16-bit (or four 8-bit) values per UInt32. For
@@ -238,24 +228,22 @@ function _mma_register_asm(mods, shape, a_ty, b_ty, c_ty, kind,
           "$(slots(n_cd + n_a, n_b)), $(slots(n_cd + n_a + n_b, n_cd));"
     constraints = join(vcat(fill("=$cd_let", n_cd), fill(ab_let, n_a + n_b),
                             fill(cd_let, n_cd), ["~{memory}"]), ",")
-    flat = vcat(fill(ab_J, n_a + n_b), fill(cd_J, n_cd))
     # mma.sync is warp-collective — emitted with a `convergent` call-site
     # attribute, same reasoning as wgmma (see src/dsl/convergent_asm.jl,
     # "convergent inline asm"). @asmcall can't attach it.
     cdT = c_ty === :f32 ? Float32 : c_ty === :f64 ? Float64 : UInt32
     abT = a_ty === :f64 ? Float64 : UInt32
     flat_types = vcat(fill(abT, n_a + n_b), fill(cdT, n_cd))
-    ir = convergent_asm_ir(asm, constraints, NTuple{n_cd, cdT}, flat_types)
     a_args = [:(a[$i]) for i in 1:n_a]
     b_args = [:(b[$i]) for i in 1:n_b]
     c_args = [:(c[$i]) for i in 1:n_cd]
+    call = convergent_asmcall(asm, constraints, NTuple{n_cd, cdT}, flat_types,
+                              a_args..., b_args..., c_args...)
     @eval function (::Operation{:mma, $mods})(
             a::NTuple{$n_a, $ab_J}, b::NTuple{$n_b, $ab_J},
             c::NTuple{$n_cd, $cd_J})
         Base.@inline
-        Base.llvmcall(($ir, "entry"),
-                      NTuple{$n_cd, $cd_J}, Tuple{$(flat...)},
-                      $(a_args...), $(b_args...), $(c_args...))
+        $call
     end
     nothing
 end
@@ -327,10 +315,11 @@ function _mma_b1_register_asm(shape::Symbol, bitop::Symbol,
     constraints = join(vcat(fill("=&r", n_cd),
                             fill("r", n_a + n_b + n_cd)), ",")
     flat_types = vcat(fill(UInt32, n_a + n_b), fill(Int32, n_cd))
-    ir = convergent_asm_ir(asm, constraints, NTuple{n_cd, Int32}, flat_types)
     a_in = [:(a[$i]) for i in 1:n_a]
     b_in = [:(b[$i]) for i in 1:n_b]
     c_in = [:(c[$i]) for i in 1:n_cd]
+    call = convergent_asmcall(asm, constraints, NTuple{n_cd, Int32}, flat_types,
+                              a_in..., b_in..., c_in...)
     mods = (:sync, :aligned, shape, :row, :col,
             :s32, :b1, :b1, :s32, bitop, :popc)
     register_wrapper!(:mma_b1, :mma, mods, :asm)
@@ -338,9 +327,7 @@ function _mma_b1_register_asm(shape::Symbol, bitop::Symbol,
             a::NTuple{$n_a, UInt32}, b::NTuple{$n_b, UInt32},
             c::NTuple{$n_cd, Int32})
         Base.@inline
-        Base.llvmcall(($ir, "entry"), NTuple{$n_cd, Int32},
-                      Tuple{$(flat_types...)},
-                      $(a_in...), $(b_in...), $(c_in...))
+        $call
     end
     nothing
 end

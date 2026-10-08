@@ -23,7 +23,7 @@ CUDACoreExt = "CUDACore"
 BFloat16s = "0.6"
 CUDACore = "6.4"
 EnumX = "1"
-LLVM = "9.7.1"
+LLVM = "10"
 # The NVVM registry (src/nvvm/table.jl) is generated from the backend's
 # IntrinsicsNVVM.td and is valid within that backend major. The weakdep
 # compat constrains any environment that carries the backend (i.e. every
