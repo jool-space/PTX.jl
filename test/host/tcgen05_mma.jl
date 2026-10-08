@@ -52,7 +52,7 @@ function _t5_asm_check(mods, args, schema)
     @test info.tier === :asm
     @test info.rettype === Nothing
     @test isempty(info.intrinsics)
-    ci, _ = first(Base.code_typed(op, args))
+    ci, _ = first(PTX.device_code_typed(op, args))
     typed = replace(string(ci), "\\\$" => "\$")
     head = "tcgen05." * join(String.(mods), ".")
     @test occursin(head * " " * schema, typed)

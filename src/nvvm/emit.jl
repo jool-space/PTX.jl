@@ -637,7 +637,7 @@ callsite_ceiling(::IntrinsicCall{name, contract}) where {name, contract} =
                 (:(args[$i]) for i in s.runtime)...)
     return quote
         $(Expr(:meta, :inline))
-        $call
+        $(device_only(call, String(name)))
     end
 end
 

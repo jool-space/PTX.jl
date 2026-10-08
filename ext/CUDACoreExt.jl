@@ -1,18 +1,43 @@
 module CUDACoreExt
 
-# Provides TMA descriptor encoding and upload for PTX.jl. Loaded
-# automatically when CUDACore is loaded alongside PTX.
-# See src/lib/tensor_map.jl for the public surface — this module implements
+# Provides PTX.jl's CUDA.jl integration: the device side of the host gate
+# (src/device_gate.jl), device-typed reflection, and TMA descriptor encoding
+# and upload. Loaded automatically when CUDACore is loaded alongside PTX.
+# See src/lib/tensor_map.jl for the TMA surface — this module implements
 # the methods that need the CUDA driver or device allocations.
 
 using PTX
 using PTX: CuTensorMap, tensor_map_dtype_code, tensor_map_swizzle_code,
            tensor_map_interleave_code, tensor_map_l2_promotion_code,
            tensor_map_oob_fill_code, _tensor_map_elem_bytes
-using CUDACore: CUtensorMap, CUtensorMapDataType, CUtensorMapInterleave,
+using CUDACore: CUDACore, CUDACompilerParams, CUtensorMap, CUtensorMapDataType,
+                CUtensorMapInterleave,
                 CUtensorMapSwizzle, CUtensorMapL2promotion,
                 CUtensorMapFloatOOBfill, cuTensorMapEncodeTiled,
                 cuuint32_t, cuuint64_t, CuPtr, CuArray, DeviceMemory
+using CUDACore.GPUCompiler: GPUCompiler, CompilerConfig, CompilerJob,
+                            PTXCompilerTarget, methodinstance
+
+# The device answer to PTX.jl's host gate. A plain overlay: `@device_override`
+# is `@consistent_overlay` on Julia 1.11+, which would license the compiler to
+# evaluate the host method (`false`) in its place.
+Base.Experimental.@overlay CUDACore.method_table PTX.on_device() = true
+
+# Typed IR under CUDA.jl's interpreter, so without a device or the CUDA
+# toolkit. Inference is target-independent; the newest SM and PTX ISA the
+# NVPTX backend supports just make the job well-formed.
+function PTX.device_code_typed(@nospecialize(f), @nospecialize(argtypes);
+                               optimize::Bool = true)
+    support = CUDACore.llvm_compat()
+    sm = argmax(sm -> (sm.major, sm.minor), support.sm)
+    ptx = maximum(support.ptx)
+    target = PTXCompilerTarget(; cap = VersionNumber(sm.major, sm.minor), ptx,
+                               sm.feature_set)
+    config = CompilerConfig(target, CUDACompilerParams(; sm, ptx);
+                            kernel = false, libraries = false)
+    source = methodinstance(Core.Typeof(f), Base.to_tuple_type(argtypes))
+    GPUCompiler.code_typed(CompilerJob(source, config); optimize)
+end
 
 # Inner-mode driver call. `tmap` is mutable so its data field is at a stable
 # pointer for the lifetime of the GC.@preserve block.

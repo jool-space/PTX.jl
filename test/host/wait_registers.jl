@@ -7,7 +7,7 @@ const _WR_ST = ptx"tcgen05.wait::st.sync.aligned"
     for op in (_WR_LD, _WR_ST),
             T in (UInt32, Int32, Float32, UInt64, Int64, Float64),
             V in (T, NTuple{1,T}, NTuple{3,T}, NTuple{32,T}, NTuple{64,T})
-        ci, rt = only(Base.code_typed(wait_registers, (typeof(op), V)))
+        ci, rt = only(PTX.device_code_typed(wait_registers, (typeof(op), V)))
         @test rt === V
         ir = replace(string(ci), "\\\"" => "\"")
         @test occursin("asm sideeffect", ir)
@@ -15,7 +15,7 @@ const _WR_ST = ptx"tcgen05.wait::st.sync.aligned"
         @test occursin("~{memory}", ir)
     end
     for op in (_WR_LD, _WR_ST)
-        ci, rt = only(Base.code_typed(wait_registers, (typeof(op), Tuple{})))
+        ci, rt = only(PTX.device_code_typed(wait_registers, (typeof(op), Tuple{})))
         @test rt === Tuple{}
         @test occursin("asm sideeffect", string(ci))
     end

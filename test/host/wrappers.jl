@@ -143,7 +143,7 @@ end
         # the method dispatches and routes to that intrinsic
         op = Operation{opsym, mods}()
         @test which(op, argts).module == PTX
-        ci, rt = first(Base.code_typed(op, argts))
+        ci, rt = first(PTX.device_code_typed(op, argts))
         @test rt === ret
         @test occursin(intr, string(ci))
     end
@@ -151,7 +151,7 @@ end
     # Wider integers miss the wrappers and fall through to the generic chain,
     # which renders the form with convergent nomerge asm (ptxas then rejects
     # its 64-bit register; see src/wrappers/barrier.jl).
-    ci, _ = first(Base.code_typed(Operation{:bar, (:sync,)}(), (Int64,)))
+    ci, _ = first(PTX.device_code_typed(Operation{:bar, (:sync,)}(), (Int64,)))
     s = string(ci)
     @test occursin("bar.sync", s)
     @test occursin("convergent nomerge", s)
@@ -527,7 +527,7 @@ end
         # the method dispatches and routes to that intrinsic
         op = Operation{opsym, mods}()
         @test which(op, argts).module == PTX
-        ci, rt = first(Base.code_typed(op, argts))
+        ci, rt = first(PTX.device_code_typed(op, argts))
         @test rt === rettype
         @test occursin(intr, string(ci))
     end
@@ -545,7 +545,7 @@ end
         (:stmatrix, (:sync, :aligned, :m8n8, :x4, :trans, Symbol("shared::cta"), :b16),
             (pSh, T4), "stmatrix.sync.aligned.m8n8.x4.trans.shared::cta.b16"),
     ]
-        ci, _ = first(Base.code_typed(Operation{opsym, mods}(), argts))
+        ci, _ = first(PTX.device_code_typed(Operation{opsym, mods}(), argts))
         s = string(ci)
         @test occursin(asm, s)
         @test occursin("convergent nomerge", s)
@@ -598,7 +598,7 @@ end
     for (mods, argts, rettype, asm) in cases
         op = Operation{:mbarrier, mods}()
         @test which(op, argts).module == PTX
-        ci, rt = first(Base.code_typed(op, argts))
+        ci, rt = first(PTX.device_code_typed(op, argts))
         code = string(ci)
         @test rt === rettype
         @test occursin(asm, code)
@@ -608,7 +608,7 @@ end
     end
 
     # integer-flexible signatures still convert (count::Integer etc.)
-    ci, rt = first(Base.code_typed(Operation{:mbarrier, (:init, :shared, :b64)}(),
+    ci, rt = first(PTX.device_code_typed(Operation{:mbarrier, (:init, :shared, :b64)}(),
                                    (pS, Int)))
     @test rt === Nothing
 
@@ -619,7 +619,7 @@ end
         ((:arrive, :expect_tx, Symbol("shared::cluster"), :b64), (pS, UInt32),
             "mbarrier.arrive.expect_tx.shared::cluster.b64 _, ["),
     ]
-        ci, _ = first(Base.code_typed(Operation{:mbarrier, mods}(), argts))
+        ci, _ = first(PTX.device_code_typed(Operation{:mbarrier, mods}(), argts))
         @test occursin(asm, string(ci))
     end
 end
@@ -628,7 +628,7 @@ end
     pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
     pC = Core.LLVMPtr{UInt64, PTX.AS.SharedCluster}
     for form in (ptx"mapa.shared::cluster.u32", ptx"mapa.shared::cluster.u64")
-        _, rt = first(Base.code_typed(form, (pS, UInt32)))
+        _, rt = first(PTX.device_code_typed(form, (pS, UInt32)))
         @test rt === pC
     end
 
@@ -637,7 +637,7 @@ end
     for (mods, extra) in [((:arrive, cluster, :b64), ()),
                           ((:arrive, :expect_tx, cluster, :b64), (UInt32,))]
         for p in (pS, pC)
-            ci, rt = first(Base.code_typed(Operation{:mbarrier, mods}(),
+            ci, rt = first(PTX.device_code_typed(Operation{:mbarrier, mods}(),
                                            (p, extra...)))
             @test rt === Nothing
         end
@@ -693,7 +693,7 @@ end
     for (mods, argts, rettype, asm) in cases
         op = Operation{:mbarrier, mods}()
         @test which(op, argts).module == PTX
-        ci, rt = first(Base.code_typed(op, argts))
+        ci, rt = first(PTX.device_code_typed(op, argts))
         @test rt === rettype
         s = string(ci)
         @test occursin(asm, s)
@@ -702,7 +702,7 @@ end
 
     # Full report shape: predicate pair plus a b8 temporary packed into the
     # low byte of an NVPTX-compatible UInt16 carrier.
-    ci, _ = first(Base.code_typed(
+    ci, _ = first(PTX.device_code_typed(
         Operation{:mbarrier, (:test_wait, :report, Symbol("phase_type::primary"),
                               :shared, :b64)}(), (pS, UInt64)))
     @test occursin("\\\$0|\\\$1, report_value", string(ci))
@@ -771,7 +771,7 @@ end
     for (mods, argts, expected_asm, expected_cons) in cases
         op = Operation{:fabric, mods}()
         @test which(op, argts).module == PTX
-        ci, rt = first(Base.code_typed(op, argts))
+        ci, rt = first(PTX.device_code_typed(op, argts))
         @test rt === Nothing
         s = string(ci)
         @test occursin(expected_asm,  s)
@@ -874,7 +874,7 @@ end
     for argts in ((NTuple{4, Float32}, UInt64, UInt64, Bool),
                   (NTuple{4, Float32}, UInt64, UInt64, Val{true}),
                   (NTuple{4, Float32}, UInt64, UInt64, Val{false}))
-        ci, rt = first(Base.code_typed(wg, argts))
+        ci, rt = first(PTX.device_code_typed(wg, argts))
         @test rt === NTuple{4, Float32}
         s = unescape(string(ci))
         @test occursin("asm sideeffect", s)
@@ -885,7 +885,7 @@ end
     mma_fb = Operation{:mma, (:sync, :aligned, Symbol("kind::f8f6f4"),
                               :m16n8k16, :row, :col,
                               :f32, :e4m3, :e4m3, :f32)}()
-    ci, rt = first(Base.code_typed(mma_fb,
+    ci, rt = first(PTX.device_code_typed(mma_fb,
         (NTuple{2, UInt32}, NTuple{1, UInt32}, NTuple{4, Float32})))
     @test rt === NTuple{4, Float32}
     s = unescape(string(ci))
@@ -898,7 +898,7 @@ end
                                  :block_scale, Symbol("scale_vec::4X"),
                                  :m16n8k64, :row, :col,
                                  :f32, :e2m1, :e2m1, :f32, :ue8m0)}()
-    ci, rt = first(Base.code_typed(mma_sc,
+    ci, rt = first(PTX.device_code_typed(mma_sc,
         (NTuple{4, UInt32}, NTuple{2, UInt32}, NTuple{4, Float32},
          UInt32, UInt16, UInt16, UInt32, UInt16, UInt16)))
     @test rt === NTuple{4, Float32}
@@ -912,7 +912,7 @@ end
     # retaining it on the declaration is harmless but insufficient alone.
     mma_t2 = Operation{:mma, (:sync, :aligned, :m16n8k16, :row, :col,
                               :f32, :bf16, :bf16, :f32)}()
-    ci, rt = first(Base.code_typed(mma_t2,
+    ci, rt = first(PTX.device_code_typed(mma_t2,
         (NTuple{4, UInt32}, NTuple{2, UInt32}, NTuple{4, Float32})))
     @test rt === NTuple{4, Float32}
     s = unescape(string(ci))
@@ -1255,7 +1255,7 @@ end
                 ((:async, :bulk, :tensor, nd, cg2, cta, :global, :tile, cmpl),
                  (pSh, pTm, coords..., pMb)))
             @test which(Operation{:cp, mods}(), argtypes).module == PTX
-            ci, rt = first(Base.code_typed(Operation{:cp, mods}(), argtypes))
+            ci, rt = first(PTX.device_code_typed(Operation{:cp, mods}(), argtypes))
             code = string(ci)
             @test rt === Nothing
             @test occursin("cp." * join(String.(mods), ".") * " [", code)
@@ -1277,7 +1277,7 @@ end
              "llvm.nvvm.fence.mbarrier_init.release.cluster"))
         @test PTX.NVVM.isintrinsic(intr)
         @test which(Operation{:fence, mods}(), ()).module == PTX
-        ci, rt = first(Base.code_typed(Operation{:fence, mods}(), ()))
+        ci, rt = first(PTX.device_code_typed(Operation{:fence, mods}(), ()))
         @test rt === Nothing
         @test occursin(intr, string(ci))
     end
@@ -1294,7 +1294,7 @@ end
         mods = (:proxy, dir, :alias, sem, :sys)
         op = Operation{:fence, mods}()
         @test which(op, ()).module == PTX
-        ci, rt = first(Base.code_typed(op, ()))
+        ci, rt = first(PTX.device_code_typed(op, ()))
         @test rt === Nothing
         s = string(ci)
         @test occursin("fence.proxy.$dir.alias.$sem.sys;", s)
@@ -1334,7 +1334,7 @@ end
                                    (:sys,     ""))
             mods = (sem, scope)
             @test which(Operation{:fence, mods}(), ()).module == PTX
-            ci, rt = first(Base.code_typed(Operation{:fence, mods}(), ()))
+            ci, rt = first(PTX.device_code_typed(Operation{:fence, mods}(), ()))
             @test rt === Nothing
             # CodeInfo printing escapes the quotes inside the llvmcall IR
             # string; unescape before matching the syncscope clause.
@@ -1358,7 +1358,7 @@ end
     for (mods, argts, intr) in (
             ((:shift, cg1, :down), (UInt32,), "tcgen05.shift.down.cg1"),)
         @test which(Operation{:tcgen05, mods}(), argts).module == PTX
-        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), argts))
+        ci, rt = first(PTX.device_code_typed(Operation{:tcgen05, mods}(), argts))
         @test rt === Nothing
         @test occursin(intr, string(ci))
     end
@@ -1396,7 +1396,7 @@ end
              (UInt32, UInt16),
              "tcgen05.commit.cta_group::1.mbarrier::arrive::one.multicast::cluster.shared::cluster.b64 ["))
         @test which(Operation{:tcgen05, mods}(), argts).module == PTX
-        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), argts))
+        ci, rt = first(PTX.device_code_typed(Operation{:tcgen05, mods}(), argts))
         code = string(ci)
         @test rt === Nothing
         @test occursin(asm, code)
@@ -1408,7 +1408,7 @@ end
     # attributes render the same conservative barrier as the clobber).
     for w in ("ld", "st")
         mods = (Symbol("wait::$w"), :sync, :aligned)
-        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), ()))
+        ci, rt = first(PTX.device_code_typed(Operation{:tcgen05, mods}(), ()))
         code = string(ci)
         @test rt === Nothing
         @test occursin("tcgen05.wait::$w.sync.aligned;", code)
@@ -1447,7 +1447,7 @@ end
              (UInt32, UInt32),
              "tcgen05.commit.cta_group::2.mbarrier::arrive::one.sync_restrict::shared::read::mma::a.shared::cluster.multicast::cluster::32b.b64 ["))
         @test which(Operation{:tcgen05, mods}(), argts).module == PTX
-        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(), argts))
+        ci, rt = first(PTX.device_code_typed(Operation{:tcgen05, mods}(), argts))
         code = string(ci)
         @test rt === Nothing
         @test occursin(asm, code)
@@ -1473,12 +1473,12 @@ end
         stflag = repack ? (Symbol("unpack::16b"),) : ()
         ld = Operation{:tcgen05, (:ld, :sync, :aligned, sh, cnt,
                                   ldflag..., :b32)}()
-        ci, rt = first(Base.code_typed(ld, (UInt32, split...)))
+        ci, rt = first(PTX.device_code_typed(ld, (UInt32, split...)))
         @test rt === (n == 1 ? UInt32 : NTuple{n, UInt32})
         @test occursin("tcgen05.ld.$shape.x$c", string(ci))
         st = Operation{:tcgen05, (:st, :sync, :aligned, sh, cnt,
                                   stflag..., :b32)}()
-        ci2, rt2 = first(Base.code_typed(st, (UInt32, split...,
+        ci2, rt2 = first(PTX.device_code_typed(st, (UInt32, split...,
                                               NTuple{n, UInt32})))
         @test rt2 === Nothing
         @test occursin("tcgen05.st.$shape.x$c", string(ci2))
@@ -1487,7 +1487,7 @@ end
     # dense mma kinds route to mma.shared (immarg-selected kind/cta_group)
     for kind in ("f16", "tf32", "f8f6f4", "i8"), cg in (cg1, cg2)
         mods = (:mma, cg, Symbol("kind::$kind"))
-        ci, rt = first(Base.code_typed(Operation{:tcgen05, mods}(),
+        ci, rt = first(PTX.device_code_typed(Operation{:tcgen05, mods}(),
                                        (UInt32, UInt64, UInt64, UInt32, Bool)))
         @test rt === Nothing
         @test occursin("tcgen05.mma.shared", string(ci))
@@ -1498,7 +1498,7 @@ end
     # representative asm-tier inference pin beside the dense intrinsic pins.
     mxmods = (:mma, cg1, Symbol("kind::mxf8f6f4"), :block_scale,
               Symbol("scale_vec::1X"))
-    ci, rt = first(Base.code_typed(Operation{:tcgen05, mxmods}(),
+    ci, rt = first(PTX.device_code_typed(Operation{:tcgen05, mxmods}(),
         (UInt32, UInt64, UInt64, UInt32, UInt32, UInt32, Bool)))
     @test rt === Nothing
     @test occursin(
@@ -1621,7 +1621,7 @@ end
     pG = Core.LLVMPtr{Float32, PTX.AS.Global}
     for (qual, n) in [(:ca, 4), (:ca, 8), (:ca, 16), (:cg, 16)]
         op = Operation{:cp, (:async, qual, :shared, :global)}()
-        ci, _ = first(Base.code_typed(op, (pS, pG, Val{n})))
+        ci, _ = first(PTX.device_code_typed(op, (pS, pG, Val{n})))
         s = string(ci)
         # Size baked into the asm tail.
         @test occursin("cp.async.$qual.shared.global", s)
@@ -1653,7 +1653,7 @@ end
         m = which(Operation{:shfl, (:sync, mode, :b32)}(),
                   (UInt32, UInt32, UInt32, UInt32))
         @test m.module == PTX
-        ci, rt = first(Base.code_typed(Operation{:shfl, (:sync, mode, :b32)}(),
+        ci, rt = first(PTX.device_code_typed(Operation{:shfl, (:sync, mode, :b32)}(),
                                        (UInt32, UInt32, UInt32, UInt32)))
         @test rt === UInt32
         @test occursin("shfl.sync.$mode.i32", string(ci))
@@ -1661,7 +1661,7 @@ end
         mp = which(Operation{:shfl, (:sync, mode, :b32, :pred)}(),
                    (UInt32, UInt32, UInt32, UInt32))
         @test mp.module == PTX
-        ci, rt = first(Base.code_typed(Operation{:shfl, (:sync, mode, :b32, :pred)}(),
+        ci, rt = first(PTX.device_code_typed(Operation{:shfl, (:sync, mode, :b32, :pred)}(),
                                        (UInt32, UInt32, UInt32, UInt32)))
         @test rt === Tuple{UInt32, Bool}
         @test occursin("shfl.sync.$mode.i32p", string(ci))
@@ -1676,7 +1676,7 @@ end
     # `<N x T>` (what load/store want) and the array type `[N x T]` (how Julia
     # represents the homogeneous tuple).
 
-    body(op, argts) = string(first(Base.code_typed(op, argts))[1])
+    body(op, argts) = string(first(PTX.device_code_typed(op, argts))[1])
     pG(T) = Core.LLVMPtr{T, PTX.AS.Global}
 
     # v4.f32 load: load <4 x float> with the vector's alignment, unpack into
@@ -1727,7 +1727,7 @@ end
     # expansion at host. Every variant bakes its alignment as N*sizeof(T).
     for (n, dt, T) in PTX._VEC_LDST_VARIANTS
         op = Operation{:ld, (:global, Symbol("v", n), dt)}()
-        ci, _ = first(Base.code_typed(op,
+        ci, _ = first(PTX.device_code_typed(op,
             (Core.LLVMPtr{T, PTX.AS.Global},)))
         s = string(ci)
         @test occursin("load <$n x", s)

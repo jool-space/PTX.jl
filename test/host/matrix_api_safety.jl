@@ -198,7 +198,7 @@ _tcgen_mx_mods_b(kind, scale, cg, coll_b; sp = false, coll = nothing) =
             info = PTX.lowering(op, argts)
             @test info.tier === :asm
             @test info.rettype === Nothing
-            ci, _ = first(Base.code_typed(op, argts))
+            ci, _ = first(PTX.device_code_typed(op, argts))
             typed = string(ci)
             @test occursin("tcgen05.mma" * (sp ? ".sp" : "") *
                            ".cta_group::$cg.kind::$kind" *
@@ -241,7 +241,7 @@ _tcgen_mx_mods_b(kind, scale, cg, coll_b; sp = false, coll = nothing) =
                 info = PTX.lowering(op, argts)
                 @test info.tier === :asm
                 @test info.rettype === Nothing
-                ci, _ = first(Base.code_typed(op, argts))
+                ci, _ = first(PTX.device_code_typed(op, argts))
                 unescaped = replace(string(ci), "\\\$" => "\$")
                 @test occursin("tcgen05.mma" * (sp ? ".sp" : "") *
                                ".cta_group::$cg.kind::$kind" *

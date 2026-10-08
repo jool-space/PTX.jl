@@ -2,7 +2,8 @@
 #
 # `lowering(op, argtypes)` answers "what will this call actually become?"
 # without compiling for a device. Chain-vs-wrapper is a dispatch question
-# (`which`); wrapper tier is a typed-IR question: tier-2 wrappers reference
+# (`which`); wrapper tier is a question about device-typed IR (host inference
+# sees only the host gate's error branch): tier-2 wrappers reference
 # an `NVVM.IntrinsicCall{name}` singleton whose name is a *type parameter*,
 # recoverable structurally, and the remaining wrappers split on whether the
 # body's llvmcall IR contains an inline-`asm` call (asm tier) or plain
@@ -55,6 +56,8 @@ end
 
 Reflect on how calling `op` with arguments of the given types will lower,
 without a device. `argtypes` is a tuple of types or a `Tuple{...}` type.
+Classifying a wrapper infers it as device code with
+[`PTX.device_code_typed`](@ref), so it needs the CUDACore extension loaded.
 Returns `(; tier, method, rettype, intrinsics, asm)`:
 
 - `tier = :intrinsic` — a wrapper routes to `llvm.nvvm.*` intrinsics (tier 2);
@@ -122,7 +125,7 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
     end
     # Structural pass: tier-2 wrappers reference IntrinsicCall singletons in
     # their unoptimized body — the intrinsic name is a type parameter.
-    ci, rettype = only(Base.code_typed(o, argts; optimize = false))
+    ci, rettype = only(device_code_typed(o, argts; optimize = false))
     names = String[]
     for st in ci.code
         _walk_intrinsics!(names, st)
@@ -131,7 +134,7 @@ function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
     # intrinsics declared in literal IR (belt and braces) and, for the
     # remaining wrappers, splits asm tier from tier-1 core IR. (`@asmcall`
     # bodies only surface their asm string after inlining.)
-    s = string(first(only(Base.code_typed(o, argts))))
+    s = string(first(only(device_code_typed(o, argts))))
     for match in eachmatch(r"llvm\.nvvm\.[A-Za-z0-9_.]+", s)
         push!(names, match.match)
     end

@@ -6,7 +6,9 @@ using LLVM.Build: bitcast!, call!, extract_element!, extract_value!,
                   insert_element!, insert_value!, inttoptr!, load!, ptrtoint!,
                   store!
 using BFloat16s: BFloat16
-using LLVM.Interop: @asmcall, @llvmgenerated, generate_llvmcall
+using LLVM.Interop: @llvmgenerated, generate_llvmcall
+
+include("device_gate.jl")
 
 include("ir/nodes.jl")
 using .IR
@@ -84,15 +86,20 @@ include("lib/warps.jl")
 include("lib/utils.jl")
 
 function __init__()
-    # TMA descriptor encoding and upload are implemented by the CUDACore package
-    # extension; without it they have no methods. Name the missing package
-    # in the MethodError instead of leaving a bare zero-methods failure.
+    # TMA descriptor encoding and upload, and device reflection, are
+    # implemented by the CUDACore package extension; without it they have no
+    # methods. Name the missing package in the MethodError instead of leaving
+    # a bare zero-methods failure.
     Base.Experimental.register_error_hint(MethodError) do io, exc, _, _
         if exc.f === tensor_map_encode_tiled || exc.f === tensor_map_tile_2d ||
            exc.f === upload_tma_descriptor
             print(io, "\nTMA descriptor encoding and upload are provided by PTX.jl's ",
                       "CUDACore extension — run `using CUDA` (or ",
                       "`using CUDACore`) to load it.")
+        elseif exc.f === device_code_typed
+            print(io, "\nDevice reflection (also behind `PTX.lowering` for ",
+                      "wrappers) is provided by PTX.jl's CUDACore extension — ",
+                      "run `using CUDA` (or `using CUDACore`) to load it.")
         end
     end
 end

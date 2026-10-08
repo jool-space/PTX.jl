@@ -238,7 +238,7 @@ end
             @test info.tier === :asm
             @test info.rettype === Nothing
             @test isempty(info.intrinsics)
-            ci, rt = first(Base.code_typed(o, argtypes))
+            ci, rt = first(PTX.device_code_typed(o, argtypes))
             code = string(ci)
             @test rt === Nothing
             @test occursin(PTX.build_head(op, mods) * " [", code)
@@ -261,7 +261,7 @@ end
 
 # The typed IR quotes the asm template, so `$` slots print escaped.
 _tma94_code(o, argtypes) =
-    replace(string(first(Base.code_typed(o, argtypes))[1]), "\\\$" => "\$")
+    replace(string(first(PTX.device_code_typed(o, argtypes))[1]), "\\\$" => "\$")
 
 @testset "PTX ISA 9.4 tensor-copy operand rendering" begin
     tmap = PTX.TMADescriptorPtr
@@ -309,10 +309,10 @@ _tma94_code(o, argtypes) =
     mods32 = (:async, :bulk, :tensor, Symbol("2d"), cluster, :global, :tile,
               complete, _TMA94_MC32)
     @test occursin("r,l,r,r,r,h,~{memory}",
-                   string(first(Base.code_typed(Operation{:cp, mods16}(),
+                   string(first(PTX.device_code_typed(Operation{:cp, mods16}(),
                                                 (pS, tmap, Int32, Int32, pM, UInt16)))[1]))
     @test occursin("r,l,r,r,r,r,~{memory}",
-                   string(first(Base.code_typed(Operation{:cp, mods32}(),
+                   string(first(PTX.device_code_typed(Operation{:cp, mods32}(),
                                                 (pS, tmap, Int32, Int32, pM, UInt32)))[1]))
 end
 

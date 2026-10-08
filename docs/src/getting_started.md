@@ -66,6 +66,20 @@ Rule of thumb: write what you'd write in normal CUDA C++ in Julia + CUDA.jl;
 drop into PTX.jl for what you'd write as a `<header>` library call that
 nvcc lowers to `asm volatile`-equivalent inline PTX. Real kernels mix both.
 
+### Device code only
+
+PTX instructions run only in device code. Called from the host, they throw a
+[`PTX.DeviceOnlyError`](@ref) rather than reaching the host's LLVM backend,
+which would abort the Julia process on PTX constraint letters and NVVM
+intrinsics. For the same reason, host reflection (`code_typed`, `code_llvm`)
+on a function using PTX.jl shows only that error path. Inspect device code with
+`CUDATools.code_llvm` and `@device_code_llvm`, or [`PTX.device_code_typed`](@ref).
+
+The device/host split is the [`PTX.on_device`](@ref) overlay, which PTX.jl's
+CUDACore extension installs for CUDA.jl's compiler. A GPUCompiler client other
+than CUDA.jl that targets NVPTX with its own method table must add the same
+overlay there.
+
 ## Address spaces
 
 `ptx"ld.global.f32"` / `ptx"cp.async.ca.shared.global"` and friends take

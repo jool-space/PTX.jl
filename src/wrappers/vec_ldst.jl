@@ -64,17 +64,19 @@ end
 function _vec_ld_register(n::Int, dtype::Symbol, T)
     mods = (:global, Symbol("v", n), dtype)
     register_wrapper!(:vec_ldst, :ld, mods, :core_ir)
+    load = device_only(:(_vec_load(addr, $T, Val($n))), "ld.global.v$n.$dtype")
     @eval @inline (::Operation{:ld, $mods})(addr::Core.LLVMPtr{S, AS.Global}) where S =
-        _vec_load(addr, $T, Val($n))
+        $load
     nothing
 end
 
 function _vec_st_register(n::Int, dtype::Symbol, T)
     mods = (:global, Symbol("v", n), dtype)
     register_wrapper!(:vec_ldst, :st, mods, :core_ir)
+    store = device_only(:(_vec_store(addr, vals)), "st.global.v$n.$dtype")
     @eval @inline function (::Operation{:st, $mods})(
             addr::Core.LLVMPtr{S, AS.Global}, vals::NTuple{$n, $T}) where S
-        _vec_store(addr, vals)
+        $store
         nothing
     end
     nothing

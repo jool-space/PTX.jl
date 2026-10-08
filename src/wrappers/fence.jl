@@ -127,8 +127,9 @@ function _generic_fence_register(sem::Symbol, ordering::String,
                                  scope::Symbol, syncscope::String)
     register_wrapper!(:fence, :fence, (sem, scope), :core_ir)
     ir = "fence $syncscope$ordering\nret void"
+    call = device_only(:(Base.llvmcall($ir, Nothing, Tuple{})), "fence.$sem.$scope")
     @eval @inline (::Operation{:fence, ($(QuoteNode(sem)), $(QuoteNode(scope)))})() =
-        Base.llvmcall($ir, Nothing, Tuple{})
+        $call
     nothing
 end
 

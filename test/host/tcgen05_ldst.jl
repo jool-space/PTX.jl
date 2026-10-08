@@ -238,7 +238,7 @@ end
         n = parse(Int, String(mods[6])[2:end])
         redT = _LDRED_REDT[mods[end]]
         argts = split ? (UInt32, Val{16}) : (UInt32,)
-        ci, rt = first(Base.code_typed(op, argts))
+        ci, rt = first(PTX.device_code_typed(op, argts))
         code = string(ci)
         head = "tcgen05." * join(String.(mods), ".") * " {"
         checked += 1
@@ -264,7 +264,7 @@ end
     # float register class, and the callsite attribute group.
     op = Operation{:tcgen05, (:ld, :red, :sync, :aligned, Symbol("32x32b"),
                               :x2, :min, :f32)}()
-    @test only(Base.return_types(op, (UInt32,))) ===
+    @test last(only(PTX.device_code_typed(op, (UInt32,)))) ===
           Tuple{UInt32, UInt32, Float32}
     ir = llvmcall_ir(op, (UInt32,))
     @test occursin("call { i32, i32, float } asm sideeffect " *
@@ -276,7 +276,7 @@ end
     # Split shape: the immediate is part of the asm text, after the address.
     ops = Operation{:tcgen05, (:ld, :red, :sync, :aligned, Symbol("16x32bx2"),
                                :x2, :max, :u32)}()
-    @test only(Base.return_types(ops, (UInt32, Val{8}))) ===
+    @test last(only(PTX.device_code_typed(ops, (UInt32, Val{8})))) ===
           Tuple{UInt32, UInt32, UInt32}
     irs = llvmcall_ir(ops, (UInt32, Val{8}))
     @test occursin("{\$0, \$1}, \$2, [\$3], 8;", irs)
@@ -342,7 +342,7 @@ end
         n = parse(Int, String(mods[red ? 7 : 6])[2:end])
         nm = cld(n, 32)
         nc = n ÷ 2
-        ci, rt = first(Base.code_typed(op, (UInt32,)))
+        ci, rt = first(PTX.device_code_typed(op, (UInt32,)))
         code = string(ci)
         head = "tcgen05." * join(String.(mods), ".") * " {"
         want = Tuple{NTuple{nm, UInt32}, NTuple{nc, UInt32},
@@ -370,7 +370,7 @@ end
     mods = (:ld, :red, :spcompress, :sync, :aligned, Symbol("32x32b"), :x4,
             :max, Symbol("sp::2:4"), :abs, Symbol("NaN"), :f32, :b2)
     op = Operation{:tcgen05, mods}()
-    @test only(Base.return_types(op, (UInt32,))) ===
+    @test last(only(PTX.device_code_typed(op, (UInt32,)))) ===
           Tuple{NTuple{1, UInt32}, NTuple{2, UInt32}, Float32}
     ir = llvmcall_ir(op, (UInt32,))
     @test occursin("call { i32, i32, i32, float } asm sideeffect " *
@@ -384,7 +384,7 @@ end
     mods = (:ld, :spcompress, :sync, :aligned, Symbol("32x32b"), :x128,
             :min, Symbol("sp::2:4"), :f32, :b2)
     op = Operation{:tcgen05, mods}()
-    @test only(Base.return_types(op, (UInt32,))) ===
+    @test last(only(PTX.device_code_typed(op, (UInt32,)))) ===
           Tuple{NTuple{4, UInt32}, NTuple{64, UInt32}}
     ir = llvmcall_ir(op, (UInt32,))
     @test occursin("{\$0, \$1, \$2, \$3}, {\$4, ", ir)

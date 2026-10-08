@@ -723,7 +723,7 @@ end
         spec = PTX.build_call(name, mods, args)
         @test spec.rettype === result
         @test spec.constraints == constraints
-        @test only(Base.code_typed(op, args))[2] === result
+        @test only(PTX.device_code_typed(op, args))[2] === result
         raw = PTX.build_call(name, mods, args; raw = true)
         @test raw.rettype === result
         @test raw.constraints == constraints * ",~{memory}"
