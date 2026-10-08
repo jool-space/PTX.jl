@@ -64,8 +64,8 @@ function _asmcall(asm::String, constraints::String, @nospecialize(rettype::Type)
         push!(abitypes, T)
         push!(argexprs, ex)
     end
-    generate_llvmcall(rettype, Tuple{abitypes...},
-                      argexprs...) do builder, @nospecialize(params...)
+    call = generate_llvmcall(rettype, Tuple{abitypes...},
+                             argexprs...) do builder, @nospecialize(params...)
         T_ret = convert(LLVMType, rettype)
         # LLVM dictates the asm's return shape from the number of outputs:
         # one returns the scalar, several a literal struct. Julia lowers a
@@ -91,4 +91,5 @@ function _asmcall(asm::String, constraints::String, @nospecialize(rettype::Type)
         end
         ret
     end
+    device_only(call, asm)
 end

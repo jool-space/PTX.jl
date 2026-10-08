@@ -419,7 +419,7 @@ end
     )
     @test length(asm_wrappers) == 15
     for (mods, argtypes) in asm_wrappers
-        ci, rettype = first(Base.code_typed(Operation{:mbarrier, mods}(),
+        ci, rettype = first(PTX.device_code_typed(Operation{:mbarrier, mods}(),
                                             argtypes))
         schema = PTX.schema(PTX.MBarrierLedger(), :mbarrier, mods)
         @test rettype === _mb_rettype(schema.destination)
@@ -484,7 +484,7 @@ end
     @test rawspec.convergent
     @test PTX.lowering(RawOperation{:mbarrier, reportmods}(),
                        (pS, UInt64)).tier === :chain_asm
-    ci, rt = first(Base.code_typed(RawOperation{:mbarrier, reportmods}(),
+    ci, rt = first(PTX.device_code_typed(RawOperation{:mbarrier, reportmods}(),
                                    (pS, UInt64)))
     @test rt === Tuple{Bool, Bool, UInt16}
     ir = string(ci)

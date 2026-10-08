@@ -12,6 +12,8 @@ explicit policy: this vocabulary is upstream's, surfaced honestly.
 """
 module NVVM
 
+using ..PTX: device_only
+
 export Intrinsic, intrinsic, isintrinsic
 
 # --- Type tokens ------------------------------------------------------------

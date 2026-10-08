@@ -170,10 +170,20 @@ emit_host_ptx(f, tt::Type{<:Tuple}; kwargs...) =
 emit_host_llvm(f, tt::Type{<:Tuple}; kwargs...) =
     emit_llvm(_host_target_job(f, tt; kwargs...))
 
+# `code_llvm` for device code. Host reflection sees only the host gate's
+# `DeviceOnlyError` branch; CUDA.jl's method table resolves it to the device
+# body. The IR does not depend on the target, so any LLVM-supported one does.
+function device_code_llvm(io::IO, f, tt; cap::VersionNumber = v"9.0",
+                          feature_set::Symbol = :arch, kwargs...)
+    job = _host_target_job(f, Base.to_tuple_type(tt); cap, feature_set,
+                           kernel = false)
+    CUDACore.invoke_frozen(CUDACore.GPUCompiler.code_llvm, io, job; kwargs...)
+end
+
 # The IR module a wrapper hands to `Base.llvmcall`, read from its inlined
-# typed code (the first one, for wrappers that emit several).
+# device-typed code (the first one, for wrappers that emit several).
 function llvmcall_ir(f, argtypes)
-    ci, _ = first(Base.code_typed(f, argtypes))
+    ci, _ = first(PTX.device_code_typed(f, argtypes))
     for stmt in ci.code, arg in (stmt isa Expr ? stmt.args : ())
         arg isa String && occursin("define ", arg) && return arg
     end

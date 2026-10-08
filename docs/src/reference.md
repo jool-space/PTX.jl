@@ -14,6 +14,14 @@ The full public API. Everything else under `PTX`, `PTX.IR`,
 PTX.@mod_str
 ```
 
+## Device code
+
+```@docs
+PTX.on_device
+PTX.DeviceOnlyError
+PTX.device_code_typed
+```
+
 ## Pointers
 
 ```@docs

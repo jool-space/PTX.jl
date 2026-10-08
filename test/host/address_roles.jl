@@ -1,7 +1,6 @@
 using PTX: Address, address, build_call, format_call, Operation, RawOperation
 using PTX.Parser: parse as parse_ptx
 using PTX.IR: AddressOperand, Instruction, format
-using InteractiveUtils: code_llvm
 
 @noinline _address_payload_llvm_probe(x::UInt32) =
     ptx"ld.shared.u32"(address(x))
@@ -363,7 +362,7 @@ end
     # Optimized LLVM proves that the marker itself is not passed to inline
     # asm: the call receives the bare i32 payload and no aggregate carrier.
     llvm = sprint() do io
-        code_llvm(io, _address_payload_llvm_probe, Tuple{UInt32};
+        device_code_llvm(io, _address_payload_llvm_probe, Tuple{UInt32};
                   optimize = true, raw = true, debuginfo = :none,
                   dump_module = true)
     end
@@ -524,7 +523,7 @@ end
              "tcgen05.mma.cta_group::1.kind::mxf8f6f4.block_scale." *
              "scale_vec::1X [\$0], [\$1], \$2, \$3, [\$4], [\$5], \$6;"))
         llvm = sprint() do io
-            code_llvm(io, probe, argtypes; optimize = true, raw = true,
+            device_code_llvm(io, probe, argtypes; optimize = true, raw = true,
                       debuginfo = :none, dump_module = true)
         end
         @test occursin(asm, llvm)
@@ -592,7 +591,7 @@ end
          Tuple{Core.LLVMPtr{UInt64, PTX.AS.Shared}}),
     )
     for (f, argtypes) in cases
-        ci, rt = only(Base.code_typed(f, argtypes; optimize = true))
+        ci, rt = only(PTX.device_code_typed(f, argtypes; optimize = true))
         @test rt === Nothing
         @test !occursin("PTX.Address", string(ci))
     end

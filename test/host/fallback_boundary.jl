@@ -1,5 +1,4 @@
 using PTX: Operation, RawOperation, build_call, format_call
-using InteractiveUtils: code_llvm
 
 @noinline function _tcgen05_thread_fence_optimizer_probe()
     ptx"tcgen05.fence::before_thread_sync"()
@@ -289,7 +288,7 @@ end
 
 @testset "typed-wrapper-only boundary: tcgen05 fences survive optimization" begin
     llvm = sprint() do io
-        code_llvm(io, _tcgen05_thread_fence_optimizer_probe, Tuple{};
+        device_code_llvm(io, _tcgen05_thread_fence_optimizer_probe, Tuple{};
                   optimize = true, raw = true, debuginfo = :none,
                   dump_module = true)
     end

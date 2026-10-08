@@ -77,7 +77,7 @@ end
     for (mods, (nm, nc, nd)) in sort!(collect(_spcompress_expected()))
         op = Operation{:spcompress, mods}()
         argts = (NTuple{nd, UInt32}, UInt32)
-        ci, rt = first(Base.code_typed(op, argts))
+        ci, rt = first(PTX.device_code_typed(op, argts))
         code = string(ci)
         head = "spcompress." * join(String.(mods), ".") * " {"
         ok = rt === Tuple{NTuple{nm, UInt32}, NTuple{nc, UInt32}} &&
@@ -96,7 +96,7 @@ end
     for (mods, (nm, nc, nd)) in sort!(collect(_spdecompress_expected()))
         op = Operation{:spdecompress, mods}()
         argts = (NTuple{nm, UInt32}, NTuple{nc, UInt32})
-        ci, rt = first(Base.code_typed(op, argts))
+        ci, rt = first(PTX.device_code_typed(op, argts))
         code = string(ci)
         head = "spdecompress." * join(String.(mods), ".") * " {"
         ok = rt === NTuple{nd, UInt32} &&
@@ -111,7 +111,7 @@ end
 end
 
 @testset "spcompress asm: hand-pinned operand order" begin
-    ci, _ = first(Base.code_typed(
+    ci, _ = first(PTX.device_code_typed(
         Operation{:spcompress, (:b8, :b2, Symbol("sp::2:4"), :x4)}(),
         (NTuple{8, UInt32}, UInt32)))
     # `string(ci)` shows the asm template with its `$` escaped.
@@ -119,7 +119,7 @@ end
     @test occursin("spcompress.b8.b2.sp::2:4.x4 {\$0}, {\$1, \$2, \$3, \$4}, " *
                    "{\$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12}, \$13;", code)
     @test occursin("=&r,=&r,=&r,=&r,=&r,r,r,r,r,r,r,r,r,r", code)
-    ci, _ = first(Base.code_typed(
+    ci, _ = first(PTX.device_code_typed(
         Operation{:spdecompress, (:b16, :b4, Symbol("sp::1:4"), :x2)}(),
         (NTuple{1, UInt32}, NTuple{1, UInt32})))
     code = replace(string(ci), "\\\$" => "\$")

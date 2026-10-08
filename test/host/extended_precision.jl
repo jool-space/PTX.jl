@@ -1,4 +1,3 @@
-using InteractiveUtils: code_llvm
 using PTX: Operation
 
 # Independent ISA ledger: do not derive this from the wrapper registration
@@ -76,7 +75,7 @@ end
         info = PTX.lowering(typed, sig.argtypes)
         @test info.tier === :asm
         @test info.rettype === sig.rettype
-        ci, _ = first(Base.code_typed(typed, sig.argtypes))
+        ci, _ = first(PTX.device_code_typed(typed, sig.argtypes))
         lowering_text = string(ci)
         @test occursin("sideeffect", lowering_text)
         @test occursin("~{cc}", lowering_text)
@@ -159,10 +158,10 @@ end
     @test occursin("subc.s32 cc_tmp, 0, 0", sub.asm)
     @test_throws ArgumentError PTX._addsub_aggregate_spec(:add, 0, UInt32, false)
 
-    _, add_rt = first(Base.code_typed(_add_with_carry_type_probe,
+    _, add_rt = first(PTX.device_code_typed(_add_with_carry_type_probe,
         (NTuple{4,UInt32}, NTuple{4,UInt32})))
     @test add_rt === Tuple{NTuple{4,UInt32}, Bool}
-    _, sub_rt = first(Base.code_typed(_sub_with_borrow_type_probe,
+    _, sub_rt = first(PTX.device_code_typed(_sub_with_borrow_type_probe,
         (NTuple{2,Int64}, NTuple{2,Int64}, Bool)))
     @test sub_rt === Tuple{NTuple{2,Int64}, Bool}
 end
@@ -181,7 +180,7 @@ end
     @test u32.constraints == "=&r,=&r,=&r,=&r,r,r,r,r,~{cc}"
     @test PTX._mul_wide_spec(UInt64).constraints ==
         "=&l,=&l,=&l,=&l,l,l,l,l,~{cc}"
-    _, mul_rt = first(Base.code_typed(_mul_wide_type_probe,
+    _, mul_rt = first(PTX.device_code_typed(_mul_wide_type_probe,
         (NTuple{2,UInt64}, NTuple{2,UInt64})))
     @test mul_rt === NTuple{4,UInt64}
     @test !hasmethod(PTX.mul_wide, Tuple{NTuple{2,Int32}, NTuple{2,Int32}})
@@ -197,7 +196,7 @@ end
 end
 
 @testset "optimized LLVM retains opaque, non-convergent carry units" begin
-    ir = sprint(io -> code_llvm(io, _fused_add_probe,
+    ir = sprint(io -> device_code_llvm(io, _fused_add_probe,
         (NTuple{3,UInt32}, NTuple{3,UInt32}); debuginfo = :none))
     @test length(collect(eachmatch(r"asm sideeffect", ir))) == 1
     @test occursin("add.cc.u32", ir)
@@ -205,13 +204,13 @@ end
     @test occursin("=&r,=&r,=&r,=b,r,r,r,r,r,r,~{cc}", ir)
     @test !occursin("convergent", ir)
 
-    scalar_ir = sprint(io -> code_llvm(io, _explicit_carry_probe,
+    scalar_ir = sprint(io -> device_code_llvm(io, _explicit_carry_probe,
         (UInt32, UInt32, UInt32, UInt32); debuginfo = :none))
     @test length(collect(eachmatch(r"asm sideeffect", scalar_ir))) == 2
     @test findfirst("add.cc.u32", scalar_ir) < findlast("addc.u32", scalar_ir)
     @test !occursin("convergent", scalar_ir)
 
-    mul_ir = sprint(io -> code_llvm(io, PTX.mul_wide,
+    mul_ir = sprint(io -> device_code_llvm(io, PTX.mul_wide,
         (NTuple{2,UInt32}, NTuple{2,UInt32}); debuginfo = :none))
     @test length(collect(eachmatch(r"asm sideeffect", mul_ir))) == 1
     @test occursin("madc.hi.cc.u32", mul_ir)

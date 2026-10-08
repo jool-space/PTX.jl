@@ -380,11 +380,11 @@ end
         (ptx"redux.sync.add.s32",   (Int32, UInt32)),
         (ptx"activemask.b32",       ()),
     ]
-        ci, _ = first(Base.code_typed(op, argts))
+        ci, _ = first(PTX.device_code_typed(op, argts))
         @test occursin("convergent nomerge", string(ci))
     end
     # Non-collective side effects stay on plain @asmcall (no attr group).
-    ci, _ = first(Base.code_typed(ptx"membar.gl", ()))
+    ci, _ = first(PTX.device_code_typed(ptx"membar.gl", ()))
     @test !occursin("convergent", string(ci))
 end
 

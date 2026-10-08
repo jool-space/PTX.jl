@@ -49,7 +49,7 @@ const NVVM_SREG_U32 = Dict{Symbol, String}(
     end
     spec = build_call(:mov, (:u32,), (SpecialReg{S},))
     quote
-        Base.@inline $(LLVM.Interop).@asmcall(
+        Base.@inline $(PTX).@asmcall(
             $(spec.asm), $(spec.constraints), $(spec.side_effects),
             $(spec.rettype),
             Tuple{$(spec.passthrough_argtypes...)})

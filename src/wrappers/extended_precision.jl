@@ -15,13 +15,13 @@ _extended_precision_dtype(::Type{Int32})  = (:s32, "r")
 _extended_precision_dtype(::Type{UInt64}) = (:u64, "l")
 _extended_precision_dtype(::Type{Int64})  = (:s64, "l")
 
-# LLVM.Interop.@asmcall requires literal template/constraint strings at macro
+# `@asmcall` requires literal template/constraint strings at macro
 # expansion time.  Returning the macro call from a generated body makes the
 # aggregate length N literal while staying on LLVM.jl's public API.
 function _extended_asmcall_expr(asm::String, constraints::String,
                                 rettype::Type, argtype::Type,
                                 args::AbstractVector)
-    :( $(LLVM.Interop).@asmcall(
+    :( $(PTX).@asmcall(
         $asm, $constraints, true, $rettype, $argtype, $(args...)) )
 end
 

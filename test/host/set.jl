@@ -15,7 +15,7 @@
     )
     for (op, args, result, constraints) in cases
         name, mods = typeof(op).parameters
-        @test only(Base.code_typed(op, args))[2] === result
+        @test only(PTX.device_code_typed(op, args))[2] === result
         for raw in (false, true)
             spec = PTX.build_call(name, mods, args; raw)
             @test spec.rettype === result

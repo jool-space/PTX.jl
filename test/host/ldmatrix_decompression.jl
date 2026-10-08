@@ -48,7 +48,7 @@ _ldmatrix_decomp_mods(shape_count, trans, space, src_fmt) =
         cta_info = lowering(Operation{:ldmatrix, cta_mods}(), (pS8,))
         @test cta_info.tier === :asm
         @test cta_info.rettype === expected_type
-        ci, _ = only(Base.code_typed(Operation{:ldmatrix, cta_mods}(), (pS8,)))
+        ci, _ = only(PTX.device_code_typed(Operation{:ldmatrix, cta_mods}(), (pS8,)))
         typed = string(ci)
         @test occursin("ldmatrix.sync.aligned.$(shape_count[1]).$(shape_count[2])" *
                        (trans ? ".trans" : "") *
