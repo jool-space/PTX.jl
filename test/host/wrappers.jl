@@ -624,6 +624,35 @@ end
     end
 end
 
+@testset "mapa result is a shared::cluster pointer" begin
+    pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
+    pC = Core.LLVMPtr{UInt64, PTX.AS.SharedCluster}
+    for form in (ptx"mapa.shared::cluster.u32", ptx"mapa.shared::cluster.u64")
+        @test Base.return_types(form, (pS, UInt32)) == [pC]
+    end
+
+    # cluster forms take a local (AS 3) or cluster-mapped (AS 7) pointer
+    cluster = Symbol("shared::cluster")
+    for (mods, extra) in [((:arrive, cluster, :b64), ()),
+                          ((:arrive, :expect_tx, cluster, :b64), (UInt32,))]
+        for p in (pS, pC)
+            ci, rt = first(Base.code_typed(Operation{:mbarrier, mods}(),
+                                           (p, extra...)))
+            @test rt === Nothing
+        end
+    end
+
+    # cta forms reject the cluster-mapped pointer
+    err = try
+        ptx"mbarrier.arrive.shared.b64"(pC(C_NULL))
+        nothing
+    catch e
+        e
+    end
+    @test err isa ArgumentError
+    @test occursin("address-space-3 LLVMPtr", err.msg)
+end
+
 @testset "mbarrier PTX 9.3 extensions (layout / phase_type / report)" begin
     # Asm tier by necessity (no NVVM intrinsics at 23.1.1). Prefix-matching
     # on the @generated body's asm head plus rettype pins; `:report` is the

@@ -4,11 +4,12 @@
 #
 # Hand-written: the chain default would infer a `UInt32`/`UInt64` return
 # from the trailing dtype suffix, but the semantically correct surface is
-# `LLVMPtr → LLVMPtr` (caller threads the result through ops that expect
-# an SMEM pointer — mbarrier arrive, st.shared, etc.). LLVM uses one
-# addrspace (3) for both `shared::cta` and `shared::cluster`; the
-# `.shared::cluster` modifier on consuming ops is what selects the cluster
-# decode at runtime.
+# `LLVMPtr → LLVMPtr`: the source is a local `shared::cta` pointer (AS 3)
+# and the result is a `shared::cluster` pointer (AS 7, `AS.SharedCluster`).
+# `.shared::cluster` consumers accept either space, since the ISA defines
+# every `shared::cta` address as a valid `shared::cluster` address;
+# `.shared::cta` consumers reject AS 7, so a remote address cannot reach
+# them without an explicit `reinterpret_addrspace`.
 
 # 32-bit shared-memory pointer form. LLVMPtr-in / LLVMPtr-out keeps the
 # pointer through the @asmcall as one register; ptxas accepts it under the
@@ -19,7 +20,7 @@
         Base.@inline
         @asmcall("mapa.shared::cluster.u32 \$0, \$1, \$2;",
                  "=r,r,r", true,
-                 Core.LLVMPtr{$T, AS.Shared},
+                 Core.LLVMPtr{$T, AS.SharedCluster},
                  Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
                  src, rank)
     end
@@ -34,7 +35,7 @@ end
         Base.@inline
         @asmcall("mapa.shared::cluster.u64 \$0, \$1, \$2;",
                  "=l,l,r", true,
-                 Core.LLVMPtr{$T, AS.Shared},
+                 Core.LLVMPtr{$T, AS.SharedCluster},
                  Tuple{Core.LLVMPtr{$T, AS.Shared}, UInt32},
                  src, rank)
     end

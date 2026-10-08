@@ -17,8 +17,9 @@
 # ISA), and static-SMEM symbols materialize through mov/cvt instead of
 # folding into the operand (ptxas folds these in SASS).
 #
-# Cluster-mapped addresses (from mapa.shared::cluster) are modeled as AS 3
-# throughout the package; see the sink-destination forms below.
+# Cluster-mapped addresses (from mapa.shared::cluster) are AS 7
+# (`AS.SharedCluster`); the `.shared::cluster` forms below accept them as
+# well as local AS 3 pointers.
 
 # Exact methods retain their integer-normalizing convenience signatures
 # (the ledger deliberately rejects Int64 at :u32 operand positions), but
@@ -88,6 +89,9 @@ end
     _mbarrier_schema_call(ptx"mbarrier.try_wait.parity.shared.b64",
                           mbar, UInt32(phase))
 
+const _ClusterPtr{T} = Union{Core.LLVMPtr{T, AS.Shared},
+                             Core.LLVMPtr{T, AS.SharedCluster}}
+
 # --- Cluster-scope variants (sm_90+), asm tier ------------------------------
 # `mbarrier.arrive.shared::cluster.b64` requires a `_` (sink) destination
 # operand — the cluster-scope arrive doesn't return a state token (cross-CTA
@@ -95,12 +99,12 @@ end
 # `mapa.shared::cluster` when arriving on a remote CTA's mbarrier.
 
 @inline function ptx"mbarrier.arrive.shared::cluster.b64"(
-        mbar::Core.LLVMPtr{T, AS.Shared}) where T
+        mbar::_ClusterPtr{T}) where T
     _mbarrier_schema_call(ptx"mbarrier.arrive.shared::cluster.b64", mbar)
 end
 
 @inline function ptx"mbarrier.arrive.expect_tx.shared::cluster.b64"(
-        mbar::Core.LLVMPtr{T, AS.Shared},
+        mbar::_ClusterPtr{T},
         tx_count::Integer) where T
     _mbarrier_schema_call(ptx"mbarrier.arrive.expect_tx.shared::cluster.b64",
                           mbar, UInt32(tx_count))
@@ -112,14 +116,14 @@ end
 # %cluster_ctarank i). The mask is the mandatory trailing operand.
 
 @inline function ptx"mbarrier.arrive.shared::cluster.multicast::cluster::32b.b64"(
-        mbar::Core.LLVMPtr{T, AS.Shared}, cta_mask::Integer) where T
+        mbar::_ClusterPtr{T}, cta_mask::Integer) where T
     _mbarrier_schema_call(
         ptx"mbarrier.arrive.shared::cluster.multicast::cluster::32b.b64",
         mbar, UInt32(cta_mask))
 end
 
 @inline function ptx"mbarrier.arrive.expect_tx.shared::cluster.multicast::cluster::32b.b64"(
-        mbar::Core.LLVMPtr{T, AS.Shared},
+        mbar::_ClusterPtr{T},
         tx_count::Integer, cta_mask::Integer) where T
     _mbarrier_schema_call(
         ptx"mbarrier.arrive.expect_tx.shared::cluster.multicast::cluster::32b.b64",
@@ -127,7 +131,7 @@ end
 end
 
 @inline function ptx"mbarrier.expect_tx.shared::cluster.multicast::cluster::32b.b64"(
-        mbar::Core.LLVMPtr{T, AS.Shared},
+        mbar::_ClusterPtr{T},
         tx_count::Integer, cta_mask::Integer) where T
     _mbarrier_schema_call(
         ptx"mbarrier.expect_tx.shared::cluster.multicast::cluster::32b.b64",

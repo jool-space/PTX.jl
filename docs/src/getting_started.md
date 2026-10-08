@@ -81,7 +81,7 @@ PTX.AS.Const          # 4
 PTX.AS.Local          # 5
 PTX.AS.Param          # 101
 PTX.AS.Tmem           # 6 — Blackwell tensor memory (tcgen05 taddr operands)
-PTX.AS.SharedCluster  # 7 — distributed shared memory (cluster-window operands)
+PTX.AS.SharedCluster  # 7 — distributed shared memory; `mapa.shared::cluster` returns these
 ```
 
 A pointer reaches a wrapper as `Core.LLVMPtr{T, AS.X}`. NVPTX lowers
