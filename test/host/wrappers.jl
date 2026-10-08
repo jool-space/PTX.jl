@@ -628,7 +628,8 @@ end
     pS = Core.LLVMPtr{UInt64, PTX.AS.Shared}
     pC = Core.LLVMPtr{UInt64, PTX.AS.SharedCluster}
     for form in (ptx"mapa.shared::cluster.u32", ptx"mapa.shared::cluster.u64")
-        @test Base.return_types(form, (pS, UInt32)) == [pC]
+        _, rt = first(Base.code_typed(form, (pS, UInt32)))
+        @test rt === pC
     end
 
     # cluster forms take a local (AS 3) or cluster-mapped (AS 7) pointer
