@@ -1,6 +1,10 @@
 module PTX
 
-using LLVM, LLVM.IR, LLVM.Build
+using LLVM
+using LLVM.IR: EnumAttribute, InlineAsm, LLVMType, Value, supports_typed_pointers
+using LLVM.Build: bitcast!, call!, extract_element!, extract_value!,
+                  insert_element!, insert_value!, inttoptr!, load!, ptrtoint!,
+                  store!
 using BFloat16s: BFloat16
 using LLVM.Interop: @asmcall, @llvmgenerated, generate_llvmcall
 
