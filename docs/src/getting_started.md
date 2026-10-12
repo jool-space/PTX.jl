@@ -10,14 +10,9 @@ CurrentModule = PTX
 pkg> add PTX, CUDA
 ```
 
-PTX.jl depends on `LLVM.jl` for the inline-asm machinery (`@asmcall`).
+PTX.jl depends on LLVM.jl for the inline-asm machinery (`@asmcall`).
 Kernel launch and memory go through CUDA.jl. PTX.jl itself carries no hard
-GPU dependency: it weak-depends on `CUDACore` (the runtime core CUDA.jl is
-built on), and loading either package activates the extension that provides
-TMA descriptor encoding ([`PTX.tensor_map_encode_tiled`](@ref)) and upload
-([`PTX.upload_tma_descriptor`](@ref)).
-Host-only use — parsing, transpiling, inspecting lowering — needs no GPU
-stack at all.
+GPU dependency.
 
 ## First kernel
 
@@ -29,18 +24,21 @@ as Julia arguments, the result is the call's return value:
 using PTX, CUDA
 
 function add_kernel!(c, a, b)
-    tid = ptx"mov.u32"(ptx"%tid.x")
-    i = Int(tid) + 1
-    c[i] = ptx"add.f32"(a[i], b[i])
+    tid = ptx"mov.u32"(ptx"%tid.x") # access instructions and special registers,
+    i = tid + one(tid)               # while also writing familiar julia code.
+    c[i] = ptx"add.f32"(a[i], b[i])  # same as a[i] + b[i], assuming Float32
     return
 end
 
-n = 128
-a = cu(randn(Float32, n))
-b = cu(randn(Float32, n))
-c = similar(a)
-@cuda threads = n add_kernel!(c, a, b)
-@assert Array(c) ≈ Array(a) + Array(b)
+n = 128;
+a = CUDA.randn(n);
+b = CUDA.randn(n);
+c = similar(a);
+@cuda threads=n add_kernel!(c, a, b);
+@assert c == a + b
+
+# or simply use an instruction in a broadcast:
+@assert c == ptx"add.f32".(a, b)
 ```
 
 `ptx"add.f32"` constructs an `Operation` singleton; the call site is
