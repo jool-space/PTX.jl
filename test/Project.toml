@@ -30,6 +30,7 @@ LLVM = "10"
 Microfloats = "0.2"
 NVPTX_LLVM_Backend_jll = "23"
 ParallelTestRunner = "2.6.0"
+Random = "1.10"
 TOML = "1.0.3"
 
 [extras]
