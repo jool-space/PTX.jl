@@ -24,12 +24,16 @@ struct SpecialRegisterFamily
     min_sm::Union{Nothing, Int}  # nothing means every target architecture.
     spellings::Tuple{Vararg{String}}
     scalar_spellings::Tuple{Vararg{String}}
+
+    # Tuple-typed fields vary in length between entries; one unspecialized
+    # constructor instead of one compiled per length combination.
+    Base.@nospecializeinfer SpecialRegisterFamily(@nospecialize(args...)) = new(args...)
 end
 
-function _special_register_family(section::String, introduced::Version,
-                                  min_sm::Union{Nothing, Int},
-                                  spellings::Tuple{Vararg{String}};
-                                  scalar_spellings::Tuple{Vararg{String}} = spellings)
+Base.@nospecializeinfer function _special_register_family(
+        section::String, introduced::Version, min_sm::Union{Nothing, Int},
+        @nospecialize(spellings::Tuple{Vararg{String}});
+        @nospecialize(scalar_spellings::Tuple{Vararg{String}} = spellings))
     isempty(spellings) && error("PTX special-register family $section is empty")
     all(startswith(name, "%") for name in spellings) ||
         error("PTX special-register family $section has a non-register spelling")

@@ -16,12 +16,16 @@ struct StructuredResultSchema
     min_sm::Union{Nothing,VersionNumber}
     feature_set::Symbol
     section::String
+
+    # Tuple-typed fields vary in length between entries; one unspecialized
+    # constructor instead of one compiled per length combination.
+    Base.@nospecializeinfer StructuredResultSchema(@nospecialize(args...)) = new(args...)
 end
 
-function _structured_result_schema!(schemas, op, mods, ptxmods, outputs,
-                                    operands, ptx_version, min_sm, section;
-                                    sinkable = ntuple(_ -> false,
-                                                      length(outputs)))
+Base.@nospecializeinfer function _structured_result_schema!(
+        schemas, op, @nospecialize(mods), @nospecialize(ptxmods), @nospecialize(outputs),
+        @nospecialize(operands), ptx_version, min_sm, section;
+        @nospecialize(sinkable = ntuple(_ -> false, length(outputs))))
     any(s -> s.op === op && s.mods == mods, schemas) &&
         error("duplicate structured-result form: ", op, ".", join(mods, "."))
     length(sinkable) == length(outputs) ||

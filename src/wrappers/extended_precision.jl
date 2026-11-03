@@ -72,10 +72,10 @@ function _scalar_extended_spec(head::String, ::Type{T}, value_inputs::Int;
     (; asm, constraints, rettype, argtype)
 end
 
-function _register_scalar_extended(op::Symbol, mods::Tuple{Vararg{Symbol}},
-                                   head::String, ::Type{T}, value_inputs::Int;
-                                   carry_in::Bool, carry_out::Bool,
-                                   flag_kind::Symbol = :carry) where {T<:ExtendedPrecisionWord}
+Base.@nospecializeinfer function _register_scalar_extended(
+        op::Symbol, @nospecialize(mods::Tuple{Vararg{Symbol}}), head::String,
+        @nospecialize(T::Type{<:ExtendedPrecisionWord}), value_inputs::Int; carry_in::Bool,
+        carry_out::Bool, flag_kind::Symbol = :carry)
     spec = _scalar_extended_spec(head, T, value_inputs;
                                  carry_in, carry_out, flag_kind)
     asm, constraints, rettype, argtype =

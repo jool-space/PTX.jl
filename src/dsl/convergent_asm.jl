@@ -74,7 +74,7 @@ function _asmcall(asm::String, constraints::String, @nospecialize(rettype::Type)
                                             for T in rettype.parameters] : nothing
         T_asm = rettype === Nothing ? LLVM.VoidType() :
                 comps === nothing ? T_ret :
-                length(comps) == 1 ? only(comps) : LLVM.StructType(comps)
+                length(comps) == 1 ? only(comps) : _asm_outputs_type(comps)
         values = Value[params[i] for i in 1:length(params)]
         asm_ft = LLVM.FunctionType(T_asm, LLVMType[v.value_type for v in values])
         call = call!(builder, asm_ft,
@@ -91,5 +91,52 @@ function _asmcall(asm::String, constraints::String, @nospecialize(rettype::Type)
         end
         ret
     end
-    device_only(call, asm)
+    device_only(_inline_arguments(call), asm)
+end
+
+# The struct a multi-output asm call returns. Textual IR spells a literal
+# struct type out at every use, once per output's extractvalue, so its size
+# grows with the square of the output count: wgmma's 128 outputs make it most
+# of the IR string the method body embeds. Wide structs are named, which
+# spells the elements once; narrow ones stay literal, keeping the element
+# types readable on the call line.
+const _NAMED_ASM_OUTPUTS_MIN = 16
+
+function _asm_outputs_type(comps::Vector{LLVMType})
+    length(comps) < _NAMED_ASM_OUTPUTS_MIN && return LLVM.StructType(comps)
+    T = LLVM.StructType("asm.outputs")
+    LLVM.elements!(T, comps)
+    T
+end
+
+# `generate_llvmcall` binds each argument expression to a temporary so it is
+# evaluated once and in order. Passing the expressions to the `llvmcall`
+# directly keeps both guarantees, since call arguments evaluate once each,
+# left to right, and halves the statements a many-operand body (wgmma's up to
+# 128 accumulators) lowers to. A temporary the `llvmcall` does not consume (a
+# statically known argument) is dropped only when it is a bare variable;
+# anything else keeps the block as generated.
+function _inline_arguments(block::Expr)
+    block.head === :block || return block
+    stmts = block.args
+    call = stmts[end]
+    call isa Expr && call.head === :call || return block
+    meta = Any[]
+    binds = Dict{Symbol, Any}()
+    for st in @view stmts[1:end-1]
+        st isa Expr || return block
+        if st.head === :meta
+            push!(meta, st)
+        elseif st.head === :(=) && st.args[1] isa Symbol
+            binds[st.args[1]] = st.args[2]
+        else
+            return block
+        end
+    end
+    used = Set{Symbol}(a for a in call.args if a isa Symbol && haskey(binds, a))
+    for (tmp, ex) in binds
+        tmp in used || ex isa Symbol || return block
+    end
+    args = Any[a isa Symbol && haskey(binds, a) ? binds[a] : a for a in call.args]
+    Expr(:block, meta..., Expr(:call, args...))
 end

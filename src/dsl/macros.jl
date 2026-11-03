@@ -125,7 +125,8 @@ end
 # generator runs, under inference, where `eval` is forbidden and a new
 # binding would land in a newer world than the one the body compiles in.
 # That context can only call, never define, so it gets the literal.
-function _operation_binding!(mod::Module, spelling::String, op::Symbol, mods::Tuple)
+Base.@nospecializeinfer function _operation_binding!(
+        mod::Module, spelling::String, op::Symbol, @nospecialize(mods::Tuple))
     literal = :( $Operation{$(QuoteNode(op)), $mods}() )
     ccall(:jl_is_in_pure_context, Bool, ()) && return literal
     name = Symbol("#ptx#", spelling)

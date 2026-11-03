@@ -400,9 +400,12 @@ end
         r"wgmma\.mma_async\.sync\.aligned\.m64n8k16\.f32\.bf16\.bf16 \{[^}]+\}, \{[^}]+\}, %rd\d+, %p\d+, 1, 1, 0;",
         ptx)
     @test occursin("cvt.rn.bf16x2.f32", ptx)     # dequant pack
-    # NVPTX loads the s8 into a 16-bit register (ld.shared.s8 sign-extends)
-    # and converts from there — there is no cvt.rn.f32.s8 in the output.
-    @test occursin("ld.shared.s8", ptx)
+    # NVPTX loads the s8 into a 16-bit register and converts from there —
+    # there is no cvt.rn.f32.s8 in the output. A scalar load sign-extends
+    # itself (ld.shared.s8); when the access alignment is known, adjacent
+    # loads merge into ld.shared.v2.b8 and cvt.s16.s8 sign-extends.
+    @test occursin("ld.shared.s8", ptx) ||
+          (occursin(r"ld\.shared\.v[24]\.b8", ptx) && occursin("cvt.s16.s8", ptx))
     @test occursin("cvt.rn.f32.s16", ptx)
 end
 

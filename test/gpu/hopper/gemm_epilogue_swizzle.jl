@@ -171,7 +171,7 @@ end
     @test occursin("wgmma.mma_async.sync.aligned.m64n8k32.s32.s8.s8", ptx)
     @test occursin("st.global.v4.b32", ptx)
     @test occursin("st.shared.b8", ptx)         # the staging writes
-    @test occursin("ld.shared.b32", ptx)        # the vectorized-drain reads
+    @test occursin(r"ld\.shared(\.v[24])?\.b32", ptx)  # the vectorized-drain reads
     @test occursin("cp.async.bulk.tensor.2d.shared::cta.global.tile.mbarrier::complete_tx::bytes", ptx)
 end
 
