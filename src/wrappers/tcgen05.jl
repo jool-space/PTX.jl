@@ -1318,7 +1318,9 @@ end
 # NTuple type whose every use (iteration, `unique`) compiles a specialization
 # sized to it, costing over a second of precompilation.
 const TCGEN05_INTEGER_ADDRESS_ADAPTERS = let specs = _TCGEN05_ADAPTER_SPECS
-    allunique((s.mods, s.argtypes) for s in specs) ||
+    # Compared as records (one concrete type, content-hashed by `objectid`)
+    # rather than as `(mods, argtypes)` tuples, whose concrete types vary.
+    allunique(specs) ||
         error("duplicate tcgen05 integer-address adapter signature")
     copy(specs)
 end

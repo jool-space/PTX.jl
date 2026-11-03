@@ -50,9 +50,70 @@ _asm_operand(@nospecialize(T::Type), @nospecialize(ex)) =
          :(reinterpret(Core.LLVMPtr{UInt8, $(T.parameters[2])}, $ex))) :
         (T, ex)
 
+# Static description of one asm call site, carried as type parameters so the
+# emitter's generator depends on nothing but its argument types.
+struct AsmSpec{asm, constraints, sideeffect, attrs} end
+
+# Declared type of an emitter argument `x` standing for the `n` operands
+# `x[1], …, x[n]`, each of type `T`. Wrappers spread accumulator tuples into
+# up to 128 operands; passing the tuple keeps their bodies small, and the
+# generator expands it back into the same operands.
+struct _Spread{n, T} end
+
+# `ex` is `x[k]` for a variable `x`: return `x`.
+_spread_base(ex, k::Int) =
+    ex isa Expr && ex.head === :ref && length(ex.args) == 2 &&
+    ex.args[1] isa Symbol && ex.args[2] === k ? ex.args[1] : nothing
+
+# Fold each run of operands `x[1], …, x[n]` (n ≥ 2) of one declared type into
+# the single argument `x`, declared `_Spread{n, T}`.
+function _fold_spreads(@nospecialize(argtypes), @nospecialize(args))
+    types = Any[]
+    exprs = Any[]
+    i = 1
+    while i <= length(args)
+        x = _spread_base(args[i], 1)
+        j = i
+        if x !== nothing
+            while j < length(args) && argtypes[j + 1] === argtypes[i] &&
+                  _spread_base(args[j + 1], j - i + 2) === x
+                j += 1
+            end
+        end
+        if j > i
+            push!(types, _Spread{j - i + 1, argtypes[i]})
+            push!(exprs, x)
+        else
+            push!(types, argtypes[i])
+            push!(exprs, args[i])
+        end
+        i = j + 1
+    end
+    types, exprs
+end
+
+# The expression a wrapper body embeds: a call to the lazy emitter, which
+# builds the `llvmcall` IR when the wrapper is first compiled. Building the IR
+# here, for every wrapper as it is defined, is most of the precompile time and
+# the package image of the asm-tier families, which define thousands of
+# wrappers a kernel uses a handful of.
 function _asmcall(asm::String, constraints::String, @nospecialize(rettype::Type),
                   @nospecialize(argtypes), @nospecialize(args); sideeffect::Bool,
                   attrs::Tuple{Vararg{String}})
+    length(argtypes) == length(args) ||
+        error("asm call: $(length(args)) arguments for $(length(argtypes)) argument types")
+    spec = AsmSpec{Symbol(asm), Symbol(constraints), sideeffect, map(Symbol, attrs)}()
+    types, exprs = _fold_spreads(argtypes, args)
+    call = Expr(:call, GlobalRef(@__MODULE__, :_lazy_asmcall), spec, rettype,
+                Tuple{types...}, exprs...)
+    device_only(call, asm)
+end
+
+# The `llvmcall` expression for an asm call: built by `_lazy_asmcall`'s
+# generator, on argument expressions that index its vararg tuple.
+function _asm_llvmcall(asm::String, constraints::String, @nospecialize(rettype::Type),
+                       @nospecialize(argtypes), @nospecialize(args); sideeffect::Bool,
+                       attrs::Tuple{Vararg{String}})
     length(argtypes) == length(args) ||
         error("asm call: $(length(args)) arguments for $(length(argtypes)) argument types")
     # Index instead of `collect`ing: the call sites pass hundreds of distinct
@@ -91,7 +152,7 @@ function _asmcall(asm::String, constraints::String, @nospecialize(rettype::Type)
         end
         ret
     end
-    device_only(_inline_arguments(call), asm)
+    _inline_arguments(call)
 end
 
 # The struct a multi-output asm call returns. Textual IR spells a literal
@@ -139,4 +200,23 @@ function _inline_arguments(block::Expr)
     end
     args = Any[a isa Symbol && haskey(binds, a) ? binds[a] : a for a in call.args]
     Expr(:block, meta..., Expr(:call, args...))
+end
+
+@generated function _lazy_asmcall(::AsmSpec{asm, constraints, sideeffect, attrs},
+                                  ::Type{R}, ::Type{AT}, args...) where
+                                 {asm, constraints, sideeffect, attrs, R, AT}
+    types = Any[]
+    exprs = Any[]
+    for (k, T) in enumerate(AT.parameters)
+        if T <: _Spread
+            n, E = T.parameters
+            append!(types, ntuple(_ -> E, n))
+            append!(exprs, [:(args[$k][$i]) for i in 1:n])
+        else
+            push!(types, T)
+            push!(exprs, :(args[$k]))
+        end
+    end
+    _asm_llvmcall(String(asm), String(constraints), R, types, exprs;
+                  sideeffect, attrs = map(String, attrs))
 end
