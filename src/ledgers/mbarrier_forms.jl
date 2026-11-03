@@ -32,6 +32,10 @@ struct MBarrierFormSchema
     space::Symbol
     provenance::Symbol
     section::String
+
+    # Tuple-typed fields vary in length between entries; one unspecialized
+    # constructor instead of one compiled per length combination.
+    Base.@nospecializeinfer MBarrierFormSchema(@nospecialize(args...)) = new(args...)
 end
 
 const _MBARRIER_SECTION =
@@ -39,8 +43,9 @@ const _MBARRIER_SECTION =
 
 _mb_max_version(xs...) = maximum(xs)
 
-function _mbarrier_form!(schemas, mods, ptxmods, destination, variants,
-                         space; provenance::Symbol = :canonical)
+Base.@nospecializeinfer function _mbarrier_form!(
+        schemas, @nospecialize(mods), @nospecialize(ptxmods), destination,
+        @nospecialize(variants), space; provenance::Symbol = :canonical)
     destination in (:none, :sink, :state, :remote_sink, :predicate, :count,
                     :report_pred, :report) ||
         error("invalid mbarrier destination shape: ", destination)

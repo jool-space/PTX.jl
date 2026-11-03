@@ -16,11 +16,15 @@ struct ScalarResultSchema
     feature_set::Symbol
     provenance::Symbol
     section::String
+
+    # Tuple-typed fields vary in length between entries; one unspecialized
+    # constructor instead of one compiled per length combination.
+    Base.@nospecializeinfer ScalarResultSchema(@nospecialize(args...)) = new(args...)
 end
 
-function _scalar_result_schema!(schemas, op, mods, rettype, operands,
-                                ptx_version, min_sm, feature_set, section;
-                                provenance = :isa)
+Base.@nospecializeinfer function _scalar_result_schema!(
+        schemas, op, @nospecialize(mods), @nospecialize(rettype), @nospecialize(operands),
+        ptx_version, min_sm, feature_set, section; provenance = :isa)
     feature_set in (:baseline, :family, :arch) ||
         error("invalid audited scalar-result feature set: ", feature_set)
     provenance in (:isa, :ptxas_compat) ||

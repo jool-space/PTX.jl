@@ -112,6 +112,10 @@ struct Intrinsic
     ranges::Tuple{Vararg{Tuple{Int,Int,Int}}}
     argnames::Tuple{Vararg{Tuple{Int,Symbol}}}
     argattrs::Tuple{Vararg{Tuple{Int,Symbol}}}
+
+    # Tuple-typed fields vary in length between entries; one unspecialized
+    # constructor instead of one compiled per length combination.
+    Base.@nospecializeinfer Intrinsic(@nospecialize(args...)) = new(args...)
 end
 
 """
@@ -126,9 +130,13 @@ overloaded(i::Intrinsic) =
 
 const TABLE = Dict{String,Intrinsic}()
 
-function intr(name::String, ret::Tuple, params::Tuple, props::Tuple;
-              immargs::Tuple=(), ranges::Tuple=(), argnames::Tuple=(),
-              argattrs::Tuple=())
+# Called once per table row with ~200 distinct tuple shapes; unspecialized so
+# loading the table compiles this once.
+Base.@nospecializeinfer function intr(
+        name::String, @nospecialize(ret::Tuple), @nospecialize(params::Tuple),
+        @nospecialize(props::Tuple); @nospecialize(immargs::Tuple=()),
+        @nospecialize(ranges::Tuple=()), @nospecialize(argnames::Tuple=()),
+        @nospecialize(argattrs::Tuple=()))
     TABLE[name] = Intrinsic(name, ret, params, props,
                             immargs, ranges, argnames, argattrs)
     return nothing

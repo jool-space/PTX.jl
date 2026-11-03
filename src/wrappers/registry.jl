@@ -27,6 +27,10 @@ struct WrapperRecord
     mods::Tuple{Vararg{Symbol}}
     tier::Symbol
     intrinsic::Union{String, Nothing}
+
+    # Tuple-typed fields vary in length between entries; one unspecialized
+    # constructor instead of one compiled per length combination.
+    Base.@nospecializeinfer WrapperRecord(@nospecialize(args...)) = new(args...)
 end
 
 const WRAPPER_REGISTRY = WrapperRecord[]
@@ -44,9 +48,9 @@ protect. `tier` must be `:intrinsic`, `:asm`, `:core_ir`, or `:missing`;
 `intrinsic` is required for `:intrinsic`/`:missing` records and must be
 absent otherwise.
 """
-function register_wrapper!(family::Symbol, op::Symbol,
-                           mods::Tuple{Vararg{Symbol}}, tier::Symbol,
-                           intrinsic::Union{String, Nothing} = nothing)
+Base.@nospecializeinfer function register_wrapper!(
+        family::Symbol, op::Symbol, @nospecialize(mods::Tuple{Vararg{Symbol}}),
+        tier::Symbol, intrinsic::Union{String, Nothing} = nothing)
     tier in (:intrinsic, :asm, :core_ir, :missing) ||
         error("register_wrapper!: unknown tier $tier")
     (tier in (:intrinsic, :missing)) == (intrinsic isa String) ||
@@ -72,9 +76,9 @@ is recorded as a `:missing` record and `nothing` is returned — the caller
 skips the method and the conformance counts fail loudly (used by families
 whose forms have no asm fallback).
 """
-function wrapper_intrinsic_call(family::Symbol, op::Symbol,
-                                mods::Tuple{Vararg{Symbol}}, name::String;
-                                missing_ok::Bool = false)
+Base.@nospecializeinfer function wrapper_intrinsic_call(
+        family::Symbol, op::Symbol, @nospecialize(mods::Tuple{Vararg{Symbol}}),
+        name::String; missing_ok::Bool = false)
     if !NVVM.isintrinsic(name)
         missing_ok ||
             error("$family generator built an unregistered intrinsic name: $name")

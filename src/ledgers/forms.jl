@@ -329,7 +329,8 @@ use the generic/raw chain (currently the implicit-`CC.CF` family). Callers
 distinguish the fail-loud semantic boundary from an ordinary unregistered
 opcode before considering the explicit raw tier.
 """
-function form_contract(op::Symbol, mods::Tuple{Vararg{Symbol}})
+Base.@nospecializeinfer function form_contract(
+        op::Symbol, @nospecialize(mods::Tuple{Vararg{Symbol}}))
     # CC.CF cannot cross an LLVM inline-asm call boundary.  Typed wrappers in
     # wrappers/extended_precision.jl expose the flag explicitly or fuse the
     # complete operation; the generic and raw tiers must never claim a scalar

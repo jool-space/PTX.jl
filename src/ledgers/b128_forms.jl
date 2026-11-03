@@ -44,6 +44,10 @@ struct B128FormSchema
     operands::Tuple{Vararg{Symbol}}
     cache_policy::Bool
     section::String
+
+    # Tuple-typed fields vary in length between entries; one unspecialized
+    # constructor instead of one compiled per length combination.
+    Base.@nospecializeinfer B128FormSchema(@nospecialize(args...)) = new(args...)
 end
 
 const _B128_MOV_SECTION =

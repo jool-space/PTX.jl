@@ -111,6 +111,11 @@
 struct TCGen05IntegerAddressAdapter
     mods::Tuple{Vararg{Symbol}}
     argtypes::Tuple{Vararg{Type}}
+
+    # Tuple-typed fields vary in length between entries; one unspecialized
+    # constructor instead of one compiled per length combination.
+    Base.@nospecializeinfer TCGen05IntegerAddressAdapter(@nospecialize(args...)) =
+        new(args...)
 end
 
 const _TCGEN05_ADAPTER_SPECS = TCGen05IntegerAddressAdapter[]
@@ -118,7 +123,8 @@ const _TCGEN05_ADAPTER_SPECS = TCGen05IntegerAddressAdapter[]
 # Record the adapter signature and define the Address-unwrapping method that
 # forwards to the primary typed wrapper. Duplicate signatures are rejected
 # when the closed inventory is sealed below.
-function _tcgen05_adapter!(mods::Tuple{Vararg{Symbol}}, argtypes::Type...)
+Base.@nospecializeinfer function _tcgen05_adapter!(
+        @nospecialize(mods::Tuple{Vararg{Symbol}}), @nospecialize(argtypes::Type...))
     push!(_TCGEN05_ADAPTER_SPECS,
           TCGen05IntegerAddressAdapter(mods, argtypes))
     names = [gensym(:arg) for _ in argtypes]
@@ -1308,12 +1314,14 @@ end
 # so this closed set cannot drift from the typed surface; the independent
 # oracle in test/host/address_roles.jl pins both the form set and the
 # signature set.
+# Both inventories stay Vectors: a Tuple of thousands of elements gets an
+# NTuple type whose every use (iteration, `unique`) compiles a specialization
+# sized to it, costing over a second of precompilation.
 const TCGEN05_INTEGER_ADDRESS_ADAPTERS = let specs = _TCGEN05_ADAPTER_SPECS
-    keys = ((s.mods, s.argtypes) for s in specs)
-    allunique(keys) ||
+    allunique((s.mods, s.argtypes) for s in specs) ||
         error("duplicate tcgen05 integer-address adapter signature")
-    Tuple(specs)
+    copy(specs)
 end
 
 const TCGEN05_INTEGER_ADDRESS_FORMS =
-    Tuple(unique(s.mods for s in TCGEN05_INTEGER_ADDRESS_ADAPTERS))
+    unique(s.mods for s in TCGEN05_INTEGER_ADDRESS_ADAPTERS)
