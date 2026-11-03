@@ -109,8 +109,12 @@ function _asmcall(asm::String, constraints::String, @nospecialize(rettype::Type)
     device_only(call, asm)
 end
 
-# The `llvmcall` expression for an asm call: built by `_lazy_asmcall`'s
-# generator, on argument expressions that index its vararg tuple.
+# The `llvmcall` expression for an asm call on the argument expressions
+# `args`, built by `_lazy_asmcall`'s generator. An argument type
+# `_Spread{n, T}` passes the `NTuple{n, T}` its expression evaluates to as one
+# `llvmcall` argument, which the IR unpacks into `n` asm operands of type `T`.
+# Lowering a call on hundreds of operand expressions (`x[1], …, x[128]`) costs
+# several times more than building its IR, so the tuple is not spread in Julia.
 function _asm_llvmcall(asm::String, constraints::String, @nospecialize(rettype::Type),
                        @nospecialize(argtypes), @nospecialize(args); sideeffect::Bool,
                        attrs::Tuple{Vararg{String}})
@@ -120,39 +124,33 @@ function _asm_llvmcall(asm::String, constraints::String, @nospecialize(rettype::
     # tuple types, each of which would compile its own specialization.
     abitypes = Any[]
     argexprs = Any[]
+    widths = Int[]
     for i in 1:length(args)
-        T, ex = _asm_operand(argtypes[i], args[i])
-        push!(abitypes, T)
-        push!(argexprs, ex)
-    end
-    call = generate_llvmcall(rettype, Tuple{abitypes...},
-                             argexprs...) do builder, @nospecialize(params...)
-        T_ret = convert(LLVMType, rettype)
-        # LLVM dictates the asm's return shape from the number of outputs:
-        # one returns the scalar, several a literal struct. Julia lowers a
-        # homogeneous tuple to an array instead, so that shape is repacked.
-        comps = rettype <: Tuple ? LLVMType[convert(LLVMType, T)
-                                            for T in rettype.parameters] : nothing
-        T_asm = rettype === Nothing ? LLVM.VoidType() :
-                comps === nothing ? T_ret :
-                length(comps) == 1 ? only(comps) : _asm_outputs_type(comps)
-        values = Value[params[i] for i in 1:length(params)]
-        asm_ft = LLVM.FunctionType(T_asm, LLVMType[v.value_type for v in values])
-        call = call!(builder, asm_ft,
-                     InlineAsm(asm_ft, asm, constraints, sideeffect), values)
-        for attr in attrs
-            push!(call.function_attributes, EnumAttribute(attr))
+        T = argtypes[i]
+        if T <: _Spread
+            n, E = T.parameters
+            push!(abitypes, NTuple{n, E})
+            push!(argexprs, args[i])
+            push!(widths, n)
+        else
+            (Base.isType(T) || Base.issingletontype(T)) &&
+                throw(ArgumentError("asm call: argument $i of type $T has no LLVM " *
+                                    "representation"))
+            T, ex = _asm_operand(T, args[i])
+            push!(abitypes, T)
+            push!(argexprs, ex)
+            push!(widths, 0)
         end
-        rettype === Nothing && return nothing
-        T_asm == T_ret && return call
-        ret = LLVM.UndefValue(T_ret)
-        for i in 0:length(comps)-1
-            elem = length(comps) == 1 ? call : extract_value!(builder, call, i)
-            ret = insert_value!(builder, ret, elem, i)
-        end
-        ret
     end
-    _inline_arguments(call)
+    # The IR is for Julia's code generator, so its types come from Julia's
+    # LLVM, also when another library is LLVM.jl's current one.
+    ir = LLVM.library!(:julia) do
+        _asm_ir(asm, constraints, rettype, abitypes, widths, sideeffect, attrs)
+    end
+    llvmcall = Expr(:call, GlobalRef(Core.Intrinsics, :llvmcall),
+                    Expr(:tuple, ir, "entry"), rettype, Tuple{abitypes...})
+    append!(llvmcall.args, argexprs)
+    Expr(:block, Expr(:meta, :inline), llvmcall)
 end
 
 # The struct a multi-output asm call returns. Textual IR spells a literal
@@ -163,44 +161,157 @@ end
 # types readable on the call line.
 const _NAMED_ASM_OUTPUTS_MIN = 16
 
-function _asm_outputs_type(comps::Vector{LLVMType})
-    length(comps) < _NAMED_ASM_OUTPUTS_MIN && return LLVM.StructType(comps)
-    T = LLVM.StructType("asm.outputs")
-    LLVM.elements!(T, comps)
-    T
+# Textual IR of the `llvmcall` module: an `entry` function calling the inline
+# asm, laid out as LLVM prints a module, since tests match it. Only the types
+# go through LLVM, taken from Julia's own lowering of each Julia type, which
+# fixes the pointer spelling (typed on Julia 1.10) and the tuple lowering.
+# Building a module to print and parse it again costs three times as much.
+function _asm_ir(asm::String, constraints::String, @nospecialize(rettype::Type),
+                 abitypes::Vector{Any}, widths::Vector{Int}, sideeffect::Bool,
+                 attrs::Tuple{Vararg{String}})
+    @dispose ctx=LLVM.Context() begin
+        lowered = IdDict{Any, LLVMType}()
+        lower(@nospecialize(T)) = get!(() -> convert(LLVMType, T), lowered, T)
+        T_ret = lower(rettype)
+        # LLVM dictates the asm's return shape from the number of outputs:
+        # one returns the scalar, several a struct. Julia lowers a homogeneous
+        # tuple to an array instead, so that shape is repacked.
+        comps = rettype <: Tuple ?
+            LLVMType[lower(T) for T in rettype.parameters] : nothing
+        named = comps !== nothing && length(comps) >= _NAMED_ASM_OUTPUTS_MIN
+        T_asm = rettype === Nothing ? LLVM.VoidType() :
+                comps === nothing ? T_ret :
+                length(comps) == 1 ? only(comps) :
+                named ? nothing : LLVM.StructType(comps)
+        repack = rettype !== Nothing && T_asm != T_ret
+        s_ret = string(T_ret)
+        s_asm = T_asm === nothing ? "%asm.outputs" : string(T_asm)
+
+        io = IOBuffer()
+        print(io, "; ModuleID = 'llvmcall'\nsource_filename = \"llvmcall\"\n\n")
+        if named
+            print(io, "%asm.outputs = type { ")
+            join(io, (string(T) for T in comps), ", ")
+            print(io, " }\n\n")
+        end
+        print(io, "; Function Attrs: alwaysinline\ndefine ", s_ret, " @entry(")
+        s_args = String[string(lower(T)) for T in abitypes]
+        for i in eachindex(s_args)
+            i > 1 && print(io, ", ")
+            print(io, s_args[i], " %", i - 1)
+        end
+        print(io, ") #0 {\nentry:\n")
+        # Unnamed values number on from the parameters.
+        nextval = length(abitypes)
+        operands = String[]
+        for i in eachindex(abitypes)
+            if widths[i] == 0
+                push!(operands, string(s_args[i], " %", i - 1))
+                continue
+            end
+            T_tuple = lower(abitypes[i])
+            T_tuple isa LLVM.ArrayType ||
+                error("asm call: spread operand type $(abitypes[i]) lowers to " *
+                      "$(string(T_tuple)), not an array")
+            s_elem = string(T_tuple.element_type)
+            for j in 0:widths[i]-1
+                print(io, "  %", nextval, " = extractvalue ", s_args[i], " %", i - 1,
+                      ", ", j, "\n")
+                push!(operands, string(s_elem, " %", nextval))
+                nextval += 1
+            end
+        end
+        _check_constraints(constraints, rettype === Nothing ? 0 :
+                                        comps === nothing ? 1 : length(comps),
+                           length(operands))
+        print(io, "  ")
+        if rettype !== Nothing
+            call = nextval
+            print(io, "%", call, " = ")
+            nextval += 1
+        end
+        print(io, "call ", rettype === Nothing ? "void" : s_asm, " asm ",
+              sideeffect ? "sideeffect " : "")
+        _escaped_string(io, asm)
+        print(io, ", ")
+        _escaped_string(io, constraints)
+        print(io, "(")
+        join(io, operands, ", ")
+        print(io, ")", isempty(attrs) ? "" : " #1", "\n")
+        if rettype === Nothing
+            print(io, "  ret void\n")
+        elseif !repack
+            print(io, "  ret ", s_ret, " %", call, "\n")
+        else
+            agg = "undef"
+            for i in 0:length(comps)-1
+                s_elem = string(comps[i+1])
+                elem = call
+                if length(comps) > 1
+                    print(io, "  %", nextval, " = extractvalue ", s_asm, " %", call,
+                          ", ", i, "\n")
+                    elem = nextval
+                    nextval += 1
+                end
+                print(io, "  %", nextval, " = insertvalue ", s_ret, " ", agg, ", ",
+                      s_elem, " %", elem, ", ", i, "\n")
+                agg = string("%", nextval)
+                nextval += 1
+            end
+            print(io, "  ret ", s_ret, " ", agg, "\n")
+        end
+        print(io, "}\n\nattributes #0 = { alwaysinline }\n")
+        # LLVM prints a group's enum attributes in alphabetical order.
+        isempty(attrs) ||
+            print(io, "attributes #1 = { ", join(sort!(collect(attrs)), " "), " }\n")
+        String(take!(io))
+    end
 end
 
-# `generate_llvmcall` binds each argument expression to a temporary so it is
-# evaluated once and in order. Passing the expressions to the `llvmcall`
-# directly keeps both guarantees, since call arguments evaluate once each,
-# left to right, and halves the statements a many-operand body (wgmma's up to
-# 128 accumulators) lowers to. A temporary the `llvmcall` does not consume (a
-# statically known argument) is dropped only when it is a bare variable;
-# anything else keeps the block as generated.
-function _inline_arguments(block::Expr)
-    block.head === :block || return block
-    stmts = block.args
-    call = stmts[end]
-    call isa Expr && call.head === :call || return block
-    meta = Any[]
-    binds = Dict{Symbol, Any}()
-    for st in @view stmts[1:end-1]
-        st isa Expr || return block
-        if st.head === :meta
-            push!(meta, st)
-        elseif st.head === :(=) && st.args[1] isa Symbol
-            binds[st.args[1]] = st.args[2]
-        else
-            return block
+# Julia parses the IR only when it compiles the `llvmcall`, and turns a parse
+# error into a call that throws at run time, which a device compile rejects
+# without the parser's message. So check here the mismatch the parser rejects
+# an asm call for: a constraint list naming `=` outputs (other than indirect
+# `=*` ones, which take an operand) and inputs (`~` clobbers are neither) in
+# numbers other than the call returns and passes.
+function _check_constraints(constraints::String, nout::Int, nin::Int)
+    outs = ins = 0
+    for c in eachsplit(constraints, ',')
+        if startswith(c, "=*")
+            ins += 1
+        elseif startswith(c, '=')
+            outs += 1
+        elseif !startswith(c, '~')
+            ins += 1
         end
     end
-    used = Set{Symbol}(a for a in call.args if a isa Symbol && haskey(binds, a))
-    for (tmp, ex) in binds
-        tmp in used || ex isa Symbol || return block
-    end
-    args = Any[a isa Symbol && haskey(binds, a) ? binds[a] : a for a in call.args]
-    Expr(:block, meta..., Expr(:call, args...))
+    outs == nout && ins == nin && return nothing
+    error("asm call: constraints \"$constraints\" name $outs outputs and $ins " *
+          "inputs, but the call returns $nout and passes $nin")
 end
+
+# A string constant as LLVM prints one: `\` doubled, printable ASCII other
+# than `"` as is, every other byte as `\` and two uppercase hex digits.
+function _escaped_string(io::IO, s::String)
+    write(io, '"')
+    for b in codeunits(s)
+        if b == UInt8('\\')
+            write(io, "\\\\")
+        elseif 0x20 <= b <= 0x7e && b != UInt8('"')
+            write(io, b)
+        else
+            write(io, '\\', "0123456789ABCDEF"[(b >> 4) + 1],
+                  "0123456789ABCDEF"[(b & 0x0f) + 1])
+        end
+    end
+    write(io, '"')
+end
+
+# A spread argument passes whole when its value is the operand tuple exactly:
+# a tuple of another type is indexed, and LLVMPtr operands are retyped one by
+# one.
+_passes_whole(@nospecialize(T), n::Int, @nospecialize(E)) =
+    T === NTuple{n, E} && isprimitivetype(E) && !(E <: Core.LLVMPtr)
 
 @generated function _lazy_asmcall(::AsmSpec{asm, constraints, sideeffect, attrs},
                                   ::Type{R}, ::Type{AT}, args...) where
@@ -208,10 +319,12 @@ end
     types = Any[]
     exprs = Any[]
     for (k, T) in enumerate(AT.parameters)
-        if T <: _Spread
+        if T <: _Spread && !_passes_whole(args[k], T.parameters[1], T.parameters[2])
             n, E = T.parameters
-            append!(types, ntuple(_ -> E, n))
-            append!(exprs, [:(args[$k][$i]) for i in 1:n])
+            for i in 1:n
+                push!(types, E)
+                push!(exprs, :(args[$k][$i]))
+            end
         else
             push!(types, T)
             push!(exprs, :(args[$k]))
