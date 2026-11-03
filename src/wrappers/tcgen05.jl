@@ -101,13 +101,15 @@
 # and pointer commit forms need no entry because `address(::Core.LLVMPtr)` is
 # identity.
 #
-# Adapters are emitted by the SAME enumeration that emits (or, for the
-# literal families, sits next to) the primary methods: each registration
-# site calls `_tcgen05_adapter!` with the exact signature it reviewed, and
-# `TCGEN05_INTEGER_ADDRESS_ADAPTERS` at the bottom of this file is the
-# collected result. The independent double-entry copy of this grid lives in
-# test/host/address_roles.jl, which pins both the form set and the
-# signature set.
+# Adapter signatures are recorded by the SAME enumeration that emits (or,
+# for the literal families, sits next to) the primary methods: each
+# registration site calls `_tcgen05_adapter!` with the exact signature it
+# reviewed, and `TCGEN05_INTEGER_ADDRESS_ADAPTERS` at the bottom of this file
+# is the collected result. One generated method at the bottom serves the
+# whole inventory: it admits exactly the recorded signatures and gives every
+# other `Address{UInt32}`-led call the chain default's body. The independent
+# double-entry copy of this grid lives in test/host/address_roles.jl, which
+# pins both the form set and the signature set.
 struct TCGen05IntegerAddressAdapter
     mods::Tuple{Vararg{Symbol}}
     argtypes::Tuple{Vararg{Type}}
@@ -120,20 +122,17 @@ end
 
 const _TCGEN05_ADAPTER_SPECS = TCGen05IntegerAddressAdapter[]
 
-# Record the adapter signature and define the Address-unwrapping method that
-# forwards to the primary typed wrapper. Duplicate signatures are rejected
-# when the closed inventory is sealed below.
-Base.@nospecializeinfer function _tcgen05_adapter!(
+# Record one adapter signature for the generated adapter method at the
+# bottom of this file. Every signature leads with the bracketed
+# `Address{UInt32}` operand, which is what routes a call to that method.
+# Duplicate signatures are rejected when the closed inventory is sealed.
+# `@noinline`: inlining this small body into a top-level registration loop
+# makes Julia 1.10's union-split inliner call `fieldcount` on the `Type...`
+# vararg tuple, which aborts the process.
+Base.@nospecializeinfer @noinline function _tcgen05_adapter!(
         @nospecialize(mods::Tuple{Vararg{Symbol}}), @nospecialize(argtypes::Type...))
     push!(_TCGEN05_ADAPTER_SPECS,
           TCGen05IntegerAddressAdapter(mods, argtypes))
-    names = [gensym(:arg) for _ in argtypes]
-    decls = [:($(names[i])::$(argtypes[i])) for i in eachindex(names)]
-    args = [argtypes[i] <: Address ? :($(names[i]).value) : names[i]
-            for i in eachindex(names)]
-    @eval @inline function (op::Operation{:tcgen05, $mods})($(decls...))
-        op($(args...))
-    end
     nothing
 end
 
@@ -206,7 +205,7 @@ end
 #
 # The full grid is `shape × count × {plain, repack}` for both ld and st,
 # generated from one spec (`_TCGEN05_LDST_SHAPES`) — 148 methods over 74
-# tier-2 names, each with its integer-address adapter emitted by the same
+# tier-2 names, each with its integer-address adapter recorded by the same
 # registration call. The wrapper registry (family :tcgen05_ldst) records
 # every name for the conformance replay (the dense-mma standing guarantee):
 # test/host/conformance.jl requires a selection probe per recorded name
@@ -1160,7 +1159,7 @@ end
 # schema (two scale addresses, no mask/scale-input-d); `ws` selects the
 # weight-stationary schema (trailing zero-column-mask form); `ashift`
 # restricts A to the TMEM species; `scale_ok` adds the scale-input-d
-# shapes. Integer-address adapters are emitted for every signature.
+# shapes. Integer-address adapters are recorded for every signature.
 function _tcgen05_mma94_register(family::Symbol, mods::Tuple{Vararg{Symbol}};
                                  cg::Int, meta::Bool = false,
                                  mx::Bool = false, ws::Bool = false,
@@ -1309,7 +1308,7 @@ let lut = Symbol("decompress::lut::b")
     end
 end
 
-# Seal the derived adapter inventory. Every signature above was emitted by
+# Seal the derived adapter inventory. Every signature above was recorded by
 # the same enumeration that registered (or accompanies) its primary method,
 # so this closed set cannot drift from the typed surface; the independent
 # oracle in test/host/address_roles.jl pins both the form set and the
@@ -1322,8 +1321,57 @@ const TCGEN05_INTEGER_ADDRESS_ADAPTERS = let specs = _TCGEN05_ADAPTER_SPECS
     # rather than as `(mods, argtypes)` tuples, whose concrete types vary.
     allunique(specs) ||
         error("duplicate tcgen05 integer-address adapter signature")
+    all(s -> first(s.argtypes) === Address{UInt32}, specs) ||
+        error("tcgen05 integer-address adapter must lead with Address{UInt32}")
     copy(specs)
 end
 
 const TCGEN05_INTEGER_ADDRESS_FORMS =
     unique(s.mods for s in TCGEN05_INTEGER_ADDRESS_ADAPTERS)
+
+# Whether the closed inventory admits a `tcgen05` call spelled `mods` with
+# argument types `argtypes`: some recorded signature for `mods` has the same
+# arity and admits every argument type positionally, exactly as a method with
+# that signature would under dispatch.
+Base.@nospecializeinfer function tcgen05_integer_address_adapter(
+        @nospecialize(mods::Tuple{Vararg{Symbol}}), @nospecialize(argtypes))
+    n = length(argtypes)
+    for s in TCGEN05_INTEGER_ADDRESS_ADAPTERS
+        s.mods === mods && length(s.argtypes) == n || continue
+        all(i -> argtypes[i] <: s.argtypes[i], 1:n) && return true
+    end
+    false
+end
+
+# The integer-address adapter method for the whole inventory. Every tcgen05
+# call led by an `Address{UInt32}` lands here (no typed wrapper takes one).
+# An admitted signature unwraps each Address and forwards to the typed
+# wrapper through ordinary dispatch, so the kernel sees the wrapper's body
+# behind its host gate. Any other signature takes the chain default's body
+# (dsl/entries.jl), so it fails at the same `build_call` check, with the
+# same error, as it would with no adapter. The inventory lookup runs in the
+# generator; device code carries only the forwarded call.
+@generated function (op::Operation{:tcgen05, mods})(
+        taddr::Address{UInt32}, rest::Vararg{Any, N}) where {mods, N}
+    argtypes = (taddr, rest...)
+    if tcgen05_integer_address_adapter(mods, argtypes)
+        vals = [rest[i] <: Address ? :(rest[$i].value) : :(rest[$i])
+                for i in 1:N]
+        return quote
+            Base.@inline
+            op(taddr.value, $(vals...))
+        end
+    end
+    body = _chain_call_expr(build_call(:tcgen05, mods, argtypes))
+    quote
+        Base.@inline
+        args = (taddr, rest...)
+        $body
+    end
+end
+
+# The method above, for reflection: `resolved_method` reports its
+# out-of-inventory signatures as the chain default whose body they take.
+const _TCGEN05_ADDRESS_ADAPTER_METHOD =
+    which(Operation{:tcgen05, (:shift, Symbol("cta_group::1"), :down)}(),
+          Tuple{Address{UInt32}})

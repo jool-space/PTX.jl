@@ -14,6 +14,18 @@
 const _CHAIN_METHOD     = which(Operation{:add, (:f32,)}(),    (Float32, Float32))
 const _RAW_CHAIN_METHOD = which(RawOperation{:add, (:f32,)}(), (Float32, Float32))
 
+# The method whose body a call of `o` with arguments of the given types runs:
+# `which`, except that a signature the tcgen05 integer-address adapter method
+# does not admit is reported as the chain default, whose body that method
+# takes for it (wrappers/tcgen05.jl).
+function resolved_method(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
+    argts = argtypes isa Type ? Tuple(argtypes.parameters) : Tuple(argtypes)
+    m = which(o, Tuple{argts...})
+    m === _TCGEN05_ADDRESS_ADAPTER_METHOD || return m
+    tcgen05_integer_address_adapter(typeof(o).parameters[2], argts) ? m :
+        _CHAIN_METHOD
+end
+
 function _walk_intrinsics!(names::Vector{String}, @nospecialize(x))
     if x isa NVVM.IntrinsicCall
         push!(names, String(typeof(x).parameters[1]))
@@ -85,7 +97,7 @@ its capability floor — that gate lives in the backend, not the registry.
 function lowering(o::Union{Operation, RawOperation}, @nospecialize(argtypes))
     argts = argtypes isa Type ? Tuple(argtypes.parameters) : Tuple(argtypes)
     op, mods = typeof(o).parameters
-    m = which(o, Tuple{argts...})
+    m = resolved_method(o, argts)
     if m === _CHAIN_METHOD || m === _RAW_CHAIN_METHOD
         raw = m === _RAW_CHAIN_METHOD
         forbidden = (; tier = :forbidden, method = m, rettype = nothing,
