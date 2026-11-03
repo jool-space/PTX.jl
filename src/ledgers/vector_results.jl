@@ -177,8 +177,8 @@ const VECTOR_RESULT_CORE_FORMS = let forms = VectorResultCoreForm[]
     forms
 end
 
-const _VECTOR_RESULT_CORE_BY_FORM = Dict(
-    (form.op, form.coremods) => form for form in VECTOR_RESULT_CORE_FORMS)
+const _VECTOR_RESULT_CORE_BY_FORM = Dict{FormKey, VectorResultCoreForm}(
+    FormKey(form.op, form.coremods) => form for form in VECTOR_RESULT_CORE_FORMS)
 
 const VECTOR_RESULT_COMPAT_FORMS = (
     VectorResultCompatForm(((:global, :v8, :f16, :max, :noftz),), _VECTOR_ATOM_SECTION),
@@ -191,12 +191,13 @@ const VECTOR_RESULT_COMPAT_FORMS = (
     VectorResultCompatForm(((:global, :v2, :f32, :add),), _VECTOR_ATOM_SECTION),
 )
 
-const _VECTOR_ATOM_COMPAT_SPELLINGS = let spellings = Dict{Tuple,Tuple}()
+# Compatibility `atom` spelling -> key of its canonical core form.
+const _VECTOR_ATOM_COMPAT_SPELLINGS = let spellings = Dict{FormKey, FormKey}()
     for compat in VECTOR_RESULT_COMPAT_FORMS, mods in compat.spellings
         vec, lane_kind, atomop = mods[2], mods[3], mods[4]
         core = lane_kind === :f32 ? (atomop, vec, lane_kind) :
                (atomop, :noftz, vec, lane_kind)
-        spellings[mods] = core
+        spellings[FormKey(:atom, mods)] = FormKey(:atom, core)
     end
     length(spellings) == 8 || error("atom compatibility spelling drift")
     spellings
@@ -332,9 +333,9 @@ end
 
 function schema(::VectorLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
     if op === :atom
-        compat_core = get(_VECTOR_ATOM_COMPAT_SPELLINGS, mods, nothing)
+        compat_core = get(_VECTOR_ATOM_COMPAT_SPELLINGS, FormKey(op, mods), nothing)
         if compat_core !== nothing
-            form = get(_VECTOR_RESULT_CORE_BY_FORM, (:atom, compat_core), nothing)
+            form = get(_VECTOR_RESULT_CORE_BY_FORM, compat_core, nothing)
             form === nothing && error("compatibility form lacks canonical atom core")
             return VectorResultSchema(form, mods, (:address, :vector), false,
                                       :ptxas_compat)
@@ -348,7 +349,7 @@ function schema(::VectorLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
     if op === :ld
         vecindex == length(mods) - 1 || return nothing
         core = (mods[vecindex], mods[end])
-        form = get(_VECTOR_RESULT_CORE_BY_FORM, (:ld, core), nothing)
+        form = get(_VECTOR_RESULT_CORE_BY_FORM, FormKey(:ld, core), nothing)
         form === nothing && return nothing
         info = _ld_prefix_info(mods[1:vecindex-1], form)
         info === nothing && return nothing
@@ -366,7 +367,7 @@ function schema(::VectorLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
         atomop = mods[j]
         core = noftz ? (atomop, :noftz, mods[vecindex], mods[end]) :
                         (atomop, mods[vecindex], mods[end])
-        form = get(_VECTOR_RESULT_CORE_BY_FORM, (:atom, core), nothing)
+        form = get(_VECTOR_RESULT_CORE_BY_FORM, FormKey(:atom, core), nothing)
         form === nothing && return nothing
         prefix = mods[1:j-1]
         info = _atom_prefix_info(prefix)
@@ -382,7 +383,7 @@ function schema(::VectorLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})
         core = acc ? (:ld_reduce, mods[opindex], mods[vecindex - 1],
                       mods[vecindex], mods[end]) :
                      (:ld_reduce, mods[opindex], mods[vecindex], mods[end])
-        form = get(_VECTOR_RESULT_CORE_BY_FORM, (:multimem, core), nothing)
+        form = get(_VECTOR_RESULT_CORE_BY_FORM, FormKey(:multimem, core), nothing)
         form === nothing && return nothing
         info = _multimem_prefix_info(mods[1:opindex-1])
         info === nothing && return nothing

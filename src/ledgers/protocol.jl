@@ -42,6 +42,24 @@ function miss end
 function validate_ledger_args end
 function result_type end
 
+"""
+    FormKey(op, mods)
+
+Key of the islands' exact-form tables: one opcode and its modifier tuple.
+
+The default `hash`/`isequal` compare it by content (through `objectid`/`===`),
+and it is one concrete type whatever `mods`' length. An `(op, mods)` tuple key
+would carry `mods`' concrete type, compiling the hash-table operations once
+per modifier count.
+"""
+struct FormKey
+    op::Symbol
+    mods::Tuple{Vararg{Symbol}}
+
+    Base.@nospecializeinfer FormKey(
+            op::Symbol, @nospecialize(mods::Tuple{Vararg{Symbol}})) = new(op, mods)
+end
+
 # Vector-result markers live here because the partition keys on them; the
 # vector ledger's schema resolver shares this set.
 const _VECTOR_MARKERS = Set((:v2, :v4, :v8))

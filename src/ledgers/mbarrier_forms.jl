@@ -340,13 +340,13 @@ const MBARRIER_FORM_SCHEMAS = let schemas = MBarrierFormSchema[]
     schemas
 end
 
-const _MBARRIER_SCHEMA_BY_FORM =
-    Dict(schema.mods => schema for schema in MBARRIER_FORM_SCHEMAS)
+const _MBARRIER_SCHEMA_BY_FORM = Dict{FormKey, MBarrierFormSchema}(
+    FormKey(:mbarrier, schema.mods) => schema for schema in MBARRIER_FORM_SCHEMAS)
 length(_MBARRIER_SCHEMA_BY_FORM) == length(MBARRIER_FORM_SCHEMAS) ||
     error("duplicate keys in MBARRIER_FORM_SCHEMAS")
 
 schema(::MBarrierLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    op === :mbarrier ? get(_MBARRIER_SCHEMA_BY_FORM, mods, nothing) : nothing
+    get(_MBARRIER_SCHEMA_BY_FORM, FormKey(op, mods), nothing)
 
 # `op` is always :mbarrier for a routed miss; the spelling is fixed.
 function miss(::MBarrierLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})

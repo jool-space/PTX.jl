@@ -641,8 +641,9 @@ end
 end
 
 @testset "clusterlaunchcontrol.try_cancel closed address schema" begin
-    actual = Set((mods, schema.shared_cta, schema.multicast)
-                 for (mods, schema) in PTX.CLC_TRY_CANCEL_FORMS)
+    @test all(key.op === :clusterlaunchcontrol for key in keys(PTX.CLC_TRY_CANCEL_FORMS))
+    actual = Set((key.mods, schema.shared_cta, schema.multicast)
+                 for (key, schema) in PTX.CLC_TRY_CANCEL_FORMS)
     expected = Set(EXPECTED_CLC_TRY_CANCEL_FORMS)
     @test actual == expected
     @test length(PTX.CLC_TRY_CANCEL_FORMS) == 4
