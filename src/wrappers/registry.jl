@@ -34,9 +34,10 @@ struct WrapperRecord
 end
 
 const WRAPPER_REGISTRY = WrapperRecord[]
-const _WRAPPER_KEYS =
-    Set{Tuple{Symbol, Symbol, Tuple{Vararg{Symbol}}, Symbol,
-              Union{String, Nothing}}}()
+# Keyed by the record itself: one concrete key type, hashed and compared by
+# content through `objectid`/`===`. A tuple key would carry `mods`' concrete
+# type, compiling the hash-table operations once per modifier count.
+const _WRAPPER_KEYS = Set{WrapperRecord}()
 
 """
     register_wrapper!(family, op, mods, tier[, intrinsic])
@@ -57,10 +58,10 @@ Base.@nospecializeinfer function register_wrapper!(
         error("register_wrapper!: tier $tier " *
               (intrinsic === nothing ? "requires" : "does not take") *
               " an intrinsic name")
-    key = (family, op, mods, tier, intrinsic)
-    key in _WRAPPER_KEYS && return nothing
-    push!(_WRAPPER_KEYS, key)
-    push!(WRAPPER_REGISTRY, WrapperRecord(family, op, mods, tier, intrinsic))
+    record = WrapperRecord(family, op, mods, tier, intrinsic)
+    record in _WRAPPER_KEYS && return nothing
+    push!(_WRAPPER_KEYS, record)
+    push!(WRAPPER_REGISTRY, record)
     nothing
 end
 
