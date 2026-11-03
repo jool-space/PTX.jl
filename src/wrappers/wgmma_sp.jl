@@ -64,7 +64,7 @@ function wgmma_sp_spec(dtype_d::Symbol, dtype_a::Symbol, dtype_b::Symbol,
                        n::Int, k::Int, has_trans::Bool, sel::Int)
     nd, _, d_let = _wgmma_dvec_kind(dtype_d, n)
     head = "wgmma.mma_async.sp.sync.aligned.m64n$(n)k$(k).$dtype_d.$dtype_a.$dtype_b"
-    d_slots = "{" * join(("\$$i" for i in 0:nd-1), ", ") * "}"
+    d_slots = "{" * _asm_slots(0:nd-1) * "}"
     imms_tail = if dtype_d === :s32
         ""
     elseif has_trans
@@ -96,7 +96,7 @@ function _wgmma_sp_register(dtype_d::Symbol, dtype_a::Symbol, dtype_b::Symbol,
         spec = wgmma_sp_spec(dtype_d, dtype_a, dtype_b, n, k, has_trans, sel)
         nd, asm, constraints = spec.nd, spec.asm, spec.constraints
         flat_argtypes = vcat([UInt64, UInt64, UInt32, Bool], fill(d_J, nd))
-        d_args = [:(d[$i]) for i in 1:nd]
+        d_args = _index_exprs(:d, 1:nd)
         call = convergent_asmcall(asm, constraints, NTuple{nd, d_J},
                                   flat_argtypes, :a_desc, :b_desc, :sp_meta,
                                   :scale_d, d_args...)

@@ -27,8 +27,9 @@
 # Expression calling side-effecting inline `asm` on the argument expressions
 # `args` (of Julia types `argtypes`), returning `rettype`, with the call site
 # marked `convergent nomerge nounwind`.
-convergent_asmcall(asm::String, constraints::String, @nospecialize(rettype::Type),
-                   @nospecialize(argtypes), @nospecialize(args...)) =
+Base.@nospecializeinfer convergent_asmcall(
+        asm::String, constraints::String, @nospecialize(rettype::Type),
+        @nospecialize(argtypes), @nospecialize(args...)) =
     _asmcall(asm, constraints, rettype, argtypes, args;
              sideeffect = true, attrs = ("convergent", "nomerge", "nounwind"))
 
@@ -36,8 +37,9 @@ convergent_asmcall(asm::String, constraints::String, @nospecialize(rettype::Type
 # deliberately non-convergent (tcgen05.mma) or pure (register-only data
 # movement). `sideeffect = false` lets LLVM drop or merge the call like any
 # other pure computation; pass true for observable operations.
-plain_asmcall(asm::String, constraints::String, @nospecialize(rettype::Type),
-              @nospecialize(argtypes), @nospecialize(args...); sideeffect::Bool = true) =
+Base.@nospecializeinfer plain_asmcall(
+        asm::String, constraints::String, @nospecialize(rettype::Type),
+        @nospecialize(argtypes), @nospecialize(args...); sideeffect::Bool = true) =
     _asmcall(asm, constraints, rettype, argtypes, args;
              sideeffect, attrs = ("nounwind",))
 

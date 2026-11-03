@@ -4,9 +4,12 @@
 
 const _PTX_94 = Version(9, 4)
 
-const _TARGET_INTRODUCED = let entries = Pair{String,Version}[]
-    function add!(version::Version, names...)
-        append!(entries, (String(name) => version for name in names))
+const _TARGET_INTRODUCED = let entries = Dict{String,Version}()
+    # Unspecialized: compiled once rather than once per row length.
+    function add!(version::Version, @nospecialize(names::String...))
+        for name in names
+            entries[name] = version
+        end
     end
     add!(Version(1, 0), "10", "11")
     add!(Version(1, 2), "12", "13")
@@ -31,7 +34,7 @@ const _TARGET_INTRODUCED = let entries = Pair{String,Version}[]
                            "120f", "121", "121f", "121a")
     add!(Version(9, 0), "88", "110", "110f", "110a")
     add!(Version(9, 4), "107", "107f", "107a")
-    Dict(entries)
+    entries
 end
 
 const _TARGET_OPTIONS = Set(("texmode_unified", "texmode_independent",

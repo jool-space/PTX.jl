@@ -35,12 +35,20 @@ Base.@nospecializeinfer function _special_register_family(
         @nospecialize(spellings::Tuple{Vararg{String}});
         @nospecialize(scalar_spellings::Tuple{Vararg{String}} = spellings))
     isempty(spellings) && error("PTX special-register family $section is empty")
-    all(startswith(name, "%") for name in spellings) ||
-        error("PTX special-register family $section has a non-register spelling")
-    length(unique(spellings)) == length(spellings) ||
-        error("PTX special-register family $section repeats a spelling")
-    all(name -> name in spellings, scalar_spellings) ||
-        error("PTX special-register family $section exposes an unknown scalar spelling")
+    # Indexed: iterating the tuples through `all`/`unique`/`in` would compile
+    # those once per family length.
+    names = Set{String}()
+    for i in 1:length(spellings)
+        name = spellings[i]
+        startswith(name, "%") ||
+            error("PTX special-register family $section has a non-register spelling")
+        name in names && error("PTX special-register family $section repeats a spelling")
+        push!(names, name)
+    end
+    for i in 1:length(scalar_spellings)
+        scalar_spellings[i] in names ||
+            error("PTX special-register family $section exposes an unknown scalar spelling")
+    end
     SpecialRegisterFamily(section, introduced, min_sm, spellings, scalar_spellings)
 end
 
@@ -58,9 +66,9 @@ const _V4_COMPONENT_SUFFIXES = (
     ".x", ".y", ".z", ".w", ".r", ".g", ".b", ".a",
 )
 
-function _v4_special_register_family(section::String, introduced::Version,
-                                     min_sm::Union{Nothing, Int},
-                                     roots::Tuple{Vararg{String}})
+Base.@nospecializeinfer function _v4_special_register_family(
+        section::String, introduced::Version, @nospecialize(min_sm::Union{Nothing, Int}),
+        @nospecialize(roots::Tuple{Vararg{String}}))
     spellings = String[]
     scalar_spellings = String[]
     for root in roots

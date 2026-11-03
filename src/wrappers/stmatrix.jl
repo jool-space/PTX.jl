@@ -64,7 +64,7 @@ for (count, n) in ((:x1, 1), (:x2, 2), (:x4, 4)), trans in (false, true)
         (:sync, :aligned, :m8n8, count, :trans, Symbol("shared::cta"), :b16) :
         (:sync, :aligned, :m8n8, count, Symbol("shared::cta"), :b16)
     ttext = trans ? ".trans" : ""
-    ins = "{" * join(("\$$i" for i in 1:n), ", ") * "}"
+    ins = "{" * _asm_slots(1:n) * "}"
     asm = "stmatrix.sync.aligned.m8n8.$count$ttext.shared::cta.b16 [\$0], $ins;"
     constraints = join(vcat(["r"], fill("r", n), ["~{memory}"]), ",")
     argtypes = (Core.LLVMPtr{UInt16, AS.Shared}, ntuple(_ -> UInt32, n)...)

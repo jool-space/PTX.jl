@@ -51,9 +51,9 @@ function _mma_scaled_register(kind::Symbol, scale_vec::Symbol,
     call = wrapper_intrinsic_call(:mma_scaled, :mma, mods, full)
     cd_J = c_ty === :f32 ? :Float32 : :UInt32
 
-    a_in = [:(a[$i]) for i in 1:n_a]
-    b_in = [:(b[$i]) for i in 1:n_b]
-    c_in = [:(c[$i]) for i in 1:n_cd]
+    a_in = _index_exprs(:a, 1:n_a)
+    b_in = _index_exprs(:b, 1:n_b)
+    c_in = _index_exprs(:c, 1:n_cd)
 
     @eval function (::Operation{:mma, $mods})(
             a::NTuple{$n_a, UInt32}, b::NTuple{$n_b, UInt32},

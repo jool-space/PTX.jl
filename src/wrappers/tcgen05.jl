@@ -173,8 +173,7 @@ for cg in 1:2
                       (Symbol("32x128b"), :warpx4)),
             fmt in ((), (:b8x16, :b6x16_p32), (:b8x16, :b4x16_p64))
         mods = (:cp, cta, shapemods..., fmt...)
-        spell = join(("tcgen05", "cp", String(cta),
-                      String.(shapemods)..., String.(fmt)...), ".")
+        spell = build_head(:tcgen05, mods)
         call = convergent_asmcall("$spell [\$0], \$1;", "r,l,~{memory}",
                                   Nothing, (UInt32, UInt64),
                                   :taddr, :s_desc)
@@ -279,10 +278,11 @@ end
 
 const _TCGEN05_LDRED_REDT = (f32 = Float32, u32 = UInt32, s32 = Int32)
 
-function _tcgen05_ldred_call(mods::Tuple{Vararg{Symbol}}, n::Int,
-                             redT::Type, off)
-    head = "tcgen05." * join(String.(mods), ".")
-    regs = join(("\$$(k - 1)" for k in 1:n), ", ")
+Base.@nospecializeinfer function _tcgen05_ldred_call(
+        @nospecialize(mods::Tuple{Vararg{Symbol}}), n::Int, @nospecialize(redT::Type),
+        @nospecialize(off))
+    head = build_head(:tcgen05, mods)
+    regs = _asm_slots(0:n - 1)
     tail = off === nothing ? "" : ", $off"
     asm = "$head {$regs}, \$$n, [\$$(n + 1)]$tail;"
     constraints = join(fill("=r", n), ",") * "," *
@@ -303,9 +303,9 @@ end
     _tcgen05_ldred_call(mods, n, _TCGEN05_LDRED_REDT[mods[end]], Int(off))
 end
 
-function _tcgen05_ldred_register(shape::Symbol, count::Int, redop::Symbol,
-                                 variant::Tuple{Vararg{Symbol}},
-                                 dtype::Symbol)
+Base.@nospecializeinfer function _tcgen05_ldred_register(
+        shape::Symbol, count::Int, redop::Symbol,
+        @nospecialize(variant::Tuple{Vararg{Symbol}}), dtype::Symbol)
     mods = (:ld, :red, :sync, :aligned, shape, Symbol("x", count), redop,
             variant..., dtype)
     register_wrapper!(:tcgen05_ldred, :tcgen05, mods, :asm)
@@ -347,13 +347,14 @@ end
 # (mdata, cdata[, redval]); the indices and the kept data keep their ISA
 # operand order.
 
-function _tcgen05_ldspc_call(mods::Tuple{Vararg{Symbol}}, red::Bool, n::Int)
-    head = "tcgen05." * join(String.(mods), ".")
+Base.@nospecializeinfer function _tcgen05_ldspc_call(
+        @nospecialize(mods::Tuple{Vararg{Symbol}}), red::Bool, n::Int)
+    head = build_head(:tcgen05, mods)
     nm = cld(n, 32)
     nc = n ÷ 2
     total = nm + nc
-    mregs = join(("\$$(k - 1)" for k in 1:nm), ", ")
-    cregs = join(("\$$(k - 1)" for k in nm + 1:total), ", ")
+    mregs = _asm_slots(0:nm - 1)
+    cregs = _asm_slots(nm:total - 1)
     redval = red ? ", \$$total" : ""
     addr = red ? total + 1 : total
     asm = "$head {$mregs}, {$cregs}$redval, [\$$addr];"
@@ -363,15 +364,16 @@ function _tcgen05_ldspc_call(mods::Tuple{Vararg{Symbol}}, red::Bool, n::Int)
     convergent_asmcall(asm, constraints, flat, (UInt32,), :taddr), nm, nc
 end
 
-function _tcgen05_ldspc_register(red::Bool, count::Int, rowop::Symbol,
-                                 variant::Tuple{Vararg{Symbol}})
+Base.@nospecializeinfer function _tcgen05_ldspc_register(
+        red::Bool, count::Int, rowop::Symbol,
+        @nospecialize(variant::Tuple{Vararg{Symbol}}))
     mods = (:ld, (red ? (:red,) : ())..., :spcompress, :sync, :aligned,
             Symbol("32x32b"), Symbol("x", count), rowop, Symbol("sp::2:4"),
             variant..., :f32, :b2)
     register_wrapper!(:tcgen05_ldspc, :tcgen05, mods, :asm)
     call, nm, nc = _tcgen05_ldspc_call(mods, red, count)
-    mvals = [:(r[$i]) for i in 1:nm]
-    cvals = [:(r[$i]) for i in nm + 1:nm + nc]
+    mvals = _index_exprs(:r, 1:nm)
+    cvals = _index_exprs(:r, nm + 1:nm + nc)
     tail = red ? (:(r[$(nm + nc + 1)]),) : ()
     rt = Tuple{NTuple{nm, UInt32}, NTuple{nc, UInt32},
                (red ? (Float32,) : ())...}
@@ -688,9 +690,9 @@ const _TCGEN05_DENSE_COLLECTORS =
     ((nothing, 0), (Symbol("collector::a::lastuse"), 1),
      (Symbol("collector::a::fill"), 2), (Symbol("collector::a::use"), 3))
 
-function _tcgen05_dense_register(kind::Symbol, kindval::Int, scale_ok::Bool,
-                                 cg::Int, tmem_a::Bool, ashift::Bool,
-                                 collmod, collval::Int)
+Base.@nospecializeinfer function _tcgen05_dense_register(
+        kind::Symbol, kindval::Int, scale_ok::Bool, cg::Int, tmem_a::Bool,
+        ashift::Bool, @nospecialize(collmod), collval::Int)
     mods = (:mma, Symbol("cta_group::", cg), Symbol("kind::", kind),
             (ashift ? (:ashift,) : ())...,
             (collmod === nothing ? () : (collmod,))...)
@@ -777,9 +779,9 @@ end
 # reorder. Kinds, collector enum, .ashift restrictions, mask widths, and
 # scale-input-d legality are identical to dense. The sp block-scale (MX)
 # records stay outside this family, like their dense counterparts.
-function _tcgen05_sp_register(kind::Symbol, kindval::Int, scale_ok::Bool,
-                              cg::Int, tmem_a::Bool, ashift::Bool,
-                              collmod, collval::Int)
+Base.@nospecializeinfer function _tcgen05_sp_register(
+        kind::Symbol, kindval::Int, scale_ok::Bool, cg::Int, tmem_a::Bool,
+        ashift::Bool, @nospecialize(collmod), collval::Int)
     mods = (:mma, :sp, Symbol("cta_group::", cg), Symbol("kind::", kind),
             (ashift ? (:ashift,) : ())...,
             (collmod === nothing ? () : (collmod,))...)
@@ -879,9 +881,9 @@ const _TCGEN05_WS_COLLECTORS = begin
     Tuple(out)
 end
 
-function _tcgen05_ws_register(kind::Symbol, kindval::Int, sp::Bool,
-                              tmem_a::Bool, collmod, bufval::Int,
-                              opval::Int)
+Base.@nospecializeinfer function _tcgen05_ws_register(
+        kind::Symbol, kindval::Int, sp::Bool, tmem_a::Bool,
+        @nospecialize(collmod), bufval::Int, opval::Int)
     mods = (:mma, :ws, (sp ? (:sp,) : ())..., Symbol("cta_group::1"),
             Symbol("kind::", kind),
             (collmod === nothing ? () : (collmod,))...)
@@ -954,10 +956,11 @@ const _TCGEN05_MX_SCALE_VARIANTS = (
     (:mxf4nvf4, Symbol("scale_vec::4X"), :block16),
 )
 
-function _tcgen05_mx_register(kind::Symbol, scale::Symbol, cta_group::Int,
-                              sp::Bool, coll::Union{Nothing, Symbol};
-                              coll_b::Union{Nothing, Symbol} = nothing,
-                              family::Symbol = :tcgen05_mx)
+Base.@nospecializeinfer function _tcgen05_mx_register(
+        kind::Symbol, scale::Symbol, cta_group::Int, sp::Bool,
+        @nospecialize(coll::Union{Nothing, Symbol});
+        @nospecialize(coll_b::Union{Nothing, Symbol} = nothing),
+        family::Symbol = :tcgen05_mx)
     cta_group in (1, 2) || throw(ArgumentError("invalid tcgen05 cta_group: $cta_group"))
     cg = Symbol("cta_group::", cta_group)
     kmod = Symbol("kind::", kind)
@@ -1069,10 +1072,11 @@ const _TCGEN05_COLL_B = (nothing, Symbol("collector::b::fill"),
                          Symbol("collector::b::lastuse"))
 
 # Render one operand shape as the asm call on the flat argument
-# expressions `args` (mask words are passed individually).
-function _tcgen05_mma94_call(head::String, a_tmem::Bool, meta::Bool,
-                             mx::Bool, maskN::Int, zero_col::Bool,
-                             scale::Union{Nothing, Int}, args...)
+# expressions `args` (mask words are passed individually). Unspecialized:
+# each shape passes a different number of them.
+Base.@nospecializeinfer function _tcgen05_mma94_call(
+        head::String, a_tmem::Bool, meta::Bool, mx::Bool, maskN::Int,
+        zero_col::Bool, scale::Union{Nothing, Int}, @nospecialize(args...))
     slots = String["[\$0]", a_tmem ? "[\$1]" : "\$1", "\$2"]
     cons = String["r", a_tmem ? "r" : "l", "l"]
     argts = Type[UInt32, a_tmem ? UInt32 : UInt64, UInt64]
@@ -1089,7 +1093,7 @@ function _tcgen05_mma94_call(head::String, a_tmem::Bool, meta::Bool,
         k += 2
     end
     if maskN > 0
-        push!(slots, "{" * join(("\$$(k + i)" for i in 0:maskN - 1), ", ") * "}")
+        push!(slots, "{" * _asm_slots(k:k + maskN - 1) * "}")
         append!(cons, fill("r", maskN)); append!(argts, fill(UInt32, maskN))
         k += maskN
     end
@@ -1105,7 +1109,7 @@ function _tcgen05_mma94_call(head::String, a_tmem::Bool, meta::Bool,
     plain_asmcall(asm, constraints, Nothing, argts, args...)
 end
 
-_tcgen05_mma94_head(mods) = "tcgen05." * join(String.(mods), ".")
+_tcgen05_mma94_head(mods) = build_head(:tcgen05, mods)
 
 # scale-input-d is a PTX immediate baked into the asm text, so the IR for
 # those shapes is generated per Val (helper above — the generator-world
@@ -1136,7 +1140,7 @@ end
         mask::NTuple{N, UInt32}, enable_input_d::Bool,
         ::Val{s}) where {mods, A, N, s}
     s isa Integer && 0 <= s <= 15 || return _tcgen05_mma94_scale_error()
-    words = [:(mask[$i]) for i in 1:N]
+    words = _index_exprs(:mask, 1:N)
     _tcgen05_mma94_call(_tcgen05_mma94_head(mods), A === UInt32,
                         false, false, N, false, Int(s),
                         :d, :a, :b_desc, :idesc, words..., :enable_input_d)
@@ -1147,7 +1151,7 @@ end
         mask::NTuple{N, UInt32}, enable_input_d::Bool,
         ::Val{s}) where {mods, A, N, s}
     s isa Integer && 0 <= s <= 15 || return _tcgen05_mma94_scale_error()
-    words = [:(mask[$i]) for i in 1:N]
+    words = _index_exprs(:mask, 1:N)
     _tcgen05_mma94_call(_tcgen05_mma94_head(mods), A === UInt32,
                         true, false, N, false, Int(s),
                         :d, :a, :b_desc, :sp_meta, :idesc, words...,
@@ -1160,11 +1164,10 @@ end
 # weight-stationary schema (trailing zero-column-mask form); `ashift`
 # restricts A to the TMEM species; `scale_ok` adds the scale-input-d
 # shapes. Integer-address adapters are recorded for every signature.
-function _tcgen05_mma94_register(family::Symbol, mods::Tuple{Vararg{Symbol}};
-                                 cg::Int, meta::Bool = false,
-                                 mx::Bool = false, ws::Bool = false,
-                                 ashift::Bool = false,
-                                 scale_ok::Bool = false)
+Base.@nospecializeinfer function _tcgen05_mma94_register(
+        family::Symbol, @nospecialize(mods::Tuple{Vararg{Symbol}}); cg::Int,
+        meta::Bool = false, mx::Bool = false, ws::Bool = false,
+        ashift::Bool = false, scale_ok::Bool = false)
     register_wrapper!(family, :tcgen05, mods, :asm)
     head = _tcgen05_mma94_head(mods)
     A32 = Address{UInt32}
@@ -1220,7 +1223,7 @@ function _tcgen05_mma94_register(family::Symbol, mods::Tuple{Vararg{Symbol}};
         end
 
         # [d], a, b{, [meta]}, idesc, {disable-output-lane}, enable
-        words = [:(mask[$i]) for i in 1:maskN]
+        words = _index_exprs(:mask, 1:maskN)
         call = _tcgen05_mma94_call(head, a_tmem, meta, false, maskN, false,
                                    nothing, :d, :a, :b_desc, metaarg...,
                                    :idesc, words..., :enable_input_d)

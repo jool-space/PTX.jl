@@ -42,18 +42,18 @@ function _spcompress_register(elem::Symbol, idx::Symbol, num::Int)
     nmdata = cld(num * _sp_bits(idx), _sp_bits(elem))
     nout = nmdata + ncdata
     outs = 0:nout - 1
-    mregs = join(("\$$k" for k in 0:nmdata - 1), ", ")
-    cregs = join(("\$$k" for k in nmdata:nout - 1), ", ")
-    dregs = join(("\$$k" for k in nout:nout + ndata - 1), ", ")
+    mregs = _asm_slots(0:nmdata - 1)
+    cregs = _asm_slots(nmdata:nout - 1)
+    dregs = _asm_slots(nout:nout + ndata - 1)
     asm = "spcompress.$elem.$idx.sp::2:4.x$num {$mregs}, {$cregs}, " *
           "{$dregs}, \$$(nout + ndata);"
     constraints = join([fill("=&r", nout); fill("r", ndata + 1)], ",")
-    dvals = [:(data[$i]) for i in 1:ndata]
+    dvals = _index_exprs(:data, 1:ndata)
     call = plain_asmcall(asm, constraints, NTuple{nout, UInt32},
                          fill(UInt32, ndata + 1), dvals..., :spdesc;
                          sideeffect = false)
-    mvals = [:(r[$i]) for i in 1:nmdata]
-    cvals = [:(r[$i]) for i in nmdata + 1:nout]
+    mvals = _index_exprs(:r, 1:nmdata)
+    cvals = _index_exprs(:r, nmdata + 1:nout)
     register_wrapper!(:spcompress, :spcompress, mods, :asm)
     @eval @inline function (::Operation{:spcompress, $mods})(
             data::NTuple{$ndata, UInt32}, spdesc::UInt32)
@@ -83,14 +83,14 @@ function _spdecompress_register(elem::Symbol, idx::Symbol, s::Int, t::Int,
     admitted || return nothing
     mods = (elem, idx, Symbol("sp::$s:$t"), Symbol("x", num))
     nin = nmdata + ncdata
-    dregs = join(("\$$k" for k in 0:ndata - 1), ", ")
-    mregs = join(("\$$k" for k in ndata:ndata + nmdata - 1), ", ")
-    cregs = join(("\$$k" for k in ndata + nmdata:ndata + nin - 1), ", ")
+    dregs = _asm_slots(0:ndata - 1)
+    mregs = _asm_slots(ndata:ndata + nmdata - 1)
+    cregs = _asm_slots(ndata + nmdata:ndata + nin - 1)
     asm = "spdecompress.$elem.$idx.sp::$s:$t.x$num {$dregs}, {$mregs}, " *
           "{$cregs};"
     constraints = join([fill("=&r", ndata); fill("r", nin)], ",")
-    mvals = [:(mdata[$i]) for i in 1:nmdata]
-    cvals = [:(cdata[$i]) for i in 1:ncdata]
+    mvals = _index_exprs(:mdata, 1:nmdata)
+    cvals = _index_exprs(:cdata, 1:ncdata)
     call = plain_asmcall(asm, constraints, NTuple{ndata, UInt32},
                          fill(UInt32, nin), mvals..., cvals...;
                          sideeffect = false)
