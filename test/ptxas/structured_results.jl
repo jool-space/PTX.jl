@@ -5,32 +5,40 @@
 
 using LLVM.Interop: @asmcall
 
+# Run `cmd`, returning whether it succeeded and its combined output. The
+# output goes through a file rather than an in-process buffer, so it is
+# complete when the process has exited.
+function _structured_run(cmd::Cmd, dir::AbstractString, name::AbstractString)
+    log_path = joinpath(dir, name)
+    proc = open(log_path, "w") do io
+        run(pipeline(ignorestatus(cmd); stdout = io, stderr = io))
+    end
+    success(proc), read(log_path, String)
+end
+
 function _structured_raw_ptxas(source::AbstractString, target::AbstractString;
                                inspect_global::Bool = false)
     mktempdir() do dir
         ptx_path = joinpath(dir, "probe.ptx")
         cubin_path = joinpath(dir, "probe.cubin")
         write(ptx_path, source)
-        cmd = `$(CUDACore.CUDA_Compiler.ptxas()) --gpu-name $target --output-file $cubin_path $ptx_path`
-        log = IOBuffer()
-        proc = run(pipeline(ignorestatus(cmd), stdout = log, stderr = log))
-        diagnostics = String(take!(log))
-        dump = if success(proc) && inspect_global
+        ptxas = CUDACore.CUDA_Compiler.ptxas()
+        ok, diagnostics = _structured_run(
+            `$ptxas --gpu-name $target --output-file $cubin_path $ptx_path`,
+            dir, "ptxas.log")
+        dump = if ok && inspect_global
             readelf = Sys.which("readelf")
             readelf === nothing && error(
                 "readelf is required by the ptxas constant-expression oracle")
-            readelf_log = IOBuffer()
-            readelf_proc = run(pipeline(
-                ignorestatus(`$readelf -x .nv.global.init $cubin_path`),
-                stdout = readelf_log, stderr = readelf_log))
-            success(readelf_proc) || error(
-                "readelf could not inspect ptxas global initializer:\n" *
-                String(take!(readelf_log)))
-            String(take!(readelf_log))
+            dumped, dump = _structured_run(`$readelf -x .nv.global.init $cubin_path`,
+                                           dir, "readelf.log")
+            dumped && occursin("Hex dump", dump) || error(
+                "readelf could not inspect ptxas global initializer:\n" * dump)
+            dump
         else
             ""
         end
-        success(proc), diagnostics, dump
+        ok, diagnostics, dump
     end
 end
 
