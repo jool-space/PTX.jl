@@ -42,16 +42,11 @@ function miss end
 function validate_ledger_args end
 function result_type end
 
-"""
-    FormKey(op, mods)
-
-Key of the islands' exact-form tables: one opcode and its modifier tuple.
-
-The default `hash`/`isequal` compare it by content (through `objectid`/`===`),
-and it is one concrete type whatever `mods`' length. An `(op, mods)` tuple key
-would carry `mods`' concrete type, compiling the hash-table operations once
-per modifier count.
-"""
+# Key of the islands' exact-form tables: one opcode and its modifier tuple.
+# The default `hash`/`isequal` compare it by content (through
+# `objectid`/`===`), and it is one concrete type whatever `mods`' length. An
+# `(op, mods)` tuple key would carry `mods`' concrete type, compiling the
+# hash-table operations once per modifier count.
 struct FormKey
     op::Symbol
     mods::Tuple{Vararg{Symbol}}
