@@ -1,6 +1,6 @@
 # SURFACE.toml — the machine-checked instruction-surface inventory.
 #
-# One entry per PTX ISA 9.4 §9.7.x instruction family (subsection splits where
+# One entry per PTX ISA 9.5 §9.7.x instruction family (subsection splits where
 # one section's opcodes have different dispositions). Every PTX opcode head the
 # project has an opinion about appears in exactly ONE entry; test/host/surface.jl
 # asserts this inventory against the live code (PTX.FORMS,
@@ -59,7 +59,7 @@ title = "Floating-Point Instructions"
 status = "generic"
 opcodes = ["fma", "copysign", "rcp", "sqrt", "rsqrt", "sin", "cos", "lg2",
            "ex2", "tanh"]
-notes = "Pure per-lane FP under the generic trailing-dtype rule; add/sub/mul/mad/div/abs/neg/min/max heads are owned by the §9.7.1 entry and cover the FP forms."
+notes = "Pure per-lane FP under the generic trailing-dtype rule; add/sub/mul/mad/div/abs/neg/min/max heads are owned by the §9.7.1 entry and cover the FP forms. The PTX ISA 9.5 sin/cos.approx.2pi.ftz.f32 forms (input in turns) render through the same rule; the chain does not enforce that .2pi requires .ftz."
 owner = ["src/ledgers/forms.jl"]
 
 [[family]]
@@ -283,19 +283,27 @@ section = "9.7.10.28"
 title = "Data Movement and Conversion Instructions: Asynchronous copy (cp.async, cp.async.bulk, TMA)"
 status = "strict"
 opcodes = ["cp"]
-notes = "cp.async and the bulk/tensor forms are chain-renderable under sink overrides (the terminal type token is an operand descriptor), cp.async.bulk.prefetch.tensor is typed-wrapper-only (rank-dependent coordinate vectors plus a paired cache-hint operand), and the TMA wrappers own the tensor-copy API. The whole cp.async.bulk.tensor/prefetch wrapper family is single-route asm — the former tier-2 intrinsic route was demoted (observable async effects; the argmem-widen A/B on B200 showed the conservative clobber is codegen-free) — making the notation WYSIWYG: cluster cta_group::2 renders after the rank like the pre-existing shared::cta residue (ptxas accepts both orders). PTX ISA 9.4 (sm_107f family) wrapped inventory: .multicast::cluster::{16b,32b} on the cluster loads (with and without cta_group::2); the six .report_mechanism spellings on both load directions (no multicast or ::32b); .override::global_address alone and with the rank-determined .override_attribute on both load directions (no multicast or ::32b), the tile store, the tile reduce (all eight redOps), the tile prefetch, and the tile eviction hint; .im2col_no_offs and .im2col_no_offs::w on the store and reduce directions (3d-5d); .L2::evict_last on the tile and base-im2col prefetches; plus the pre-9.4 cp.reduce.async.bulk.tensor tile forms. Not wrapped: report×override crosses, report/override with cta_group::2, .L2::cache_hint on copies or with overrides/evict_last, tile::gather4 and im2col::w modes. Assembly evidence at sm_107f/sm_107a only; no runtime evidence. The chain cp.async.bulk ::16b/::32b/report and cp.async.bulk.prefetch .L2::evict_last spellings render under the sink override."
+notes = "cp.async and the bulk/tensor forms are chain-renderable under sink overrides (the terminal type token is an operand descriptor), cp.async.bulk.prefetch.tensor is typed-wrapper-only (rank-dependent coordinate vectors plus a paired cache-hint operand), and the TMA wrappers own the tensor-copy API. The whole cp.async.bulk.tensor/prefetch wrapper family is single-route asm — the former tier-2 intrinsic route was demoted (observable async effects; the argmem-widen A/B on B200 showed the conservative clobber is codegen-free) — making the notation WYSIWYG: cluster cta_group::2 renders after the rank like the pre-existing shared::cta residue (ptxas accepts both orders). PTX ISA 9.4 (sm_107f family) wrapped inventory: .multicast::cluster::{16b,32b} on the cluster loads (with and without cta_group::2); the six .report_mechanism spellings on both load directions (no multicast or ::32b); .override::global_address alone and with the rank-determined .override_attribute on both load directions (no multicast or ::32b), the tile store, the tile reduce (all eight redOps), the tile prefetch, and the tile eviction hint; .im2col_no_offs and .im2col_no_offs::w on the store and reduce directions (3d-5d); .L2::evict_last on the tile and base-im2col prefetches; plus the pre-9.4 cp.reduce.async.bulk.tensor tile forms. Not wrapped: report×override crosses, report/override with cta_group::2, .L2::cache_hint on copies or with overrides/evict_last, tile::gather4 and im2col::w modes. Assembly evidence at sm_107f/sm_107a only; no runtime evidence. The chain cp.async.bulk ::16b/::32b/report and cp.async.bulk.prefetch .L2::evict_last spellings render under the sink override, as does the PTX 9.5 cp.async.bulk.wait_group.sync_restrict::proxy::async N (sm_100; no assembly evidence because the managed compiler does not support ISA 9.5)."
 owner = ["src/ledgers/forms.jl", "src/wrappers/cp_async.jl", "src/wrappers/tma.jl"]
 
 [[family]]
 section = "9.7.10.29"
 title = "Data Movement and Conversion Instructions: tensormap.replace"
-status = "generic"
+status = "strict"
 opcodes = ["tensormap"]
-notes = "Sink (the type tail names the replaced field); the head also covers tensormap.cp_fenceproxy (§9.7.14.17); the tensormap PROXY FENCES live under the fence head and are typed-wrapper-only."
-owner = ["src/ledgers/forms.jl", "src/lib/tensor_map.jl"]
+notes = "tensormap.replace is a chain sink (the type tail names the replaced field), including the PTX ISA 9.5 .alloc_class forms with .global_address or with no field; the head also covers tensormap.cp_fenceproxy (§9.7.14.17). tensormap.query (§9.7.10.30) is typed-wrapper-only under this head. The tensormap PROXY FENCES live under the fence head and are typed-wrapper-only."
+owner = ["src/ledgers/forms.jl", "src/lib/tensor_map.jl", "src/wrappers/tensormap.jl"]
 
 [[family]]
 section = "9.7.10.30"
+title = "Data Movement and Conversion Instructions: tensormap.query.alloc_class_large"
+status = "strict"
+opcodes = []
+notes = "No distinct opcode head: typed-wrapper-only under the §9.7.10.29 tensormap entry (PTX ISA 9.5; sm_90a and the sm_100f/sm_110f/sm_120f families) because the replace sink contract cannot carry its .pred destination. Wrapped: generic, .global, and .shared::cta, returning Bool. Not wrapped: .const and .param{::entry}. No assembly evidence: the managed compiler does not support ISA 9.5."
+owner = ["src/wrappers/tensormap.jl"]
+
+[[family]]
+section = "9.7.10.31"
 title = "Data Movement and Conversion Instructions: spcompress"
 status = "strict"
 opcodes = ["spcompress"]
@@ -303,7 +311,7 @@ notes = "Typed-wrapper-only (PTX 9.4, sm_107a): the dense input, kept-element, a
 owner = ["src/wrappers/spcompress.jl", "src/lib/sparsity_descriptor.jl"]
 
 [[family]]
-section = "9.7.10.31"
+section = "9.7.10.32"
 title = "Data Movement and Conversion Instructions: spdecompress"
 status = "strict"
 opcodes = ["spdecompress"]
@@ -317,7 +325,7 @@ section = "9.7.11"
 title = "Fabric Instructions"
 status = "strict"
 opcodes = ["fabric"]
-notes = "Hand-written asm wrappers (submit/wait/try_get/try_put, PTX 9.3 sm_100+): the two-register CFT handle operand has no chain-default rendering, so :fabric is deliberately NOT in FORMS; try_red/try_pullred and the cp_mask/counted::bytes put forms are deferred. PTX 9.4 tensor get/put/red, try_atom, and cache-policy operands remain unimplemented. The deferred try_pullred.sync form requires a literal full-warp member mask."
+notes = "Hand-written asm wrappers (submit/wait/try_get/try_put, PTX 9.3 sm_100+; submit.commit_group and wait.sync_restrict::read N, PTX 9.5). PTX 9.5 defines the deprecated wait.sync_restrict::reads as having no effect; its wrapper remains for source compatibility. The 9.5 forms have no assembly evidence because the managed compiler does not support ISA 9.5. The two-register CFT handle operand has no chain-default rendering, so :fabric is deliberately NOT in FORMS; try_red/try_pullred and the cp_mask/counted::bytes put forms are deferred. PTX 9.4 tensor get/put/red, try_atom, and cache-policy operands remain unimplemented. The deferred try_pullred.sync form requires a literal full-warp member mask."
 owner = ["src/wrappers/fabric.jl"]
 
 # ── §9.7.12 / §9.7.13 Texture and Surface ─────────────────────────────────────
@@ -377,7 +385,7 @@ section = "9.7.15.4"
 title = "Parallel Synchronization and Communication Instructions: fence"
 status = "strict"
 opcodes = ["fence"]
-notes = "Ordinary fence forms are chain-generic, but the tensormap::generic proxy fences are typed-wrapper-only (direction-specific acquire/release ABIs, exact scope set, ISA-fixed 128-byte acquire range); intrinsic/core-IR wrappers cover the common scoped fences. PTX 9.4 alias acquire/release.sys and async::generic release.sync_restrict::shared::cluster::read.cluster have host and sm_90 assembly coverage. The cluster-read fence is non-cumulative; assembly does not establish concurrent runtime ordering."
+notes = "Ordinary fence forms are chain-generic, but the tensormap::generic proxy fences are typed-wrapper-only (direction-specific acquire/release ABIs, exact scope set, ISA-fixed 128-byte acquire range); intrinsic/core-IR wrappers cover the common scoped fences. PTX 9.4 alias acquire/release.sys and async::generic release.sync_restrict::shared::cluster::read.cluster have host and sm_90 assembly coverage. The cluster-read fence is non-cumulative; assembly does not establish concurrent runtime ordering. The PTX 9.5 fence.alias.sync_restrict::read.release.sys (sm_90) renders through the chain; it has no assembly evidence because the managed compiler does not support ISA 9.5."
 owner = ["src/ledgers/forms.jl", "src/wrappers/fence.jl"]
 
 [[family]]
@@ -551,3 +559,10 @@ status = "generic"
 opcodes = ["brkpt", "nanosleep", "pmevent", "trap", "setmaxnreg"]
 notes = "Observable side effects, conservative contracts (nanosleep/pmevent tails name operands; setmaxnreg is convergent and requires .reqntid via minthreads to take effect)."
 owner = ["src/ledgers/forms.jl"]
+
+[[family]]
+section = "9.7.21.6"
+title = "Miscellaneous Instructions: trace.mark"
+status = "raw-only"
+opcodes = ["trace"]
+notes = "PTX ISA 9.5, sm_107f family. No reviewed FORMS entry: event-id is an immediate, the optional payload width is named by the tail, and .cond takes a possibly negated predicate. The event-label operand names a .metadata_label in a module-level .metadata_section, which a single inline-asm call cannot declare, so only label-less forms are expressible."

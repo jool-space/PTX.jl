@@ -21,12 +21,13 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
     (:spcompress,   (),        nothing),
     (:spdecompress, (),        nothing),
     (:applypriority, (:async, :bulk, :tensor), nothing),
+    (:tensormap, (:query,),    nothing),
 ])
 
 @testset "typed-wrapper-only boundary: closed-world rule inventory" begin
     actual = Set((r.op, r.prefix, r.marker) for r in PTX.TYPED_WRAPPER_ONLY_RULES)
     @test actual == EXPECTED_TYPED_ONLY_RULES
-    @test length(PTX.TYPED_WRAPPER_ONLY_RULES) == 11
+    @test length(PTX.TYPED_WRAPPER_ONLY_RULES) == 12
 
     positives = (
         (:mma, (:sync, :aligned, :m16n8k16, :row, :col,
@@ -47,6 +48,7 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
         (:spdecompress, (:b16, :b4, Symbol("sp::1:4"), :x2)),
         (:applypriority, (:async, :bulk, :tensor, Symbol("2d"), :global,
                           :bulk_group, :tile, Symbol("L2::evict_normal"))),
+        (:tensormap, (:query, :alloc_class_large, :const, :b1024)),
     )
     for (op, mods) in positives
         @test PTX.requires_typed_wrapper(op, mods)
@@ -69,6 +71,7 @@ const EXPECTED_TYPED_ONLY_RULES = Set([
                           :bulk_group, :tile, Symbol("L2::evict_normal"))),
         (:applypriority, (:async, :bulk, :global, :bulk_group,
                           Symbol("L2::evict_normal"))),
+        (:tensormap, (:replace, :tile, :alloc_large, :global, :b1024)),
     )
         @test !PTX.requires_typed_wrapper(op, mods)
         @test PTX.typed_wrapper_only_rule(op, mods) === nothing

@@ -11,7 +11,8 @@
 # blessing boundary instead of rendering wrong asm; `ptx"..."raw` remains
 # the explicit escape hatch.
 #
-# Scope: `submit`, `wait`, `try_get`, `try_put` (basic + .multimem).
+# Scope: `submit`, `submit.commit_group`, `wait`, `try_get`, `try_put`
+# (basic + .multimem).
 # DEFERRED:
 #   * `fabric.try_red`     — full redOp × type matrix
 #   * `fabric.try_pullred` — full redOp × type matrix, multimem-only
@@ -20,13 +21,22 @@
 # All of these are extension-shaped: add another set of @generated methods
 # alongside the existing ones; no core infrastructure changes needed.
 
-# --- Zero-arg lifecycle ops -------------------------------------------------
+# --- Lifecycle ops ----------------------------------------------------------
 # `fabric.submit;` and `fabric.submit.op_restrict::fetching;` — submit prior
 # fabric operations issued by this thread so a subsequent mbarrier phase
 # advance can observe their completion. Required before grid exit.
-# `fabric.wait.sync_restrict::reads;` — wait on local shared-memory reads of
-# submitted fabric ops; lets the program overwrite source smem before the
-# entire op completes (fabric-read completion mechanism).
+#
+# Fabric-read completion (PTX 9.5): `fabric.submit.commit_group;` closes a
+# fabric submit group over this thread's prior fabric operations, and
+# `fabric.wait.sync_restrict::read N;` waits until at most the N most recent
+# groups are pending. A completed group has finished reading its local
+# `.shared::cta` sources, so those buffers may be overwritten before the
+# operations themselves complete. Waiting with this pair before arriving at
+# the tracking mbarrier is mandatory once groups are used.
+#
+# `fabric.wait.sync_restrict::reads;` (PTX 9.3) is deprecated by PTX 9.5,
+# which defines it as having no effect: it orders nothing and does not wait
+# for submit groups. The wrapper remains for source compatibility only.
 #
 # All fabric ops carry sideeffect + `~{memory}`: they have observable
 # cross-GPU visibility, and LLVM must not reorder them around the mbarrier
@@ -58,6 +68,29 @@ end
         @asmcall("fabric.wait.sync_restrict::reads;",
                  "~{memory}", true, Nothing,
                  Tuple{})
+        nothing
+    end
+end
+
+@generated function ptx"fabric.submit.commit_group"()
+    quote
+        Base.@inline
+        @asmcall("fabric.submit.commit_group;",
+                 "~{memory}", true, Nothing,
+                 Tuple{})
+        nothing
+    end
+end
+
+# N is an integer constant in the ISA, so it is baked into the asm string.
+@generated function ptx"fabric.wait.sync_restrict::read"(::Val{N}) where {N}
+    N isa Integer && N >= 0 ||
+        return :(error($("fabric.wait.sync_restrict::read takes a non-negative " *
+                         "integer pending-group count, got $(repr(N))")))
+    asm = "fabric.wait.sync_restrict::read $(Int(N));"
+    quote
+        Base.@inline
+        @asmcall($asm, "~{memory}", true, Nothing, Tuple{})
         nothing
     end
 end
