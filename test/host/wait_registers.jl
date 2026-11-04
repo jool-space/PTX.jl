@@ -69,7 +69,10 @@ end
         @test occursin(expected, ir)
         @test !occursin("alloca", ir)
         @test !occursin("gpu_gc", ir)
-        @test !occursin("call fastcc", ir)
+        # `--check-bounds=yes` (forced by `Pkg.test` on some Julia versions)
+        # overrides `@inbounds`, leaving a `throw_boundserror` call behind.
+        bounds_forced = Base.JLOptions().check_bounds == 1
+        @test !occursin("call fastcc", ir) skip=bounds_forced
     end
 end
 
