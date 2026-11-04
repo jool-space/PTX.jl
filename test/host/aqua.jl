@@ -10,8 +10,11 @@ using Aqua
 using ExplicitImports
 using PTX
 
+# The persistent-tasks check loads PTX in a fresh process and waits for it to
+# exit; the default 30 s is too tight when the GB10 runners are busy (a tag
+# push runs CI twice on one commit). A task that never finishes still fails.
 @testset "Aqua" begin
-    Aqua.test_all(PTX)
+    Aqua.test_all(PTX; persistent_tasks = (; tmax = 120))
 end
 
 # check_all_explicit_imports_are_public is deliberately NOT enforced: the
