@@ -364,23 +364,25 @@ end
 # the schema, and the spelling would fall through to terminal inference or
 # another island's miss.
 @testset "island partition covers every reviewed schema key" begin
-    for (op, mods) in keys(PTX._SCALAR_RESULT_SCHEMA_BY_FORM)
-        @test PTX.island_of(op, mods) === PTX.ScalarLedger()
+    for key in keys(PTX._SCALAR_RESULT_SCHEMA_BY_FORM)
+        @test PTX.island_of(key.op, key.mods) === PTX.ScalarLedger()
     end
-    for (op, mods) in keys(PTX._STRUCTURED_RESULT_SCHEMA_BY_FORM)
-        @test PTX.island_of(op, mods) === PTX.StructuredLedger()
+    for key in keys(PTX._STRUCTURED_RESULT_SCHEMA_BY_FORM)
+        @test PTX.island_of(key.op, key.mods) === PTX.StructuredLedger()
     end
-    for (op, mods) in keys(PTX.B128_FORM_SCHEMAS)
-        @test PTX.island_of(op, mods) === PTX.B128Ledger()
+    for key in keys(PTX.B128_FORM_SCHEMAS)
+        @test PTX.island_of(key.op, key.mods) === PTX.B128Ledger()
     end
-    for mods in keys(PTX.CLC_TRY_CANCEL_FORMS)
-        @test PTX.island_of(:clusterlaunchcontrol, mods) === PTX.CLCLedger()
+    for key in keys(PTX.CLC_TRY_CANCEL_FORMS)
+        @test key.op === :clusterlaunchcontrol
+        @test PTX.island_of(:clusterlaunchcontrol, key.mods) === PTX.CLCLedger()
     end
-    for mods in keys(PTX._MBARRIER_SCHEMA_BY_FORM)
-        @test PTX.island_of(:mbarrier, mods) === PTX.MBarrierLedger()
+    for key in keys(PTX._MBARRIER_SCHEMA_BY_FORM)
+        @test key.op === :mbarrier
+        @test PTX.island_of(:mbarrier, key.mods) === PTX.MBarrierLedger()
     end
-    for (op, mods) in keys(PTX._IMMEDIATE_FORM_CONTRACT_BY_FORM)
-        @test PTX.island_of(op, mods) === PTX.ImmediateLedger()
+    for key in keys(PTX._IMMEDIATE_FORM_CONTRACT_BY_FORM)
+        @test PTX.island_of(key.op, key.mods) === PTX.ImmediateLedger()
     end
     # The vector resolver parses optional prefixes around a finite core, so
     # the core spellings and the eight ptxas-compat spellings are its key set.

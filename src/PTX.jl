@@ -1,12 +1,12 @@
 module PTX
 
 using LLVM
-using LLVM.IR: EnumAttribute, InlineAsm, LLVMType, Value, supports_typed_pointers
-using LLVM.Build: bitcast!, call!, extract_element!, extract_value!,
+using LLVM.IR: LLVMType, supports_typed_pointers
+using LLVM.Build: bitcast!, extract_element!, extract_value!,
                   insert_element!, insert_value!, inttoptr!, load!, ptrtoint!,
                   store!
 using BFloat16s: BFloat16
-using LLVM.Interop: @llvmgenerated, generate_llvmcall
+using LLVM.Interop: @llvmgenerated
 
 include("device_gate.jl")
 

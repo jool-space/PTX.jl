@@ -131,9 +131,9 @@ _mma_b1_intrinsic_name(shape::Symbol, bitop::Symbol) =
 # (family :mma) — for the conformance completeness assertion (this is what
 # protects the family in place of the literal scan). Forms with no intrinsic
 # fall back to the asm tier and are recorded as :asm registry records instead.
-function _mma_register(shape::Symbol, d_ty::Symbol, a_ty::Symbol,
-                       b_ty::Symbol, c_ty::Symbol;
-                       kind::Union{Symbol, Nothing} = nothing)
+Base.@nospecializeinfer function _mma_register(
+        shape::Symbol, d_ty::Symbol, a_ty::Symbol, b_ty::Symbol, c_ty::Symbol;
+        @nospecialize(kind::Union{Symbol, Nothing} = nothing))
     haskey(MMA_SYNC_FRAGS, (shape, a_ty, c_ty)) || return nothing
     n_a, n_b, n_cd = MMA_SYNC_FRAGS[(shape, a_ty, c_ty)]
 
@@ -199,9 +199,9 @@ function _mma_int_register(shape::Symbol, a_ty::Symbol, b_ty::Symbol,
            _mma_int_intrinsic_name(shape, a_ty, b_ty, satfinite)
     call = wrapper_intrinsic_call(:mma, :mma, mods, full)
 
-    a_in = [:(a[$i]) for i in 1:n_a]
-    b_in = [:(b[$i]) for i in 1:n_b]
-    c_in = [:(c[$i]) for i in 1:n_cd]
+    a_in = _index_exprs(:a, 1:n_a)
+    b_in = _index_exprs(:b, 1:n_b)
+    c_in = _index_exprs(:c, 1:n_cd)
     @eval function (::Operation{:mma, $mods})(
             a::NTuple{$n_a, UInt32},
             b::NTuple{$n_b, UInt32},
@@ -222,7 +222,7 @@ function _mma_register_asm(mods, shape, a_ty, b_ty, c_ty, kind,
     cd_let = c_ty === :f32 ? "f" : c_ty === :f64 ? "d" : "r"
     ab_let = a_ty === :f64 ? "d" : "r"
     ab_J   = a_ty === :f64 ? :Float64 : :UInt32
-    slots(off, n) = "{" * join(("\$$i" for i in off:off+n-1), ", ") * "}"
+    slots(off, n) = "{" * _asm_slots(off:off+n-1) * "}"
     asm = "mma.sync.aligned.$asm_kind$shape.row.col.$c_ty.$a_ty.$b_ty.$c_ty " *
           "$(slots(0, n_cd)), $(slots(n_cd, n_a)), " *
           "$(slots(n_cd + n_a, n_b)), $(slots(n_cd + n_a + n_b, n_cd));"
@@ -234,9 +234,9 @@ function _mma_register_asm(mods, shape, a_ty, b_ty, c_ty, kind,
     cdT = c_ty === :f32 ? Float32 : c_ty === :f64 ? Float64 : UInt32
     abT = a_ty === :f64 ? Float64 : UInt32
     flat_types = vcat(fill(abT, n_a + n_b), fill(cdT, n_cd))
-    a_args = [:(a[$i]) for i in 1:n_a]
-    b_args = [:(b[$i]) for i in 1:n_b]
-    c_args = [:(c[$i]) for i in 1:n_cd]
+    a_args = _index_exprs(:a, 1:n_a)
+    b_args = _index_exprs(:b, 1:n_b)
+    c_args = _index_exprs(:c, 1:n_cd)
     call = convergent_asmcall(asm, constraints, NTuple{n_cd, cdT}, flat_types,
                               a_args..., b_args..., c_args...)
     @eval function (::Operation{:mma, $mods})(
@@ -305,7 +305,7 @@ const MMA_B1_VARIANTS = (
 
 function _mma_b1_register_asm(shape::Symbol, bitop::Symbol,
                               n_a::Int, n_b::Int, n_cd::Int)
-    slots(off, n) = "{" * join(("\$$i" for i in off:off+n-1), ", ") * "}"
+    slots(off, n) = "{" * _asm_slots(off:off+n-1) * "}"
     asm = "mma.sync.aligned.$shape.row.col.s32.b1.b1.s32.$bitop.popc " *
           "$(slots(0, n_cd)), $(slots(n_cd, n_a)), " *
           "$(slots(n_cd + n_a, n_b)), " *
@@ -315,9 +315,9 @@ function _mma_b1_register_asm(shape::Symbol, bitop::Symbol,
     constraints = join(vcat(fill("=&r", n_cd),
                             fill("r", n_a + n_b + n_cd)), ",")
     flat_types = vcat(fill(UInt32, n_a + n_b), fill(Int32, n_cd))
-    a_in = [:(a[$i]) for i in 1:n_a]
-    b_in = [:(b[$i]) for i in 1:n_b]
-    c_in = [:(c[$i]) for i in 1:n_cd]
+    a_in = _index_exprs(:a, 1:n_a)
+    b_in = _index_exprs(:b, 1:n_b)
+    c_in = _index_exprs(:c, 1:n_cd)
     call = convergent_asmcall(asm, constraints, NTuple{n_cd, Int32}, flat_types,
                               a_in..., b_in..., c_in...)
     mods = (:sync, :aligned, shape, :row, :col,
@@ -346,9 +346,9 @@ function _mma_b1_register(shape::Symbol, bitop::Symbol)
     full = "llvm.nvvm." * _mma_b1_intrinsic_name(shape, bitop)
     call = wrapper_intrinsic_call(:mma_b1, :mma, mods, full)
 
-    a_in = [:(a[$i]) for i in 1:n_a]
-    b_in = [:(b[$i]) for i in 1:n_b]
-    c_in = [:(c[$i]) for i in 1:n_cd]
+    a_in = _index_exprs(:a, 1:n_a)
+    b_in = _index_exprs(:b, 1:n_b)
+    c_in = _index_exprs(:c, 1:n_cd)
     @eval function (::Operation{:mma, $mods})(
             a::NTuple{$n_a, UInt32},
             b::NTuple{$n_b, UInt32},

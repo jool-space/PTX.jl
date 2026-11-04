@@ -60,8 +60,25 @@ function render_arg(::Type{T}, slot::Int, ::Bool) where {T}
     op_str, InputSlot[(constraint_letter(T), T, nothing, false)], slot + 1
 end
 
-build_head(op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    isempty(mods) ? string(op) : string(op) * "." * join(string.(mods), ".")
+# Shared by the wrapper builders, which would otherwise each compile their
+# own generator or comprehension for these at load time.
+
+# `"\$a, \$(a + 1), …, \$b"`: references to the asm operands numbered `a:b`.
+_asm_slots(slots::UnitRange{Int}) = join(("\$$i" for i in slots), ", ")
+
+# `[:(x[i]) for i in r]`: the elements of tuple argument `x` as operands.
+_index_exprs(x::Symbol, r::UnitRange{Int}) = Any[:($x[$i]) for i in r]
+
+# Unspecialized and indexed: `join`/broadcast over the tuple would compile
+# once per modifier count.
+Base.@nospecializeinfer function build_head(
+        op::Symbol, @nospecialize(mods::Tuple{Vararg{Symbol}}))
+    head = string(op)
+    for i in 1:length(mods)
+        head *= "." * String(mods[i]::Symbol)
+    end
+    head
+end
 
 function build_ledger_call(::StructuredLedger, schema::StructuredResultSchema,
                            @nospecialize(argtypes),

@@ -200,15 +200,15 @@ const STRUCTURED_RESULT_SCHEMAS = let schemas = StructuredResultSchema[]
     schemas
 end
 
-const _STRUCTURED_RESULT_SCHEMA_BY_FORM = Dict(
-    (schema.op, schema.mods) => schema for schema in STRUCTURED_RESULT_SCHEMAS)
+const _STRUCTURED_RESULT_SCHEMA_BY_FORM = Dict{FormKey, StructuredResultSchema}(
+    FormKey(schema.op, schema.mods) => schema for schema in STRUCTURED_RESULT_SCHEMAS)
 length(_STRUCTURED_RESULT_SCHEMA_BY_FORM) == length(STRUCTURED_RESULT_SCHEMAS) ||
     error("duplicate keys in STRUCTURED_RESULT_SCHEMAS")
 length(STRUCTURED_RESULT_SCHEMAS) == 1134 ||
     error("structured-result ledger count changed; re-audit PTX 9.3 grammar")
 
 schema(::StructuredLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    get(_STRUCTURED_RESULT_SCHEMA_BY_FORM, (op, mods), nothing)
+    get(_STRUCTURED_RESULT_SCHEMA_BY_FORM, FormKey(op, mods), nothing)
 
 # The island is opcode-wide (see `island_of`): every setp/lop3/match/elect/
 # testp/isspacep spelling must hit an exact reviewed form, whatever its mods.

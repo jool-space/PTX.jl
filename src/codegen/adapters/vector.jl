@@ -77,8 +77,10 @@ end
 # also permits a destination register wider than its instruction type (§9.4.1),
 # but that changes the observable result width and extension semantics. Until
 # the structured API can represent those widened lanes, accept only exact-size
-# declarations and fail before emitting a narrower Julia tuple.
-const _VECTOR_RESULT_REGISTER_TYPES = Dict(
+# declarations and fail before emitting a narrower Julia tuple. The value
+# type is declared: inferring it from the mixed-length entries builds the
+# table through a chain of widening copies, each compiled separately.
+const _VECTOR_RESULT_REGISTER_TYPES = Dict{Symbol, Tuple{Vararg{ScalarType.T}}}(
     :b8 => (ScalarType.B8, ScalarType.U8, ScalarType.S8),
     :u8 => (ScalarType.B8, ScalarType.U8, ScalarType.S8),
     :s8 => (ScalarType.B8, ScalarType.U8, ScalarType.S8),

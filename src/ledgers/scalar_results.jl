@@ -422,13 +422,13 @@ const SCALAR_RESULT_SCHEMAS = let schemas = ScalarResultSchema[]
     schemas
 end
 
-const _SCALAR_RESULT_SCHEMA_BY_FORM = Dict(
-    (schema.op, schema.mods) => schema for schema in SCALAR_RESULT_SCHEMAS)
+const _SCALAR_RESULT_SCHEMA_BY_FORM = Dict{FormKey, ScalarResultSchema}(
+    FormKey(schema.op, schema.mods) => schema for schema in SCALAR_RESULT_SCHEMAS)
 length(_SCALAR_RESULT_SCHEMA_BY_FORM) == length(SCALAR_RESULT_SCHEMAS) ||
     error("duplicate keys in SCALAR_RESULT_SCHEMAS")
 
 schema(::ScalarLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    get(_SCALAR_RESULT_SCHEMA_BY_FORM, (op, mods), nothing)
+    get(_SCALAR_RESULT_SCHEMA_BY_FORM, FormKey(op, mods), nothing)
 
 # The scalar island's routing predicate lives in `island_of`
 # (src/ledgers/protocol.jl); this file owns the schemas it routes to.

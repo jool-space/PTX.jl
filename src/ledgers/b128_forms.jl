@@ -89,12 +89,12 @@ const _B128_ST_CACHE_OPS = Set((:wb, :cg, :cs, :wt))
 # count pins. Editing the rules below without updating both test-side
 # oracles is a pinned failure, not a silent drift.
 function _b128_form_schemas()
-    schemas = Dict{Tuple{Symbol,Tuple},B128FormSchema}()
+    schemas = Dict{FormKey, B128FormSchema}()
     function add!(op::Symbol, mods::Vector{Symbol}, kind::Symbol,
                   result::Type, operands::Tuple{Vararg{Symbol}},
                   cache_policy::Bool, section::String)
-        key = (op, (mods...,))
-        schemas[key] = B128FormSchema(op, key[2], kind, result, operands,
+        key = FormKey(op, (mods...,))
+        schemas[key] = B128FormSchema(op, key.mods, kind, result, operands,
                                       cache_policy, section)
         nothing
     end
@@ -240,7 +240,7 @@ end
 const B128_FORM_SCHEMAS = _b128_form_schemas()
 
 schema(::B128Ledger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    get(B128_FORM_SCHEMAS, (op, mods), nothing)
+    get(B128_FORM_SCHEMAS, FormKey(op, mods), nothing)
 
 function miss(::B128Ledger, op::Symbol, mods::Tuple{Vararg{Symbol}})
     spelling = isempty(mods) ? string(op) : string(op, ".", join(mods, "."))

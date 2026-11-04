@@ -166,14 +166,14 @@ const _CLC_COMPLETE_TX = Symbol("mbarrier::complete_tx::bytes")
 const _CLC_MULTICAST_ALL = Symbol("multicast::cluster::all")
 
 const CLC_TRY_CANCEL_FORMS = let
-    forms = Dict{Tuple{Vararg{Symbol}}, CLCTryCancelSchema}()
+    forms = Dict{FormKey, CLCTryCancelSchema}()
     for shared_cta in (false, true), multicast in (false, true)
         mods = Symbol[:try_cancel, :async]
         shared_cta && push!(mods, Symbol("shared::cta"))
         push!(mods, _CLC_COMPLETE_TX)
         multicast && push!(mods, _CLC_MULTICAST_ALL)
         push!(mods, :b128)
-        forms[Tuple(mods)] = CLCTryCancelSchema(
+        forms[FormKey(:clusterlaunchcontrol, Tuple(mods))] = CLCTryCancelSchema(
             shared_cta, multicast, v"8.6", v"10.0",
             multicast ? ("sm_100a", "sm_110a", "sm_120a") : (),
             multicast ? ("sm_100f", "sm_110f", "sm_120f") : (),
@@ -184,8 +184,7 @@ const CLC_TRY_CANCEL_FORMS = let
 end
 
 schema(::CLCLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    op === :clusterlaunchcontrol ? get(CLC_TRY_CANCEL_FORMS, mods, nothing) :
-    nothing
+    get(CLC_TRY_CANCEL_FORMS, FormKey(op, mods), nothing)
 
 # `op` is always :clusterlaunchcontrol for a routed miss; spelling is fixed.
 function miss(::CLCLedger, op::Symbol, mods::Tuple{Vararg{Symbol}})

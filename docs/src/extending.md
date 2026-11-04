@@ -209,12 +209,14 @@ shape) and close the boundary:
   spelling errors at compile time instead of receiving a guessed
   contract — its count and content are pinned in
   `test/host/fallback_boundary.jl`;
-- if operands accept integer addresses, forwarding adapters emitted by
+- if operands accept integer addresses, adapter signatures recorded by
   the *same* enumeration that emits (or, for literal methods, sits next
   to) the primary methods — the tcgen05 registration calls
   `_tcgen05_adapter!(mods, argtypes...)` with the exact reviewed
-  signature, and the sealed `TCGEN05_INTEGER_ADDRESS_ADAPTERS` inventory
-  is pinned by the independent oracle in `test/host/address_roles.jl`;
+  signature, one generated method forwards exactly the recorded
+  signatures to the typed wrappers, and the sealed
+  `TCGEN05_INTEGER_ADDRESS_ADAPTERS` inventory is pinned by the
+  independent oracle in `test/host/address_roles.jl`;
 - combinatorial modifier grids should be generated (`@eval` over a
   declarative spec, like the tcgen05 ld/st grid), with the spec — not
   the expansion — as the reviewed artifact.

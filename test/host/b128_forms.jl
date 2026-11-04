@@ -119,7 +119,7 @@ end
 
 @testset "independent exhaustive b128 form matrix" begin
     expected = _expected_b128_form_keys()
-    actual = Set(keys(PTX.B128_FORM_SCHEMAS))
+    actual = Set((key.op, key.mods) for key in keys(PTX.B128_FORM_SCHEMAS))
     @test isempty(setdiff(actual, expected))
     @test isempty(setdiff(expected, actual))
     histogram = Dict(op => count(key -> key[1] === op, expected)
@@ -418,10 +418,10 @@ function _b128_candidate_keys()
 end
 
 @testset "audited grammar roundtrip still defines the table" begin
-    rebuilt = Dict{Tuple{Symbol,Tuple},B128FormSchema}()
+    rebuilt = Dict{PTX.FormKey,B128FormSchema}()
     for (op, mods) in _b128_candidate_keys()
         schema = _parse_b128_form_schema(op, mods)
-        schema === nothing || (rebuilt[(op, mods)] = schema)
+        schema === nothing || (rebuilt[PTX.FormKey(op, mods)] = schema)
     end
     @test isempty(setdiff(keys(rebuilt), keys(PTX.B128_FORM_SCHEMAS)))
     @test isempty(setdiff(keys(PTX.B128_FORM_SCHEMAS), keys(rebuilt)))

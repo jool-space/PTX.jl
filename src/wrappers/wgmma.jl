@@ -80,7 +80,7 @@ function wgmma_mma_async_spec(dtype_d::Symbol, dtype_a::Symbol, dtype_b::Symbol,
                               scale_d_imm::Union{Bool, Nothing} = nothing)
     nd, _, d_let = _wgmma_dvec_kind(dtype_d, n)
     head = "wgmma.mma_async.sync.aligned.m64n$(n)k$(k).$dtype_d.$dtype_a.$dtype_b"
-    d_slots = "{" * join(("\$$i" for i in 0:nd-1), ", ") * "}"
+    d_slots = "{" * _asm_slots(0:nd-1) * "}"
     # PTX 9.3 §9.7.16.5.2: integer wgmma takes only `scale-d` (no scale-a/b
     # or trans-a/b). FP wgmma takes `scale-d, scale-a, scale-b` plus optional
     # `trans-a, trans-b` for f16/bf16 inputs. TF32 and FP8 inputs have no
@@ -128,8 +128,8 @@ function wgmma_mma_async_rf_spec(dtype_d::Symbol, dtype_a::Symbol,
                                  has_trans::Bool)
     nd, _, d_let = _wgmma_dvec_kind(dtype_d, n)
     head = "wgmma.mma_async.sync.aligned.m64n$(n)k$(k).$dtype_d.$dtype_a.$dtype_b"
-    d_slots = "{" * join(("\$$i" for i in 0:nd-1), ", ") * "}"
-    a_slots = "{" * join(("\$$(nd + i)" for i in 0:3), ", ") * "}"
+    d_slots = "{" * _asm_slots(0:nd-1) * "}"
+    a_slots = "{" * _asm_slots(nd:nd + 3) * "}"
     imms_tail = if dtype_d === :s32
         ""
     elseif has_trans
@@ -166,7 +166,7 @@ function _wgmma_mma_async_register(
     let spec = wgmma_mma_async_spec(dtype_d, dtype_a, dtype_b, n, k, has_trans)
         nd, asm, constraints = spec.nd, spec.asm, spec.constraints
         flat_argtypes = vcat([UInt64, UInt64, Bool], fill(d_J, nd))
-        d_args = [:(d[$i]) for i in 1:nd]
+        d_args = _index_exprs(:d, 1:nd)
         call = convergent_asmcall(asm, constraints, NTuple{nd, d_J},
                                   flat_argtypes, :a_desc, :b_desc, :scale_d,
                                   d_args...)
@@ -185,7 +185,7 @@ function _wgmma_mma_async_register(
                                      scale_d_imm = true)
         nd, asm, constraints = spec.nd, spec.asm, spec.constraints
         flat_argtypes = vcat([UInt64, UInt64], fill(d_J, nd))
-        d_args = [:(d[$i]) for i in 1:nd]
+        d_args = _index_exprs(:d, 1:nd)
         call = convergent_asmcall(asm, constraints, NTuple{nd, d_J},
                                   flat_argtypes, :a_desc, :b_desc, d_args...)
         @eval function (::Operation{:wgmma, $mods})(
@@ -223,7 +223,7 @@ function _wgmma_mma_async_register(
                                        has_trans)
         nd, asm, constraints = spec.nd, spec.asm, spec.constraints
         flat_argtypes = vcat(fill(UInt32, 4), [UInt64, Bool], fill(d_J, nd))
-        d_args = [:(d[$i]) for i in 1:nd]
+        d_args = _index_exprs(:d, 1:nd)
         call = convergent_asmcall(asm, constraints, NTuple{nd, d_J},
                                   flat_argtypes, (:(a[$i]) for i in 1:4)...,
                                   :b_desc, :scale_d, d_args...)

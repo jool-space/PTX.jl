@@ -455,8 +455,21 @@ end
         @test marked_info.tier === payload_info.tier
         @test marked_info.rettype === payload_info.rettype
         @test marked_info.tier !== :chain_asm
-        @test which(op, Tuple{marked...}) !== PTX._CHAIN_METHOD
+        # One generated method serves the whole inventory: dispatch reaches
+        # it, the inventory admits the signature, and the call runs the
+        # forwarded wrapper's body rather than the chain's.
+        @test which(op, Tuple{marked...}) ===
+              PTX._TCGEN05_ADDRESS_ADAPTER_METHOD
+        @test PTX.tcgen05_integer_address_adapter(mods, marked)
+        @test PTX.resolved_method(op, marked) !== PTX._CHAIN_METHOD
     end
+
+    # Admitted signatures forward to the typed wrapper, whose host gate
+    # still rejects a host call.
+    @test_throws PTX.DeviceOnlyError ptx"tcgen05.shift.cta_group::1.down"(
+        address(UInt32(0)))
+    @test_throws PTX.DeviceOnlyError ptx"tcgen05.ld.red.sync.aligned.32x32b.x2.min.f32"(
+        address(UInt32(0)))
 
     # A reviewed spelling with a missing operand (16x32bx2 without its
     # immHalfSplitoff) can use neither the adapter nor the raw fallback.
@@ -469,7 +482,7 @@ end
     # stays forbidden.
     red = ptx"tcgen05.ld.red.sync.aligned.32x32b.x2.min.f32"
     @test PTX.lowering(red, (Address{UInt32},)).tier === :asm
-    @test which(red, Tuple{Address{UInt32}}) !== PTX._CHAIN_METHOD
+    @test PTX.resolved_method(red, (Address{UInt32},)) !== PTX._CHAIN_METHOD
     @test PTX.lowering(red, (Float32, Address{UInt32})).tier === :forbidden
 
     # PTX 9.3 §9.7.17.7.1 spells dealloc's taddr as a bare register. It must
@@ -509,7 +522,19 @@ end
             (A32, UInt32, UInt64, UInt32, A32, A32, Bool),
             (A32, A32, Address{UInt64}, UInt32, A32, A32, Bool))
         @test PTX.lowering(mxop, bad_signature).tier === :forbidden
-        @test which(mxop, Tuple{bad_signature...}) === PTX._CHAIN_METHOD
+        # Outside the inventory the adapter method takes the chain default's
+        # body, so the call fails with the chain's own build_call error.
+        @test !PTX.tcgen05_integer_address_adapter(mxmods, bad_signature)
+        @test PTX.resolved_method(mxop, bad_signature) === PTX._CHAIN_METHOD
+        chain_err = try
+            build_call(:tcgen05, mxmods, bad_signature)
+        catch err
+            err
+        end
+        @test chain_err isa ArgumentError
+        @test_throws chain_err mxop(
+            (T <: Address ? address(zero(T.parameters[1])) : zero(T)
+             for T in bad_signature)...)
     end
     for (probe, argtypes, asm) in (
             (_tcgen05_mx_shared_address_probe,
@@ -641,8 +666,9 @@ end
 end
 
 @testset "clusterlaunchcontrol.try_cancel closed address schema" begin
-    actual = Set((mods, schema.shared_cta, schema.multicast)
-                 for (mods, schema) in PTX.CLC_TRY_CANCEL_FORMS)
+    @test all(key.op === :clusterlaunchcontrol for key in keys(PTX.CLC_TRY_CANCEL_FORMS))
+    actual = Set((key.mods, schema.shared_cta, schema.multicast)
+                 for (key, schema) in PTX.CLC_TRY_CANCEL_FORMS)
     expected = Set(EXPECTED_CLC_TRY_CANCEL_FORMS)
     @test actual == expected
     @test length(PTX.CLC_TRY_CANCEL_FORMS) == 4

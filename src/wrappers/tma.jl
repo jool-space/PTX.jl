@@ -57,6 +57,140 @@
 # though PTX imposes no collective participation rule; see the prefetch
 # note below).
 
+# --- Grid builders ------------------------------------------------------------
+# The grids below define their methods through these, except the base-im2col
+# prefetch, whose `Int32`/`UInt8` signature is its own. They run once per
+# form at load time with a modifier tuple of a different length each time,
+# so they are unspecialized and compile once.
+
+# The override operand group inside the tensor-map bracket, rendered
+# between the tensor map and the coordinates. `slot` is the next free asm
+# operand index. Returns the bracket fragment (with its trailing comma),
+# the constraint letters, the llvmcall argument types, the Julia signature
+# and call-argument expressions, and the next free slot.
+function _tma_override_operands(n::Int, attr::Bool, slot::Int)
+    frag = String[]
+    cons = String[]
+    argts = Type[]
+    sig = Any[]
+    vals = Any[]
+    push!(frag, "\$$slot")
+    push!(cons, "l")
+    push!(argts, Core.LLVMPtr{UInt8, AS.Global})
+    push!(sig, :(gaddr::Core.LLVMPtr{G, AS.Global}))
+    push!(vals, :gaddr)
+    slot += 1
+    if attr
+        push!(frag, "{" * _asm_slots(slot:slot + n - 1) * "}")
+        append!(cons, fill("h", n))
+        append!(argts, fill(UInt16, n))
+        push!(sig, :(dims::NTuple{$n, UInt8}))
+        append!(vals, [:(UInt16(dims[$i])) for i in 1:n])
+        slot += n
+        if n >= 2
+            push!(frag, "{" * _asm_slots(slot:slot + n - 2) * "}")
+            append!(cons, fill("r", n - 1))
+            append!(argts, fill(UInt32, n - 1))
+            push!(sig, :(lower::NTuple{$(n - 1), UInt32}))
+            append!(vals, _index_exprs(:lower, 1:n-1))
+            slot += n - 1
+            push!(frag, "\$$slot")
+            push!(cons, "h")
+            push!(argts, UInt16)
+            push!(sig, :(upper::UInt16))
+            push!(vals, :upper)
+            slot += 1
+        end
+    end
+    return (join(frag, ", ") * ", ", cons, Tuple(argts), sig, vals, slot)
+end
+
+# Loads: `[dst], [tmap{, overrides}, {coords}], [mbar]{, mask}`.
+Base.@nospecializeinfer function _tma_define_load(
+        @nospecialize(mods::Tuple{Vararg{Symbol}}), n::Int;
+        @nospecialize(mask::Union{Nothing, Type} = nothing),
+        override::Bool = false, attr::Bool = false)
+    cs = [Symbol("c", i) for i in 1:n]
+    spell = build_head(:cp, mods)
+    frag, ocons, oargts, osig, ovals, slot =
+        override ? _tma_override_operands(n, attr, 2) :
+        ("", String[], (), Any[], Any[], 2)
+    coordops = _asm_slots(slot:slot + n - 1)
+    slot += n
+    mbarop = "\$$slot"
+    slot += 1
+    maskop = mask === nothing ? "" : ", \$$slot"
+    asm = "$spell [\$0], [\$1, $frag{$coordops}], [$mbarop]$maskop;"
+    letter = mask === UInt16 ? "h" : "r"
+    constraints = join(["r"; "l"; ocons; fill("r", n); "r";
+                        (mask === nothing ? String[] : [letter]);
+                        "~{memory}"], ",")
+    argts = (Core.LLVMPtr{UInt8, AS.Shared}, Core.LLVMPtr{UInt8, AS.Const},
+             oargts..., ntuple(_ -> Int32, n)..., Core.LLVMPtr{UInt8, AS.Shared},
+             (mask === nothing ? () : (mask,))...)
+    coordsig = [:($c::Integer) for c in cs]
+    coordvals = [:(Int32($c)) for c in cs]
+    masksig = mask === nothing ? Any[] : Any[:(mask::Integer)]
+    maskvals = mask === nothing ? Any[] : Any[:($mask(mask))]
+    tvars = override ? (:T, :S, :U, :G) : (:T, :S, :U)
+    call = convergent_asmcall(asm, constraints, Nothing, argts,
+                              :dst, :tmap, ovals..., coordvals..., :mbar,
+                              maskvals...)
+    @eval @inline function (::Operation{:cp, $mods})(
+            dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
+            $(osig...), $(coordsig...), mbar::Core.LLVMPtr{U, AS.Shared},
+            $(masksig...)) where {$(tvars...)}
+        $call
+    end
+end
+
+# Tensor-map-first forms:
+# `[tmap{, overrides}, {coords}]{, [src]}{, {offsets}}{, policy}` — stores and
+# reductions (`src`), prefetches and eviction hints (no source; base-im2col
+# modes append N-2 offsets; `hint` appends the `.L2::cache_hint` policy).
+Base.@nospecializeinfer function _tma_define_tmap_first(
+        op::Symbol, @nospecialize(mods::Tuple{Vararg{Symbol}}), n::Int;
+        src::Bool = false, offsets::Int = 0, hint::Bool = false,
+        override::Bool = false, attr::Bool = false)
+    cs = [Symbol("c", i) for i in 1:n]
+    os = [Symbol("o", i) for i in 1:offsets]
+    spell = build_head(op, mods)
+    frag, ocons, oargts, osig, ovals, slot =
+        override ? _tma_override_operands(n, attr, 1) :
+        ("", String[], (), Any[], Any[], 1)
+    coordops = _asm_slots(slot:slot + n - 1)
+    slot += n
+    srcop = src ? ", [\$$slot]" : ""
+    src && (slot += 1)
+    offsetops = offsets == 0 ? "" :
+        ", {" * _asm_slots(slot:slot + offsets - 1) * "}"
+    slot += offsets
+    hintop = hint ? ", \$$slot" : ""
+    asm = "$spell [\$0, $frag{$coordops}]$srcop$offsetops$hintop;"
+    constraints = join(["l"; ocons; fill("r", n); (src ? ["r"] : String[]);
+                        fill("h", offsets); (hint ? ["l"] : String[]);
+                        "~{memory}"], ",")
+    argts = (Core.LLVMPtr{UInt8, AS.Const}, oargts..., ntuple(_ -> Int32, n)...,
+             (src ? (Core.LLVMPtr{UInt8, AS.Shared},) : ())...,
+             ntuple(_ -> Int16, offsets)..., (hint ? (UInt64,) : ())...)
+    coordsig = [:($c::Integer) for c in cs]
+    coordvals = [:(Int32($c)) for c in cs]
+    srcsig = src ? Any[:(src::Core.LLVMPtr{T, AS.Shared})] : Any[]
+    srcvals = src ? Any[:src] : Any[]
+    offsetsig = [:($o::Int16) for o in os]
+    hintsig = hint ? Any[:(cache_policy::UInt64)] : Any[]
+    hintvals = hint ? Any[:cache_policy] : Any[]
+    tvars = (:S, (src ? (:T,) : ())..., (override ? (:G,) : ())...)
+    call = convergent_asmcall(asm, constraints, Nothing, argts,
+                              :tmap, ovals..., coordvals..., srcvals..., os...,
+                              hintvals...)
+    @eval @inline function (::Operation{$(QuoteNode(op)), $mods})(
+            tmap::Core.LLVMPtr{S, AS.Const}, $(osig...), $(coordsig...),
+            $(srcsig...), $(offsetsig...), $(hintsig...)) where {$(tvars...)}
+        $call
+    end
+end
+
 # --- Loads: shared::cluster destination --------------------------------------
 # Plain, multicast::cluster (one global read lands in every CTA whose bit
 # is set in the b16 mask), cta_group::2 (Blackwell 2-SM, sm_100a; both
@@ -65,58 +199,20 @@
 # `shared::cluster` addresses, which is exactly what the `r` constraint
 # relies on — the same convention as the asm residue below.
 for n in 1:5, cg2 in (false, true), mc in (false, true)
-    nd = Symbol("$(n)d")
-    cs = [Symbol("c", i) for i in 1:n]
-    mods = (:async, :bulk, :tensor, nd,
+    mods = (:async, :bulk, :tensor, Symbol("$(n)d"),
             (cg2 ? (Symbol("cta_group::2"),) : ())...,
             Symbol("shared::cluster"), :global, :tile,
             Symbol("mbarrier::complete_tx::bytes"),
             (mc ? (Symbol("multicast::cluster"),) : ())...)
-    spell = "cp." * join(String.(mods), ".")
-    coordops = join(("\$$(i + 1)" for i in 1:n), ", ")
-    asm = "$spell [\$0], [\$1, {$coordops}], [\$$(n + 2)]" *
-          (mc ? ", \$$(n + 3);" : ";")
-    constraints = join(["r"; "l"; fill("r", n); "r";
-                        (mc ? ["h"] : []); "~{memory}"], ",")
-    argts = (Core.LLVMPtr{UInt8, AS.Shared}, Core.LLVMPtr{UInt8, AS.Const},
-             ntuple(_ -> Int32, n)..., Core.LLVMPtr{UInt8, AS.Shared},
-             (mc ? (UInt16,) : ())...)
-    coordsig = [:($c::Integer) for c in cs]
-    coordvals = [:(Int32($c)) for c in cs]
-    masksig = mc ? Any[:(mask::Integer)] : Any[]
-    maskvals = mc ? Any[:(UInt16(mask))] : Any[]
-    call = convergent_asmcall(asm, constraints, Nothing, argts,
-                              :dst, :tmap, coordvals..., :mbar, maskvals...)
-    @eval @inline function (::Operation{:cp, $mods})(
-            dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-            $(coordsig...), mbar::Core.LLVMPtr{U, AS.Shared},
-            $(masksig...)) where {T, S, U}
-        $call
-    end
+    _tma_define_load(mods, n; mask = mc ? UInt16 : nothing)
 end
 
 # --- Loads: shared::cta destination (PTX 8.6) ---------------------------------
 
 for n in 1:5
-    nd = Symbol("$(n)d")
-    cs = [Symbol("c", i) for i in 1:n]
-    mods = (:async, :bulk, :tensor, nd, Symbol("shared::cta"), :global,
-            :tile, Symbol("mbarrier::complete_tx::bytes"))
-    spell = "cp." * join(String.(mods), ".")
-    coordops = join(("\$$(i + 1)" for i in 1:n), ", ")
-    asm = "$spell [\$0], [\$1, {$coordops}], [\$$(n + 2)];"
-    constraints = join(["r"; "l"; fill("r", n); "r"; "~{memory}"], ",")
-    argts = (Core.LLVMPtr{UInt8, AS.Shared}, Core.LLVMPtr{UInt8, AS.Const},
-             ntuple(_ -> Int32, n)..., Core.LLVMPtr{UInt8, AS.Shared})
-    coordsig = [:($c::Integer) for c in cs]
-    coordvals = [:(Int32($c)) for c in cs]
-    call = convergent_asmcall(asm, constraints, Nothing, argts,
-                              :dst, :tmap, coordvals..., :mbar)
-    @eval @inline function (::Operation{:cp, $mods})(
-            dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-            $(coordsig...), mbar::Core.LLVMPtr{U, AS.Shared}) where {T, S, U}
-        $call
-    end
+    mods = (:async, :bulk, :tensor, Symbol("$(n)d"), Symbol("shared::cta"),
+            :global, :tile, Symbol("mbarrier::complete_tx::bytes"))
+    _tma_define_load(mods, n)
 end
 
 # --- Stores: shared::cta → global, bulk_group completion ----------------------
@@ -124,25 +220,9 @@ end
 # shared::cta → global syntax block.
 
 for n in 1:5
-    nd = Symbol("$(n)d")
-    cs = [Symbol("c", i) for i in 1:n]
-    mods = (:async, :bulk, :tensor, nd, :global, Symbol("shared::cta"),
-            :tile, :bulk_group)
-    spell = "cp." * join(String.(mods), ".")
-    coordops = join(("\$$i" for i in 1:n), ", ")
-    asm = "$spell [\$0, {$coordops}], [\$$(n + 1)];"
-    constraints = join(["l"; fill("r", n); "r"; "~{memory}"], ",")
-    argts = (Core.LLVMPtr{UInt8, AS.Const}, ntuple(_ -> Int32, n)...,
-             Core.LLVMPtr{UInt8, AS.Shared})
-    coordsig = [:($c::Integer) for c in cs]
-    coordvals = [:(Int32($c)) for c in cs]
-    call = convergent_asmcall(asm, constraints, Nothing, argts,
-                              :tmap, coordvals..., :src)
-    @eval @inline function (::Operation{:cp, $mods})(
-            tmap::Core.LLVMPtr{S, AS.Const}, $(coordsig...),
-            src::Core.LLVMPtr{T, AS.Shared}) where {S, T}
-        $call
-    end
+    mods = (:async, :bulk, :tensor, Symbol("$(n)d"), :global,
+            Symbol("shared::cta"), :tile, :bulk_group)
+    _tma_define_tmap_first(:cp, mods, n; src = true)
 end
 
 # --- Prefetch: global → L2 through a tensor map -------------------------------
@@ -157,29 +237,11 @@ end
 # `.L2::cache_hint` qualifier as an inseparable pair; the policy is only a
 # performance hint and does not change weak-memory semantics.
 
+
 for n in 1:5, hint in (false, true)
-    nd = Symbol("$(n)d")
-    cs = [Symbol("c", i) for i in 1:n]
-    mods = (:async, :bulk, :prefetch, :tensor, nd, :L2, :global, :tile,
-            (hint ? (Symbol("L2::cache_hint"),) : ())...)
-    spell = "cp." * join(String.(mods), ".")
-    coordops = join(("\$$i" for i in 1:n), ", ")
-    asm = "$spell [\$0, {$coordops}]" * (hint ? ", \$$(n + 1);" : ";")
-    constraints = join(["l"; fill("r", n); (hint ? ["l"] : []);
-                        "~{memory}"], ",")
-    argts = (Core.LLVMPtr{UInt8, AS.Const}, ntuple(_ -> Int32, n)...,
-             (hint ? (UInt64,) : ())...)
-    coordsig = [:($c::Integer) for c in cs]
-    coordvals = [:(Int32($c)) for c in cs]
-    hintsig = hint ? Any[:(cache_policy::UInt64)] : Any[]
-    hintvals = hint ? Any[:cache_policy] : Any[]
-    call = convergent_asmcall(asm, constraints, Nothing, argts,
-                              :tmap, coordvals..., hintvals...)
-    @eval @inline function (::Operation{:cp, $mods})(
-            tmap::Core.LLVMPtr{S, AS.Const}, $(coordsig...),
-            $(hintsig...)) where {S}
-        $call
-    end
+    mods = (:async, :bulk, :prefetch, :tensor, Symbol("$(n)d"), :L2, :global,
+            :tile, (hint ? (Symbol("L2::cache_hint"),) : ())...)
+    _tma_define_tmap_first(:cp, mods, n; hint)
 end
 
 # Base im2col prefetch is a separate grammar island from tile prefetch. PTX
@@ -196,9 +258,9 @@ for n in 3:5, hint in (false, true)
     os = [Symbol("o", i) for i in 1:k]
     mods = (:async, :bulk, :prefetch, :tensor, nd, :L2, :global, :im2col,
             (hint ? (Symbol("L2::cache_hint"),) : ())...)
-    spell = "cp." * join(String.(mods), ".")
-    coordops = join(("\$$i" for i in 1:n), ", ")
-    offsetops = join(("\$$(n + i)" for i in 1:k), ", ")
+    spell = build_head(:cp, mods)
+    coordops = _asm_slots(1:n)
+    offsetops = _asm_slots(n + 1:n + k)
     asm = "$spell [\$0, {$coordops}], {$offsetops}" *
           (hint ? ", \$$(n + k + 1);" : ";")
     constraints = join(["l"; fill("r", n); fill("h", k);
@@ -346,123 +408,6 @@ const _TMA_REDUCE_OPS = (:add, :min, :max, :inc, :dec, :and, :or, :xor)
 _tma_override_attribute(n::Int) =
     n == 1 ? Symbol("override::global_dim") : Symbol("override::global_dim_stride")
 
-# The override operand group inside the tensor-map bracket, rendered
-# between the tensor map and the coordinates. `slot` is the next free asm
-# operand index. Returns the bracket fragment (with its trailing comma),
-# the constraint letters, the llvmcall argument types, the Julia signature
-# and call-argument expressions, and the next free slot.
-function _tma_override_operands(n::Int, attr::Bool, slot::Int)
-    frag = String[]
-    cons = String[]
-    argts = Type[]
-    sig = Any[]
-    vals = Any[]
-    push!(frag, "\$$slot")
-    push!(cons, "l")
-    push!(argts, Core.LLVMPtr{UInt8, AS.Global})
-    push!(sig, :(gaddr::Core.LLVMPtr{G, AS.Global}))
-    push!(vals, :gaddr)
-    slot += 1
-    if attr
-        push!(frag, "{" * join(("\$$(slot + i - 1)" for i in 1:n), ", ") * "}")
-        append!(cons, fill("h", n))
-        append!(argts, fill(UInt16, n))
-        push!(sig, :(dims::NTuple{$n, UInt8}))
-        append!(vals, [:(UInt16(dims[$i])) for i in 1:n])
-        slot += n
-        if n >= 2
-            push!(frag, "{" * join(("\$$(slot + i - 1)" for i in 1:n-1), ", ") * "}")
-            append!(cons, fill("r", n - 1))
-            append!(argts, fill(UInt32, n - 1))
-            push!(sig, :(lower::NTuple{$(n - 1), UInt32}))
-            append!(vals, [:(lower[$i]) for i in 1:n-1])
-            slot += n - 1
-            push!(frag, "\$$slot")
-            push!(cons, "h")
-            push!(argts, UInt16)
-            push!(sig, :(upper::UInt16))
-            push!(vals, :upper)
-            slot += 1
-        end
-    end
-    return (join(frag, ", ") * ", ", cons, Tuple(argts), sig, vals, slot)
-end
-
-# Loads: `[dst], [tmap{, overrides}, {coords}], [mbar]{, mask}`.
-function _tma_define_load(mods, n::Int; mask::Union{Nothing, Type} = nothing,
-                          override::Bool = false, attr::Bool = false)
-    cs = [Symbol("c", i) for i in 1:n]
-    spell = "cp." * join(String.(mods), ".")
-    frag, ocons, oargts, osig, ovals, slot =
-        override ? _tma_override_operands(n, attr, 2) :
-        ("", String[], (), Any[], Any[], 2)
-    coordops = join(("\$$(slot + i - 1)" for i in 1:n), ", ")
-    slot += n
-    mbarop = "\$$slot"
-    slot += 1
-    maskop = mask === nothing ? "" : ", \$$slot"
-    asm = "$spell [\$0], [\$1, $frag{$coordops}], [$mbarop]$maskop;"
-    letter = mask === UInt16 ? "h" : "r"
-    constraints = join(["r"; "l"; ocons; fill("r", n); "r";
-                        (mask === nothing ? String[] : [letter]);
-                        "~{memory}"], ",")
-    argts = (Core.LLVMPtr{UInt8, AS.Shared}, Core.LLVMPtr{UInt8, AS.Const},
-             oargts..., ntuple(_ -> Int32, n)..., Core.LLVMPtr{UInt8, AS.Shared},
-             (mask === nothing ? () : (mask,))...)
-    coordsig = [:($c::Integer) for c in cs]
-    coordvals = [:(Int32($c)) for c in cs]
-    masksig = mask === nothing ? Any[] : Any[:(mask::Integer)]
-    maskvals = mask === nothing ? Any[] : Any[:($mask(mask))]
-    tvars = override ? (:T, :S, :U, :G) : (:T, :S, :U)
-    call = convergent_asmcall(asm, constraints, Nothing, argts,
-                              :dst, :tmap, ovals..., coordvals..., :mbar,
-                              maskvals...)
-    @eval @inline function (::Operation{:cp, $mods})(
-            dst::Core.LLVMPtr{T, AS.Shared}, tmap::Core.LLVMPtr{S, AS.Const},
-            $(osig...), $(coordsig...), mbar::Core.LLVMPtr{U, AS.Shared},
-            $(masksig...)) where {$(tvars...)}
-        $call
-    end
-end
-
-# Tensor-map-first forms: `[tmap{, overrides}, {coords}]{, [src]}{, {offsets}}`
-# — stores and reductions (`src`), prefetches and eviction hints (no
-# source; base-im2col modes append N-2 offsets).
-function _tma_define_tmap_first(op::Symbol, mods, n::Int; src::Bool = false,
-                                offsets::Int = 0, override::Bool = false,
-                                attr::Bool = false)
-    cs = [Symbol("c", i) for i in 1:n]
-    os = [Symbol("o", i) for i in 1:offsets]
-    spell = String(op) * "." * join(String.(mods), ".")
-    frag, ocons, oargts, osig, ovals, slot =
-        override ? _tma_override_operands(n, attr, 1) :
-        ("", String[], (), Any[], Any[], 1)
-    coordops = join(("\$$(slot + i - 1)" for i in 1:n), ", ")
-    slot += n
-    srcop = src ? ", [\$$slot]" : ""
-    src && (slot += 1)
-    offsetops = offsets == 0 ? "" :
-        ", {" * join(("\$$(slot + i - 1)" for i in 1:offsets), ", ") * "}"
-    asm = "$spell [\$0, $frag{$coordops}]$srcop$offsetops;"
-    constraints = join(["l"; ocons; fill("r", n); (src ? ["r"] : String[]);
-                        fill("h", offsets); "~{memory}"], ",")
-    argts = (Core.LLVMPtr{UInt8, AS.Const}, oargts..., ntuple(_ -> Int32, n)...,
-             (src ? (Core.LLVMPtr{UInt8, AS.Shared},) : ())...,
-             ntuple(_ -> Int16, offsets)...)
-    coordsig = [:($c::Integer) for c in cs]
-    coordvals = [:(Int32($c)) for c in cs]
-    srcsig = src ? Any[:(src::Core.LLVMPtr{T, AS.Shared})] : Any[]
-    srcvals = src ? Any[:src] : Any[]
-    offsetsig = [:($o::Int16) for o in os]
-    tvars = (:S, (src ? (:T,) : ())..., (override ? (:G,) : ())...)
-    call = convergent_asmcall(asm, constraints, Nothing, argts,
-                              :tmap, ovals..., coordvals..., srcvals..., os...)
-    @eval @inline function (::Operation{$(QuoteNode(op)), $mods})(
-            tmap::Core.LLVMPtr{S, AS.Const}, $(osig...), $(coordsig...),
-            $(srcsig...), $(offsetsig...)) where {$(tvars...)}
-        $call
-    end
-end
 
 let cluster = Symbol("shared::cluster"), cta = Symbol("shared::cta"),
     complete = Symbol("mbarrier::complete_tx::bytes"),

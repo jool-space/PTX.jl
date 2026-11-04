@@ -25,9 +25,10 @@ function _extended_asmcall_expr(asm::String, constraints::String,
         $asm, $constraints, true, $rettype, $argtype, $(args...)) )
 end
 
-function _scalar_extended_spec(head::String, ::Type{T}, value_inputs::Int;
-                               carry_in::Bool, carry_out::Bool,
-                               flag_kind::Symbol = :carry) where {T<:ExtendedPrecisionWord}
+Base.@nospecializeinfer function _scalar_extended_spec(
+        head::String, @nospecialize(T::Type{<:ExtendedPrecisionWord}),
+        value_inputs::Int; carry_in::Bool, carry_out::Bool,
+        flag_kind::Symbol = :carry)
     flag_kind in (:carry, :borrow) ||
         throw(ArgumentError("expected :carry or :borrow, got $flag_kind"))
     dt, letter = _extended_precision_dtype(T)
@@ -48,7 +49,7 @@ function _scalar_extended_spec(head::String, ::Type{T}, value_inputs::Int;
             push!(lines, "sub.cc.$dt cc_tmp, 0, cc_tmp;")
         end
     end
-    push!(lines, "$head \$0, " * join(("\$$slot" for slot in value_slots), ", ") * ";")
+    push!(lines, "$head \$0, " * _asm_slots(value_slots) * ";")
     if carry_out
         # No PTX instruction reads CC.CF into a predicate directly. Materialize
         # with the matching consumer, then convert its nonzero result to Bool.
@@ -168,12 +169,12 @@ function _addsub_aggregate_expr(kind::Symbol, N::Int, ::Type{T},
                                 carry_in::Bool,
                                 carry_name::Symbol = :carry) where {T<:ExtendedPrecisionWord}
     spec = _addsub_aggregate_spec(kind, N, T, carry_in)
-    args = Any[:(a[$i]) for i in 1:N]
-    append!(args, [:(b[$i]) for i in 1:N])
+    args = _index_exprs(:a, 1:N)
+    append!(args, _index_exprs(:b, 1:N))
     carry_in && push!(args, carry_name)
     call = _extended_asmcall_expr(spec.asm, spec.constraints,
                                   spec.rettype, spec.argtype, args)
-    words = Expr(:tuple, [:(flat[$i]) for i in 1:N]...)
+    words = Expr(:tuple, _index_exprs(:flat, 1:N)...)
     quote
         Base.@inline
         flat = $call

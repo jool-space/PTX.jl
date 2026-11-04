@@ -50,9 +50,10 @@ const IMMEDIATE_FORM_CONTRACTS = ImmediateFormContract[
 length(IMMEDIATE_FORM_CONTRACTS) == 4 ||
     error("immediate-form contract count changed; re-audit PTX 9.3 grammar")
 
-const _IMMEDIATE_FORM_CONTRACT_BY_FORM = let by_form = Dict()
+const _IMMEDIATE_FORM_CONTRACT_BY_FORM = let
+    by_form = Dict{FormKey, ImmediateFormContract}()
     for contract in IMMEDIATE_FORM_CONTRACTS, mods in contract.forms
-        key = (contract.op, mods)
+        key = FormKey(contract.op, mods)
         haskey(by_form, key) && error("duplicate immediate-form contract: $key")
         by_form[key] = contract
     end
@@ -60,7 +61,7 @@ const _IMMEDIATE_FORM_CONTRACT_BY_FORM = let by_form = Dict()
 end
 
 schema(::ImmediateLedger, op::Symbol, mods::Tuple{Vararg{Symbol}}) =
-    get(_IMMEDIATE_FORM_CONTRACT_BY_FORM, (op, mods), nothing)
+    get(_IMMEDIATE_FORM_CONTRACT_BY_FORM, FormKey(op, mods), nothing)
 
 function miss(::ImmediateLedger, op::Symbol,
               mods::Tuple{Vararg{Symbol}})

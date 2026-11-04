@@ -118,7 +118,7 @@ for (count, n) in ((:x1, 1), (:x2, 2), (:x4, 4)), trans in (false, true)
         (:sync, :aligned, :m8n8, count, :trans, Symbol("shared::cta"), :b16) :
         (:sync, :aligned, :m8n8, count, Symbol("shared::cta"), :b16)
     ttext = trans ? ".trans" : ""
-    outs = "{" * join(("\$$i" for i in 0:n-1), ", ") * "}"
+    outs = "{" * _asm_slots(0:n-1) * "}"
     asm = "ldmatrix.sync.aligned.m8n8.$count$ttext.shared::cta.b16 $outs, [\$$n];"
     constraints = join(vcat(fill("=r", n), ["r", "~{memory}"]), ",")
     rettype = n == 1 ? UInt32 : NTuple{n, UInt32}
@@ -145,7 +145,7 @@ for (shape, count, nout, trans) in (
     mods = (:sync, :aligned, shape, count, transmods...,
             Symbol("shared::cta"), :b8x16, src_fmt)
     ttext = trans ? ".trans" : ""
-    outs = "{" * join(("\$$i" for i in 0:nout-1), ", ") * "}"
+    outs = "{" * _asm_slots(0:nout-1) * "}"
     asm = "ldmatrix.sync.aligned.$shape.$count$ttext.shared::cta.b8x16.$src_fmt " *
           "$outs, [\$$nout];"
     constraints = join(vcat(fill("=r", nout), ["r", "~{memory}"]), ",")
@@ -169,7 +169,7 @@ end
 for (count, nout) in ((:x1, 1), (:x2, 2), (:x4, 4)),
         space in (:shared, Symbol("shared::cta"))
     mods = (:sync, :aligned, :m8n16, count, space, :s8, :s4)
-    outs = "{" * join(("\$$i" for i in 0:nout-1), ", ") * "}"
+    outs = "{" * _asm_slots(0:nout-1) * "}"
     asm = "ldmatrix.sync.aligned.m8n16.$count.$space.s8.s4 $outs, [\$$nout];"
     constraints = join(vcat(fill("=r", nout), ["r", "~{memory}"]), ",")
     rettype = nout == 1 ? UInt32 : NTuple{nout, UInt32}
