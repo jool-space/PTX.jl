@@ -9,12 +9,13 @@
 # chain would drop the `.pred` destination.
 #
 # Wrapped state spaces are the three with an unambiguous pointer carrier:
-# generic, `.global` (both 64-bit `l`), and `.shared::cta` (32-bit `r`, as for
-# the other shared-window wrappers). `.const` and `.param{::entry}` are not
-# wrapped: a `TMADescriptorPtr` is typed `AS.Const` by convention but holds a
-# generic address of global storage (see `reinterpret_addrspace`), so
-# `.const` would misread it; reinterpret it to `AS.Generic` and use the
-# generic form.
+# generic, `.global`, and `.shared::cta`, all passed as 64-bit `l` like the
+# `tensormap.replace` chain. Unlike most shared-window instructions, ptxas
+# 13.5 rejects a 32-bit `.shared::cta` address here ("Arguments mismatch for
+# instruction 'mov'"). `.const` and `.param{::entry}` are not wrapped: a
+# `TMADescriptorPtr` is typed `AS.Const` by convention but holds a generic
+# address of global storage (see `reinterpret_addrspace`), so `.const` would
+# misread it; reinterpret it to `AS.Generic` and use the generic form.
 #
 # The query reads the descriptor, so it keeps the memory clobber: it must not
 # move above a preceding `tensormap.replace` to the same object.
@@ -29,7 +30,7 @@ end
 
 for (ss, as, constraint) in (((),                       AS.Generic, "l"),
                              ((:global,),               AS.Global,  "l"),
-                             ((Symbol("shared::cta"),), AS.Shared,  "r"))
+                             ((Symbol("shared::cta"),), AS.Shared,  "l"))
     mods = (:query, :alloc_class_large, ss..., :b1024)
     asm = "tensormap.$(join(mods, '.')) \$0, [\$1];"
     constraints = "=b,$(constraint),~{memory}"

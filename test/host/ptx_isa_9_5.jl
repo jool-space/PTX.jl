@@ -1,7 +1,7 @@
 using PTX: format_call, build_call, Operation
 
-# PTX ISA 9.5 additions that PTX.jl binds. Rendering only: assembly evidence
-# needs a managed compiler that accepts `.version 9.5`.
+# PTX ISA 9.5 additions that PTX.jl binds: rendering and lowering contracts.
+# Assembly evidence lives in ptxas/ptx_isa_9_5.jl.
 
 @testset "PTX 9.5 locality special registers" begin
     for name in ("%locality_domain_id", "%locality_domain_supplemental_sm")
@@ -35,7 +35,7 @@ end
 @testset "PTX 9.5 tensormap.query.alloc_class_large (typed wrappers)" begin
     for (ss, as, constraint) in (((),                       PTX.AS.Generic, "l"),
                                  ((:global,),               PTX.AS.Global,  "l"),
-                                 ((Symbol("shared::cta"),), PTX.AS.Shared,  "r"))
+                                 ((Symbol("shared::cta"),), PTX.AS.Shared,  "l"))
         mods = (:query, :alloc_class_large, ss..., :b1024)
         op = Operation{:tensormap, mods}()
         argtypes = (Core.LLVMPtr{UInt8, as},)

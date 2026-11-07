@@ -520,8 +520,8 @@ ptx"tensormap.query.alloc_class_large.global.b1024"(desc)   # desc::LLVMPtr{_, A
 
 The special registers `%locality_domain_id` and
 `%locality_domain_supplemental_sm` (sm_100) read through `ptx"mov.u32"`.
-These PTX ISA 9.5 forms render today, but kernels using them need an
-assembler that accepts `.version 9.5`.
+Kernels using these PTX ISA 9.5 forms need an assembler that accepts
+`.version 9.5`, which ptxas does from CUDA 13.5.
 
 Stochastic conversion (`cvt.rs`) does not permit `.pzo`. Other rounding
 and saturation modifier combinations continue to be checked by ptxas.
