@@ -2,7 +2,8 @@
 # Copyright 2026 Patrick Toulmé. Licensed under the Apache License, Version 2.0
 # (http://www.apache.org/licenses/LICENSE-2.0). Translated to Julia and adapted.
 
-const _PTX_94 = Version(9, 4)
+# Newest PTX ISA whose target and `.target` option tables are bundled below.
+const _PTX_KNOWN = Version(9, 5)
 
 const _TARGET_INTRODUCED = let entries = Dict{String,Version}()
     # Unspecialized: compiled once rather than once per row length.
@@ -43,7 +44,7 @@ const _TEXTURE_MODES = Set(("texmode_unified", "texmode_independent"))
 
 _version_tuple(v::Version) = (v.major, v.minor)
 _version_at_least(v::Version, floor::Version) = _version_tuple(v) >= _version_tuple(floor)
-_known_ptx_version(v::Version) = _version_tuple(v) <= _version_tuple(_PTX_94)
+_known_ptx_version(v::Version) = _version_tuple(v) <= _version_tuple(_PTX_KNOWN)
 _architecture_match(value::String) = match(r"^(sm|compute)_([0-9]+)([af]?)$", value)
 
 function _target_floor(value::String)
@@ -63,7 +64,7 @@ function _validate_target!(s::ParserState, target::Target, version::Version)
     floor = _target_floor(arch)
     if floor === nothing
         _known_ptx_version(version) &&
-            throw(_err(s, "target architecture $(repr(arch)) is not defined by PTX ISA 9.4"))
+            throw(_err(s, "target architecture $(repr(arch)) is not defined by PTX ISA $(_PTX_KNOWN.major).$(_PTX_KNOWN.minor)"))
     elseif !_version_at_least(version, floor)
         throw(_err(s, "target architecture $(repr(arch)) requires PTX ISA $(floor.major).$(floor.minor) or later"))
     end
@@ -80,7 +81,7 @@ function _validate_target!(s::ParserState, target::Target, version::Version)
         elseif _architecture_match(option) !== nothing
             throw(_err(s, ".target specifies more than one architecture"))
         elseif _known_ptx_version(version)
-            throw(_err(s, "unknown PTX 9.4 .target option $(repr(option))"))
+            throw(_err(s, "unknown PTX $(_PTX_KNOWN.major).$(_PTX_KNOWN.minor) .target option $(repr(option))"))
         end
     end
     count(in(_TEXTURE_MODES), options) <= 1 ||

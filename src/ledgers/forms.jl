@@ -109,7 +109,9 @@ const _COLLMEM   = FormContract(convergent = true, brackets = true)
 #   * tcgen05 spans address destinations, register vectors, sinks, fences, and
 #     matrix descriptors under one opcode; and
 #   * tensormap proxy fences split into an address-bearing acquire ABI and a
-#     no-operand release ABI, with an ISA-fixed 128-byte range; and
+#     no-operand release ABI, with an ISA-fixed 128-byte range;
+#   * tensormap.query returns a predicate under a head whose replace forms
+#     are no-result sinks; and
 #   * :pred is a PTX.jl-only selector for a grouped destination,
 #     not literal PTX modifiers.
 #
@@ -142,6 +144,8 @@ const TYPED_WRAPPER_ONLY_RULES = (
      detail = "spcompress has num/elemsize/idxsize-dependent grouped register vectors with two leading grouped destinations"),
     (op = :spdecompress, prefix = (),        marker = nothing,
      detail = "spdecompress has spfactor/num/elemsize/idxsize-dependent grouped register vectors with a leading grouped destination"),
+    (op = :tensormap, prefix = (:query,),    marker = nothing,
+     detail = "tensormap.query writes a .pred destination that the tensormap.replace sink contract cannot express"),
     (op = :applypriority, prefix = (:async, :bulk, :tensor), marker = nothing,
      detail = "applypriority.async.bulk.tensor has rank-dependent coordinate vectors and override operand groups inside the tensor-map bracket"),
 )

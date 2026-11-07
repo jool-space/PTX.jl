@@ -60,6 +60,8 @@ end
         ("9.3", "sm_121a, debug"),
         ("9.4", "sm_107f"),
         ("9.4", "sm_107a, debug"),
+        ("9.5", "sm_107f"),
+        ("9.5", "sm_100a, debug"),
     )
     for (version, target) in positives
         @test parse_ptx(header(version, target)).target.targets[1] ==
@@ -69,6 +71,8 @@ end
     negatives = (
         ("9.4", "sm_130"),
         ("9.4", "gfx_90"),
+        ("9.5", "sm_130"),
+        ("9.5", "sm_90, mystery"),
         ("9.3", "sm_107"),
         ("9.3", "debug, sm_90"),
         ("9.3", "sm_90, sm_89"),
@@ -84,10 +88,10 @@ end
     end
     @test_throws ParseError parse_ptx(".version 9.3\n.target sm_90 debug\n")
 
-    # A bundled 9.4 ledger must not pretend to describe a future ISA.
-    future = parse_ptx(header("9.5", "sm_130f, future_platform_option"))
+    # A bundled 9.5 ledger must not pretend to describe a future ISA.
+    future = parse_ptx(header("9.6", "sm_130f, future_platform_option"))
     @test future.target.targets == ("sm_130f", "future_platform_option")
-    @test_throws ParseError parse_ptx(header("9.5", "sm_130f, sm_131"))
+    @test_throws ParseError parse_ptx(header("9.6", "sm_130f, sm_131"))
 end
 
 @testset "module header: later target directives retain order and structure" begin
