@@ -64,6 +64,16 @@ the runtime; LLVM owns optimization of the surrounding Julia code; PTX.jl
 owns the instruction boundary; `ptxas` owns final scheduling and register
 allocation. PTX.jl adds a layer without replacing any of them.
 
+## Installation
+
+PTX.jl is currently only registered in the [jool registry](https://github.com/jool-space/registry/). Add the package like any other, by first adding the registry:
+
+```julia
+using Pkg
+pkg"registry add https://registry.jool.space"
+pkg"add PTX"
+```
+
 ## Acknowledgements
 
 Primary design inspiration: [pyptx](https://github.com/patrick-toulme/pyptx)
