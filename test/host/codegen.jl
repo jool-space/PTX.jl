@@ -141,11 +141,11 @@ end
     @test sreg_val_expr("%cluster_ctaid.x") == "ptx\"%cluster_ctaid.x\""
 end
 
-@testset "PTX 9.4 scalar special-register lowering" begin
+@testset "PTX 9.5 scalar special-register lowering" begin
     # Codegen shares the reviewed scalar subset, while canonicalization keeps
     # the full inventory (including bare v4 roots) for structural comparison.
     @test PTX.Codegen.SPECIAL_REGS === PTX.IR.SCALAR_SPECIAL_REGS
-    @test length(PTX.Codegen.SPECIAL_REGS) == 143
+    @test length(PTX.Codegen.SPECIAL_REGS) == 145
     @test !("%warpsize" in PTX.Codegen.SPECIAL_REGS)
     cg = CodeGenState()
     for reg in PTX.IR.SCALAR_SPECIAL_REGS

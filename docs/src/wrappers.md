@@ -487,5 +487,41 @@ do not rely on it to transitively order other accesses. The assembly tests
 check the emitted instructions and target floors; concurrent ordering still
 depends on the surrounding synchronization protocol.
 
+PTX ISA 9.5 adds a read-only alias release fence and an async-proxy-only bulk
+wait, both through the chain:
+
+```julia
+ptx"fence.alias.sync_restrict::read.release.sys"()                     # sm_90
+ptx"cp.async.bulk.wait_group.sync_restrict::proxy::async"(Val(0))      # sm_100
+```
+
+The `sync_restrict::proxy::async` wait orders completed bulk-group accesses
+only before later async-proxy accesses, not before generic-proxy ones.
+
+Fabric-read completion uses submit groups in PTX ISA 9.5. Close a group after
+the fabric operations that read a `.shared::cta` buffer, then wait until at
+most `N` groups are pending before reusing that buffer:
+
+```julia
+ptx"fabric.submit.commit_group"()
+ptx"fabric.wait.sync_restrict::read"(Val(0))
+```
+
+PTX ISA 9.5 defines the older `fabric.wait.sync_restrict::reads` as having no
+effect; its wrapper is kept only so existing code still assembles.
+
+`tensormap.query.alloc_class_large` reports whether a tensor-map object's
+allocation class was set to large. Its typed wrappers return `Bool` and take a
+generic, global, or `shared::cta` pointer:
+
+```julia
+ptx"tensormap.query.alloc_class_large.global.b1024"(desc)   # desc::LLVMPtr{_, AS.Global}
+```
+
+The special registers `%locality_domain_id` and
+`%locality_domain_supplemental_sm` (sm_100) read through `ptx"mov.u32"`.
+Kernels using these PTX ISA 9.5 forms need an assembler that accepts
+`.version 9.5`, which ptxas does from CUDA 13.5.
+
 Stochastic conversion (`cvt.rs`) does not permit `.pzo`. Other rounding
 and saturation modifier combinations continue to be checked by ptxas.

@@ -1,4 +1,4 @@
-# Reviewed PTX 9.3 special-register ledger.
+# Reviewed PTX 9.5 special-register ledger.
 #
 # PTX §10 defines the registers themselves; §6.4.3 additionally permits the
 # .x/.y/.z/.w and .r/.g/.b/.a projections of every .v4 register. Keep the
@@ -173,6 +173,14 @@ const SPECIAL_REGISTER_FAMILIES = (
     # ptx/10-special-registers/10.35-special-registers-perctamemorysize.md
     _special_register_family("PTX 9.4 §10.35", Version(9, 4), 80,
                              ("%perctamemorysize",)),
+    # ptx/10-special-registers/10.36-special-registers-locality_domain_id.md
+    # Uniform across a cluster for its lifetime.
+    _special_register_family("PTX 9.5 §10.36", Version(9, 5), 100,
+                             ("%locality_domain_id",)),
+    # ptx/10-special-registers/10.37-special-registers-locality_domain_supplemental_sm.md
+    # Uniform across a CTA; CTAs of one cluster may read different values.
+    _special_register_family("PTX 9.5 §10.37", Version(9, 5), 100,
+                             ("%locality_domain_supplemental_sm",)),
 )
 
 function _special_register_set(field::Symbol)
@@ -186,7 +194,7 @@ function _special_register_set(field::Symbol)
     names
 end
 
-# PTX 9.4 §10 inventory: 151 spellings = 8 vector roots + 143 scalar or
+# PTX 9.5 §10 inventory: 153 spellings = 8 vector roots + 145 scalar or
 # projected spellings. The scalar subset is intentionally what codegen uses
 # until vector-valued PTX operands have structured lowering support.
 const SPECIAL_REGS = _special_register_set(:spellings)
